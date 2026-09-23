@@ -7,7 +7,7 @@
   "runtime": "node 22, express, ws, better-sqlite3",
   "port": 4400,
   "domain": "openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via an nginx include in openvibe.live's vhost); openvibe.chat is still the OpenVibe.Sites placeholder",
-  "contracts": "openvibe-contracts v0.32.0",
+  "contracts": "openvibe-contracts v0.33.0",
   "capabilities": ["chat.live_bridge.write", "chat.message.send", "chat.presence.read"],
   "capabilitiesUsed": ["live.chat_context.read", "live.chat_effects.write", "live.chat_mirror.write", "events.event.publish", "events.subscription.manage", "vip.entitlement.check", "network.modules.read", "network.modules.write"],
   "capabilitiesRegistered": true,
