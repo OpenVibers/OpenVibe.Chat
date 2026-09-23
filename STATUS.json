@@ -6,13 +6,14 @@
   "plan": "OpenVibe End-to-End Realignment & Implementation Plan, revision 3 (20 Sep 2026)",
   "runtime": "node 22, express, ws, better-sqlite3",
   "port": 4400,
-  "domain": "openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via nginx); openvibe.chat keeps its placeholder",
-  "contracts": "openvibe-contracts v0.5.1",
+  "domain": "openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via an nginx include in openvibe.live's vhost); openvibe.chat is still the OpenVibe.Sites placeholder",
+  "contracts": "openvibe-contracts v0.13.0",
   "capabilities": ["chat.live_bridge.write", "chat.presence.read"],
   "capabilitiesUsed": ["live.chat_context.read", "live.chat_effects.write", "live.chat_mirror.write", "events.event.publish"],
-  "capabilitiesRegistered": false,
+  "capabilitiesRegistered": true,
   "events": ["chat.message.created", "chat.dm.created", "chat.moderation.action"],
-  "liveAuthorityFlag": "CHAT_AUTHORITY=chat (docs/live-patch.diff)",
-  "deployed": false,
-  "updated": "2026-09-22"
+  "liveAuthorityFlag": "CHAT_AUTHORITY=chat is set in production live.env since the cutover (2026-09-23 02:03 UTC); Live's chat tables are a read mirror Chat keeps current",
+  "deployed": true,
+  "deployment": "openvibe-ovh /opt/openvibe.chat, unit openvibe-chat, 127.0.0.1:4400 (loopback); public only through openvibe.live's nginx include for the chat paths; release 45f2b1f; EVENTS_URL set (chat.message.created reaches OpenVibe.Events); restore drill passed 2026-09-23",
+  "updated": "2026-09-23"
 }

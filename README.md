@@ -2,9 +2,11 @@
 
 > Rooms, messages, DMs, calls, TTS and audio queues, moderation and presence — one identity, every conversation.
 
-**Status:** alpha — Wave 6 code, not deployed. Live's chat runs here behind a service boundary;
-the cutover (`docs/cutover.md`) has not happened, and `openvibe.chat` keeps its placeholder.  
-**Domain:** `openvibe.chat` (placeholder); until launch Chat is served on Live's origin:
+**Status:** alpha — deployed. Since the cutover on 2026-09-23 at 02:03 UTC (`docs/cutover.md`),
+Chat is the authority for openvibe.live's chat: the service runs on `openvibe-ovh` (unit
+`openvibe-chat`, 127.0.0.1:4400, release `45f2b1f`), Live runs with `CHAT_AUTHORITY=chat` and keeps
+a read mirror, and chat events go to OpenVibe.Events. `openvibe.chat` still shows its placeholder.  
+**Domain:** `openvibe.chat` (placeholder); Chat is served on Live's origin:
 `https://openvibe.live/ws/chat`, `/api/chat/`, `/api/dm/`, `/api/tts/`, `/api/sounds` via nginx.  
 **Plan:** OpenVibe End-to-End Realignment & Implementation Plan, revision 3 (20 Sep 2026), §9 and §9.5.  
 **License:** AGPL-3.0 (same as every OpenVibe service).
@@ -130,7 +132,7 @@ settings, the media-request queue and calls are still Live's and reached through
 
 ## Capabilities and events
 
-Introduced here (proposals in `docs/capabilities-proposal/`, not yet in `openvibe-contracts`):
+Introduced here and registered in `openvibe-contracts` v0.13.0:
 `chat.live_bridge.write`, `chat.presence.read` (owner chat) and `live.chat_context.read`,
 `live.chat_effects.write`, `live.chat_mirror.write` (owner live). Planned families:
 `chat.room.*`, `chat.message.*`, `chat.dm.*`, `chat.moderation.*`, `chat.tts.*`, `chat.call.*`.
@@ -148,8 +150,8 @@ planned `chat.message.deleted`, `chat.room.updated`, `chat.call.*`, `chat.tts.qu
 
 ## Acceptance (must be true before "done")
 
-- stream/global/DM histories preserved on import; old Live URLs and WS messages keep working through the adapter — *implemented (import, same paths, protocol parity tests); not yet exercised on production data*
-- restart Live without losing Chat; restart Chat's delivery plane and resume persisted messages — *implemented (Live's forwarded writes wait in its outbox; Chat's mirror and events wait in theirs); not yet exercised in production*
+- stream/global/DM histories preserved on import; old Live URLs and WS messages keep working through the adapter — *done on production data: 70,860 messages, 11 conversations and 1,522 DMs imported with 0 held (two passes, identical), 15/15 read paths identical at the cutover*
+- restart Live without losing Chat; restart Chat's delivery plane and resume persisted messages — *seen in production (Live restarted several times on 2026-09-23 while Chat stayed up; messages and a queued outbox row survived Chat restarts); no automated restart-and-resume test yet*
 - a call row without a working signalling/media path is not parity — *calls are still Live's (`/ws/call`)*
 - a paid TTS request is never duplicated by a retry — *forwarded writes are applied once per idempotency key; paid TTS does not exist yet*
 
