@@ -164,7 +164,7 @@ Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat
 ## Acceptance (must be true before "done")
 
 - stream/global/DM histories preserved on import; old Live URLs and WS messages keep working through the adapter — *done on production data: 70,860 messages, 11 conversations and 1,522 DMs imported with 0 held (two passes, identical), 15/15 read paths identical at the cutover*
-- restart Live without losing Chat; restart Chat's delivery plane and resume persisted messages — *seen in production (Live restarted several times on 2026-09-23 while Chat stayed up; messages and a queued outbox row survived Chat restarts); no automated restart-and-resume test yet*
+- restart Live without losing Chat; restart Chat's delivery plane and resume persisted messages — *seen in production (Live restarted several times on 2026-09-23 while Chat stayed up; messages and a queued outbox row survived Chat restarts); `test/restart-resume.test.js` restarts Chat as a real process (SIGTERM, new process on the same database) and proves stream, global and channel readers resume from their `after_id` cursor with no gap and no duplicate, including Live bridge placeholders that straddle the restart (kept in `bridge_refs`)*
 - a call row without a working signalling/media path is not parity — *calls are still Live's (`/ws/call`)*
 - a paid TTS request is never duplicated by a retry — *forwarded writes are applied once per idempotency key; paid TTS does not exist yet*
 

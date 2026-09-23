@@ -16,7 +16,9 @@
  *       Pending ids: Live's saveChatMessage cannot wait for Chat's id, so it hands its caller a
  *       placeholder (a large negative number, `ref`) and sends the insert with it. Chat maps the
  *       placeholder to the real id, and every later op in that Live boot that carries it — a
- *       broadcast `{ id }`, a TTS key `m<ref>`, a reply_to_id — is rewritten before it runs.
+ *       broadcast `{ id }`, a TTS key `m<ref>`, a reply_to_id — is rewritten before it runs. The
+ *       map is kept in bridge_refs as well, so it survives a Chat restart between the batch that
+ *       acknowledged the insert and a later batch that carries the placeholder.
  *
  *       An op that sends a chat message also needs chat.message.send in the same token (below);
  *       without it that op alone is refused ({ ok: false, code: 'capability.denied' }) and the
@@ -98,7 +100,8 @@ function sendsMessage(op, args) {
     return false;
 }
 
-const REF_TTL_MS = 10 * 60 * 1000;
+const REF_TTL_MS = 10 * 60 * 1000;            // in memory
+const REF_KEEP_MS = 24 * 3600 * 1000;          // in bridge_refs
 const REF_MIN = -(2 ** 40);   // Live's placeholders are ≤ this
 
 function createBridge({ chatServer }) {
@@ -109,18 +112,36 @@ function createBridge({ chatServer }) {
         const cutoff = Date.now() - REF_TTL_MS;
         for (const [k, v] of refs) if (v.at < cutoff) refs.delete(k);
         try { db.run('DELETE FROM bridge_applied WHERE applied_at < ?', [Date.now() - 7 * 24 * 3600 * 1000]); } catch { /* */ }
+        try { db.run('DELETE FROM bridge_refs WHERE at < ?', [Date.now() - REF_KEEP_MS]); } catch { /* */ }
+    }
+
+    function rememberRef(boot, ref, id) {
+        const at = Date.now();
+        refs.set(`${boot}|${ref}`, { id, at });
+        db.run('INSERT INTO bridge_refs (boot, ref, id, at) VALUES (?, ?, ?, ?) ON CONFLICT(boot, ref) DO UPDATE SET id = excluded.id, at = excluded.at', [boot, ref, id, at]);
+    }
+
+    /** The real id for a placeholder of this Live boot: memory first, then bridge_refs (a restart). */
+    function lookupRef(boot, ref) {
+        const hit = refs.get(`${boot}|${ref}`);
+        if (hit) return hit.id;
+        let row = null;
+        try { row = db.get('SELECT id FROM bridge_refs WHERE boot = ? AND ref = ?', [boot, ref]); } catch { row = null; }
+        if (!row) return null;
+        refs.set(`${boot}|${ref}`, { id: row.id, at: Date.now() });
+        return row.id;
     }
     const sweep = setInterval(sweepRefs, 60_000);
     if (sweep.unref) sweep.unref();
 
     function mapRefs(value, boot) {
         if (typeof value === 'number') {
-            if (value <= REF_MIN) { const hit = refs.get(`${boot}|${value}`); return hit ? hit.id : value; }
+            if (value <= REF_MIN) { const id = lookupRef(boot, value); return id != null ? id : value; }
             return value;
         }
         if (typeof value === 'string') {
             const m = /^(m|ov-)(-\d{13,})$/.exec(value);
-            if (m) { const hit = refs.get(`${boot}|${Number(m[2])}`); return hit ? `${m[1]}${hit.id}` : value; }
+            if (m) { const id = lookupRef(boot, Number(m[2])); return id != null ? `${m[1]}${id}` : value; }
             return value;
         }
         if (Array.isArray(value)) return value.map((v) => mapRefs(v, boot));
@@ -145,7 +166,7 @@ function createBridge({ chatServer }) {
             // saveChatMessage derives the channel from the stream: have the stream first.
             if (fn === 'saveChatMessage' && fnArgs[0] && fnArgs[0].stream_id) await ctx.ensureStream(fnArgs[0].stream_id);
             const remember = (result) => {
-                if (ref != null && result && result.lastInsertRowid != null) refs.set(`${boot}|${ref}`, { id: Number(result.lastInsertRowid), at: Date.now() });
+                if (ref != null && result && result.lastInsertRowid != null) rememberRef(boot, ref, Number(result.lastInsertRowid));
                 return result;
             };
             if (!key) return plain(remember(db[fn](...fnArgs)));

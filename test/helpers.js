@@ -320,7 +320,51 @@ async function boot({ env = {} } = {}) {
     /** Whether an upgrade is refused (socket destroyed). */
     h.wsRefused = (opts) => h.ws(opts).then((ws) => new Promise((r) => { const t = setTimeout(() => { ws.close(); r(false); }, 300); ws.on('close', () => { clearTimeout(t); r(true); }); }), () => true);
 
+    /**
+     * Restart tests: stop the in-process Chat (the stubs and the data directory stay), then run
+     * Chat as its own process — `node server/index.js` on the same database and a fixed port — so
+     * a restart is a real SIGTERM and a new process. h.port/h.base follow the child.
+     */
+    h.detach = async () => {
+        try { h.chatServer.close(); } catch { /* */ }
+        try { h.ctx.stop(); h.mirrorRelay.stop(); h.eventsRelay.stop(); } catch { /* */ }
+        await new Promise((r) => h.server.close(() => r()));
+        try { h.db.close(); } catch { /* */ }
+        h.children = [];
+    };
+    h.freePort = () => new Promise((r) => { const s = http.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
+    h.spawnChat = async ({ port, env = {} } = {}) => {
+        const { spawn } = require('child_process');
+        const child = spawn(process.execPath, [path.join(__dirname, '..', 'server', 'index.js')], {
+            cwd: path.join(__dirname, '..'),
+            env: { ...process.env, PORT: String(port), ...env },
+            stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        child.log = '';
+        child.stdout.on('data', (c) => { child.log += c; });
+        child.stderr.on('data', (c) => { child.log += c; });
+        child.exited = new Promise((r) => child.on('exit', (code, signal) => r({ code, signal })));
+        h.children.push(child);
+        h.port = port;
+        h.base = `http://127.0.0.1:${port}`;
+        const until = Date.now() + 20000;
+        for (;;) {
+            try { const r = await fetch(`${h.base}/health`); if (r.ok) break; } catch { /* not up yet */ }
+            if (child.exitCode != null || Date.now() > until) throw new Error(`Chat did not start:\n${child.log}`);
+            await new Promise((r) => setTimeout(r, 100));
+        }
+        return child;
+    };
+    /** SIGTERM a spawned Chat and wait for it to exit. */
+    h.stopChat = async (child) => {
+        child.kill('SIGTERM');
+        const r = await Promise.race([child.exited, new Promise((res) => setTimeout(() => res(null), 8000))]);
+        if (!r) { child.kill('SIGKILL'); await child.exited; }
+        return r;
+    };
+
     h.close = async () => {
+        for (const c of h.children || []) { if (c.exitCode == null && c.signalCode == null) { c.kill('SIGKILL'); await c.exited; } }
         try { h.chatServer.close(); } catch { /* */ }
         try { h.ctx.stop(); h.mirrorRelay.stop(); h.eventsRelay.stop(); } catch { /* */ }
         await new Promise((r) => h.server.close(() => r()));

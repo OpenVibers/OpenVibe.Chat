@@ -401,6 +401,18 @@ CREATE TABLE IF NOT EXISTS bridge_applied (
     applied_at INTEGER NOT NULL
 );
 
+-- Live's placeholder ids (a large negative number per Live boot) → the real chat_messages id, so a
+-- later op of the same Live boot that carries the placeholder is rewritten even after a Chat
+-- restart (the batch that acknowledged the insert and the one carrying its broadcast can straddle
+-- one). Kept a day.
+CREATE TABLE IF NOT EXISTS bridge_refs (
+    boot TEXT NOT NULL,
+    ref INTEGER NOT NULL,
+    id INTEGER NOT NULL,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (boot, ref)
+);
+
 -- Rows the importer could not represent. Never dropped; reviewed by hand.
 CREATE TABLE IF NOT EXISTS import_hold (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
