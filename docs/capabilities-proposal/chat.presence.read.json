@@ -1,0 +1,19 @@
+{
+  "id": "chat.presence.read",
+  "version": "1.0",
+  "owner": "chat",
+  "status": "planned",
+  "visibility": "internal",
+  "description": "Who is connected to chat where: connection and per-stream viewer counts, slow modes, and signed-in/anonymous sockets with their addresses — for Live's synchronous reads (health, AI viewer pacing, moderation by address). Internal: carries IP addresses.",
+  "permissions": [
+    "chat:read"
+  ],
+  "resourceConstraints": [
+    "none"
+  ],
+  "quotaClass": "internal-read",
+  "events": [],
+  "implementedBy": [
+    "GET /internal/live/presence"
+  ]
+}

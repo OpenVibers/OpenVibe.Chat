@@ -1,0 +1,19 @@
+{
+  "id": "live.chat_mirror.write",
+  "version": "1.0",
+  "owner": "live",
+  "status": "planned",
+  "visibility": "internal",
+  "description": "OpenVibe.Chat copies every change to the tables it owns into Live's tables of the same name and ids (a read mirror for Live's remaining readers and the rollback path). Only the twelve chat tables; only columns Live has; Live-only columns are kept; refused unless CHAT_AUTHORITY=chat. Retired when Live stops reading chat tables.",
+  "permissions": [
+    "live:write"
+  ],
+  "resourceConstraints": [
+    "none"
+  ],
+  "quotaClass": "internal-write",
+  "events": [],
+  "implementedBy": [
+    "POST /internal/chat-effects/mirror"
+  ]
+}

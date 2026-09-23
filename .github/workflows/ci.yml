@@ -1,0 +1,30 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.1   # production runs Node 22
+          cache: npm
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg   # sound uploads are probed/converted
+      - run: npm ci --no-audit --no-fund
+      - run: npm test
+  contracts:
+    # Blocking once docs/capabilities-proposal/ is registered in openvibe-contracts and the chat
+    # service manifest lists them (docs/cutover.md, prerequisites). Until then it reports the gap.
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.1
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      - run: npx openvibe-contracts-check --service chat --src server

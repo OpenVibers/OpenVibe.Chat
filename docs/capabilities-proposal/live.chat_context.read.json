@@ -1,0 +1,37 @@
+{
+  "id": "live.chat_context.read",
+  "version": "1.0",
+  "owner": "live",
+  "status": "planned",
+  "visibility": "internal",
+  "description": "OpenVibe.Chat reads the Live data chat decisions depend on and caches it (Wave 6): user projections and token resolution (Live's own rules, with the Network subject), streams, slots and channels, channel moderation settings and moderators, active bans, follows, IP approvals, cosmetics and tags, the chat site settings (tts_*, GIF and soundboard keys only), anon first-seen, arena-cached TTS clips and the chat profile card. Read-only; no secrets beyond the chat settings.",
+  "permissions": [
+    "live:read"
+  ],
+  "resourceConstraints": [
+    "none"
+  ],
+  "quotaClass": "internal-read",
+  "events": [],
+  "implementedBy": [
+    "POST /internal/chat-context/auth",
+    "GET /internal/chat-context/users",
+    "POST /internal/chat-context/users/lookup",
+    "GET /internal/chat-context/users/:id/follows",
+    "GET /internal/chat-context/users/profile",
+    "GET /internal/chat-context/streams",
+    "GET /internal/chat-context/streams/active",
+    "GET /internal/chat-context/streams/:id",
+    "GET /internal/chat-context/managed-streams",
+    "GET /internal/chat-context/channels",
+    "GET /internal/chat-context/channels/by-user/:userId",
+    "GET /internal/chat-context/channels/:id/policy",
+    "GET /internal/chat-context/channels/:id/approved-ip",
+    "GET /internal/chat-context/bans",
+    "POST /internal/chat-context/decor",
+    "GET /internal/chat-context/settings",
+    "GET /internal/chat-context/anon/:num",
+    "GET /internal/chat-context/anon-first-seen",
+    "GET /internal/chat-context/tts-audio/:file"
+  ]
+}

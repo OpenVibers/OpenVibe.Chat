@@ -1,0 +1,47 @@
+[Unit]
+Description=OpenVibe.Chat — rooms, messages, DMs, TTS and sounds, moderation (/ws/chat and the chat API of openvibe.live)
+# Live and Network should be up first; Chat serves from its caches if they are slow, and queues
+# its writes to Live (mirror, effects) until Live answers.
+After=network.target
+Wants=openvibe-live.service openvibe-network.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/openvibe.chat
+EnvironmentFile=/etc/openvibe/chat.env
+Environment=NODE_ENV=production
+Environment=PORT=4400
+Environment=HOST=127.0.0.1
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env node /opt/openvibe.chat/server/index.js
+# Tells clients the chat restarts, flushes the Live mirror, closes sockets.
+KillSignal=SIGTERM
+TimeoutStopSec=15
+Restart=always
+RestartSec=3
+
+# Hardening (as openvibe-community.service)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictRealtime=true
+
+# Chat's own database and caches. The code tree stays read-only.
+StateDirectory=openvibe-chat
+Environment=CHAT_DB_PATH=/var/lib/openvibe-chat/chat.db
+Environment=CHAT_CACHE_DIR=/var/lib/openvibe-chat/cache
+# Channel sounds stay in Live's sounds directory (rows hold absolute paths into it; Live's
+# donation alerts read alert sounds there). Legacy layout and release layout (shared/data).
+Environment=SOUNDS_PATH=/opt/openvibe.live/data/sounds
+ReadWritePaths=-/opt/openvibe.live/data/sounds -/opt/openvibe.live/shared/data/sounds
+
+[Install]
+WantedBy=multi-user.target

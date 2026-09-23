@@ -1,0 +1,1596 @@
+diff --git a/.env.example b/.env.example
+index 31f53b7..19810f1 100644
+--- a/.env.example
++++ b/.env.example
+@@ -107,3 +107,9 @@ OPS_ALERT_WEBHOOK_URL=
+ # Pastes are served by openvibe.community when this is 1 (Live 301s /p/:slug and /pastes there)
+ PASTES_ON_COMMUNITY=0
+ OV_COMMUNITY_URL=https://openvibe.community
++
++# Chat runs in OpenVibe.Chat when this is "chat" (roadmap W6; server/chat/chat-authority.js): Live
++# stops serving /ws/chat and /api/chat|dm|tts|sounds (nginx sends them to Chat), forwards its own
++# chat calls to Chat and keeps its chat tables as Chat's read mirror. Unset = Live runs chat.
++#CHAT_AUTHORITY=chat
++OV_CHAT_INTERNAL_URL=http://127.0.0.1:4400
+diff --git a/docs/chat-system.md b/docs/chat-system.md
+index 65d1647..fd58f07 100644
+--- a/docs/chat-system.md
++++ b/docs/chat-system.md
+@@ -8,6 +8,29 @@ The OpenVibe.Live chat system provides real-time messaging, moderation, and exte
+ - **REST API**: `server/chat/routes.js` — moderation endpoints, message search, admin tools
+ - **Client**: `public/js/chat.js` — rendering, emotes, TTS, settings sync
+ 
++### OpenVibe.Chat (roadmap Wave 6)
++
++Chat is moving to [OpenVibe.Chat](https://github.com/OpenVibers/OpenVibe.Chat) (127.0.0.1:4400)
++with the same WebSocket protocol and REST paths. `CHAT_AUTHORITY=chat` switches it on
++(`server/chat/chat-authority.js`); without it nothing here changes.
++
++- nginx sends `/ws/chat`, `/api/chat/`, `/api/dm/`, `/api/tts/` and `/api/sounds` to Chat; Live answers
++  them with 503 if one still arrives, and `/ws/chat` upgrades are refused.
++- `require('./chat/chat-server')` returns `chat-remote.js`: the same methods, forwarded in order to
++  Chat's `POST /internal/live/calls` (broadcasts, DMs, TTS, channel sounds, disconnects, user updates).
++  Chat-table writes Live's other modules make (AI viewers, relays, donations, `/api/mod`) are forwarded
++  too; inserts return a placeholder id (≤ -2^40) Chat maps to the real one. Unacknowledged writes wait
++  in `chat_bridge_outbox` (and are applied here if Live boots without the flag again — rollback).
++- Synchronous reads (`getTotalConnections`, viewer counts, slow modes, a connected user's IP) come from
++  Chat's presence snapshot, polled every 3 s.
++- Chat reads Live data and asks for side effects on `/internal/chat-context/*` and
++  `/internal/chat-effects/*` (`server/chat/live-context-routes.js`), with Network service tokens
++  (`live.chat_context.read`, `live.chat_effects.write`, `live.chat_mirror.write`,
++  `server/net/service-guard.js`). Effects re-check the acting moderator/owner/admin and are refused
++  unless `CHAT_AUTHORITY=chat`.
++- Live's chat tables become Chat's read mirror (`POST /internal/chat-effects/mirror`): same ids, so home
++  stats, recaps, AI context, VOD chat replay and the `/api/mod` queues keep reading them in place.
++
+ ## Features
+ 
+ ### Real-time Chat
+diff --git a/server/auth/auth.js b/server/auth/auth.js
+index e2dd198..4a7e908 100644
+--- a/server/auth/auth.js
++++ b/server/auth/auth.js
+@@ -413,6 +413,10 @@ function reloadNetworkKey() {
+ module.exports = {
+     apiTokenAllows,
+     verifyToken,
++    verifyTokenWithReason,
++    getNetworkIssuer,
++    // The Network's RS256 key also signs service tokens (server/net/service-guard.js).
++    getNetworkPublicKey: () => openvibeToolsPublicKey,
+     requireAuth,
+     optionalAuth,
+     requireAdmin,
+diff --git a/server/chat/chat-authority.js b/server/chat/chat-authority.js
+new file mode 100644
+index 0000000..4867b0b
+--- /dev/null
++++ b/server/chat/chat-authority.js
+@@ -0,0 +1,23 @@
++'use strict';
++/**
++ * Who runs chat (roadmap Wave 6).
++ *
++ * CHAT_AUTHORITY=chat: OpenVibe.Chat (127.0.0.1:4400) serves /ws/chat and the chat REST routes
++ * (nginx routes them there) and owns the chat tables. Live then
++ *   - does not start its chat WebSocket server or mount /api/chat, /api/dm, /api/tts, /api/sounds;
++ *   - hands every chat call its other modules make to Chat (server/chat/chat-remote.js — what
++ *     require('./chat/chat-server') returns in this mode);
++ *   - keeps its chat tables as a read mirror that Chat writes (POST /internal/chat-effects/mirror)
++ *     so its own readers (home stats, recaps, AI context, /api/mod queues) keep working and a
++ *     rollback loses nothing;
++ *   - answers Chat's reads and side effects on /internal/chat-context/* and /internal/chat-effects/*.
++ * Anything else (default): Live runs chat itself, exactly as before.
++ */
++
++const CHAT_URL = (process.env.OV_CHAT_INTERNAL_URL || 'http://127.0.0.1:4400').replace(/\/+$/, '');
++
++function isRemote() {
++    return process.env.CHAT_AUTHORITY === 'chat';
++}
++
++module.exports = { isRemote, CHAT_URL };
+diff --git a/server/chat/chat-remote.js b/server/chat/chat-remote.js
+new file mode 100644
+index 0000000..7809725
+--- /dev/null
++++ b/server/chat/chat-remote.js
+@@ -0,0 +1,374 @@
++'use strict';
++/**
++ * The chat server, when OpenVibe.Chat runs it (CHAT_AUTHORITY=chat, see chat-authority.js).
++ *
++ * require('./chat/chat-server') returns this object instead of a ChatServer, so every module that
++ * talks to chat keeps working unchanged:
++ *   - calls that push to browsers (broadcastToStream, forwardToGlobal, sendDm, TTS, channel sounds,
++ *     disconnectUser, sendUserUpdate …) are queued, in order, and sent to Chat's
++ *     POST /internal/live/calls in small batches (service token for audience openvibe.chat,
++ *     capability chat.live_bridge.write);
++ *   - the chat-table writes Live's other modules make (db.saveChatMessage from AI viewers, relays,
++ *     donations; /api/mod deletes and queues; moderation log) are forwarded the same way, because
++ *     Chat owns those tables. Updates and deletes also run on Live's mirror at once so their
++ *     return values (deleted ids) are right; inserts run only in Chat and return a placeholder id
++ *     (≤ -2^40) that Chat maps to the real one for every later call of this boot. Forwarded writes
++ *     are kept in chat_bridge_outbox until Chat acknowledges them, so a restart or a Chat outage
++ *     loses none;
++ *   - synchronous reads (connection counts, viewer counts, slow modes, a connected user's address)
++ *     come from a presence snapshot polled from Chat's GET /internal/live/presence every few seconds.
++ */
++const crypto = require('crypto');
++const db = require('../db/database');
++const principal = require('../net/network-principal');
++const { CHAT_URL } = require('./chat-authority');
++
++const AUDIENCE = 'openvibe.chat';
++const BOOT = crypto.randomUUID();
++const REF_BASE = 2 ** 40;
++const BATCH = 200;
++const PRESENCE_MS = 3000;
++const EPHEMERAL_TTL_MS = 30000;    // a broadcast older than this is dropped, not delivered late
++const MAX_QUEUE = 20000;
++
++// Chat-table writes Live still makes, and whether they also run on Live's mirror right away.
++// Inserts never run here (their ids are Chat's): the caller gets a placeholder.
++const FORWARDED_DB = {
++    saveChatMessage: 'insert',
++    logModerationAction: 'insert',
++    holdMessageForApproval: 'insert',
++    hideRelayUser: 'insert',
++    createChannelSound: 'insert',
++    mergeChatMessageMetadata: 'local',
++    deleteChatMessage: 'local',
++    deleteUserChatMessages: 'local',
++    deleteAnonChatMessages: 'local',
++    deleteRelayUserMessages: 'local',
++    deleteChatMessagesByTimeRange: 'local',
++    reviewPendingIpMessage: 'local',
++    approveAllFromIp: 'local',
++    denyAllFromIp: 'local',
++    recordRelayUser: 'local',
++    unhideRelayUser: 'local',
++    unhideRelayUserByIdentity: 'local',
++    recordFirstChat: 'local',
++    setTtsVoiceOverride: 'local',
++    deleteTtsVoiceOverride: 'local',
++    setChannelSoundEmote: 'local',
++    deleteChannelSound: 'local',
++    renameChannelSoundCommand: 'local',
++    updateChannelSoundEmoteRefs: 'local',
++};
++
++// Live-owned data Chat caches, written by Live's own routes (dashboard, /api/channels, /api/mod):
++// after the write, Chat is told to reload it instead of waiting for its cache to expire.
++const OBSERVED_DB = {
++    addChannelModerator: (a) => ['channel', a[0]],
++    removeChannelModerator: (a) => ['channel', a[0]],
++    upsertChannelModerationSettings: (a) => ['channel', a[0]],
++    setChannelAlertSound: (a) => ['channel', a[0]],
++    approveIp: (a) => ['approvals', a[0]],
++    revokeIpApproval: (a) => ['approvals', a[0]],
++    forgiveBan: () => ['bans', null],
++};
++
++function create(ChatServer) {
++    // A local ChatServer that never listens: its address and anon-number helpers are Live's own
++    // (call-server uses them for voice calls, and Chat asks Live for anon numbers).
++    const local = new ChatServer();
++    const queue = [];            // { seq, op, args, ref, durableId, at }
++    let seq = 0;
++    let refCounter = 0;
++    let busy = false;
++    let inflight = 0;            // ops at the head of the queue that are being sent right now
++    let batchLimit = BATCH;      // 1 after Chat refused a batch as a whole (too large / malformed)
++    let backoffUntil = 0;
++    let flushTimer = null;
++    let presenceTimer = null;
++    let started = false;
++    let presence = { total: 0, streams: {}, slow_mode: {}, users: [], anons: [], at: null };
++    const slowModeByStream = new Map();
++    const stats = { sent: 0, failed: 0, dropped: 0, lastError: null };
++
++    function ensureOutbox() {
++        db.getDb().exec(`CREATE TABLE IF NOT EXISTS chat_bridge_outbox (
++            id INTEGER PRIMARY KEY AUTOINCREMENT,
++            boot TEXT NOT NULL,
++            ref INTEGER,
++            op TEXT NOT NULL,
++            args TEXT NOT NULL,
++            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
++        )`);
++    }
++
++    function schedule(ms = 0) {
++        if (flushTimer) return;
++        flushTimer = setTimeout(() => { flushTimer = null; flush().catch(() => {}); }, ms);
++        if (flushTimer.unref) flushTimer.unref();
++    }
++
++    function enqueue(op, args, { ref = null, durable = false, boot = BOOT, durableId = null } = {}) {
++        let id = durableId;
++        if (durable && !id) {
++            try {
++                ensureOutbox();
++                id = db.getDb().prepare('INSERT INTO chat_bridge_outbox (boot, ref, op, args) VALUES (?, ?, ?, ?)').run(boot, ref, op, JSON.stringify(args)).lastInsertRowid;
++            } catch (err) { console.warn('[ChatRemote] outbox write failed:', err.message); }
++        }
++        if (queue.length >= MAX_QUEUE) {
++            // Drop the oldest broadcast, never a write.
++            const i = queue.findIndex((q, idx) => idx >= inflight && !q.durableId);
++            if (i >= 0) { queue.splice(i, 1); stats.dropped++; }
++        }
++        queue.push({ seq: ++seq, op, args, ref, durableId: id, boot, at: Date.now() });
++        schedule();
++    }
++
++    async function post(path, body, retried = false) {
++        const res = await fetch(`${CHAT_URL}${path}`, {
++            method: body ? 'POST' : 'GET',
++            headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(await principal.serviceHeaders(AUDIENCE)) },
++            body: body ? JSON.stringify(body) : undefined,
++            signal: AbortSignal.timeout(10000),
++        });
++        if (res.status === 401 && !retried) { principal.invalidate(AUDIENCE); return post(path, body, true); }
++        if (!res.ok) { const err = new Error(`Chat ${res.status}`); err.status = res.status; throw err; }
++        return res.json();
++    }
++
++    async function flush() {
++        if (busy || !queue.length) return;
++        if (Date.now() < backoffUntil) { schedule(backoffUntil - Date.now()); return; }
++        busy = true;
++        try {
++            while (queue.length) {
++                // Stale broadcasts are dropped; forwarded writes always go.
++                const now = Date.now();
++                for (let i = queue.length - 1; i >= 0; i--) {
++                    if (!queue[i].durableId && now - queue[i].at > EPHEMERAL_TTL_MS) { queue.splice(i, 1); stats.dropped++; }
++                }
++                if (!queue.length) break;
++                // One boot per request (replayed writes of an earlier boot keep their own id space).
++                const boot = queue[0].boot;
++                const batch = [];
++                for (const q of queue) { if (q.boot !== boot || batch.length >= batchLimit) break; batch.push(q); }
++                let out;
++                inflight = batch.length;
++                try {
++                    // A forwarded write carries its outbox id as an idempotency key: Chat applies it once
++                    // even when a lost response makes Live send it again.
++                    out = await post('/internal/live/calls', { boot, ops: batch.map((q) => ({ seq: q.seq, op: q.op, args: q.args, ref: q.ref, key: q.durableId ? `live:${q.durableId}` : undefined })) });
++                } catch (err) {
++                    inflight = 0;
++                    stats.failed++;
++                    if (err.status === 400 || err.status === 413) {
++                        // Refused as a request, not per op: retry one by one; a single op still refused
++                        // can never be delivered, so it is dropped (logged) instead of blocking the queue.
++                        if (batch.length > 1) { batchLimit = 1; continue; }
++                        const q = queue.shift();
++                        stats.dropped++;
++                        console.error(`[ChatRemote] Chat refused ${q.op}${q.op === 'db' ? ` ${q.args[0]}` : ''} (${err.status}); dropped`);
++                        if (q.durableId) { try { db.getDb().prepare('DELETE FROM chat_bridge_outbox WHERE id = ?').run(q.durableId); } catch { /* */ } }
++                        continue;
++                    }
++                    if (stats.lastError !== err.message) console.warn(`[ChatRemote] Chat unreachable (${queue.length} queued): ${err.message}`);
++                    stats.lastError = err.message;
++                    backoffUntil = Date.now() + 2000;
++                    schedule(2000);
++                    return;
++                }
++                stats.lastError = null;
++                inflight = 0;
++                batchLimit = BATCH;
++                queue.splice(0, batch.length);
++                stats.sent += batch.length;
++                const done = batch.filter((q) => q.durableId).map((q) => q.durableId);
++                if (done.length) {
++                    try { db.getDb().prepare(`DELETE FROM chat_bridge_outbox WHERE id IN (${done.map(() => '?').join(',')})`).run(...done); } catch { /* */ }
++                }
++                for (const r of (out && out.results) || []) {
++                    if (!r.ok) console.warn(`[ChatRemote] Chat refused op #${r.seq}: ${r.error}`);
++                }
++            }
++        } finally { busy = false; }
++    }
++
++    async function pollPresence() {
++        try {
++            const p = await post('/internal/live/presence');
++            presence = p;
++            slowModeByStream.clear();
++            for (const [k, v] of Object.entries(p.slow_mode || {})) slowModeByStream.set(Number(k), Number(v) || 0);
++        } catch { /* keep the last snapshot */ }
++    }
++
++    // ── Forwarded database writes ───────────────────────────────
++    const originals = {};
++    function installDbForwarding() {
++        for (const [fn, mode] of Object.entries(FORWARDED_DB)) {
++            if (typeof db[fn] !== 'function' || originals[fn]) continue;
++            originals[fn] = db[fn];
++            db[fn] = function forwardedChatWrite(...args) {
++                if (mode === 'insert') {
++                    const ref = -(REF_BASE + (++refCounter));
++                    enqueue('db', [fn, ...args], { ref, durable: true });
++                    return { changes: 1, lastInsertRowid: ref };
++                }
++                let result;
++                try { result = originals[fn](...args); } catch (err) { result = undefined; console.warn(`[ChatRemote] mirror ${fn}: ${err.message}`); }
++                enqueue('db', [fn, ...args], { durable: true });
++                return result;
++            };
++        }
++    }
++
++    function installInvalidations() {
++        for (const [fn, target] of Object.entries(OBSERVED_DB)) {
++            if (typeof db[fn] !== 'function' || originals[fn]) continue;
++            originals[fn] = db[fn];
++            db[fn] = function observedLiveWrite(...args) {
++                const result = originals[fn](...args);
++                try { const [kind, id] = target(args); enqueue('invalidate', [kind, id]); } catch { /* */ }
++                return result;
++            };
++        }
++    }
++
++    function replayOutbox() {
++        try {
++            ensureOutbox();
++            const rows = db.getDb().prepare('SELECT id, boot, ref, op, args FROM chat_bridge_outbox ORDER BY id').all();
++            for (const r of rows) {
++                let args;
++                try { args = JSON.parse(r.args); } catch { continue; }
++                queue.push({ seq: ++seq, op: r.op, args, ref: r.ref, durableId: r.id, boot: r.boot, at: Date.now() });
++            }
++            if (rows.length) console.log(`[ChatRemote] replaying ${rows.length} chat write(s) queued before the restart`);
++        } catch (err) { console.warn('[ChatRemote] outbox replay:', err.message); }
++    }
++
++    // A stream row carries Live's stream keys: Chat only ever needs the owner.
++    const slimStream = (s) => (s ? { id: s.id, user_id: s.user_id } : s);
++    const send = (op) => (...args) => { enqueue(op, args); };
++
++    // Live code that iterated chatServer.clients and wrote to each socket (a global delete in
++    // /api/mod) gets one pseudo-socket whose send() reaches every chat client through Chat.
++    const everyone = { readyState: 1, bufferedAmount: 0, send: (raw) => enqueue('broadcastAllRaw', [String(raw)]), close() {} };
++    const clients = new Map([[everyone, { pseudo: true }]]);
++
++    const remote = {
++        remote: true,
++        boot: BOOT,
++        stats,
++        clients,
++        slowModeByStream,
++
++        init() {
++            if (started) return null;
++            started = true;
++            ensureOutbox();
++            replayOutbox();
++            schedule();
++            pollPresence();
++            presenceTimer = setInterval(pollPresence, PRESENCE_MS);
++            if (presenceTimer.unref) presenceTimer.unref();
++            console.log(`[Chat] CHAT_AUTHORITY=chat — chat runs in OpenVibe.Chat (${CHAT_URL}); Live forwards to it`);
++            return null;
++        },
++        handleUpgrade(req, socket) {
++            // nginx sends /ws/chat to Chat; a socket that still lands here is told to retry.
++            try { socket.write('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 2\r\nConnection: close\r\n\r\n'); } catch { /* */ }
++            try { socket.destroy(); } catch { /* */ }
++            return true;
++        },
++        close() {
++            if (presenceTimer) clearInterval(presenceTimer);
++            presenceTimer = null;
++            return flush().catch(() => {});
++        },
++        flush,
++
++        // ── Pushes to browsers (Chat delivers) ──
++        broadcastToStream: send('broadcastToStream'),
++        broadcastToChannelRoom: send('broadcastToChannelRoom'),
++        broadcastGlobal: send('broadcastGlobal'),
++        broadcastAll: send('broadcastAll'),
++        forwardToGlobal: send('forwardToGlobal'),
++        forwardToGlobalByChannel: send('forwardToGlobalByChannel'),
++        forwardToStreamerRooms: send('forwardToStreamerRooms'),
++        broadcastToOwnerStreams: send('broadcastToOwnerStreams'),
++        sendDm: send('sendDm'),
++        sendUserUpdate: send('sendUserUpdate'),
++        disconnectUser: send('disconnectUser'),
++        sendToConn: send('sendToConn'),
++        synthesizeAndBroadcastTTS(...args) { enqueue('synthesizeAndBroadcastTTS', args); return Promise.resolve(); },
++        triggerChannelSound(ws, client, stream, command, args = [], relay = null) {
++            const c = client ? { streamId: client.streamId || null, user: client.user ? { id: client.user.id, username: client.user.username, display_name: client.user.display_name, role: client.user.role, avatar_url: client.user.avatar_url, profile_color: client.user.profile_color } : null, anonId: client.anonId || null, ip: client.ip || null } : {};
++            enqueue('triggerChannelSound', [null, c, slimStream(stream), command, args, relay]);
++        },
++        /** Commits this boot shipped (deploy-notice.js decides which; Chat stores and shows them). */
++        deployNotice(commits) { enqueue('deployNotice', [commits], { durable: true }); },
++        /** Live changed a user (role push, avatar): Chat drops what it cached about them. */
++        userChanged(userId) { if (userId) enqueue('userChanged', [userId]); },
++
++        // ── Synchronous reads (presence snapshot) ──
++        getTotalConnections() { return Number(presence.total) || 0; },
++        getStreamViewerCount(streamId) { return Number((presence.streams || {})[streamId]) || 0; },
++        getConnectedUserIp(userId) {
++            const hit = (presence.users || []).find((u) => u.user_id === userId);
++            return hit ? hit.ip : null;
++        },
++        findClientByAnonId(anonId, streamId) {
++            // Same match as ChatServer.findClientByAnonId: the socket's stream must equal streamId.
++            const hit = (presence.anons || []).find((a) => a.anon_id === anonId && (a.stream_id ?? null) === streamId);
++            return hit ? { anonId: hit.anon_id, ip: hit.ip, streamId: hit.stream_id || null, user: null } : null;
++        },
++        getUserList() { return { logged: [], anonCount: 0 }; },
++
++        // ── Live's own address / anon helpers ──
++        normalizeIp: (ip) => local.normalizeIp(ip),
++        getClientIp: (req) => local.getClientIp(req),
++        getAnonIdForIp: (ip) => local.getAnonIdForIp(ip),
++        getAnonIdForConnection(ip, streamId = null) {
++            const key = local.normalizeIp(ip);
++            const hit = (presence.anons || []).find((a) => a.ip === key && (streamId == null || (a.stream_id || null) === streamId));
++            return hit ? hit.anon_id : local.getAnonIdForIp(key);
++        },
++        /** The anon number for an address (Network's unified resolve, else Live's table) — for Chat. */
++        async resolveAnon(ip) {
++            const key = local.normalizeIp(ip);
++            const num = await local._resolveUnifiedAnonNum(key);
++            return { anon_number: num, first_seen: db.getAnonFirstSeen(key) };
++        },
++    };
++
++    installDbForwarding();
++    installInvalidations();
++    remote._restoreDb = () => { for (const [fn, orig] of Object.entries(originals)) db[fn] = orig; };
++    return remote;
++}
++
++/**
++ * Rollback: Live runs chat itself again (CHAT_AUTHORITY unset) but chat writes it forwarded were
++ * never acknowledged by Chat (Chat down). Apply them to Live's own tables so nothing is lost.
++ * A write Chat did apply whose answer was lost is applied twice — rare, and only for that window.
++ */
++function drainToLocal(log = console) {
++    try {
++        const d = db.getDb();
++        if (!d.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chat_bridge_outbox'").get()) return 0;
++        const rows = d.prepare("SELECT id, args FROM chat_bridge_outbox WHERE op = 'db' ORDER BY id").all();
++        let applied = 0;
++        for (const r of rows) {
++            try {
++                const [fn, ...args] = JSON.parse(r.args);
++                if (FORWARDED_DB[fn] && typeof db[fn] === 'function') { db[fn](...args); applied++; }
++            } catch (err) { log.warn(`[ChatRemote] could not apply queued chat write #${r.id}: ${err.message}`); }
++        }
++        d.prepare('DELETE FROM chat_bridge_outbox').run();
++        if (rows.length) log.log(`[ChatRemote] applied ${applied} of ${rows.length} chat write(s) OpenVibe.Chat never acknowledged`);
++        return applied;
++    } catch (err) { log.warn('[ChatRemote] drain:', err.message); return 0; }
++}
++
++module.exports = { create, drainToLocal, FORWARDED_DB, OBSERVED_DB, REF_BASE, AUDIENCE };
+diff --git a/server/chat/chat-server.js b/server/chat/chat-server.js
+index cfce589..ae77d68 100644
+--- a/server/chat/chat-server.js
++++ b/server/chat/chat-server.js
+@@ -2491,4 +2491,6 @@ class ChatServer {
+     }
+ }
+ 
+-module.exports = new ChatServer();
++// CHAT_AUTHORITY=chat: OpenVibe.Chat runs the chat server; Live's modules get a proxy with the same
++// methods that hands every call to it (chat-remote.js). Default: Live runs chat itself.
++module.exports = require('./chat-authority').isRemote() ? require('./chat-remote').create(ChatServer) : new ChatServer();
+diff --git a/server/chat/deploy-notice.js b/server/chat/deploy-notice.js
+index 4b0f91a..33f8811 100644
+--- a/server/chat/deploy-notice.js
++++ b/server/chat/deploy-notice.js
+@@ -82,6 +82,14 @@ async function announce({ db, chatServer, log = console }) {
+     const { head, commits } = await newCommits(db);
+     if (!head || !commits.length) return { announced: 0 };
+ 
++    // CHAT_AUTHORITY=chat: Live still decides what shipped; OpenVibe.Chat stores the rolling
++    // message and shows it (its own copy of this module), so hand it the commits.
++    if (chatServer && chatServer.remote) {
++        chatServer.deployNotice(commits);
++        try { db.setSetting(SETTING, head); } catch (err) { log.warn('[Deploy notice] not recorded:', err.message); }
++        return { announced: commits.length };
++    }
++
+     let saved;
+     try { saved = persist(db, commits); db.setSetting(SETTING, head); }
+     catch (err) { log.warn('[Deploy notice] not saved:', err.message); return { announced: 0 }; }
+diff --git a/server/chat/live-context-routes.js b/server/chat/live-context-routes.js
+new file mode 100644
+index 0000000..53a72ce
+--- /dev/null
++++ b/server/chat/live-context-routes.js
+@@ -0,0 +1,656 @@
++'use strict';
++/**
++ * What OpenVibe.Chat asks of Live (roadmap Wave 6). Chat owns chat; Live still owns accounts,
++ * streams, channels, bans, cosmetics, coins, AI viewers, the arena, the media queue and hardware.
++ * Chat's single adapter (OpenVibe.Chat server/live-context.js) calls these with a Network service
++ * token for audience openvibe.live (server/net/service-guard.js); nothing here is routed by nginx.
++ *
++ * /internal/chat-context/*   capability live.chat_context.read — projections Chat caches
++ *   POST /auth {token}                       → { user, expires_at, reason } (Live's own token rules)
++ *   GET  /users?after_id&limit               → { rows }   users projection (paged by id)
++ *   POST /users/lookup {ids?, usernames?}    → { users }
++ *   GET  /users/:id/follows                  → { streamer_ids }
++ *   GET  /users/profile?username&viewer_id   → the /api/chat/user/:username/profile card
++ *   GET  /streams?after_id&limit, /streams/active, /streams/:id
++ *   GET  /managed-streams?after_id&limit, /channels?after_id&limit, /channels/by-user/:userId
++ *   GET  /channels/:id/policy                → { channel, settings, moderator_ids, language }
++ *   GET  /channels/:id/approved-ip?ip        → { approved }
++ *   GET  /bans?version                       → { version, bans } | { version, unchanged: true }
++ *   POST /decor {user_ids}                   → { decor: { id: { cosmetic, tag } } }
++ *   GET  /settings                           → { settings } (tts_*, GIF and soundboard keys only)
++ *   GET  /anon/:num, /anon-first-seen?ip     → { first_seen }
++ *   GET  /tts-audio/:file                    → a clip from the arena voice cache
++ *
++ * /internal/chat-effects/*   capability live.chat_effects.write — side effects (CHAT_AUTHORITY=chat only)
++ *   anon, ip-log, viewer-counts, viewer-snapshots, user-color, ban, approve-ip, channel-settings,
++ *   alert-sound, ensure-channel, site-settings, chat-message, ai/mod-command, arena-command,
++ *   media-queue, hardware, paste, translate, notify/dm, notify/dm-read, asset-sync
++ *   mirror  (capability live.chat_mirror.write) — Chat's changes to its tables, applied to Live's copy
++ *
++ * Every effect that acts for a person re-checks that person here (moderator, owner, admin) — Chat
++ * checked first; Live does not take its word for it.
++ */
++const express = require('express');
++const fs = require('fs');
++const path = require('path');
++const db = require('../db/database');
++const config = require('../config');
++const permissions = require('../auth/permissions');
++const { guard } = require('../net/service-guard');
++const { isRemote } = require('./chat-authority');
++
++const contextRouter = express.Router();
++const effectsRouter = express.Router();
++
++const int = (v, d = 0) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : d; };
++const pageArgs = (req) => ({ after: Math.max(0, int(req.query.after_id)), limit: Math.min(5000, Math.max(1, int(req.query.limit, 1000))) });
++const fail = (res, status, error) => res.status(status).json({ error });
++
++// ── Projections ─────────────────────────────────────────────────
++
++const SUBJECT_SQL = "(SELECT la.subject_id FROM linked_accounts la WHERE la.user_id = u.id AND la.service = 'network' AND la.subject_id IS NOT NULL ORDER BY la.id DESC LIMIT 1)";
++const USER_SQL = `SELECT u.id, u.username, u.display_name, u.avatar_url, u.profile_color, u.role, u.is_banned, u.ban_reason,
++        COALESCE(u.is_owner, 0) AS is_owner, u.created_at, ${SUBJECT_SQL} AS subject_id FROM users u`;
++const STREAM_SQL = 'SELECT id, user_id, channel_id, managed_stream_id, title, is_live, started_at, ended_at, created_at FROM streams';
++const MS_SQL = 'SELECT id, user_id, slug, title, sort_order, created_at FROM managed_streams';
++const CHANNEL_SQL = 'SELECT id, user_id, title FROM channels';
++
++/** The chat projection of a user row (no secrets: no email, password, stream key, balances). */
++function userProjection(user, subjectId) {
++    if (!user) return null;
++    let subject = subjectId || user.subject_id || null;
++    if (!subject) {
++        try { subject = db.get("SELECT subject_id FROM linked_accounts WHERE user_id = ? AND service = 'network' AND subject_id IS NOT NULL ORDER BY id DESC LIMIT 1", [user.id])?.subject_id || null; } catch { subject = null; }
++    }
++    return {
++        id: user.id, username: user.username, display_name: user.display_name, avatar_url: user.avatar_url || null,
++        profile_color: user.profile_color || null, role: user.role, is_banned: user.is_banned ? 1 : 0, ban_reason: user.ban_reason || null,
++        is_owner: user.is_owner ? 1 : 0, created_at: user.created_at, subject_id: subject,
++    };
++}
++
++contextRouter.use(guard('live.chat_context.read'));
++
++// Resolve a browser/bot token exactly as Live's requireAuth / authenticateWs do.
++contextRouter.post('/auth', (req, res) => {
++    const token = String((req.body && req.body.token) || '');
++    if (!token) return res.json({ user: null, reason: 'invalid' });
++    const auth = require('../auth/auth');
++    const apiUser = auth.authenticateApiToken(token);
++    if (apiUser) {
++        const user = { ...userProjection(apiUser), auth_source: 'api_token', scopes: apiUser.scopes || [] };
++        return res.json({ user, expires_at: null, reason: null });
++    }
++    const r = auth.verifyTokenWithReason(token);
++    if (!r.ok) return res.json({ user: null, reason: 'invalid' });
++    const user = auth.resolveNetworkUser(r.decoded);
++    if (!user) return res.json({ user: null, reason: 'unresolved' });
++    res.json({
++        user: { ...userProjection(user, r.decoded.subject_id), auth_source: 'network' },
++        expires_at: typeof r.decoded.exp === 'number' ? new Date(r.decoded.exp * 1000).toISOString() : null,
++        reason: null,
++    });
++});
++
++contextRouter.get('/users', (req, res) => {
++    const { after, limit } = pageArgs(req);
++    res.json({ rows: db.all(`${USER_SQL} WHERE u.id > ? ORDER BY u.id LIMIT ?`, [after, limit]) });
++});
++
++contextRouter.post('/users/lookup', (req, res) => {
++    const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger).slice(0, 500);
++    const names = (Array.isArray(req.body?.usernames) ? req.body.usernames : []).map(String).slice(0, 100);
++    const rows = [];
++    if (ids.length) rows.push(...db.all(`${USER_SQL} WHERE u.id IN (${ids.map(() => '?').join(',')})`, ids));
++    for (const n of names) { const r = db.get(`${USER_SQL} WHERE u.username = ? COLLATE NOCASE`, [n]); if (r) rows.push(r); }
++    res.json({ users: rows });
++});
++
++contextRouter.get('/users/profile', (req, res) => {
++    // The same card /api/chat/user/:username/profile built in Live.
++    try {
++        const name = String(req.query.username || '');
++        let user = db.getUserByUsername(name);
++        if (!user) user = db.get('SELECT * FROM users WHERE display_name = ? COLLATE NOCASE', [name]);
++        if (!user) return fail(res, 404, 'User not found');
++        const profile = db.getUserProfile(user.id);
++        if (!profile) return fail(res, 404, 'Profile not found');
++        // OpenCoins are part of the game; Vibes (real money) and presence stay with the user.
++        const viewerId = int(req.query.viewer_id, 0);
++        if (!viewerId || viewerId !== user.id) {
++            delete profile.openvibe_bucks_balance;
++            delete profile.last_seen;
++        }
++        try {
++            const game = require('../game/game-engine');
++            const player = game.getPlayer(user.id);
++            if (player) {
++                profile.game = {
++                    total_level: player.total_level,
++                    mining_level: player.mining_level,
++                    fishing_level: player.fishing_level,
++                    woodcut_level: player.woodcut_level,
++                    farming_level: player.farming_level,
++                    combat_level: player.combat_level,
++                    crafting_level: player.crafting_level,
++                    mining_xp: player.mining_xp,
++                    fishing_xp: player.fishing_xp,
++                    woodcut_xp: player.woodcut_xp,
++                    farming_xp: player.farming_xp,
++                    combat_xp: player.combat_xp,
++                    crafting_xp: player.crafting_xp,
++                    total_coins_earned: player.total_coins_earned || 0,
++                };
++            }
++        } catch { /* game not initialized or player doesn't exist */ }
++        res.json(profile);
++    } catch (err) {
++        fail(res, 500, 'Failed to get profile');
++    }
++});
++
++contextRouter.get('/users/:id/follows', (req, res) => {
++    res.json({ streamer_ids: db.all('SELECT streamer_id FROM follows WHERE follower_id = ?', [int(req.params.id)]).map((r) => r.streamer_id) });
++});
++
++contextRouter.get('/streams', (req, res) => {
++    const { after, limit } = pageArgs(req);
++    res.json({ rows: db.all(`${STREAM_SQL} WHERE id > ? ORDER BY id LIMIT ?`, [after, limit]) });
++});
++// Live now, plus anything that ended in the last quarter hour (so Chat sees it go offline).
++contextRouter.get('/streams/active', (req, res) => {
++    res.json({ rows: db.all(`${STREAM_SQL} WHERE is_live = 1 OR (ended_at IS NOT NULL AND ended_at >= datetime('now', '-15 minutes'))`) });
++});
++contextRouter.get('/streams/:id', (req, res) => {
++    const stream = db.get(`${STREAM_SQL} WHERE id = ?`, [int(req.params.id)]);
++    if (!stream) return res.json({ stream: null });
++    res.json({
++        stream,
++        owner: db.get(`${USER_SQL} WHERE u.id = ?`, [stream.user_id]) || null,
++        managed_stream: stream.managed_stream_id ? (db.get(`${MS_SQL} WHERE id = ?`, [stream.managed_stream_id]) || null) : null,
++        channel: stream.channel_id ? (db.get(`${CHANNEL_SQL} WHERE id = ?`, [stream.channel_id]) || null) : (db.get(`${CHANNEL_SQL} WHERE user_id = ?`, [stream.user_id]) || null),
++    });
++});
++
++contextRouter.get('/managed-streams', (req, res) => {
++    const { after, limit } = pageArgs(req);
++    res.json({ rows: db.all(`${MS_SQL} WHERE id > ? ORDER BY id LIMIT ?`, [after, limit]) });
++});
++
++contextRouter.get('/channels', (req, res) => {
++    const { after, limit } = pageArgs(req);
++    res.json({ rows: db.all(`${CHANNEL_SQL} WHERE id > ? ORDER BY id LIMIT ?`, [after, limit]) });
++});
++contextRouter.get('/channels/by-user/:userId', (req, res) => {
++    res.json({ channel: db.get(`${CHANNEL_SQL} WHERE user_id = ?`, [int(req.params.userId)]) || null });
++});
++contextRouter.get('/channels/:id/policy', (req, res) => {
++    const channelId = int(req.params.id);
++    const channel = db.get(`${CHANNEL_SQL} WHERE id = ?`, [channelId]) || null;
++    let language = 'en';
++    try { if (channel) language = require('../i18n/translate').channelLanguage(channel.user_id) || 'en'; } catch { language = 'en'; }
++    res.json({
++        channel,
++        settings: db.getChannelModerationSettings(channelId),
++        moderator_ids: db.all('SELECT user_id FROM channel_moderators WHERE channel_id = ?', [channelId]).map((r) => r.user_id),
++        language,
++    });
++});
++contextRouter.get('/channels/:id/approved-ip', (req, res) => {
++    res.json({ approved: db.isIpApproved(int(req.params.id), String(req.query.ip || '')) });
++});
++
++// Active bans (user, IP and CIDR rows). `version` changes whenever the table does, so an
++// unchanged table is one small answer.
++contextRouter.get('/bans', (req, res) => {
++    const v = db.get('SELECT COUNT(*) AS c, COALESCE(MAX(id), 0) AS m, COALESCE(SUM(id * 7 + COALESCE(stream_id, 0) + LENGTH(COALESCE(expires_at, \'\'))), 0) AS s FROM bans');
++    const version = `${v.c}:${v.m}:${v.s}`;
++    if (req.query.version && String(req.query.version) === version) return res.json({ version, unchanged: true });
++    res.json({
++        version,
++        bans: db.all('SELECT id, stream_id, user_id, ip_address, anon_id, expires_at FROM bans WHERE expires_at IS NULL OR expires_at > CURRENT_TIMESTAMP'),
++    });
++});
++
++contextRouter.post('/decor', (req, res) => {
++    const ids = (Array.isArray(req.body?.user_ids) ? req.body.user_ids : []).map(Number).filter(Number.isInteger).slice(0, 500);
++    let cosmetics = null, tags = null;
++    try { cosmetics = require('../monetization/cosmetics'); } catch { /* */ }
++    try { tags = require('../game/tags'); } catch { /* */ }
++    const decor = {};
++    for (const id of ids) {
++        let cosmetic = {}, tag = null;
++        try { if (cosmetics) cosmetic = cosmetics.getCosmeticProfile(id) || {}; } catch { cosmetic = {}; }
++        try { if (tags) tag = tags.getTagProfile(id) || null; } catch { tag = null; }
++        decor[id] = { cosmetic, tag };
++    }
++    res.json({ decor });
++});
++
++// Site settings chat reads (TTS config, GIF provider keys, the 101soundboards key) — nothing else.
++const CHAT_SETTING_KEYS = new Set(['gif_tenor_api_key', 'gif_giphy_api_key', 'soundboard_101_api_key']);
++const isChatSetting = (k) => CHAT_SETTING_KEYS.has(k) || /^tts_[a-z0-9_]+$/.test(k);
++contextRouter.get('/settings', (req, res) => {
++    const settings = {};
++    for (const r of db.all("SELECT key FROM site_settings WHERE key LIKE 'tts\\_%' ESCAPE '\\' OR key IN ('gif_tenor_api_key', 'gif_giphy_api_key', 'soundboard_101_api_key')")) {
++        if (isChatSetting(r.key)) settings[r.key] = db.getSetting(r.key);
++    }
++    res.json({ settings });
++});
++
++contextRouter.get('/anon/:num', (req, res) => {
++    res.json({ first_seen: db.get('SELECT created_at FROM anon_ip_mappings WHERE anon_num = ?', [int(req.params.num)])?.created_at || null });
++});
++contextRouter.get('/anon-first-seen', (req, res) => {
++    res.json({ first_seen: db.getAnonFirstSeen(String(req.query.ip || '')) });
++});
++
++contextRouter.get('/tts-audio/:file', (req, res) => {
++    try {
++        const hit = require('../arena/voice').cachedByName(req.params.file);
++        if (!hit) return fail(res, 404, 'No such clip');
++        res.set({ 'Content-Type': hit.mimeType });
++        require('fs').createReadStream(hit.path).pipe(res);
++    } catch (err) { fail(res, 500, err.message); }
++});
++
++// ── Effects ────────────────────────────────────────────────────
++
++effectsRouter.post('/mirror', guard('live.chat_mirror.write'), (req, res, next) => next());
++effectsRouter.use((req, res, next) => {
++    if (req.path === '/mirror') return next();
++    return guard('live.chat_effects.write')(req, res, next);
++});
++// Live only takes Chat's writes while Chat is the authority — a rehearsal Chat pointed at
++// production Live can never award coins, post to AI viewers or overwrite chat tables.
++effectsRouter.use((req, res, next) => {
++    if (!isRemote()) return fail(res, 409, 'Live runs chat itself (CHAT_AUTHORITY is not "chat")');
++    next();
++});
++
++const chatServer = () => require('./chat-server');
++const actorOf = (id) => (id ? db.getUserById(id) : null);
++
++effectsRouter.post('/anon', async (req, res) => {
++    const ip = String(req.body?.ip || '');
++    if (!ip) return fail(res, 400, 'ip required');
++    try { res.json(await chatServer().resolveAnon(ip)); } catch (err) { fail(res, 500, err.message); }
++});
++
++effectsRouter.post('/ip-log', (req, res) => {
++    const entries = Array.isArray(req.body?.entries) ? req.body.entries.slice(0, 1000) : [];
++    let ipUtils = null;
++    try { ipUtils = require('../admin/ip-utils'); } catch { /* */ }
++    for (const e of entries) {
++        try {
++            const geo = ipUtils ? ipUtils.enrichIp(e.ip) : null;
++            db.logIp({ userId: e.userId || null, anonId: e.anonId || null, ip: e.ip, action: e.action || 'chat', geo });
++        } catch { /* non-critical */ }
++    }
++    res.json({ ok: true, logged: entries.length });
++});
++
++effectsRouter.post('/viewer-counts', (req, res) => {
++    for (const [sid, count] of Object.entries(req.body?.counts || {})) {
++        try { db.updateViewerCount(int(sid), Math.max(0, int(count))); } catch { /* */ }
++    }
++    res.json({ ok: true });
++});
++
++effectsRouter.post('/viewer-snapshots', (req, res) => {
++    for (const s of (Array.isArray(req.body?.snapshots) ? req.body.snapshots : []).slice(0, 1000)) {
++        try { db.insertViewerSnapshot(int(s.stream_id), Math.max(0, int(s.viewer_count)), Math.max(0, int(s.chat_messages_5m))); } catch { /* */ }
++    }
++    res.json({ ok: true });
++});
++
++// /color: the user changes their own color.
++effectsRouter.post('/user-color', (req, res) => {
++    const userId = int(req.body?.user_id);
++    const color = String(req.body?.color || '');
++    if (!userId || !/^#[0-9a-fA-F]{6}$/.test(color)) return fail(res, 400, 'user_id and a #rrggbb color required');
++    db.run('UPDATE users SET profile_color = ? WHERE id = ?', [color, userId]);
++    res.json({ ok: true });
++});
++
++// /ban, /timeout, /unban from chat. The moderator is checked again: global staff, or a
++// moderator of the stream chat decided on (for an offline channel room, its latest stream).
++effectsRouter.post('/ban', (req, res) => {
++    const b = req.body || {};
++    const actor = actorOf(int(b.actor_user_id));
++    const modStream = int(b.moderation_stream_id) || null;
++    const allowed = actor && !actor.is_banned && (permissions.isGlobalModOrAbove(actor) || (modStream && permissions.canModerateStream(actor, modStream)));
++    if (!allowed) return fail(res, 403, 'You do not have permission.');
++    const streamId = b.stream_id != null ? int(b.stream_id) || null : null;
++    if (b.action === 'unban') {
++        const userId = int(b.user_id);
++        if (!userId) return fail(res, 400, 'user_id required');
++        db.run('DELETE FROM bans WHERE user_id = ? AND (stream_id = ? OR stream_id IS NULL)', [userId, streamId]);
++        return res.json({ ok: true });
++    }
++    if (b.action !== 'ban') return fail(res, 400, 'action must be ban or unban');
++    if (b.user_id) {
++        const target = db.getUserById(int(b.user_id));
++        if (!target) return fail(res, 404, 'User not found');
++        // Prevent non-admins from banning admins
++        if (permissions.isGlobalModOrAbove(target) && target.role === 'admin' && actor.role !== 'admin') return fail(res, 403, 'You cannot ban an admin.');
++        db.run('INSERT INTO bans (stream_id, user_id, reason, banned_by, expires_at) VALUES (?, ?, ?, ?, ?)',
++            [streamId, target.id, String(b.reason || 'Banned by moderator').slice(0, 200), actor.id, b.expires_at || null]);
++    } else if (b.ip_address) {
++        db.run('INSERT INTO bans (stream_id, ip_address, anon_id, reason, banned_by) VALUES (?, ?, ?, ?, ?)',
++            [streamId, String(b.ip_address), b.anon_id ? String(b.anon_id) : null, String(b.reason || 'Banned by moderator').slice(0, 200), actor.id]);
++    } else {
++        return fail(res, 400, 'user_id or ip_address required');
++    }
++    res.json({ ok: true });
++});
++
++// IP approval mode: an address that chatted here before is approved automatically ('auto_existing').
++effectsRouter.post('/approve-ip', (req, res) => {
++    const channelId = int(req.body?.channel_id);
++    const ip = String(req.body?.ip || '');
++    if (!channelId || !ip) return fail(res, 400, 'channel_id and ip required');
++    db.approveIp(channelId, ip, req.body.approved_by ? int(req.body.approved_by) : null, String(req.body.source || 'auto').slice(0, 32));
++    res.json({ ok: true });
++});
++
++// /slow persists the channel's slow mode.
++effectsRouter.post('/channel-settings', (req, res) => {
++    const channelId = int(req.body?.channel_id);
++    const actor = actorOf(int(req.body?.actor_user_id));
++    if (!channelId || !actor || !permissions.canModerateChannel(actor, channelId)) return fail(res, 403, 'You do not have permission.');
++    const fields = {};
++    if (req.body.fields && req.body.fields.slow_mode_seconds !== undefined) fields.slow_mode_seconds = Math.max(0, int(req.body.fields.slow_mode_seconds));
++    if (!Object.keys(fields).length) return fail(res, 400, 'no chat-settable fields');
++    db.upsertChannelModerationSettings(channelId, fields);
++    res.json({ ok: true });
++});
++
++// Donation / goal alert sounds: the streamer's own channel only, files in the shared sounds dir.
++effectsRouter.post('/alert-sound', (req, res) => {
++    const channelId = int(req.body?.channel_id);
++    const channel = channelId ? db.getChannelById(channelId) : null;
++    if (!channel || channel.user_id !== int(req.body?.actor_user_id)) return fail(res, 403, 'Not your channel');
++    const url = req.body.url ? path.resolve(String(req.body.url)) : null;
++    if (url) {
++        // Compared through realpath: Chat and Live may reach the shared sounds dir via different symlinks.
++        let inside = false;
++        try { inside = path.dirname(fs.realpathSync(url)) === fs.realpathSync(path.resolve(config.sounds.path)); } catch { inside = false; }
++        if (!inside) return fail(res, 400, 'alert sounds live in the sounds directory');
++    }
++    db.setChannelAlertSound(channelId, req.body.kind === 'goal' ? 'goal' : 'donation', url, url ? String(req.body.mime || 'audio/mpeg') : null);
++    res.json({ ok: true });
++});
++
++effectsRouter.post('/ensure-channel', (req, res) => {
++    const userId = int(req.body?.user_id);
++    if (!userId || !db.getUserById(userId)) return fail(res, 404, 'User not found');
++    const ch = db.ensureChannel(userId);
++    res.json({ channel: ch ? { id: ch.id, user_id: ch.user_id, title: ch.title } : null });
++});
++
++// TTS admin settings: admins; credentials only the owner (Live's /api/tts/admin/settings rules).
++effectsRouter.post('/site-settings', (req, res) => {
++    const actor = actorOf(int(req.body?.actor_user_id));
++    if (!actor || actor.role !== 'admin') return fail(res, 403, 'Admin access required');
++    const allowed = ['tts_enabled', 'tts_provider', 'tts_google_api_key', 'tts_google_service_account', 'tts_aws_access_key_id', 'tts_aws_secret_access_key', 'tts_aws_region', 'tts_max_length', 'tts_max_queue_per_user', 'tts_max_queue_global', 'tts_default_voice'];
++    const secret = new Set(['tts_google_api_key', 'tts_google_service_account', 'tts_aws_access_key_id', 'tts_aws_secret_access_key']);
++    const owner = permissions.isOwner(actor);
++    let count = 0;
++    for (const [key, value] of Object.entries(req.body.settings || {})) {
++        if (!allowed.includes(key)) continue;
++        if (secret.has(key) && !owner) continue;
++        if (secret.has(key) && typeof value === 'string' && /^••••/.test(value)) continue;
++        db.setSetting(key, value);
++        count++;
++    }
++    try { require('./tts-engine').invalidateSettingsCache(); } catch { /* */ }
++    res.json({ ok: true, updated: count });
++});
++
++// One real chat line: OpenCoins chat bonus, AI chat viewers, the PowerChat overlay relay.
++effectsRouter.post('/chat-message', (req, res) => {
++    const b = req.body || {};
++    let coin = null;
++    if (b.award && b.user_id && b.stream_id) {
++        try { coin = require('../monetization/opencoins').awardChat(int(b.user_id), int(b.stream_id)); } catch { coin = null; }
++    }
++    if (b.ai && b.stream_id) {
++        try {
++            require('../integrations/ai-chatbot-service').onRealChatMessage(int(b.stream_id), {
++                username: b.username,
++                message: b.message,
++                userId: b.user_id || null,
++                anonId: b.anon_id || null,
++                isStreamer: !!b.is_streamer,
++                isMod: !!b.is_mod,
++                msgId: b.msg_id || null,
++                channelUserId: b.channel_user_id || null,
++            });
++        } catch { /* non-critical */ }
++    }
++    if (b.powerchat && b.channel_user_id && b.powerchat_chat) {
++        try {
++            const pc = require('../integrations/powerchat-platform');
++            const channelUserId = int(b.channel_user_id);
++            if (pc.channelRelayEnabled(channelUserId, b.stream_id || null)) {
++                let isSub = false;
++                try { isSub = !!(b.user_id && db.isActiveSubscriber(int(b.user_id), channelUserId)); } catch { /* */ }
++                const c = b.powerchat_chat;
++                pc.forwardChat(channelUserId, {
++                    chatterName: c.chatterName,
++                    externalChatterId: c.externalChatterId,
++                    message: c.message,
++                    avatarUrl: c.avatarUrl || undefined,
++                    isModerator: !!c.isModerator,
++                    isSubscriber: isSub,
++                });
++            }
++        } catch { /* non-critical */ }
++    }
++    res.json({ coin });
++});
++
++effectsRouter.post('/ai/mod-command', (req, res) => {
++    try {
++        const engine = require('../integrations/ai-chatbot-service');
++        const reply = engine.onModCommand
++            ? engine.onModCommand(req.body.channel_user_id || null, req.body.stream_id || null, Array.isArray(req.body.args) ? req.body.args : [], { by: req.body.by })
++            : 'AI viewers: command not supported by this engine.';
++        res.json({ reply: reply || null });
++    } catch (err) { fail(res, 400, err.message); }
++});
++
++// !hype / !beef / !arena: arena-chat answers the sender through Chat (sendToConn).
++effectsRouter.post('/arena-command', (req, res) => {
++    const client = req.body?.client || {};
++    const cs = chatServer();
++    const shim = {
++        sendTo: (_ws, payload) => cs.sendToConn(client.conn_id, payload),
++        broadcastToStream: (streamId, payload) => cs.broadcastToStream(streamId, payload),
++    };
++    let handled = false;
++    try { handled = require('../arena/arena-chat').handle(shim, null, client, String(req.body.cmd || ''), Array.isArray(req.body.parts) ? req.body.parts : []); } catch (e) { console.warn('[Arena] chat command:', e.message); }
++    res.json({ handled: !!handled });
++});
++
++// !sr / !queue / !np / !skip — the media queue is Live's.
++effectsRouter.post('/media-queue', async (req, res) => {
++    const b = req.body || {};
++    const mediaQueue = require('../media/media-queue');
++    const streamerId = int(b.streamerId);
++    if (!streamerId) return fail(res, 400, 'streamerId required');
++    try {
++        if (b.op === 'add') {
++            const request = await mediaQueue.addRequest({ streamerId, streamId: int(b.streamId) || null, userId: int(b.userId), username: String(b.username || ''), input: String(b.input || '') });
++            return res.json({ request });
++        }
++        if (b.op === 'state') return res.json({ state: mediaQueue.getState(streamerId) });
++        if (b.op === 'skip') {
++            const actor = actorOf(int(b.actorUserId));
++            const streamId = int(b.streamId) || null;
++            const allowed = actor && (actor.id === streamerId || permissions.isGlobalModOrAbove(actor) || (streamId && permissions.canModerateStream(actor, streamId)));
++            if (!allowed) return fail(res, 403, 'Only the streamer or a moderator can skip media.');
++            const ended = mediaQueue.finishCurrent(streamerId, 'skipped');
++            const next = mediaQueue.startNext(streamerId);
++            return res.json({ ended: ended || null, next: next || null });
++        }
++        fail(res, 400, 'unknown op');
++    } catch (err) {
++        fail(res, 400, err.message || 'Media command failed.');
++    }
++});
++
++// Cozmo / !say: the robot's control socket is in Live, keyed by the streamer's stream key.
++const HARDWARE_COMMANDS = new Set(['forward', 'backward', 'turn_left', 'turn_right', 'lift_up', 'lift_down', 'head_up', 'head_down']);
++effectsRouter.post('/hardware', (req, res) => {
++    const command = String(req.body?.command || '');
++    if (!HARDWARE_COMMANDS.has(command) && !/^say:[\s\S]{1,200}$/.test(command)) return fail(res, 400, 'unknown command');
++    const user = db.getUserById(int(req.body.streamer_user_id));
++    if (!user) return res.json({ ok: false, reason: 'no_user' });
++    const controlServer = require('../controls/control-server');
++    const hwWs = controlServer.hardwareClients.get(user.stream_key);
++    if (!hwWs || hwWs.readyState !== 1) return res.json({ ok: false, reason: 'no_hardware' });
++    hwWs.send(JSON.stringify({
++        type: 'command',
++        command,
++        from_user: String(req.body.from_user || ''),
++        timestamp: new Date().toISOString(),
++    }));
++    res.json({ ok: true });
++});
++
++// /paste from chat, through Live's pastes client (Community or Media per PASTES_AUTHORITY).
++effectsRouter.post('/paste', async (req, res) => {
++    const b = req.body || {};
++    try {
++        const paste = await require('../pastes-client').createPaste({
++            title: String(b.title || '').slice(0, 200),
++            content: String(b.content || ''),
++            language: b.language || 'auto',
++            visibility: b.visibility || 'public',
++            user_id: b.user_id || undefined,
++            stream_id: b.stream_id || undefined,
++        });
++        res.json({ paste: { slug: paste.slug } });
++    } catch (err) { fail(res, 502, err.message); }
++});
++
++effectsRouter.post('/translate', async (req, res) => {
++    let i18n;
++    try { i18n = require('../i18n/translate'); } catch { return res.json({ translation: null }); }
++    if (!i18n.available()) return res.json({ translation: null });
++    try {
++        const tr = await i18n.translateChatMessage(String(req.body?.text || ''), req.body?.channel_user_id || null);
++        res.json({ translation: tr && tr.text ? tr : null });
++    } catch { res.json({ translation: null }); }
++});
++
++effectsRouter.post('/notify/dm', (req, res) => {
++    try {
++        const { pushBulkNotification, actorInfo } = require('../utils/notify');
++        const sender = db.getUserById(int(req.body?.sender_id));
++        const otherIds = (Array.isArray(req.body?.recipient_ids) ? req.body.recipient_ids : []).map(Number).filter(Boolean).slice(0, 50);
++        const convId = int(req.body?.conversation_id);
++        if (otherIds.length && convId) {
++            const senderName = sender?.display_name || sender?.username || 'Someone';
++            // Generic preview — the message itself only travels over the live socket.
++            pushBulkNotification(otherIds, {
++                type: 'DIRECT_MESSAGE',
++                title: `Message from ${senderName}`,
++                message: 'Sent you a message',
++                url: `https://openvibe.live/dm/${convId}`,
++                ...actorInfo(sender),
++            });
++        }
++    } catch { /* non-critical */ }
++    res.json({ ok: true });
++});
++
++effectsRouter.post('/notify/dm-read', (req, res) => {
++    try {
++        const { markNotificationsRead } = require('../utils/notify');
++        markNotificationsRead(int(req.body?.user_id), 'DIRECT_MESSAGE', `%/dm/${int(req.body?.conversation_id)}`);
++    } catch { /* non-critical */ }
++    res.json({ ok: true });
++});
++
++// Channel sound files are mirrored to OpenVibe.Media from Live's copy of channel_sounds.
++effectsRouter.post('/asset-sync', (req, res) => {
++    try {
++        const sync = require('../media-proxy/asset-sync');
++        if (req.body?.op === 'syncSoon') sync.syncSoon();
++        else if (req.body?.op === 'remove-sound') {
++            const row = db.get('SELECT media_asset_id FROM channel_sounds WHERE id = ?', [int(req.body.asset_id)]);
++            if (row && row.media_asset_id) sync.removeAsset(row.media_asset_id);
++        }
++    } catch { /* best-effort */ }
++    res.json({ ok: true });
++});
++
++// ── The read mirror of Chat's tables ──────────────────────────────
++// Same tables, same ids. Upserts set only the columns Live's table has (Chat's *subject_id
++// columns are skipped; Live-only columns such as channel_sounds.media_asset_id are kept).
++const MIRROR_TABLES = {
++    chat_messages: ['id'],
++    dm_conversations: ['id'],
++    dm_participants: ['id'],
++    dm_messages: ['id'],
++    dm_blocks: ['id'],
++    tts_voice_overrides: ['identity_key'],
++    channel_sounds: ['id'],
++    relay_users: ['platform', 'username'],
++    hidden_relay_users: ['id'],
++    pending_ip_messages: ['id'],
++    stream_first_chats: ['chatter_key', 'channel_user_id'],
++    moderation_actions: ['id'],
++};
++const _cols = new Map();
++function liveColumns(table) {
++    if (!_cols.has(table)) _cols.set(table, new Set(db.getDb().prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name)));
++    return _cols.get(table);
++}
++
++function applyMirror(changes) {
++    const d = db.getDb();
++    let applied = 0;
++    const skipped = [];
++    // A copy of the authority's rows: foreign keys are the authority's business. Synchronous, so
++    // nothing else runs while they are off.
++    d.pragma('foreign_keys = OFF');
++    try {
++        d.transaction(() => {
++            for (const c of changes) {
++                const pk = MIRROR_TABLES[c && c.table];
++                if (!pk) { skipped.push({ table: c && c.table, reason: 'not a mirrored table' }); continue; }
++                const have = liveColumns(c.table);
++                try {
++                    if (c.op === 'delete') {
++                        d.prepare(`DELETE FROM ${c.table} WHERE ${pk.map((k) => `${k} = ?`).join(' AND ')}`).run(...pk.map((k) => c.pk[k]));
++                    } else if (c.op === 'upsert' && c.row) {
++                        const cols = Object.keys(c.row).filter((k) => have.has(k) && /^[a-z_]+$/.test(k));
++                        const upd = cols.filter((k) => !pk.includes(k));
++                        d.prepare(`INSERT INTO ${c.table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})
++                            ON CONFLICT(${pk.join(', ')}) DO ${upd.length ? `UPDATE SET ${upd.map((k) => `${k} = excluded.${k}`).join(', ')}` : 'NOTHING'}`)
++                            .run(...cols.map((k) => c.row[k]));
++                    } else { skipped.push({ table: c.table, reason: 'bad change' }); continue; }
++                    applied++;
++                } catch (err) {
++                    skipped.push({ table: c.table, pk: c.pk || (c.row && pk.map((k) => c.row[k])), reason: err.message });
++                }
++            }
++        })();
++    } finally {
++        d.pragma('foreign_keys = ON');
++    }
++    return { applied, skipped };
++}
++
++effectsRouter.post('/mirror', (req, res) => {
++    const changes = Array.isArray(req.body?.changes) ? req.body.changes.slice(0, 1000) : [];
++    const out = applyMirror(changes);
++    if (out.skipped.length) console.warn(`[ChatMirror] ${out.skipped.length} change(s) not applied:`, JSON.stringify(out.skipped.slice(0, 3)));
++    res.json({ ok: true, ...out });
++});
++
++module.exports = { contextRouter, effectsRouter, applyMirror, userProjection, MIRROR_TABLES };
+diff --git a/server/index.js b/server/index.js
+index 894e159..2763945 100644
+--- a/server/index.js
++++ b/server/index.js
+@@ -585,6 +585,11 @@ app.get('/internal/analytics-summary', (req, res) => {
+     } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+ });
+ 
++// OpenVibe.Chat reads Live data and asks for side effects here, with Network service tokens
++// (server/chat/live-context-routes.js); mounted before the X-Internal-Key routes below.
++const chatLiveContext = require('./chat/live-context-routes');
++app.use('/internal/chat-context', chatLiveContext.contextRouter);
++app.use('/internal/chat-effects', chatLiveContext.effectsRouter);
+ app.use('/internal', require('./internal/routes'));
+ 
+ 
+@@ -653,7 +658,11 @@ app.use('/api/streams', streamRoutes);
+ // Cross-site "streamer went live" SSE feed (consumed by /live-notify.js everywhere).
+ const liveEvents = require('./streaming/live-events');
+ app.get('/api/live-events', (req, res) => liveEvents.subscribe(req, res));
+-app.use('/api/chat', chatRoutes);
++// CHAT_AUTHORITY=chat: OpenVibe.Chat serves the chat REST routes (nginx sends /api/chat/, /api/dm/,
++// /api/tts/, /api/sounds there). One that still reaches Live must not write to the mirror.
++const chatRemote = require('./chat/chat-authority').isRemote();
++const chatMoved = (req, res) => res.status(503).set('Retry-After', '2').json({ error: 'Chat is served by OpenVibe.Chat' });
++app.use('/api/chat', chatRemote ? chatMoved : chatRoutes);
+ app.use('/api/funds', monetizationRoutes);
+ app.use('/api/coins', coinsRoutes);
+ app.use('/api/payments', require('./monetization/payments-routes'));
+@@ -675,7 +684,7 @@ app.use('/api/restream', restreamRoutes);
+ app.use('/api/thumbnails', thumbnailRoutes);
+ app.use('/api/themes', themeRoutes);
+ app.use('/api/emotes', emoteRoutes);
+-app.use('/api/sounds', require('./chat/sounds-routes'));
++app.use('/api/sounds', chatRemote ? chatMoved : require('./chat/sounds-routes'));
+ app.use('/api/ai-viewers', require('./ai/viewers/routes'));
+ app.use('/api/powerchat', require('./integrations/powerchat-routes'));
+ // Game & Canvas — migrated to openvibe.games
+@@ -695,9 +704,9 @@ app.use('/api/media', require('./media/routes'));
+ app.use('/api/img-proxy', require('./media/external-image-proxy'));
+ app.use('/api/vibe-coding', vibeCodingRoutes);
+ const ttsRoutes = require('./chat/tts-routes');
+-app.use('/api/tts', ttsRoutes);
++app.use('/api/tts', chatRemote ? chatMoved : ttsRoutes);
+ const dmRoutes = require('./chat/dm-routes');
+-app.use('/api/dm', dmRoutes);
++app.use('/api/dm', chatRemote ? chatMoved : dmRoutes);
+ const analyticsRoutes = require('./streaming/analytics-routes');
+ app.use('/api/analytics', analyticsRoutes);
+ const newsRoutes = require('./news/news-routes');
+@@ -1081,6 +1090,8 @@ async function start() {
+     // Initialize DM tables
+     const dm = require('./chat/dm');
+     dm.ensureTables();
++    // Back from CHAT_AUTHORITY=chat (rollback): chat writes OpenVibe.Chat never acknowledged land here.
++    if (!require('./chat/chat-authority').isRemote()) require('./chat/chat-remote').drainToLocal();
+     // Migrate: add last_heartbeat column if missing
+     try { db.run("ALTER TABLE streams ADD COLUMN last_heartbeat DATETIME"); console.log('[DB] Added last_heartbeat column'); } catch { /* already exists */ }
+     // Migrate: add theme_id to users table if missing
+diff --git a/server/internal/routes.js b/server/internal/routes.js
+index 540fcb2..d962f81 100644
+--- a/server/internal/routes.js
++++ b/server/internal/routes.js
+@@ -17,6 +17,11 @@ function requireInternalKey(req, res, next) {
+ 
+ router.use(requireInternalKey);
+ 
++// CHAT_AUTHORITY=chat: OpenVibe.Chat caches users; a role or avatar pushed here reaches it at once.
++function notifyChat(userId) {
++    try { const cs = require('../chat/chat-server'); if (cs.remote) cs.userChanged(userId); } catch { /* non-critical */ }
++}
++
+ // ── Site copy for the shared footer (OpenVibe.Network → here, once a day) ─────────────
+ // The Network sends facts about each site plus an allow-list of link ids; the model writes a
+ // short blurb per site and PICKS ids from that list. It never returns URLs or markup, so nothing
+@@ -81,6 +86,7 @@ router.post('/user-avatar', (req, res) => {
+         if (!user && username) user = db.getUserByUsername(username);
+         if (!user) return res.status(404).json({ ok: false, error: 'user not found' });
+         if ((user.avatar_url || null) !== url) db.updateUserAvatar(user.id, url, null);
++        notifyChat(user.id);
+         return res.json({ ok: true, id: user.id, changed: (user.avatar_url || null) !== url });
+     } catch (err) {
+         console.error('[Internal] user-avatar error:', err.message);
+@@ -107,6 +113,7 @@ router.post('/user-role', (req, res) => {
+         // Never strip the owner's admin role via a role push (is_owner is local).
+         const finalRole = (user.is_owner && role !== 'admin') ? 'admin' : role;
+         db.getDb().prepare('UPDATE users SET role = ? WHERE id = ?').run(finalRole, user.id);
++        notifyChat(user.id);
+         console.log(`[Internal] role push: ${user.username} -> ${finalRole}`);
+         return res.json({ ok: true, id: user.id, username: user.username, role: finalRole });
+     } catch (err) {
+diff --git a/server/net/service-guard.js b/server/net/service-guard.js
+new file mode 100644
+index 0000000..e4b13d4
+--- /dev/null
++++ b/server/net/service-guard.js
+@@ -0,0 +1,45 @@
++'use strict';
++/**
++ * Live as a receiver of service tokens (roadmap Wave 6).
++ *
++ * guard(capability) checks a Network client-credentials token (RS256, contract
++ * identity.service-token-claims@1) for audience openvibe.live on Live's own internal routes —
++ * today the ones OpenVibe.Chat calls (/internal/chat-context/*, /internal/chat-effects/*). The
++ * token is verified with the same Network key Live verifies user JWTs with.
++ *
++ * Chat's capabilities (live.chat_context.read, live.chat_effects.write, live.chat_mirror.write)
++ * are proposals not yet in the openvibe-contracts registry, whose requireCapability() refuses
++ * unknown ids; until they are registered the grant is checked with capabilities.grants() and the
++ * guard switches to capabilities.check() by itself once the registry knows the id. Like
++ * X-Internal-Key routes, these are loopback-only: anything that came through nginx is refused.
++ */
++const { serviceAuth, capabilities, http } = require('openvibe-contracts');
++const { getNetworkPublicKey, getNetworkIssuer } = require('../auth/auth');
++
++const AUDIENCE = 'openvibe.live';
++
++function viaProxy(req) {
++    return !!(req.headers['x-forwarded-for'] || req.headers['x-real-ip'] || req.headers['cf-connecting-ip']);
++}
++
++function guard(capability) {
++    const registered = !!capabilities.get(capability);
++    return function liveServiceGuard(req, res, next) {
++        const ctx = http.requestContext(req.headers);
++        if (viaProxy(req)) return http.sendProblem(res, 403, 'capability.denied', { detail: 'internal routes are loopback-only', ctx });
++        const auth = String(req.headers.authorization || '');
++        if (!auth.startsWith('Bearer ')) return http.sendProblem(res, 401, 'token.missing', { detail: 'no service token', ctx });
++        const publicKey = getNetworkPublicKey();
++        if (!publicKey) return http.sendProblem(res, 503, 'identity.unavailable', { detail: 'the Network signing key is not loaded', ctx });
++        const r = serviceAuth.verifyServiceToken(auth.slice(7).trim(), { publicKey, issuer: getNetworkIssuer(), audience: AUDIENCE });
++        if (!r.ok) return http.sendProblem(res, 401, r.code, { detail: r.reason, ctx });
++        const c = registered
++            ? capabilities.check(r.claims, capability)
++            : (capabilities.grants(r.claims.cap, capability) ? { allowed: true } : { allowed: false, code: 'capability.denied', reason: `${capability} not granted` });
++        if (!c.allowed) return http.sendProblem(res, 403, c.code || 'capability.denied', { detail: c.reason, ctx });
++        req.principal = { sub: r.claims.sub, cap: r.claims.cap, jti: r.claims.jti };
++        next();
++    };
++}
++
++module.exports = { guard, AUDIENCE };
+diff --git a/test/chat-context.test.js b/test/chat-context.test.js
+new file mode 100644
+index 0000000..1d935cc
+--- /dev/null
++++ b/test/chat-context.test.js
+@@ -0,0 +1,283 @@
++'use strict';
++
++// Chat moved to OpenVibe.Chat (roadmap Wave 6). What Live answers it on /internal/chat-context/*
++// and /internal/chat-effects/* (service tokens, capabilities, re-checked moderators, the read
++// mirror), and the chat-server proxy Live's own modules get with CHAT_AUTHORITY=chat (ordered
++// bridge calls, placeholder ids for forwarded inserts, presence reads). Against stub Network and
++// Chat servers.
++
++const assert = require('assert');
++const fs = require('fs');
++const os = require('os');
++const path = require('path');
++const http = require('http');
++const crypto = require('crypto');
++const jwt = require('jsonwebtoken');
++const { serviceAuth } = require('openvibe-contracts');
++
++const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-chatctx-'));
++const keys = crypto.generateKeyPairSync('rsa', { modulusLength: 2048, publicKeyEncoding: { type: 'spki', format: 'pem' }, privateKeyEncoding: { type: 'pkcs8', format: 'pem' } });
++fs.writeFileSync(path.join(tmp, 'network.pem'), keys.publicKey);
++fs.mkdirSync(path.join(tmp, 'sounds'));
++process.env.DB_PATH = path.join(tmp, 'live.db');
++process.env.OV_NETWORK_PUBLIC_KEY = path.join(tmp, 'network.pem');
++process.env.OV_NETWORK_URL = 'https://openvibe.network';
++process.env.OV_OAUTH_CLIENT_ID = 'live';
++process.env.OV_OAUTH_CLIENT_SECRET = 'live-secret';
++process.env.SOUNDS_PATH = path.join(tmp, 'sounds');
++process.env.CHAT_AUTHORITY = 'chat';
++const quiet = console.log;
++console.log = () => {};
++console.warn = () => {};
++
++const ISS = 'https://openvibe.network';
++const now = () => Math.floor(Date.now() / 1000);
++let jti = 0;
++function serviceToken(cap, { aud = 'openvibe.live', sub = 'svc:chat' } = {}) {
++    return serviceAuth.signServiceToken({ iss: ISS, sub, actor_type: 'service', aud: [aud], cap, iat: now(), exp: now() + 300, jti: `tok_test_${++jti}` }, keys.privateKey);
++}
++const READ = serviceToken(['live.chat_context.read']);
++const WRITE = serviceToken(['live.chat_effects.write']);
++const MIRROR = serviceToken(['live.chat_mirror.write']);
++
++// Stub Network (Live's own service token for audience openvibe.chat) and stub Chat (the bridge).
++const bridgeCalls = [];
++const network = http.createServer((req, res) => {
++    let raw = '';
++    req.on('data', (c) => { raw += c; });
++    req.on('end', () => {
++        res.setHeader('Content-Type', 'application/json');
++        if (req.url === '/oauth/token') {
++            const f = new URLSearchParams(raw);
++            return res.end(JSON.stringify({ access_token: serviceToken(['chat.live_bridge.write', 'chat.presence.read'], { aud: f.get('audience'), sub: 'svc:live' }), expires_in: 300 }));
++        }
++        res.statusCode = 404; res.end('{}');
++    });
++});
++const chat = http.createServer((req, res) => {
++    let raw = '';
++    req.on('data', (c) => { raw += c; });
++    req.on('end', () => {
++        res.setHeader('Content-Type', 'application/json');
++        assert.ok(String(req.headers.authorization || '').startsWith('Bearer '), 'Live calls Chat with a service token');
++        if (req.url === '/internal/live/calls') {
++            const body = JSON.parse(raw);
++            bridgeCalls.push(body);
++            return res.end(JSON.stringify({ ok: true, results: body.ops.map((o) => ({ seq: o.seq, ok: true })) }));
++        }
++        if (req.url === '/internal/live/presence') {
++            return res.end(JSON.stringify({ total: 7, streams: { 1: 3 }, slow_mode: { 1: 5000 }, users: [{ user_id: 3, ip: '198.51.100.3', stream_id: 1 }], anons: [{ anon_id: 'anon9', ip: '203.0.113.9', stream_id: 1 }] }));
++        }
++        res.statusCode = 404; res.end('{}');
++    });
++});
++
++const listen = (s) => new Promise((r) => s.listen(0, '127.0.0.1', () => r(s.address().port)));
++const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
++
++(async () => {
++    process.env.OV_NETWORK_INTERNAL_URL = `http://127.0.0.1:${await listen(network)}`;
++    process.env.OV_CHAT_INTERNAL_URL = `http://127.0.0.1:${await listen(chat)}`;
++
++    const db = require('../server/db/database');
++    db.initDb();
++    require('../server/chat/dm').ensureTables();
++    const d = db.getDb();
++    const mkUser = (username, role = 'user', extra = {}) => {
++        const id = db.createUser({ username, email: `${username}@example.test`, password_hash: '!x', display_name: username.toUpperCase(), stream_key: `key-${username}` }).lastInsertRowid;
++        d.prepare('UPDATE users SET role = ?, is_owner = ? WHERE id = ?').run(role, extra.owner ? 1 : 0, id);
++        return Number(id);
++    };
++    const owner = mkUser('owner', 'admin', { owner: true });
++    const admin = mkUser('admin2', 'admin');
++    const streamer = mkUser('streamer', 'streamer');
++    const mod = mkUser('moddy');
++    const viewer = mkUser('viewer');
++    d.prepare("INSERT INTO linked_accounts (user_id, service, service_user_id, subject_id) VALUES (?, 'network', '501', 'usr_01J9ZZZZZZZZZZZZZZZZZZZZZZ')").run(viewer);
++    db.createChannel({ user_id: streamer, title: 'Streamer TV' });
++    const channel = db.getChannelByUserId(streamer);
++    const streamId = Number(db.createStream({ user_id: streamer, channel_id: channel.id, title: 'Live now' }).lastInsertRowid);
++    db.addChannelModerator ? db.addChannelModerator(channel.id, mod, streamer) : d.prepare('INSERT INTO channel_moderators (channel_id, user_id, added_by) VALUES (?, ?, ?)').run(channel.id, mod, streamer);
++    d.prepare('INSERT INTO follows (follower_id, streamer_id) VALUES (?, ?)').run(viewer, streamer);
++    db.setSetting('tts_enabled', 'true');
++    db.setSetting('stripe_secret_key', 'sk_live_never_shared');
++
++    const express = require('express');
++    const routes = require('../server/chat/live-context-routes');
++    const app = express();
++    app.use(express.json());
++    app.use('/internal/chat-context', routes.contextRouter);
++    app.use('/internal/chat-effects', routes.effectsRouter);
++    const port = await listen(http.createServer(app));
++    const call = async (method, p, { token, body, headers = {} } = {}) => {
++        const res = await fetch(`http://127.0.0.1:${port}${p}`, {
++            method, headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}), ...headers },
++            body: body ? JSON.stringify(body) : undefined,
++        });
++        const text = await res.text();
++        let json = null; try { json = JSON.parse(text); } catch { /* */ }
++        return { status: res.status, body: json, text };
++    };
++
++    let exit = 0;
++    try {
++        // 1. Service tokens only: none, wrong audience, missing capability, through nginx.
++        assert.strictEqual((await call('GET', '/internal/chat-context/users')).status, 401);
++        assert.strictEqual((await call('GET', '/internal/chat-context/users', { token: serviceToken(['live.chat_context.read'], { aud: 'openvibe.media' }) })).status, 401);
++        assert.strictEqual((await call('GET', '/internal/chat-context/users', { token: WRITE })).status, 403);
++        assert.strictEqual((await call('GET', '/internal/chat-context/users', { token: READ, headers: { 'X-Forwarded-For': '1.2.3.4' } })).status, 403, 'loopback only');
++        assert.strictEqual((await call('POST', '/internal/chat-effects/user-color', { token: READ, body: { user_id: viewer, color: '#ff00ff' } })).status, 403, 'reads cannot write');
++
++        // 2. Users projection: paged, with the Network subject, never secrets.
++        const users = (await call('GET', '/internal/chat-context/users?after_id=0&limit=2', { token: READ })).body.rows;
++        assert.strictEqual(users.length, 2);
++        const all = (await call('GET', `/internal/chat-context/users?after_id=${users[1].id}`, { token: READ })).body.rows;
++        const v = all.find((u) => u.id === viewer);
++        assert.strictEqual(v.subject_id, 'usr_01J9ZZZZZZZZZZZZZZZZZZZZZZ');
++        for (const u of users.concat(all)) { assert.ok(!('email' in u) && !('password_hash' in u) && !('stream_key' in u), 'no secrets in the projection'); }
++
++        // 3. Token resolution follows Live's rules and carries the subject.
++        const userJwt = jwt.sign({ sub: '501', username: 'viewer', subject_id: 'usr_01J9ZZZZZZZZZZZZZZZZZZZZZZ' }, keys.privateKey, { algorithm: 'RS256', issuer: ISS, expiresIn: 600 });
++        const auth = (await call('POST', '/internal/chat-context/auth', { token: READ, body: { token: userJwt } })).body;
++        assert.strictEqual(auth.user.id, viewer);
++        assert.strictEqual(auth.user.subject_id, 'usr_01J9ZZZZZZZZZZZZZZZZZZZZZZ');
++        assert.strictEqual(auth.user.auth_source, 'network');
++        assert.ok(auth.expires_at);
++        assert.deepStrictEqual((await call('POST', '/internal/chat-context/auth', { token: READ, body: { token: 'garbage' } })).body, { user: null, reason: 'invalid' });
++
++        // 4. Streams, channel policy (settings + moderators + language), follows, bans with version.
++        const s = (await call('GET', `/internal/chat-context/streams/${streamId}`, { token: READ })).body;
++        assert.strictEqual(s.stream.user_id, streamer);
++        assert.strictEqual(s.owner.username, 'streamer');
++        assert.strictEqual(s.channel.id, channel.id);
++        assert.ok(!('stream_key' in s.stream));
++        const active = (await call('GET', '/internal/chat-context/streams/active', { token: READ })).body.rows;
++        assert.ok(active.some((r) => r.id === streamId && r.is_live === 1));
++        const policy = (await call('GET', `/internal/chat-context/channels/${channel.id}/policy`, { token: READ })).body;
++        assert.deepStrictEqual(policy.moderator_ids, [mod]);
++        assert.strictEqual(policy.settings.allow_anonymous, 1, 'defaults when the channel has no row');
++        assert.deepStrictEqual((await call('GET', `/internal/chat-context/users/${viewer}/follows`, { token: READ })).body.streamer_ids, [streamer]);
++        const b1 = (await call('GET', '/internal/chat-context/bans', { token: READ })).body;
++        assert.deepStrictEqual(b1.bans, []);
++        assert.strictEqual((await call('GET', `/internal/chat-context/bans?version=${encodeURIComponent(b1.version)}`, { token: READ })).body.unchanged, true);
++        const settings = (await call('GET', '/internal/chat-context/settings', { token: READ })).body.settings;
++        assert.strictEqual(settings.tts_enabled, db.getSetting('tts_enabled'), 'typed like Live\'s getSetting');
++        assert.ok(!('stripe_secret_key' in settings), 'only chat settings leave Live');
++
++        // 5. Effects need CHAT_AUTHORITY=chat.
++        process.env.CHAT_AUTHORITY = '';
++        assert.strictEqual((await call('POST', '/internal/chat-effects/user-color', { token: WRITE, body: { user_id: viewer, color: '#ff00ff' } })).status, 409);
++        process.env.CHAT_AUTHORITY = 'chat';
++        assert.strictEqual((await call('POST', '/internal/chat-effects/user-color', { token: WRITE, body: { user_id: viewer, color: '#ff00ff' } })).status, 200);
++        assert.strictEqual(db.getUserById(viewer).profile_color, '#ff00ff');
++
++        // 6. Bans: Live re-checks the moderator; the rows are exactly chat-server's.
++        const ban = (body) => call('POST', '/internal/chat-effects/ban', { token: WRITE, body });
++        assert.strictEqual((await ban({ action: 'ban', actor_user_id: viewer, moderation_stream_id: streamId, stream_id: streamId, user_id: mod })).status, 403, 'a viewer cannot ban');
++        assert.strictEqual((await ban({ action: 'ban', actor_user_id: mod, moderation_stream_id: streamId, stream_id: streamId, user_id: owner })).status, 403, 'a channel mod cannot ban an admin');
++        assert.strictEqual((await ban({ action: 'ban', actor_user_id: mod, moderation_stream_id: streamId, stream_id: streamId, user_id: viewer, reason: 'Banned by moderator', banned_by: mod })).status, 200);
++        assert.ok(db.isUserBanned(viewer, streamId));
++        const b2 = (await call('GET', `/internal/chat-context/bans?version=${encodeURIComponent(b1.version)}`, { token: READ })).body;
++        assert.strictEqual(b2.bans.length, 1, 'the version moved with the table');
++        assert.strictEqual((await ban({ action: 'unban', actor_user_id: mod, moderation_stream_id: streamId, stream_id: streamId, user_id: viewer })).status, 200);
++        assert.ok(!db.isUserBanned(viewer, streamId));
++
++        // 7. TTS settings: admins; credentials only the owner.
++        const put = (actor, settingsBody) => call('POST', '/internal/chat-effects/site-settings', { token: WRITE, body: { actor_user_id: actor, settings: settingsBody } });
++        assert.strictEqual((await put(viewer, { tts_enabled: 'false' })).status, 403);
++        assert.strictEqual((await put(admin, { tts_max_length: 300, tts_google_api_key: 'admin-cannot' })).body.updated, 1);
++        assert.notStrictEqual(db.getSetting('tts_google_api_key'), 'admin-cannot', 'an admin cannot set a credential');
++        assert.strictEqual((await put(owner, { tts_google_api_key: 'owner-can' })).body.updated, 1);
++        assert.strictEqual(db.getSetting('tts_google_api_key'), 'owner-can');
++
++        // 8. Slow mode persistence and alert sounds: only for people who may.
++        assert.strictEqual((await call('POST', '/internal/chat-effects/channel-settings', { token: WRITE, body: { channel_id: channel.id, actor_user_id: viewer, fields: { slow_mode_seconds: 9 } } })).status, 403);
++        assert.strictEqual((await call('POST', '/internal/chat-effects/channel-settings', { token: WRITE, body: { channel_id: channel.id, actor_user_id: mod, fields: { slow_mode_seconds: 9 } } })).status, 200);
++        assert.strictEqual(db.getChannelModerationSettings(channel.id).slow_mode_seconds, 9);
++        const snd = path.join(tmp, 'sounds', 'alert.mp3'); fs.writeFileSync(snd, 'x');
++        assert.strictEqual((await call('POST', '/internal/chat-effects/alert-sound', { token: WRITE, body: { channel_id: channel.id, actor_user_id: mod, kind: 'donation', url: snd } })).status, 403, 'only the channel owner');
++        assert.strictEqual((await call('POST', '/internal/chat-effects/alert-sound', { token: WRITE, body: { channel_id: channel.id, actor_user_id: streamer, kind: 'donation', url: '/etc/passwd' } })).status, 400, 'files stay in the sounds dir');
++        assert.strictEqual((await call('POST', '/internal/chat-effects/alert-sound', { token: WRITE, body: { channel_id: channel.id, actor_user_id: streamer, kind: 'donation', url: snd } })).status, 200);
++
++        // 9. The read mirror: same ids, Chat-only columns ignored, Live-only columns kept.
++        const mirror = (changes) => call('POST', '/internal/chat-effects/mirror', { token: MIRROR, body: { changes } });
++        assert.strictEqual((await call('POST', '/internal/chat-effects/mirror', { token: WRITE, body: { changes: [] } })).status, 403, 'mirror has its own capability');
++        let m = await mirror([{ table: 'chat_messages', op: 'upsert', row: { id: 900001, stream_id: streamId, channel_user_id: streamer, user_id: viewer, username: 'VIEWER', message: 'hi from chat', message_type: 'chat', is_global: 0, is_deleted: 0, timestamp: '2026-09-22 10:00:00', subject_id: 'usr_01J9ZZZZZZZZZZZZZZZZZZZZZZ' } }]);
++        assert.strictEqual(m.body.applied, 1);
++        assert.strictEqual(db.getChatMessageById(900001).message, 'hi from chat');
++        // Columns only Live's copy has (media-proxy/asset-sync adds them at start).
++        for (const c of ['media_url TEXT', 'media_asset_id INTEGER']) { try { d.exec(`ALTER TABLE channel_sounds ADD COLUMN ${c}`); } catch { /* present */ } }
++        d.prepare("INSERT INTO channel_sounds (id, channel_owner_id, command, url, media_asset_id) VALUES (77, ?, 'honk', '/x.mp3', 555)").run(streamer);
++        m = await mirror([{ table: 'channel_sounds', op: 'upsert', row: { id: 77, channel_owner_id: streamer, command: 'honk2', url: '/x.mp3', created_by_subject_id: null } }, { table: 'chat_messages', op: 'delete', pk: { id: 900001 } }, { table: 'users', op: 'delete', pk: { id: viewer } }]);
++        assert.strictEqual(m.body.applied, 2);
++        assert.strictEqual(m.body.skipped.length, 1, 'only chat tables are mirrored');
++        const s77 = d.prepare('SELECT command, media_asset_id FROM channel_sounds WHERE id = 77').get();
++        assert.deepStrictEqual(s77, { command: 'honk2', media_asset_id: 555 });
++        assert.strictEqual(db.getChatMessageById(900001), undefined);
++        assert.ok(db.getUserById(viewer), 'users are never touched');
++
++        // 10. The proxy Live's modules get: ordered bridge calls, placeholders, presence.
++        const chatServer = require('../server/chat/chat-server');
++        assert.strictEqual(chatServer.remote, true);
++        chatServer.init();
++        const before = d.prepare('SELECT COUNT(*) AS n FROM chat_messages').get().n;
++        const saved = db.saveChatMessage({ stream_id: streamId, user_id: null, username: 'Bot', message: 'beep', message_type: 'chat', source_platform: 'ai' });
++        assert.ok(saved.lastInsertRowid <= -(2 ** 40), 'a placeholder id');
++        assert.strictEqual(d.prepare('SELECT COUNT(*) AS n FROM chat_messages').get().n, before, 'inserts happen in Chat, not here');
++        assert.strictEqual(d.prepare('SELECT COUNT(*) AS n FROM chat_bridge_outbox').get().n, 1, 'kept until Chat acknowledges');
++        chatServer.broadcastToStream(streamId, { type: 'chat', id: saved.lastInsertRowid, message: 'beep' });
++        chatServer.synthesizeAndBroadcastTTS(streamId, 'Bot', 'beep', null, null, 'aibot:bot', null, `m${saved.lastInsertRowid}`);
++        await chatServer.flush();
++        await sleep(100);
++        const ops = bridgeCalls.flatMap((c) => c.ops);
++        assert.deepStrictEqual(ops.map((o) => o.op), ['db', 'broadcastToStream', 'synthesizeAndBroadcastTTS']);
++        assert.strictEqual(ops[0].args[0], 'saveChatMessage');
++        assert.strictEqual(ops[0].ref, saved.lastInsertRowid);
++        assert.ok(/^live:\d+$/.test(ops[0].key), 'forwarded writes carry an idempotency key');
++        assert.strictEqual(ops[1].args[1].id, saved.lastInsertRowid);
++        assert.strictEqual(d.prepare('SELECT COUNT(*) AS n FROM chat_bridge_outbox').get().n, 0, 'acknowledged writes leave the outbox');
++        // Deletes run on the mirror at once (their ids are returned) and are forwarded too.
++        d.prepare("INSERT INTO chat_messages (id, user_id, username, message) VALUES (900002, ?, 'MODDY', 'x')").run(mod);
++        assert.deepStrictEqual(db.deleteUserChatMessages(mod, {}), [900002]);
++        await chatServer.flush();
++        assert.deepStrictEqual(bridgeCalls.at(-1).ops[0].args.slice(0, 2), ['deleteUserChatMessages', mod]);
++        // Live's own writes to data Chat caches (dashboard mods, IP approvals) tell Chat to reload it.
++        db.addChannelModerator(channel.id, viewer, streamer);
++        await chatServer.flush();
++        assert.deepStrictEqual(bridgeCalls.at(-1).ops.map((o) => [o.op, ...o.args]), [['invalidate', 'channel', channel.id]]);
++        assert.ok(d.prepare('SELECT 1 FROM channel_moderators WHERE channel_id = ? AND user_id = ?').get(channel.id, viewer), 'the write itself still happens in Live');
++        // The /api/mod global delete loops over chatServer.clients: one pseudo-socket reaches everyone.
++        for (const [ws] of chatServer.clients) { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'delete-messages', ids: [1] })); }
++        await chatServer.flush();
++        assert.strictEqual(bridgeCalls.at(-1).ops[0].op, 'broadcastAllRaw');
++        // Synchronous reads come from Chat's presence snapshot.
++        await sleep(200);
++        assert.strictEqual(chatServer.getTotalConnections(), 7);
++        assert.strictEqual(chatServer.getStreamViewerCount(1), 3);
++        assert.strictEqual(chatServer.slowModeByStream.get(1), 5000);
++        assert.strictEqual(chatServer.getConnectedUserIp(3), '198.51.100.3');
++        assert.strictEqual(chatServer.findClientByAnonId('anon9', 1).ip, '203.0.113.9');
++        assert.strictEqual(chatServer.findClientByAnonId('anon9', 2), null);
++        // A /ws/chat upgrade that still lands on Live is refused, not served from the mirror.
++        let written = '';
++        chatServer.handleUpgrade({}, { write: (x) => { written += x; }, destroy() {} });
++        assert.match(written, /^HTTP\/1\.1 503/);
++        chatServer.close();
++
++        // Rollback: writes Chat never acknowledged are applied to Live's own tables.
++        d.prepare("INSERT INTO chat_bridge_outbox (boot, ref, op, args) VALUES ('old', -1, 'db', ?)").run(JSON.stringify(['recordFirstChat', 'user:77', streamer]));
++        chatServer._restoreDb();
++        assert.strictEqual(require('../server/chat/chat-remote').drainToLocal({ log() {}, warn() {} }), 1);
++        assert.ok(d.prepare("SELECT 1 FROM stream_first_chats WHERE chatter_key = 'user:77'").get());
++        assert.strictEqual(d.prepare('SELECT COUNT(*) AS n FROM chat_bridge_outbox').get().n, 0);
++
++        quiet('chat context (Live side of OpenVibe.Chat): all checks passed');
++    } catch (err) {
++        console.error(err);
++        exit = 1;
++    } finally {
++        try { db.close(); } catch { /* */ }
++        fs.rmSync(tmp, { recursive: true, force: true });
++        process.exit(exit);
++    }
++})();

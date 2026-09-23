@@ -1,0 +1,19 @@
+{
+  "id": "live.chat_effects.write",
+  "version": "1.0",
+  "owner": "live",
+  "status": "planned",
+  "visibility": "internal",
+  "description": "OpenVibe.Chat asks Live for the side effects chat triggers in data Live still owns (Wave 6): anon numbers, IP log, viewer counts and snapshots, /color, /ban /timeout /unban rows, IP approvals, /slow persistence, alert sounds, channel creation, TTS site settings, the per-message reactions (OpenCoins chat bonus, AI chat viewers, PowerChat relay), AI mod commands, arena commands, the media queue, hardware commands, /paste, translation, DM notifications and Media asset sync. Live re-checks the acting person (moderator, owner, admin) on every effect that acts for one, and refuses all of them unless CHAT_AUTHORITY=chat.",
+  "permissions": [
+    "live:write"
+  ],
+  "resourceConstraints": [
+    "owner"
+  ],
+  "quotaClass": "internal-write",
+  "events": [],
+  "implementedBy": [
+    "POST /internal/chat-effects/{anon,ip-log,viewer-counts,viewer-snapshots,user-color,ban,approve-ip,channel-settings,alert-sound,ensure-channel,site-settings,chat-message,ai/mod-command,arena-command,media-queue,hardware,paste,translate,notify/dm,notify/dm-read,asset-sync}"
+  ]
+}

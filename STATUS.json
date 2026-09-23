@@ -1,7 +1,18 @@
 {
   "repository": "OpenVibers/OpenVibe.Chat",
-  "stage": "placeholder",
-  "code": false,
+  "stage": "alpha",
+  "code": true,
+  "wave": "W6",
   "plan": "OpenVibe End-to-End Realignment & Implementation Plan, revision 3 (20 Sep 2026)",
-  "updated": "2026-09-21"
+  "runtime": "node 22, express, ws, better-sqlite3",
+  "port": 4400,
+  "domain": "openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via nginx); openvibe.chat keeps its placeholder",
+  "contracts": "openvibe-contracts v0.5.1",
+  "capabilities": ["chat.live_bridge.write", "chat.presence.read"],
+  "capabilitiesUsed": ["live.chat_context.read", "live.chat_effects.write", "live.chat_mirror.write", "events.event.publish"],
+  "capabilitiesRegistered": false,
+  "events": ["chat.message.created", "chat.dm.created", "chat.moderation.action"],
+  "liveAuthorityFlag": "CHAT_AUTHORITY=chat (docs/live-patch.diff)",
+  "deployed": false,
+  "updated": "2026-09-22"
 }

@@ -2,14 +2,112 @@
 
 > Rooms, messages, DMs, calls, TTS and audio queues, moderation and presence — one identity, every conversation.
 
-**Status:** placeholder — planning only, no runnable code yet.  
-**Domain:** `openvibe.chat`  
+**Status:** alpha — Wave 6 code, not deployed. Live's chat runs here behind a service boundary;
+the cutover (`docs/cutover.md`) has not happened, and `openvibe.chat` keeps its placeholder.  
+**Domain:** `openvibe.chat` (placeholder); until launch Chat is served on Live's origin:
+`https://openvibe.live/ws/chat`, `/api/chat/`, `/api/dm/`, `/api/tts/`, `/api/sounds` via nginx.  
 **Plan:** OpenVibe End-to-End Realignment & Implementation Plan, revision 3 (20 Sep 2026), §9 and §9.5.  
 **License:** AGPL-3.0 (same as every OpenVibe service).
 
 ## Purpose
 
-The communication authority extracted from OpenVibe.Live. Live keeps a compatibility adapter while browsers move to Chat directly with Network-issued tokens and authorised topic subscriptions.
+The communication authority extracted from OpenVibe.Live. Live keeps a compatibility adapter while
+browsers move to Chat directly with Network-issued tokens and authorised topic subscriptions.
+
+## What Wave 6 did
+
+The roadmap's method for this wave: **move the existing implementation behind a service boundary
+before changing behaviour.** Browser JavaScript does not change; nginx routes the chat paths here.
+
+- **Moved as they were** (from Live `server/chat/`): the WebSocket chat server (`/ws/chat`, every
+  message type and command: `join`/`join_stream`/`leave_stream`/`get-users`/`chat`/`self-delete-history`,
+  `/help /tts /color /viewers /uptime /w /me /ban /unban /timeout /clear /slow /paste /ai`, `!sr !queue
+  !np !skip !sb !gotti`, channel `!sounds`, arena `!hype !beef !arena`, hardware `!forward … !say`),
+  DMs (`dm.js`, `/api/dm/*`), chat history (`history-store.js`, `/api/chat/*`), TTS (`tts-engine.js`,
+  `/api/tts/*`), 101soundboards and channel sounds (`/api/sounds*`), moderation utils and the word
+  filter, the deploy-notice card. Changes are confined to where they touched Live's data.
+- **One adapter to Live — `server/live-context.js`.** Accounts and roles, streams, slots and channels,
+  channel moderation settings and moderators, bans and IP rules, follows, cosmetics and tags, site
+  settings and anon numbers are read through it; coins, AI viewers, arena, media queue, hardware,
+  pastes, translation, PowerChat, notifications, viewer counts and the IP log are effects it asks
+  Live for. Reads are cached projections (SQLite `ctx_*` tables kept complete by paged syncs; TTL
+  caches that serve stale while refreshing) warmed when a socket joins, so a chat message never
+  waits on a network read. Live pushes invalidations when it changes cached data.
+- **Live's side** is `docs/live-patch.diff` (applies to Live `main` with `git apply`):
+  `/internal/chat-context/*` and `/internal/chat-effects/*`, and `CHAT_AUTHORITY=chat`, which stops
+  Live's chat server and routes and turns `require('./chat/chat-server')` into a proxy that forwards
+  Live's own chat calls here (`POST /internal/live/calls`).
+- **Own database** (`CHAT_DB_PATH`, systemd `StateDirectory=openvibe-chat`) with Live's tables and
+  ids, the Network subject on new rows, a transactional events outbox and a read mirror back into Live.
+- **Import:** `scripts/import-from-live.js --live-db <snapshot> [--dry-run]` — idempotent, never drops
+  a row (`import_hold`), reports counts per table.
+
+## How it fits the network
+
+| Concern | Where it lives | How Chat reaches it |
+| --- | --- | --- |
+| Messages, DMs, channel sounds, TTS voice overrides, relay users, first chats, IP-approval queue, moderation log | **Chat** (authority from the cutover) | its own SQLite; Live keeps a read mirror (`POST /internal/chat-effects/mirror`) |
+| Accounts, roles, streams, channels, bans, IP approvals, follows, cosmetics, tags, site settings | **Live** (Network for identity) | `server/live-context.js` → `GET/POST /internal/chat-context/*` (service token, `live.chat_context.read`) |
+| Coins, AI viewers, arena, media queue, hardware, pastes, translation, PowerChat, notifications | **Live** | `server/live-context.js` → `POST /internal/chat-effects/*` (`live.chat_effects.write`) |
+| Live's own chat pushes and writes (AI viewers, relays, donations, `/api/mod`, recaps, calls) | **Live → Chat** | `POST /internal/live/calls` (`chat.live_bridge.write`), presence `GET /internal/live/presence` (`chat.presence.read`) |
+| Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |
+| Events | **OpenVibe.Events** | `events_outbox` → `POST /api/v1/events` when `EVENTS_URL` is set (`events.event.publish`) |
+
+### Data
+
+Chat owns (from the cutover): `chat_messages`, `dm_conversations`, `dm_participants`, `dm_messages`,
+`dm_blocks`, `tts_voice_overrides`, `channel_sounds`, `relay_users`, `hidden_relay_users`,
+`pending_ip_messages`, `stream_first_chats`, `moderation_actions`. Same columns and ids as Live, plus
+`subject_id` / `sender_subject_id` / `blocker_subject_id` / `actor_subject_id` /
+`created_by_subject_id` (the Network `usr_…` subject, filled on new rows and by the importer).
+
+Staged here, still written by Live in this wave (their routes have not moved): `channel_moderators`,
+`channel_moderation_settings`, `emotes`, `user_tags`, `chat_ai_summaries`, `chat_timeline_events` —
+imported (and refreshed by later import runs) so their move is a switch; Chat reads the live values
+through `live-context`. `table_authority` records which is which.
+
+Stays in Live (decided with evidence, `docs/cutover.md`): `media_requests`, `media_request_settings`.
+
+### Events
+
+| Event | Visibility | When |
+| --- | --- | --- |
+| `chat.message.created` | public | every stored message in a public room (global, channel, stream) |
+| `chat.dm.created` | subject | every DM; the payload names the participants, never the text |
+| `chat.moderation.action` | internal | every moderation log row (chat commands and Live's `/api/mod`) |
+
+## Running it
+
+```bash
+npm install
+cp .env.example .env          # OV_LIVE_INTERNAL_URL, Network URLs, OV_OAUTH_CLIENT_SECRET, SOUNDS_PATH
+npm start                     # 127.0.0.1:4400 — /ws/chat, /api/{chat,dm,tts,sounds}, /health, /ready
+npm test                      # Node 22; stub Live and Network in-process
+node scripts/import-from-live.js --live-db /tmp/live-snapshot.db --dry-run
+node scripts/parity-check.js --live https://openvibe.live --chat http://127.0.0.1:4401 --before "…"
+node scripts/mirror-flush.js  # rollback helper: push queued mirror rows to Live
+```
+
+`/ready` reports the last Live sync, the mirror queue and whether events are relayed.
+Production: `deploy/systemd/openvibe-chat.service`, `deploy/nginx/openvibe.live-chat.locations.conf`,
+`/etc/openvibe/chat.env`. The whole switch-over — rehearsal, import, parity checks, nginx, the flag,
+rollback — is `docs/cutover.md`.
+
+### Layout
+
+```
+server/index.js            boot: DB, first Live sync, WS server, HTTP app, relays, graceful stop
+server/app.js              Live's guards for these routes: CORS, /api rate limit, IP bans, ban cookie, WS origin + IP checks
+server/live-context.js     the only module that talks to Live (interface in its header)
+server/chat/               moved from Live: chat-server, dm, dm-routes, routes, history-store, tts-*, sounds-*, soundboard, moderation-utils, word-filter, deploy-notice
+server/auth/               token resolution through Live; the chat subset of Live's permissions
+server/bridge/             Live → Chat calls + presence (live-bridge.js); Chat → Live read mirror (live-mirror.js)
+server/events/outbox.js    events.event-envelope@1 outbox and relay
+server/net/service-auth.js service tokens: client (Chat → others) and guard (others → Chat)
+server/db/                 schema.sql, database.js (Live's chat functions, same names and arguments)
+scripts/                   import-from-live, parity-check, mirror-flush
+docs/                      cutover.md, live-patch.diff, capabilities-proposal/
+```
 
 ## Owns
 
@@ -19,42 +117,38 @@ The communication authority extracted from OpenVibe.Live. Live keeps a compatibi
 - TTS/audio/soundboard/media-request queues with skip/clear/failure lifecycle
 - call signalling metadata and the `pending/ringing/active/ended/missed/declined/failed` lifecycle
 
+(Wave 6 moved messages, DMs, TTS, sounds and the chat side of moderation; bans, channel moderation
+settings, the media-request queue and calls are still Live's and reached through `live-context`.)
+
 ## Does not own
 
 - media bytes (attachments are Media references)
 - billing of paid messages (Tips/Billing)
 
-## Planned surfaces
-
-- `api/` rooms, history, DMs, moderation, settings; `realtime/` WS/SSE delivery; `calls/`; `speech/`; `soundboard/`; `moderation/`; `adapters/live/`
-
-## Data (authority tables / families)
-
-- see above
-
 ## Capabilities and events
 
-- `chat.room.*`, `chat.message.*`, `chat.dm.*`, `chat.moderation.*`, `chat.tts.*`, `chat.call.*`
+Introduced here (proposals in `docs/capabilities-proposal/`, not yet in `openvibe-contracts`):
+`chat.live_bridge.write`, `chat.presence.read` (owner chat) and `live.chat_context.read`,
+`live.chat_effects.write`, `live.chat_mirror.write` (owner live). Planned families:
+`chat.room.*`, `chat.message.*`, `chat.dm.*`, `chat.moderation.*`, `chat.tts.*`, `chat.call.*`.
 
-Events: ``chat.message.created|deleted``, ``chat.room.updated``, ``chat.call.*``, ``chat.tts.queued|played|failed``
+Events: `chat.message.created`, `chat.dm.created`, `chat.moderation.action` (produced);
+planned `chat.message.deleted`, `chat.room.updated`, `chat.call.*`, `chat.tts.queued|played|failed`.
 
 ## Depends on
 
 - OpenVibe.Network
+- OpenVibe.Live (until the rest of chat's data moves)
 - OpenVibe.Events
 - OpenVibe.Media
 - OpenVibe.Contracts
 
 ## Acceptance (must be true before "done")
 
-- stream/global/DM histories preserved on import; old Live URLs and WS messages keep working through the adapter
-- restart Live without losing Chat; restart Chat's delivery plane and resume persisted messages
-- a call row without a working signalling/media path is not parity
-- a paid TTS request is never duplicated by a retry
-
-## Bootstrap / extraction source
-
-Live's chat, DM, TTS, soundboard and WebRTC call modules, imported with stable legacy IDs.
+- stream/global/DM histories preserved on import; old Live URLs and WS messages keep working through the adapter — *implemented (import, same paths, protocol parity tests); not yet exercised on production data*
+- restart Live without losing Chat; restart Chat's delivery plane and resume persisted messages — *implemented (Live's forwarded writes wait in its outbox; Chat's mirror and events wait in theirs); not yet exercised in production*
+- a call row without a working signalling/media path is not parity — *calls are still Live's (`/ws/call`)*
+- a paid TTS request is never duplicated by a retry — *forwarded writes are applied once per idempotency key; paid TTS does not exist yet*
 
 ## Launch rule
 

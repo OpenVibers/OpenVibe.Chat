@@ -1,0 +1,22 @@
+{
+  "id": "chat.live_bridge.write",
+  "version": "1.0",
+  "owner": "chat",
+  "status": "planned",
+  "visibility": "internal",
+  "description": "Live's remaining modules (AI viewers, chat relays, donations and alerts, /api/mod, recaps, news, calls, emotes, deploy notices) push to chat clients and write chat rows through OpenVibe.Chat: ChatServer calls in order (broadcasts, DMs with the participant check, TTS, channel sounds, disconnects, user updates, cache invalidations) and allow-listed chat-table writes, applied once per idempotency key, with placeholder ids mapped per Live boot. Transitional: shrinks as those modules move out of Live.",
+  "permissions": [
+    "chat:write"
+  ],
+  "resourceConstraints": [
+    "none"
+  ],
+  "quotaClass": "internal-write",
+  "events": [
+    "chat.message.created",
+    "chat.moderation.action"
+  ],
+  "implementedBy": [
+    "POST /internal/live/calls"
+  ]
+}
