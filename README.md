@@ -64,6 +64,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 | Live's own chat pushes and writes (AI viewers, relays, donations, `/api/mod`, recaps, calls) | **Live → Chat** | `POST /internal/live/calls` (`chat.live_bridge.write`), presence `GET /internal/live/presence` (`chat.presence.read`) |
 | Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |
 | Events | **OpenVibe.Events** | `events_outbox` → `POST /api/v1/events` when `EVENTS_URL` is set (`events.event.publish`) |
+| A person's chat preferences | **OpenVibe.Network** user module `chat.preferences` (Chat owns the namespace) | `server/prefs/` → `GET/PUT/DELETE /internal/modules/chat.preferences/:subject` (`network.modules.read` / `.write`), cached per person |
 | Member badges | **OpenVibe.VIP** (Billing holds the entitlement) | `server/vip/badges.js` → `POST /api/v1/entitlements/check` with `product: 'chat'` (`vip.entitlement.check`), behind the shared product cache |
 
 ### Data
@@ -125,6 +126,36 @@ written by creators, so nothing else of it passes and clients render both as tex
   nobody gets a badge. The client is vendored from OpenVibe.VIP (`server/vip/vip-client.js`, copied
   at VIP 2accbeb) until VIP publishes a tag to pin.
 
+### Chat preferences
+
+`GET /api/chat/preferences` and `PUT /api/chat/preferences { preferences: { … } }` (a patch; `null`
+removes a field; optional `If-Match: <revision>`) read and change the signed-in person's chat
+preferences. They live in OpenVibe.Network as the user module `chat.preferences` (openvibe-contracts
+namespace, schema v1: `timestamps`, `compact`, `font_scale` 0.75–2, `show_badges`, `hide_emotes`), which
+Chat owns since the cutover; Network validates, versions (revision, the ETag here) and announces each
+change as `network.module.updated`. Chat reads and writes with its service token (Network grants `chat
+network.modules.read` and `network.modules.write` on `chat.preferences`) and names the revision it read on
+every write, so another writer is never overwritten (Chat reads again and re-applies the patch; a browser
+If-Match is strict: 412).
+
+- **Cache.** One entry per person for `CHAT_PREFS_TTL_MS` (60 s). Chat's own writes land in it at once; a
+  change made through Network directly (the person's account page) shows within the TTL, and at once
+  when a `network.module.updated` for it reaches `prefs.handleEvent()` (for when Events deliveries reach
+  Chat). Network down: the cached copy with `stale: true`, else 503; writes 503.
+- API tokens read only. A person Live knows without a Network subject gets 409 `prefs.subject_unknown`.
+- **Migration** of what Live kept server-side (`user_preferences.chat_settings`, the browser's whole
+  `chatSettings`): `scripts/migrate-chat-preferences.js`. Only choices move (`showTimestamps` →
+  `timestamps`, `compactMode` → `compact`, `fontSize` small/large → `font_scale` 0.88/1.18, `showBadges`
+  false → `show_badges`); a person with defaults only gets no record, and an existing record is never
+  overwritten (create-only, `If-Match: 0`), so it is safe to re-run. The rest of `chatSettings` (TTS,
+  volumes, cross-feed, notifications, …) has no field in schema v1 and stays in Live for now.
+
+```bash
+node scripts/migrate-chat-preferences.js --live-db /tmp/live-snapshot.db                              # dry run
+node scripts/migrate-chat-preferences.js --live-db /tmp/live-snapshot.db --apply --backup /root/chat-prefs-$(date +%F).json
+node scripts/migrate-chat-preferences.js --rollback /root/chat-prefs-<date>.json [--apply]            # undo that run
+```
+
 ## Running it
 
 ```bash
@@ -156,8 +187,9 @@ server/auth/               token resolution through Live; the chat subset of Liv
 server/bridge/             Live → Chat calls + presence (live-bridge.js); Chat → Live read mirror (live-mirror.js)
 server/events/outbox.js    events.event-envelope@1 outbox and relay
 server/net/service-auth.js service tokens: client (Chat → others) and guard (others → Chat)
+server/prefs/              chat preferences in the Network user module chat.preferences (routes, cache, migration from Live)
 server/db/                 schema.sql, database.js (Live's chat functions, same names and arguments)
-scripts/                   import-from-live, parity-check, mirror-flush
+scripts/                   import-from-live, parity-check, mirror-flush, migrate-chat-preferences
 docs/                      cutover.md, live-patch.diff, capabilities-proposal/
 ```
 
@@ -195,7 +227,7 @@ Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat
 
 ## Depends on
 
-- OpenVibe.Network
+- OpenVibe.Network (identity, service tokens, the `chat.preferences` user module)
 - OpenVibe.Live (until the rest of chat's data moves)
 - OpenVibe.Events
 - OpenVibe.Media

@@ -9,6 +9,7 @@
  *   const ws = await h.ws({ ip, token, stream });   ws.next(pred), ws.send(obj), ws.all
  *   await h.http('GET', '/api/chat/…', { token })
  *   h.userToken(userId), h.serviceToken(caps, { aud })
+ *   h.netModules — the stub Network's user modules (records, subjects, calls, down, beforeWrite)
  */
 const fs = require('fs');
 const os = require('os');
@@ -46,9 +47,59 @@ async function boot({ env = {} } = {}) {
 
     // ── Stub Network ──
     const tokenRequests = [];
+    // User modules (Network server/identity/modules.js semantics): records per (namespace, subject) with
+    // revisions that never go back, If-Match, schema/quota checks, service tokens for openvibe.network.
+    // subjects = the usr_ ids Network knows; beforeWrite(req) may change a record to stage a race.
+    const { modules: nsLib } = require('openvibe-contracts');
+    const netModules = { records: new Map(), revisions: new Map(), subjects: new Set(), calls: [], down: false, beforeWrite: null };
+    netModules.key = (ns, subject) => `${ns}|${subject}`;
+    netModules.set = (ns, subject, data, by = 'user:' + subject) => {
+        const k = netModules.key(ns, subject);
+        const cur = netModules.records.get(k);
+        const revision = Math.max(cur ? cur.revision : 0, netModules.revisions.get(k) || 0) + 1;
+        netModules.revisions.set(k, revision);
+        netModules.records.set(k, { data, revision, version: nsLib.get(ns).version, updated_by: by, updated_at: sqliteNow() });
+        return revision;
+    };
+    const moduleRecord = (ns, subject, r) => ({ subject: { type: 'user', id: subject }, namespace: ns, version: r.version, revision: r.revision, data: r.data, updated_at: r.updated_at, updated_by: r.updated_by });
+    function modulesRoute(req, res, raw, ns, subject) {
+        const send = (status, body) => { res.statusCode = status; res.end(body === null ? undefined : JSON.stringify(body)); };
+        netModules.calls.push({ method: req.method, ns, subject, ifMatch: req.headers['if-match'] });
+        if (netModules.down) { req.socket.destroy(); return; }
+        const auth = String(req.headers.authorization || '');
+        const v = auth.startsWith('Bearer ') ? serviceAuth.verifyServiceToken(auth.slice(7), { publicKey: keys.publicKey, issuer: ISS, audience: 'openvibe.network' }) : { ok: false, code: 'token.missing' };
+        if (!v.ok) return send(401, { code: v.code });
+        if (!(v.claims.cap || []).includes(req.method === 'GET' ? 'network.modules.read' : 'network.modules.write')) return send(403, { code: 'capability.denied' });
+        const def = nsLib.get(ns);
+        if (!def) return send(404, { code: 'modules.unknown_namespace' });
+        const k = netModules.key(ns, subject);
+        const known = netModules.subjects.has(subject);
+        if (req.method === 'GET') {
+            const r = known && netModules.records.get(k);
+            return r ? send(200, moduleRecord(ns, subject, r)) : send(404, { code: 'modules.not_found' });
+        }
+        if (!known) return send(404, { code: 'identity.subject_not_found' });
+        if (netModules.beforeWrite) { const f = netModules.beforeWrite; netModules.beforeWrite = null; f(req); }
+        const cur = netModules.records.get(k);
+        const have = cur ? cur.revision : 0;
+        if (req.headers['if-match'] !== undefined && Number(String(req.headers['if-match']).replace(/"/g, '')) !== have) return send(412, { code: 'modules.revision_conflict' });
+        if (req.method === 'DELETE') {
+            if (!cur) return send(404, { code: 'modules.not_found' });
+            netModules.records.delete(k);
+            netModules.revisions.set(k, Math.max(have, netModules.revisions.get(k) || 0) + 1);
+            return send(204, null);
+        }
+        let data; try { data = JSON.parse(raw).data; } catch { data = undefined; }
+        const val = nsLib.validateData(ns, data);
+        if (!val.valid) return send(422, { code: 'modules.invalid_data', errors: val.errors });
+        netModules.set(ns, subject, data, `svc:${String(v.claims.sub).replace(/^svc:/, '')}`);
+        return send(cur ? 200 : 201, moduleRecord(ns, subject, netModules.records.get(k)));
+    }
     const network = http.createServer(async (req, res) => {
         const raw = await new Promise((r) => { let s = ''; req.on('data', (c) => { s += c; }); req.on('end', () => r(s)); });
         res.setHeader('Content-Type', 'application/json');
+        const mm = /^\/internal\/modules\/([^/?]+)\/([^/?]+)$/.exec(req.url);
+        if (mm) return modulesRoute(req, res, raw, decodeURIComponent(mm[1]), decodeURIComponent(mm[2]));
         if (req.url === '/oauth/token') {
             const f = new URLSearchParams(raw);
             tokenRequests.push({ audience: f.get('audience'), scope: f.get('scope'), client: f.get('client_id') });
@@ -239,7 +290,7 @@ async function boot({ env = {} } = {}) {
     });
 
     const h = {
-        tmp, keys, live, network, liveServer, tokenRequests, serviceToken, ISS,
+        tmp, keys, live, network, liveServer, tokenRequests, serviceToken, ISS, netModules,
         userSeq: 0,
         /** Add a Live user (projection row) with a browser token; returns { id, token, ...row }. */
         addUser(username, { role = 'user', subject = null, created_at = sqliteNow(-30 * 86400e3), apiScopes = null, is_owner = 0, display_name = null } = {}) {

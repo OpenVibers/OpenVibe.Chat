@@ -176,6 +176,8 @@ function createApp({ chatServer, bridge, mirror, relay }) {
         next();
     });
 
+    // The person's chat preferences: Network user module chat.preferences (server/prefs/).
+    app.use('/api/chat/preferences', require('./prefs/routes'));
     app.use('/api/chat', require('./chat/routes'));
     app.use('/api/dm', require('./chat/dm-routes'));
     app.use('/api/tts', require('./chat/tts-routes'));

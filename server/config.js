@@ -80,6 +80,18 @@ module.exports = {
         unavailableTtlMs: int(process.env.CHAT_VIP_BADGE_UNAVAILABLE_TTL_MS, 5_000),
     },
 
+    // A person's chat preferences: the OpenVibe.Network user module chat.preferences, which Chat owns
+    // (server/prefs/). Read and written with Chat's service token (grants network.modules.read and
+    // network.modules.write on chat.preferences, audience openvibe.network). Cached per person for
+    // ttlMs: Chat's own writes update the cache at once, a change made through Network directly shows
+    // within ttlMs (at once when a network.module.updated event reaches prefs.handleEvent()).
+    prefs: {
+        enabled: bool(process.env.CHAT_PREFS_ENABLED, true),
+        ttlMs: int(process.env.CHAT_PREFS_TTL_MS, 60_000),
+        timeoutMs: int(process.env.CHAT_PREFS_TIMEOUT_MS, 3000),
+        maxEntries: int(process.env.CHAT_PREFS_CACHE_MAX, 5000),
+    },
+
     // OpenVibe.Events — the outbox relays only when EVENTS_URL is set.
     events: {
         url: strip(process.env.EVENTS_URL || ''),
