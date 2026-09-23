@@ -27,6 +27,7 @@ module.exports = {
     trustProxy: process.env.TRUST_PROXY != null ? Number(process.env.TRUST_PROXY) : 2,
     // Extra browser origins allowed for WebSocket upgrades and credentialed CORS, on top of the
     // ones Live allows (BASE_URL + www variant, the Network, openvibe.games, openvibe.tools).
+    // Exact origins only: a *.openvibe.tools satellite that embeds chat must be listed here.
     extraOrigins: String(process.env.ALLOWED_ORIGINS || '').split(',').map((s) => strip(s.trim())).filter(Boolean),
 
     // Chat's own SQLite database (systemd StateDirectory openvibe-chat).

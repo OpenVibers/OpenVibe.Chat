@@ -189,10 +189,37 @@ t('CORS: Live’s origins allowed with credentials, others refused', async () =>
     const ok = await h.http('GET', '/api/chat/filters/friendly', { headers: { Origin: 'https://openvibe.network' } });
     assert.strictEqual(ok.headers.get('access-control-allow-origin'), 'https://openvibe.network');
     assert.strictEqual(ok.headers.get('access-control-allow-credentials'), 'true');
-    const sat = await h.http('GET', '/api/chat/filters/friendly', { headers: { Origin: 'https://pastes.openvibe.tools' } });
-    assert.strictEqual(sat.status, 200);
     const bad = await h.http('GET', '/api/chat/filters/friendly', { headers: { Origin: 'https://evil-openvibe.tools' } });
     assert.strictEqual(bad.status, 403);
+});
+
+t('CORS: no *.openvibe.tools wildcard — only exact origins get credentialed CORS; ALLOWED_ORIGINS adds one', async () => {
+    const { createApp } = require('../server/app');
+    const probe = (origin, method = 'GET') => h.http(method, '/api/dm/conversations', { headers: { Origin: origin, 'Access-Control-Request-Method': 'GET' } });
+    for (const origin of ['https://pastes.openvibe.tools', 'https://anything.openvibe.tools', 'https://a.b.openvibe.tools', 'http://pastes.openvibe.tools']) {
+        for (const method of ['GET', 'OPTIONS']) {
+            const r = await probe(origin, method);
+            assert.strictEqual(r.headers.get('access-control-allow-origin'), null, `${method} ${origin} got CORS`);
+            assert.strictEqual(r.headers.get('access-control-allow-credentials'), null, `${method} ${origin} got credentials`);
+            assert.strictEqual(r.status, 403, `${method} ${origin}`);
+        }
+    }
+    const apex = await probe('https://openvibe.tools');
+    assert.strictEqual(apex.headers.get('access-control-allow-origin'), 'https://openvibe.tools', 'the listed apex keeps working');
+    // The same list decides the exported check (and the WebSocket upgrade).
+    const stub = { chatServer: { getTotalConnections: () => 0 }, bridge: (q, s, n) => n() };
+    const { isAllowedOrigin, allowedOrigins } = createApp(stub);
+    assert.strictEqual(isAllowedOrigin('https://pastes.openvibe.tools'), false);
+    assert.strictEqual(isAllowedOrigin('https://openvibe.live'), true);
+    assert.ok(![...allowedOrigins].some((o) => o.includes('*')));
+    const config = require('../server/config');
+    const saved = config.extraOrigins;
+    config.extraOrigins = ['https://embed.openvibe.tools/'];
+    try {
+        const withExtra = createApp(stub);
+        assert.strictEqual(withExtra.isAllowedOrigin('https://embed.openvibe.tools'), true, 'ALLOWED_ORIGINS lists a satellite exactly');
+        assert.strictEqual(withExtra.isAllowedOrigin('https://other.openvibe.tools'), false);
+    } finally { config.extraOrigins = saved; }
 });
 
 t('scripts/parity-check.js: two identical services answer the same', async () => {

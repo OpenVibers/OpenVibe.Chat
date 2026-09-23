@@ -3,8 +3,8 @@
  *
  * Browsers reach Chat on Live's origin: nginx sends /ws/chat and the chat REST prefixes
  * (/api/chat/, /api/dm/, /api/tts/, /api/sounds) here (docs/cutover.md), so the guards Live ran
- * in front of those routes run here too, with Live's values: credentialed CORS for Live's
- * origins, the /api rate limit, IP/network bans (admins exempt) and the ov_banned cookie, the
+ * in front of those routes run here too, with Live's values: credentialed CORS for an explicit
+ * list of origins (never a wildcard), the /api rate limit, IP/network bans (admins exempt) and the ov_banned cookie, the
  * WebSocket origin allow-list and IP-ban check at upgrade.
  */
 'use strict';
@@ -27,7 +27,13 @@ function normalizeOrigin(origin) {
     }
 }
 
-/** Live's getAllowedOrigins(), plus ALLOWED_ORIGINS. */
+/**
+ * The browser origins allowed credentialed CORS and WebSocket upgrades: Live's exact list (BASE_URL
+ * and its www variant, the Network, openvibe.games, openvibe.tools) plus ALLOWED_ORIGINS. Exact
+ * origins only: Live's *.openvibe.tools suffix rule is not carried over, because a credentialed
+ * CORS grant lets that origin read a signed-in person's DMs and chat, and no tools satellite embeds
+ * chat. A host that starts to must be listed in ALLOWED_ORIGINS.
+ */
 function getAllowedOrigins() {
     const allowed = new Set();
     const baseOrigin = normalizeOrigin(config.baseUrl);
@@ -59,14 +65,9 @@ function createApp({ chatServer, bridge, mirror, relay }) {
     // Cloudflare address (DNS-only hosts reach nginx directly with a client-written X-Forwarded-For).
     app.set('trust proxy', trustProxy(config.trustProxy));
 
-    /** Exact allow-list first, then *.openvibe.tools over https (Live's isAllowedOrigin). */
+    /** Exact allow-list only (no subdomain wildcard). */
     function isAllowedOrigin(origin) {
-        if (allowedOrigins.has(origin)) return true;
-        try {
-            const u = new URL(origin);
-            if (u.protocol !== 'https:') return false;
-            return u.hostname === 'openvibe.tools' || u.hostname.endsWith('.openvibe.tools');
-        } catch { return false; }
+        return allowedOrigins.has(origin);
     }
 
     // ── Internal (loopback; never routed by nginx) ─────────────
