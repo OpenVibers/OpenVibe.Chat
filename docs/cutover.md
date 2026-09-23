@@ -69,6 +69,8 @@ Live data maintained by `live-context` (never authority), `events_outbox`, `live
    a default). Without `chat.message.send`, Chat refuses the bridge ops that send a message (AI
    viewer, relay and donation lines, deploy notices). Add them to
    `DEFAULT_GRANTS` in `server/identity/principals.js` so every boot keeps them.
+   VIP member badges (after this cutover, any time): `chat vip.entitlement.check openvibe.vip`;
+   without it no message carries a badge (README, "VIP member badges").
 3. **Live.** Apply `docs/live-patch.diff` to Live `main` (`git apply docs/live-patch.diff`), run its
    tests (`node test/chat-context.test.js`, `npm test`), deploy it **without** `CHAT_AUTHORITY` —
    nothing changes for users; the new internal routes answer only service tokens and every effect

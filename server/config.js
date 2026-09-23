@@ -64,6 +64,22 @@ module.exports = {
         syncStaleMs: int(process.env.LIVE_SYNC_STALE_MS, 60_000),
     },
 
+    // OpenVibe.VIP — the member badge on chat messages (a creator's perk bound to `chat badge`).
+    // Asked through a cache only (server/vip/badges.js): sending never waits on VIP, and any doubt
+    // (VIP down, no token, no answer yet) is "no badge". Needs Chat's client secret and the Network
+    // grant vip.entitlement.check on openvibe.vip.
+    vip: {
+        enabled: bool(process.env.CHAT_VIP_BADGES, true),
+        internalUrl: strip(process.env.OV_VIP_INTERNAL_URL || 'http://127.0.0.1:4620'),
+        timeoutMs: int(process.env.VIP_TIMEOUT_MS, 1500),
+        // How long a badge outlives the membership at most (VIP applied the change; Chat has no
+        // Events inbox): the convergence bound. A "no" is re-asked after denyTtlMs, a failure after
+        // unavailableTtlMs.
+        ttlMs: int(process.env.CHAT_VIP_BADGE_TTL_MS, 60_000),
+        denyTtlMs: int(process.env.CHAT_VIP_BADGE_DENY_TTL_MS, 30_000),
+        unavailableTtlMs: int(process.env.CHAT_VIP_BADGE_UNAVAILABLE_TTL_MS, 5_000),
+    },
+
     // OpenVibe.Events — the outbox relays only when EVENTS_URL is set.
     events: {
         url: strip(process.env.EVENTS_URL || ''),

@@ -30,6 +30,7 @@ const ttsEngine = require('./tts-engine');
 const soundboard = require('./soundboard-service');
 const audioQueue = require('./audio-queue');
 const dm = require('./dm');
+const vipBadges = require('../vip/badges');
 // Cosmetics and tags are Live's (monetization/cosmetics, game/tags); read through live-context.
 const cosmetics = { getCosmeticProfile: (userId) => ctx.getCosmeticProfile(userId) };
 const tags = { getTagProfile: (userId) => ctx.getTagProfile(userId) };
@@ -434,6 +435,8 @@ class ChatServer {
                 }
                 client.channelUserId = channelUserId;
                 client._modStream = null;
+                // Look up this member's VIP badge for the room now, so their first message has it.
+                if (client.user && channelUserId) { try { vipBadges.warm(this._subjectOfUser(client.user), db.subjectFor(channelUserId)); } catch { /* */ } }
                 // A TTS/sound queue held since a restart plays once its room has listeners again.
                 audioQueue.roomJoined(audioQueue.roomKey({ streamId: client.streamId, channelUserId: client.streamId ? null : channelUserId }));
                 // Update viewer counts for old and new streams
@@ -778,6 +781,18 @@ class ChatServer {
             } catch { /* non-critical */ }
         }
 
+        // The creator's VIP member badge (a perk bound to `chat badge`). From the cache only: the
+        // message never waits on VIP, and a miss is sent without a badge while the lookup runs; a
+        // badge found then follows as a chat_vip_badge frame for this message (below).
+        let vipBadgePending = null;
+        if (client.user?.id && client.channelUserId) {
+            try {
+                const r = vipBadges.forMessage(this._subjectOfUser(client.user), db.subjectFor(client.channelUserId));
+                if (r.badge) chatMsg.vip_badge = r.badge;
+                else vipBadgePending = r.pending;
+            } catch { /* no badge */ }
+        }
+
         // Save to database
         try {
             const result = db.saveChatMessage({
@@ -791,6 +806,7 @@ class ChatServer {
                 is_global: !client.streamId && !client.channelUserId,
                 reply_to_id: replyToId,
                 auto_delete_at: autoDeleteAt,
+                metadata: chatMsg.vip_badge ? { vip_badge: chatMsg.vip_badge } : undefined,
             });
             if (result.lastInsertRowid) chatMsg.id = Number(result.lastInsertRowid);
         } catch { /* non-critical */ }
@@ -841,6 +857,7 @@ class ChatServer {
             // Auto-translate (async): foreign → English for everyone, English → the channel's
             // language for a non-English streamer. Lands as a follow-up 'chat_translation'.
             this._maybeTranslate(chatMsg, client.channelUserId, client.streamId);
+            if (vipBadgePending) this._followVipBadge(vipBadgePending, chatMsg, client.channelUserId, client.streamId);
         }
         if (client.streamId) {
 
@@ -2130,6 +2147,28 @@ class ChatServer {
     _channelLanguage(channelUserId) {
         if (!channelUserId) return 'en';
         try { return ctx.channelLanguage(channelUserId); } catch { return 'en'; }
+    }
+
+    /** A signed-in user's Network subject (the projection's subject_id, else the ctx_users row). */
+    _subjectOfUser(user) {
+        if (!user) return null;
+        return user.subject_id || db.subjectFor(user.id) || null;
+    }
+
+    /**
+     * A VIP badge that was not cached when its message went out: when the lookup finds one, push
+     * it to the same rooms as a 'chat_vip_badge' event (clients attach it to the message by id) and
+     * keep it in the row's metadata so history shows it. Fire-and-forget; never throws.
+     */
+    _followVipBadge(pending, chatMsg, channelUserId, streamId) {
+        Promise.resolve(pending).then((badge) => {
+            if (!badge || !chatMsg || !chatMsg.id) return;
+            const evt = { type: 'chat_vip_badge', id: chatMsg.id, vip_badge: badge, stream_id: streamId || null, channel_user_id: channelUserId || null, timestamp: new Date().toISOString() };
+            this.broadcastToChannelRoom(channelUserId, streamId, evt);
+            if (streamId) this.forwardToGlobal(streamId, evt);
+            else this.forwardToGlobalByChannel(channelUserId, evt);
+            try { db.mergeChatMessageMetadata(chatMsg.id, { vip_badge: badge }); } catch { /* */ }
+        }).catch(() => { /* no badge */ });
     }
 
     /**

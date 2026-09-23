@@ -9,10 +9,11 @@
   "domain": "openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via an nginx include in openvibe.live's vhost); openvibe.chat is still the OpenVibe.Sites placeholder",
   "contracts": "openvibe-contracts v0.13.0",
   "capabilities": ["chat.live_bridge.write", "chat.presence.read"],
-  "capabilitiesUsed": ["live.chat_context.read", "live.chat_effects.write", "live.chat_mirror.write", "events.event.publish"],
+  "capabilitiesUsed": ["live.chat_context.read", "live.chat_effects.write", "live.chat_mirror.write", "events.event.publish", "vip.entitlement.check"],
   "capabilitiesRegistered": true,
   "events": ["chat.message.created", "chat.message.deleted", "chat.dm.created", "chat.moderation.action"],
   "liveAuthorityFlag": "CHAT_AUTHORITY=chat is set in production live.env since the cutover (2026-09-23 02:03 UTC); Live's chat tables are a read mirror Chat keeps current",
+  "vip": "Member badges from OpenVibe.VIP (server/vip/badges.js: entitlements/check with product chat, cached 60 s, never blocks sending, fails closed). In code only, not deployed; needs the Network grant chat vip.entitlement.check openvibe.vip and Live's chat UI to render vip_badge / chat_vip_badge",
   "deployed": true,
   "deployment": "openvibe-ovh /opt/openvibe.chat, unit openvibe-chat, 127.0.0.1:4400 (loopback); public only through openvibe.live's nginx include for the chat paths; release 45f2b1f; EVENTS_URL set (chat.message.created reaches OpenVibe.Events); restore drill passed 2026-09-23",
   "updated": "2026-09-23"

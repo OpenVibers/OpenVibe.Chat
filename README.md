@@ -64,6 +64,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 | Live's own chat pushes and writes (AI viewers, relays, donations, `/api/mod`, recaps, calls) | **Live → Chat** | `POST /internal/live/calls` (`chat.live_bridge.write`), presence `GET /internal/live/presence` (`chat.presence.read`) |
 | Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |
 | Events | **OpenVibe.Events** | `events_outbox` → `POST /api/v1/events` when `EVENTS_URL` is set (`events.event.publish`) |
+| Member badges | **OpenVibe.VIP** (Billing holds the entitlement) | `server/vip/badges.js` → `POST /api/v1/entitlements/check` with `product: 'chat'` (`vip.entitlement.check`), behind the shared product cache |
 
 ### Data
 
@@ -95,6 +96,34 @@ which makes OpenVibe.Events rewrite the stored `chat.message.created` of each id
 in one transaction with its outbox row, and the relay publishes in outbox order, so the deletion
 always follows the message it removes. Messages deleted before this existed are redacted by
 OpenVibe.Events' `scripts/redact-backfill.js`.
+
+### VIP member badges
+
+A member's messages in a creator's room (stream or offline channel chat) carry that creator's VIP
+badge: a perk of the member's plan **version** with a `chat badge` product binding (VIP's network
+perk `subscriber-badge` has one), unless the member turned it off in VIP (`show_badge`). The frame
+gets `vip_badge: { creator, perk, name, badge, label? }` and the row's `metadata` keeps it, so history
+shows it. `badge` is a short id (`subscriber`, else `member`) and `label` plain text: binding config is
+written by creators, so nothing else of it passes and clients render both as text.
+
+- **Never blocks sending.** The badge comes from the cache only (`peekEntitlement`); the lookup starts
+  when a member joins a room, so their first line normally has it. On a miss the message goes out
+  without a badge and, if the lookup then finds one, a `chat_vip_badge` frame `{ id, vip_badge,
+  stream_id, channel_user_id }` follows to the same rooms (clients attach it by message id, as with
+  `chat_translation`) and the row's metadata is updated.
+- **Fails closed.** VIP unreachable or slow, no client secret, a refused grant, a malformed answer, an
+  inactive or `unknown` entitlement → no badge. `CHAT_VIP_BADGES=0` turns lookups off.
+- **Convergence bound.** Chat has no Events inbox, so when a membership ends (Billing's
+  `billing.entitlement.changed` → VIP's `vip.membership.changed`) the badge stops at most
+  `CHAT_VIP_BADGE_TTL_MS` (60 s) after VIP stops granting, never past the entitlement's `expires_at`;
+  end to end, add VIP's own bound (seconds with events, at most `VIP_PROJECTION_MAX_AGE_MS` without —
+  OpenVibe.VIP README, "The product cache and the convergence bound"). A new member's badge appears
+  within `CHAT_VIP_BADGE_DENY_TTL_MS` (30 s). `badges.handleEvent()` drops a pair at once, for when
+  the events are routed to Chat. `test/vip-badge.test.js` drives all of this against a stub VIP with an
+  injected clock.
+- Needs the Network grant `chat vip.entitlement.check openvibe.vip`; without it VIP answers 403 and
+  nobody gets a badge. The client is vendored from OpenVibe.VIP (`server/vip/vip-client.js`, copied
+  at VIP 2accbeb) until VIP publishes a tag to pin.
 
 ## Running it
 
@@ -170,6 +199,7 @@ Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat
 - OpenVibe.Live (until the rest of chat's data moves)
 - OpenVibe.Events
 - OpenVibe.Media
+- OpenVibe.VIP (member badges; optional — without it nobody has a badge)
 - OpenVibe.Contracts
 
 ## Acceptance (must be true before "done")
