@@ -1,0 +1,36 @@
+{
+  "name": "openvibe-chat",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenVibe.Chat — rooms, messages, DMs, TTS and sound queues, moderation. Wave 6: Live's chat moved behind a service boundary (same WebSocket protocol and REST paths, own database, Live data through server/live-context.js).",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "NODE_ENV=development node server/index.js",
+    "test": "node test/run.js",
+    "import-from-live": "node scripts/import-from-live.js"
+  },
+  "keywords": [
+    "openvibe",
+    "chat",
+    "websocket",
+    "dm",
+    "tts"
+  ],
+  "author": "OpenVibers",
+  "license": "AGPL-3.0-only",
+  "dependencies": {
+    "better-sqlite3": "^11.10.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "express-rate-limit": "^7.5.0",
+    "multer": "^2.0.2",
+    "openvibe-contracts": "https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/v0.5.1",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
