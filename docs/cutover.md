@@ -64,8 +64,10 @@ Live data maintained by `live-context` (never authority), `events_outbox`, `live
    ```
    `principal_grants` (client, capability, audience): `chat live.chat_context.read openvibe.live`,
    `chat live.chat_effects.write openvibe.live`, `chat live.chat_mirror.write openvibe.live`,
-   `live chat.live_bridge.write openvibe.chat`, `live chat.presence.read openvibe.chat`
-   (`chat events.event.publish openvibe.events` is already a default). Add them to
+   `live chat.live_bridge.write openvibe.chat`, `live chat.message.send openvibe.chat`,
+   `live chat.presence.read openvibe.chat` (`chat events.event.publish openvibe.events` is already
+   a default). Without `chat.message.send`, Chat refuses the bridge ops that send a message (AI
+   viewer, relay and donation lines, deploy notices). Add them to
    `DEFAULT_GRANTS` in `server/identity/principals.js` so every boot keeps them.
 3. **Live.** Apply `docs/live-patch.diff` to Live `main` (`git apply docs/live-patch.diff`), run its
    tests (`node test/chat-context.test.js`, `npm test`), deploy it **without** `CHAT_AUTHORITY` —

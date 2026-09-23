@@ -42,7 +42,7 @@ async function boot({ env = {} } = {}) {
     const { serviceAuth } = require('openvibe-contracts');
     let jti = 0;
     const serviceToken = (cap, { aud = 'openvibe.chat', sub = 'svc:live' } = {}) =>
-        serviceAuth.signServiceToken({ iss: ISS, sub, actor_type: 'service', aud: [aud], cap, iat: now(), exp: now() + 300, jti: `tok_test_${++jti}` }, keys.privateKey);
+        serviceAuth.signServiceToken({ iss: ISS, sub, actor_type: sub.startsWith('app:') ? 'app' : 'service', aud: [aud], cap, iat: now(), exp: now() + 300, jti: `tok_test_${++jti}` }, keys.privateKey);
 
     // ── Stub Network ──
     const tokenRequests = [];

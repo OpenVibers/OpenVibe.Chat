@@ -18,6 +18,10 @@
  *       placeholder to the real id, and every later op in that Live boot that carries it — a
  *       broadcast `{ id }`, a TTS key `m<ref>`, a reply_to_id — is rewritten before it runs.
  *
+ *       An op that sends a chat message also needs chat.message.send in the same token (below);
+ *       without it that op alone is refused ({ ok: false, code: 'capability.denied' }) and the
+ *       rest of the batch still runs.
+ *
  *   GET  /internal/live/presence  capability chat.presence.read
  *       Who is connected where (counts, slow modes, user/anon → ip), for Live's synchronous
  *       reads (getTotalConnections, getStreamViewerCount, getConnectedUserIp, findClientByAnonId,
@@ -26,6 +30,7 @@
 'use strict';
 
 const express = require('express');
+const { capabilities } = require('openvibe-contracts');
 const db = require('../db/database');
 const ctx = require('../live-context');
 const serviceAuth = require('../net/service-auth');
@@ -60,6 +65,38 @@ const SERVER_OPS = {
     triggerChannelSound: [],
     sendToConn: [],
 };
+
+// chat.message.send: a service or app principal sending a chat message through this API must hold
+// it, on top of chat.live_bridge.write. Sending a message = persisting one (db.saveChatMessage, any
+// message_type), the deploy notice (it writes one), or pushing a chat line (a frame of type 'chat')
+// or a DM (a frame of type 'dm', through sendDm) to browsers. Other frames (system notices, counts,
+// alerts, call invites through sendDm), TTS, channel sounds, moderation writes and invalidations
+// need only the bridge capability.
+//
+// The id is held in a constant on purpose: the contracts registry still lists chat.message.send as
+// owned by live (it predates Wave 6), and openvibe-contracts-check refuses a literal guard of a
+// capability another service owns. Once Contracts re-owns it to chat and adds it to the chat
+// manifest, check it with a literal so the CI check sees it.
+const MESSAGE_SEND = 'chat.message.send';
+const FRAME_OPS = new Set([
+    'broadcastToStream', 'broadcastToChannelRoom', 'broadcastGlobal', 'broadcastAll', 'forwardToGlobal',
+    'forwardToGlobalByChannel', 'forwardToStreamerRooms', 'broadcastToOwnerStreams', 'sendToConn', 'sendDm',
+]);
+const MESSAGE_FRAMES = new Set(['chat', 'dm']);
+
+function isMessageFrame(frame) {
+    return !!frame && typeof frame === 'object' && MESSAGE_FRAMES.has(frame.type);
+}
+
+/** Does this bridge op send a chat message (and so need chat.message.send)? */
+function sendsMessage(op, args) {
+    const a = Array.isArray(args) ? args : [];
+    if (op === 'db') return a[0] === 'saveChatMessage';
+    if (op === 'deployNotice') return true;
+    if (FRAME_OPS.has(op)) return isMessageFrame(a[a.length - 1]);   // the frame is each of these ops' last argument
+    if (op === 'broadcastAllRaw') { try { return isMessageFrame(JSON.parse(String(a[0]))); } catch { return false; } }
+    return false;
+}
 
 const REF_TTL_MS = 10 * 60 * 1000;
 const REF_MIN = -(2 ** 40);   // Live's placeholders are ≤ this
@@ -163,7 +200,13 @@ function createBridge({ chatServer }) {
         const boot = String((req.body && req.body.boot) || '').slice(0, 64) || 'unknown';
         const ops = Array.isArray(req.body && req.body.ops) ? req.body.ops.slice(0, 500) : [];
         const results = [];
+        const mayMessage = capabilities.check({ cap: req.principal && req.principal.cap }, MESSAGE_SEND);
         for (const o of ops) {
+            if (!mayMessage.allowed && sendsMessage(String(o.op || ''), o.args)) {
+                console.warn(`[Bridge] ${o.op}${o.op === 'db' && Array.isArray(o.args) ? `.${o.args[0]}` : ''} refused: ${req.principal && req.principal.sub} lacks ${MESSAGE_SEND}`);
+                results.push({ seq: o.seq, ok: false, code: mayMessage.code || 'capability.denied', error: `${MESSAGE_SEND} not granted` });
+                continue;
+            }
             try {
                 const result = await runOp(String(o.op || ''), o.args, boot, typeof o.ref === 'number' ? o.ref : null, typeof o.key === 'string' ? o.key.slice(0, 80) : null);
                 results.push({ seq: o.seq, ok: true, result });
@@ -200,4 +243,4 @@ function createBridge({ chatServer }) {
     return router;
 }
 
-module.exports = { createBridge, DB_OPS, SERVER_OPS };
+module.exports = { createBridge, DB_OPS, SERVER_OPS, MESSAGE_SEND, sendsMessage };

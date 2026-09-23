@@ -142,7 +142,12 @@ settings, the media-request queue and calls are still Live's and reached through
 
 Introduced here and registered in `openvibe-contracts` v0.13.0:
 `chat.live_bridge.write`, `chat.presence.read` (owner chat) and `live.chat_context.read`,
-`live.chat_effects.write`, `live.chat_mirror.write` (owner live). Planned families:
+`live.chat_effects.write`, `live.chat_mirror.write` (owner live). Enforced here as well:
+`chat.message.send` — a service or app principal whose `/internal/live/calls` op sends a chat
+message (a `saveChatMessage` write, the deploy notice, or a pushed `chat`/`dm` frame) must hold it
+beside `chat.live_bridge.write`; without it that op is refused (`capability.denied`) and the rest of
+the batch runs. Contracts still lists it as owned by `live`; it needs re-owning to `chat` and adding
+to the chat manifest (then the check uses a literal id the contracts check can see). Planned families:
 `chat.room.*`, `chat.message.*`, `chat.dm.*`, `chat.moderation.*`, `chat.tts.*`, `chat.call.*`.
 
 Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat.moderation.action`

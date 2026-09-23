@@ -4,7 +4,8 @@
  * service-token guard, forwarded chat writes with placeholder ids mapped for later ops of the same
  * Live boot, idempotent retries, only allow-listed writes, pushes to browsers (broadcasts, DMs with
  * the participant check, disconnects, user updates with the stored-name rewrite, deploy notices),
- * and the presence snapshot Live's synchronous reads use.
+ * and the presence snapshot Live's synchronous reads use. Ops that send a chat message also need
+ * chat.message.send, for service and app principals alike.
  */
 const assert = require('assert');
 const { boot, suite } = require('./helpers');
@@ -18,7 +19,7 @@ const calls = (ops, { token = BRIDGE, boot: b = 'live-boot-1', headers } = {}) =
 
 t('boot', async () => {
     h = await boot();
-    BRIDGE = h.serviceToken(['chat.live_bridge.write']);
+    BRIDGE = h.serviceToken(['chat.live_bridge.write', 'chat.message.send']);
     streamer = h.addUser('streamer', { role: 'streamer' });
     viewer = h.addUser('viewer');
     channelId = h.addChannel(streamer.id);
@@ -38,6 +39,50 @@ t('only Live’s service token, only from loopback', async () => {
     assert.strictEqual((await calls([], { token: h.serviceToken(['chat.live_bridge.write'], { aud: 'openvibe.live' }) })).status, 401);
     assert.strictEqual((await calls([], { headers: { 'X-Forwarded-For': '1.2.3.4' } })).status, 403);
     assert.strictEqual((await h.http('GET', '/internal/live/presence', { token: BRIDGE })).status, 403);
+});
+
+t('sending a chat message needs chat.message.send; without it only those ops are refused', async () => {
+    const APP = 'app:app_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3';
+    const before = h.db.get('SELECT COUNT(*) AS n FROM chat_messages').n;
+    const outboxBefore = h.db.get('SELECT COUNT(*) AS n FROM events_outbox').n;
+    const commit = { hash: 'f'.repeat(40), short: 'fffffff', date: '2026-09-22T10:00:00Z', subject: 'denied deploy' };
+    const sends = [
+        { op: 'db', ref: REF - 50, key: 'live:denied:1', args: ['saveChatMessage', { stream_id: streamId, username: 'Bot', message: 'denied insert', message_type: 'chat' }] },
+        { op: 'broadcastToStream', args: [streamId, { type: 'chat', id: 1, username: 'Bot', message: 'denied line' }] },
+        { op: 'forwardToGlobal', args: [streamId, { type: 'chat', id: 1, username: 'Bot', message: 'denied line' }] },
+        { op: 'broadcastAllRaw', args: [JSON.stringify({ type: 'chat', id: 1, username: 'Bot', message: 'denied line' })] },
+        { op: 'sendDm', args: [viewer.id, { type: 'dm', message: { id: 1, content: 'denied dm' } }] },
+        { op: 'deployNotice', args: [[commit]] },
+    ];
+    const others = [
+        { op: 'broadcastToStream', args: [streamId, { type: 'system', message: 'not a message send' }] },
+        { op: 'sendDm', args: [viewer.id, { type: 'call-ring', from: 'denied-test' }] },
+    ];
+    for (const [who, token] of [['service', h.serviceToken(['chat.live_bridge.write'])], ['app', h.serviceToken(['chat.live_bridge.write'], { sub: APP })]]) {
+        const r = await calls([...sends, ...others], { token });
+        assert.strictEqual(r.status, 200, r.text);
+        const res = r.body.results;
+        for (const x of res.slice(0, sends.length)) {
+            assert.strictEqual(x.ok, false, `${who}: seq ${x.seq} should be refused`);
+            assert.strictEqual(x.code, 'capability.denied');
+            assert.match(x.error, /chat\.message\.send/);
+        }
+        assert.ok(res.slice(sends.length).every((x) => x.ok), `${who}: other ops still run ${JSON.stringify(res)}`);
+        await viewerWs.next((m) => m.type === 'system' && m.message === 'not a message send');
+        await viewerWs.next((m) => m.type === 'call-ring' && m.from === 'denied-test');
+    }
+    const denied = (m) => /denied (insert|line|dm|deploy)/.test(JSON.stringify(m));
+    assert.ok(await viewerWs.none(denied), 'no refused message reached the stream room');
+    assert.ok(await globalWs.none(denied), 'no refused message reached global chat');
+    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM chat_messages').n, before, 'nothing persisted');
+    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM events_outbox').n, outboxBefore, 'no chat.message.created');
+    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM bridge_applied WHERE key = ?', ['live:denied:1']).n, 0, 'a refused write is not marked applied');
+    // The capability alone is not enough either: the bridge capability is still required.
+    assert.strictEqual((await calls(sends.slice(0, 1), { token: h.serviceToken(['chat.message.send']) })).status, 403);
+    // An app principal holding both may send.
+    const ok = await calls([{ op: 'broadcastToStream', args: [streamId, { type: 'chat', id: 2, username: 'App', message: 'app line' }] }], { token: h.serviceToken(['chat.live_bridge.write', 'chat.message.send'], { sub: APP }) });
+    assert.ok(ok.body.results[0].ok, ok.text);
+    await viewerWs.next((m) => m.type === 'chat' && m.message === 'app line');
 });
 
 let realId;
