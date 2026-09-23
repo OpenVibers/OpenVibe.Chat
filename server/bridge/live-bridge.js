@@ -75,10 +75,8 @@ const SERVER_OPS = {
 // alerts, call invites through sendDm), TTS, channel sounds, moderation writes and invalidations
 // need only the bridge capability.
 //
-// The id is held in a constant on purpose: the contracts registry still lists chat.message.send as
-// owned by live (it predates Wave 6), and openvibe-contracts-check refuses a literal guard of a
-// capability another service owns. Once Contracts re-owns it to chat and adds it to the chat
-// manifest, check it with a literal so the CI check sees it.
+// chat.message.send is chat's own capability (openvibe-contracts >= 0.30.2 lists it in the chat
+// manifest), so the check below names it literally and openvibe-contracts-check enforces it.
 const MESSAGE_SEND = 'chat.message.send';
 const FRAME_OPS = new Set([
     'broadcastToStream', 'broadcastToChannelRoom', 'broadcastGlobal', 'broadcastAll', 'forwardToGlobal',
@@ -221,7 +219,7 @@ function createBridge({ chatServer }) {
         const boot = String((req.body && req.body.boot) || '').slice(0, 64) || 'unknown';
         const ops = Array.isArray(req.body && req.body.ops) ? req.body.ops.slice(0, 500) : [];
         const results = [];
-        const mayMessage = capabilities.check({ cap: req.principal && req.principal.cap }, MESSAGE_SEND);
+        const mayMessage = capabilities.check({ cap: req.principal && req.principal.cap }, 'chat.message.send');
         for (const o of ops) {
             if (!mayMessage.allowed && sendsMessage(String(o.op || ''), o.args)) {
                 console.warn(`[Bridge] ${o.op}${o.op === 'db' && Array.isArray(o.args) ? `.${o.args[0]}` : ''} refused: ${req.principal && req.principal.sub} lacks ${MESSAGE_SEND}`);

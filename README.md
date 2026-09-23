@@ -263,8 +263,9 @@ Introduced here and registered in `openvibe-contracts` v0.13.0:
 `chat.message.send` — a service or app principal whose `/internal/live/calls` op sends a chat
 message (a `saveChatMessage` write, the deploy notice, or a pushed `chat`/`dm` frame) must hold it
 beside `chat.live_bridge.write`; without it that op is refused (`capability.denied`) and the rest of
-the batch runs. Contracts still lists it as owned by `live`; it needs re-owning to `chat` and adding
-to the chat manifest (then the check uses a literal id the contracts check can see). Planned families:
+the batch runs. It is owned by `chat` and listed in the chat manifest since `openvibe-contracts`
+v0.30.2 (so is the `chat.preferences` user module since v0.32.0); the check names it literally, so
+the contracts check enforces it. Planned families:
 `chat.room.*`, `chat.message.*`, `chat.dm.*`, `chat.moderation.*`, `chat.tts.*`, `chat.call.*`.
 
 Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat.moderation.action`

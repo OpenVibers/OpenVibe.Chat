@@ -42,8 +42,9 @@ async function boot({ env = {} } = {}) {
     fs.mkdirSync(path.join(tmp, 'sounds'));
     const { serviceAuth } = require('openvibe-contracts');
     let jti = 0;
+    // An app token (sub app:…) carries its developer project and env (identity.service-token-claims 1.2.0).
     const serviceToken = (cap, { aud = 'openvibe.chat', sub = 'svc:live' } = {}) =>
-        serviceAuth.signServiceToken({ iss: ISS, sub, actor_type: sub.startsWith('app:') ? 'app' : 'service', aud: [aud], cap, iat: now(), exp: now() + 300, jti: `tok_test_${++jti}` }, keys.privateKey);
+        serviceAuth.signServiceToken({ iss: ISS, sub, actor_type: sub.startsWith('app:') ? 'app' : 'service', ...(sub.startsWith('app:') ? { project_id: 'prj_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3', env: 'production' } : {}), aud: [aud], cap, iat: now(), exp: now() + 300, jti: `tok_test_${++jti}` }, keys.privateKey);
 
     // ── Stub Network ──
     const tokenRequests = [];
