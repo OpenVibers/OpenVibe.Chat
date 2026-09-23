@@ -256,7 +256,9 @@ CREATE TABLE IF NOT EXISTS emotes (
     is_approved INTEGER DEFAULT 1,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     channel_owner_id INTEGER,
-    size INTEGER DEFAULT 100
+    size INTEGER DEFAULT 100,
+    media_url TEXT,
+    media_asset_id INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_emotes_user ON emotes(user_id);
 CREATE INDEX IF NOT EXISTS idx_emotes_channel_owner ON emotes(channel_owner_id);

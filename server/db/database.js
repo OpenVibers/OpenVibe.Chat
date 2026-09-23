@@ -100,9 +100,19 @@ function close() {
  * every change to Chat's tables for the Live mirror — the service does; the importer does not,
  * so imported rows (which came from Live) are never sent back.
  */
+const ADDED_COLUMNS = [
+    ['emotes', 'media_url', 'TEXT'],          // Live: emote images synced to OpenVibe.Media
+    ['emotes', 'media_asset_id', 'INTEGER'],
+];
+
 function initDb({ captureMirror = false } = {}) {
     const d = getDb();
     d.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+    // Columns Live added after a Chat database was created (CREATE TABLE IF NOT EXISTS does not add them).
+    for (const [table, column, type] of ADDED_COLUMNS) {
+        const have = d.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+        if (!have) d.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+    }
     const upsertAuth = d.prepare('INSERT INTO table_authority (table_name, authority, note) VALUES (?, ?, ?) ON CONFLICT(table_name) DO UPDATE SET authority = excluded.authority, note = excluded.note');
     for (const t of Object.keys(CHAT_TABLES)) upsertAuth.run(t, 'chat', 'Chat writes; Live keeps a read mirror');
     for (const [t, note] of Object.entries(STAGED_TABLES)) upsertAuth.run(t, 'live', note);
