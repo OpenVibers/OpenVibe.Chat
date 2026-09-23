@@ -401,6 +401,33 @@ CREATE TABLE IF NOT EXISTS bridge_applied (
     applied_at INTEGER NOT NULL
 );
 
+-- The TTS and sound queue (server/chat/audio-queue.js): one row per TTS utterance, channel !sound
+-- or 101soundboards clip, played one at a time per room ('stream:<id>' | 'channel:<userId>').
+-- queued → playing → played, or skipped (moderators, the broadcaster) / failed. payload holds what
+-- is needed to make the audio when its turn comes, so the queue survives a restart. Times are ms.
+CREATE TABLE IF NOT EXISTS audio_requests (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    room TEXT NOT NULL,
+    stream_id INTEGER,
+    channel_user_id INTEGER,
+    kind TEXT NOT NULL CHECK(kind IN ('tts', 'channel-sound', 'soundboard')),
+    state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued', 'playing', 'played', 'skipped', 'failed')),
+    requested_by TEXT,
+    identity_key TEXT,
+    label TEXT,
+    payload TEXT NOT NULL DEFAULT '{}',
+    dedupe_key TEXT,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER,
+    error TEXT,
+    actor TEXT,
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    finished_at INTEGER,
+    UNIQUE(room, dedupe_key)
+);
+CREATE INDEX IF NOT EXISTS idx_audio_requests_room_state ON audio_requests(room, state, id);
+
 -- Live's placeholder ids (a large negative number per Live boot) → the real chat_messages id, so a
 -- later op of the same Live boot that carries the placeholder is rewritten even after a Chat
 -- restart (the batch that acknowledged the insert and the one carrying its broadcast can straddle

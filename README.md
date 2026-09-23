@@ -28,6 +28,16 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   DMs (`dm.js`, `/api/dm/*`), chat history (`history-store.js`, `/api/chat/*`), TTS (`tts-engine.js`,
   `/api/tts/*`), 101soundboards and channel sounds (`/api/sounds*`), moderation utils and the word
   filter, the deploy-notice card. Changes are confined to where they touched Live's data.
+- **The TTS and sound queue** (`audio-queue.js`, table `audio_requests`). TTS, channel `!sounds` and
+  101soundboards clips are persisted requests played one at a time per room — `queued → playing →
+  played`, or `skipped` / `failed` — so the queue survives a Chat restart (what was playing is
+  finished, what waited plays once the room has listeners again, requests older than 5 minutes
+  expire) and a keyed request (the TTS of message `m<id>`) is read once. The broadcaster and
+  moderators control it: `/skiptts [id]`, `/cleartts`, and `GET /api/tts/queue`,
+  `POST /api/tts/queue/skip|clear`, `POST /api/tts/queue/:id/report` (the playing client's
+  `played`/`failed`). Browsers get the same `tts-audio` / `soundboard-audio` frames as before, now
+  with `request_id` and paced by the clip's length, plus two new frames old clients ignore:
+  `audio-skip { request_id }` and `audio-clear { request_ids }`.
 - **One adapter to Live — `server/live-context.js`.** Accounts and roles, streams, slots and channels,
   channel moderation settings and moderators, bans and IP rules, follows, cosmetics and tags, site
   settings and anon numbers are read through it; coins, AI viewers, arena, media queue, hardware,
@@ -130,8 +140,9 @@ docs/                      cutover.md, live-patch.diff, capabilities-proposal/
 - TTS/audio/soundboard/media-request queues with skip/clear/failure lifecycle
 - call signalling metadata and the `pending/ringing/active/ended/missed/declined/failed` lifecycle
 
-(Wave 6 moved messages, DMs, TTS, sounds and the chat side of moderation; bans, channel moderation
-settings, the media-request queue and calls are still Live's and reached through `live-context`.)
+(Wave 6 moved messages, DMs, TTS, sounds and the chat side of moderation, and gave TTS and sounds a
+persisted queue with skip/clear/failed states; bans, channel moderation settings, the media-request
+queue and calls are still Live's and reached through `live-context`.)
 
 ## Does not own
 

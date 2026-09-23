@@ -28,6 +28,7 @@ const permissions = require('../auth/permissions');
 const wordFilter = require('./word-filter');
 const ttsEngine = require('./tts-engine');
 const soundboard = require('./soundboard-service');
+const audioQueue = require('./audio-queue');
 const dm = require('./dm');
 // Cosmetics and tags are Live's (monetization/cosmetics, game/tags); read through live-context.
 const cosmetics = { getCosmeticProfile: (userId) => ctx.getCosmeticProfile(userId) };
@@ -79,10 +80,7 @@ class ChatServer {
         /** @type {Map<number, number>} streamId → slow mode ms (0 = off, default rate limit applies) */
         this.slowModeByStream = new Map();
         this.heartbeatInterval = null;
-        /** @type {Map<number, number>} streamId → current TTS queue size */
-        this.ttsQueueSize = new Map();
-        /** @type {Map<string, number>} `${streamId}:${userId}` → user's TTS queue count */
-        this.ttsUserCounts = new Map();
+        // TTS and sound requests queue in Chat's database (./audio-queue.js), one room at a time.
         /** @type {Map<string, number>} `${streamId}:${userKey}` → last soundboard trigger */
         this.soundboardRateLimits = new Map();
         /** @type {Map<number, {count: number, windowStart: number}>} streamId → stream-level soundboard rate window */
@@ -211,6 +209,18 @@ class ChatServer {
         this.wss.on('connection', (ws, req) => {
             this.handleConnection(ws, req);
         });
+
+        // The TTS and sound queue: how each kind of request is made when its turn comes, and
+        // where its frame goes. recover() resumes what a restart interrupted.
+        audioQueue.init({
+            performers: {
+                tts: (row, p) => this._makeTtsAudio(p),
+                'channel-sound': (row, p) => this._makeChannelSoundAudio(p),
+                soundboard: (row, p) => this._makeSoundboardAudio(p),
+            },
+            deliver: (row, frame) => this._broadcastTtsPayload(row.stream_id, row.channel_user_id, frame),
+        });
+        try { audioQueue.recover(); } catch (err) { console.warn('[AudioQueue] recover failed:', err.message); }
 
         console.log('[Chat] WebSocket chat server initialized');
         return this.wss;
@@ -424,6 +434,8 @@ class ChatServer {
                 }
                 client.channelUserId = channelUserId;
                 client._modStream = null;
+                // A TTS/sound queue held since a restart plays once its room has listeners again.
+                audioQueue.roomJoined(audioQueue.roomKey({ streamId: client.streamId, channelUserId: client.streamId ? null : channelUserId }));
                 // Update viewer counts for old and new streams
                 if (oldStream !== client.streamId) {
                     if (oldStream) this.broadcastUserCount(oldStream);
@@ -1311,12 +1323,8 @@ class ChatServer {
                 return;
             }
 
-            // Read + encode the clip
+            // The clip is read when its turn in the room's audio queue comes.
             if (!sound.url || !fs.existsSync(sound.url)) return;
-            let audioB64;
-            try {
-                audioB64 = fs.readFileSync(sound.url).toString('base64');
-            } catch { return; }
 
             this.soundboardRateLimits.set(rateKey, now);
             streamWindow.count += 1;
@@ -1377,17 +1385,14 @@ class ChatServer {
             this.broadcastToStream(client.streamId, soundMsg);
             // Also surface it on the global chat feed / global overlay (with stream_channel).
             this.forwardToGlobal(client.streamId, soundMsg);
-            this.broadcastToStream(client.streamId, {
-                type: 'soundboard-audio',
-                username,
-                title: `!${cmd}`,
-                audio: audioB64,
-                mimeType: sound.mime || 'audio/mpeg',
-                pitch: mods.pitch,
-                speed: mods.speed,
-                pitchShift: mods.pitchShift,
-                source: 'channel-sound',
-                timestamp: new Date().toISOString(),
+            audioQueue.enqueue({
+                kind: 'channel-sound',
+                streamId: client.streamId,
+                requestedBy: username,
+                identityKey: relay ? `relay:${relay.username}` : (client.user ? `user:${client.user.username}` : `anon:${client.anonId}`),
+                label: `!${cmd}`,
+                payload: { username, title: `!${cmd}`, file: sound.url, mimeType: sound.mime || 'audio/mpeg', seconds: Number(sound.duration_seconds) || 0, pitch: mods.pitch, speed: mods.speed, pitchShift: mods.pitchShift },
+                dedupeKey: soundMsg.id ? `m${soundMsg.id}` : null,
             });
         } catch (err) {
             console.error('[ChannelSound] trigger error:', err.message);
@@ -1419,7 +1424,7 @@ class ChatServer {
                     message: `Commands: /help, /tts <message>, /color <#hex>, /viewers, /uptime, /me <action>, /paste <content>` +
                         `\nMedia: !sr/!yt/!youtube/!req/!request <url>, !queue, !nowplaying` +
                         (this.canModerate(client)
-                            ? `\nMod: /ban <user>, /unban <user>, /timeout <user> [seconds], /clear, /slow <seconds>`
+                            ? `\nMod: /ban <user>, /unban <user>, /timeout <user> [seconds], /clear, /slow <seconds>, /skiptts [id], /cleartts`
                             : ''),
                 });
                 break;
@@ -1547,6 +1552,28 @@ class ChatServer {
             case 'timeout':
                 this.handleModAction(ws, client, 'timeout', args);
                 break;
+
+            case 'skiptts':
+            case 'cleartts': {
+                // The room's TTS and sound queue (./audio-queue.js): moderators and the broadcaster.
+                // /skiptts [request id] skips the clip playing now (or that request); /cleartts
+                // skips everything playing or waiting.
+                if (!this.canModerate(client)) { this.sendTo(ws, { type: 'system', message: 'You do not have permission.' }); return; }
+                const room = audioQueue.roomKey({ streamId: client.streamId, channelUserId: client.streamId ? null : client.channelUserId });
+                if (!room) { this.sendTo(ws, { type: 'system', message: 'No TTS or sounds here.' }); return; }
+                const actor = client.user ? `user:${client.user.username}` : null;
+                if (cmd === 'skiptts') {
+                    const id = parseInt(argParts[0], 10);
+                    const skipped = audioQueue.skip(room, { id: Number.isFinite(id) && id > 0 ? id : null, actor });
+                    this.sendTo(ws, { type: 'system', message: skipped ? `Skipped ${skipped.kind === 'tts' ? 'TTS' : 'sound'} #${skipped.id}${skipped.requested_by ? ` from ${skipped.requested_by}` : ''}.` : 'Nothing to skip.' });
+                    if (skipped) this.logChatModeration(client, 'tts_skip', { request_id: skipped.id, kind: skipped.kind });
+                } else {
+                    const ids = audioQueue.clear(room, { actor });
+                    this.sendTo(ws, { type: 'system', message: ids.length ? `Cleared ${ids.length} TTS/sound request${ids.length === 1 ? '' : 's'}.` : 'The TTS and sound queue is empty.' });
+                    if (ids.length) this.logChatModeration(client, 'tts_clear', { request_ids: ids });
+                }
+                return;
+            }
 
             case 'clear':
                 if (this.canModerate(client)) {
@@ -1740,24 +1767,30 @@ class ChatServer {
 
     // streamId may be null for OFFLINE channel chat — pass channelUserId instead and
     // the audio is delivered to the channel room rather than a stream room.
-    async synthesizeAndBroadcastTTS(streamId, username, text, voiceFX, sourcePlatform = null, identityKey = null, channelUserId = null, ttsKey = null) {
+    //
+    // Queues the utterance (./audio-queue.js); it is synthesized and sent when its turn comes.
+    // Returns the queue's answer ({ queued, id } or { queued: false, reason }) or undefined when
+    // the message is not read at all.
+    synthesizeAndBroadcastTTS(streamId, username, text, voiceFX, sourcePlatform = null, identityKey = null, channelUserId = null, ttsKey = null) {
         // Queue accounting key: per-stream when live, per-channel when offline.
         const queueKey = streamId || (channelUserId ? `ch:${channelUserId}` : null);
         // Duplicate suppression by MESSAGE IDENTITY, not content: the same chat
         // message synthesized twice (duplicated bridge, double-fired relay) is a dupe;
         // a user legitimately typing the same text again is NOT and must be read
-        // again. Callers pass ttsKey (the persisted message id). The content fallback
-        // for id-less paths uses a 2s window — wide enough for a racing double
-        // delivery, far too narrow to eat a real repeat.
-        if (!this._recentTtsDedupe) this._recentTtsDedupe = new Map();
-        const dedupeKey = ttsKey ? `k:${queueKey}|${ttsKey}` : `${queueKey}|${identityKey || username}|${String(text).slice(0, 200)}`;
-        const windowMs = ttsKey ? 30000 : 2000;
-        const nowMs = Date.now();
-        const lastMs = this._recentTtsDedupe.get(dedupeKey);
-        if (lastMs && nowMs - lastMs < windowMs) { console.log(`[TTS] deduped duplicate synth for ${username} in ${queueKey} (${ttsKey ? 'same message id' : 'same content <2s'})`); return; }
-        this._recentTtsDedupe.set(dedupeKey, nowMs);
-        if (this._recentTtsDedupe.size > 500) {
-            for (const [k, t] of this._recentTtsDedupe) if (nowMs - t > 60000) this._recentTtsDedupe.delete(k);
+        // again. Callers pass ttsKey (the persisted message id) — the queue keeps it, so a keyed
+        // message is queued once per room even across a restart. The content fallback for
+        // id-less paths uses a 2s window — wide enough for a racing double delivery, far too
+        // narrow to eat a real repeat.
+        if (!ttsKey) {
+            if (!this._recentTtsDedupe) this._recentTtsDedupe = new Map();
+            const dedupeKey = `${queueKey}|${identityKey || username}|${String(text).slice(0, 200)}`;
+            const nowMs = Date.now();
+            const lastMs = this._recentTtsDedupe.get(dedupeKey);
+            if (lastMs && nowMs - lastMs < 2000) { console.log(`[TTS] deduped duplicate synth for ${username} in ${queueKey} (same content <2s)`); return; }
+            this._recentTtsDedupe.set(dedupeKey, nowMs);
+            if (this._recentTtsDedupe.size > 500) {
+                for (const [k, t] of this._recentTtsDedupe) if (nowMs - t > 60000) this._recentTtsDedupe.delete(k);
+            }
         }
         try {
             // "." prefix = user opted this message out of TTS — never synthesize or broadcast it.
@@ -1766,68 +1799,119 @@ class ChatServer {
             const settings = ttsEngine.getTTSSettings();
             if (!settings.enabled) return;
 
-            // Queue limit checks
             const limits = ttsEngine.getQueueLimits();
-            const globalCount = this.ttsQueueSize.get(queueKey) || 0;
-            if (globalCount >= limits.maxGlobal) return;
+            const r = audioQueue.enqueue({
+                kind: 'tts',
+                streamId: streamId || null,
+                channelUserId: streamId ? null : channelUserId,
+                requestedBy: username || null,
+                identityKey: identityKey || null,
+                label: String(text || '').slice(0, 300),
+                payload: { streamId: streamId || null, channelUserId: channelUserId || null, username, text, voiceFX: voiceFX || null, sourcePlatform: sourcePlatform || null, identityKey: identityKey || null, ttsKey: ttsKey || null },
+                dedupeKey: ttsKey ? `tts:${ttsKey}` : null,
+                maxRoom: limits.maxGlobal,
+                maxPerRequester: limits.maxPerUser,
+            });
+            if (!r.queued && r.reason === 'duplicate') console.log(`[TTS] deduped duplicate synth for ${username} in ${queueKey} (same message id)`);
+            return r;
+        } catch (err) {
+            console.error('[TTS] queue error:', err.message);
+        }
+    }
 
-            // Determine voice ID from equipped cosmetic
-            let voiceId = null;
-            if (voiceFX?.itemId && ttsEngine.VOICE_CATALOG[voiceFX.itemId]) {
-                voiceId = voiceFX.itemId;
-            }
+    /** The queue's TTS performer: synthesize now, return the tts-audio frame (./audio-queue.js). */
+    async _makeTtsAudio(p) {
+        const settings = ttsEngine.getTTSSettings();
+        if (!settings.enabled) throw new Error('TTS is disabled');
 
-            // Increment queue counter
-            this.ttsQueueSize.set(queueKey, globalCount + 1);
+        // Determine voice ID from equipped cosmetic
+        let voiceId = null;
+        if (p.voiceFX?.itemId && ttsEngine.VOICE_CATALOG[p.voiceFX.itemId]) {
+            voiceId = p.voiceFX.itemId;
+        }
 
-            // Honor the channel's configured TTS length (streamers can raise it up to 1200);
-            // falls back to the site default when unset. Without this the server synth always
-            // truncated at the global 200 even when the channel allowed more.
-            let ttsMaxOverride;
-            try { ttsMaxOverride = Number(this._getChannelChatSettings(streamId).tts_max_length) || undefined; } catch { /* use engine default */ }
+        // Honor the channel's configured TTS length (streamers can raise it up to 1200);
+        // falls back to the site default when unset. Without this the server synth always
+        // truncated at the global 200 even when the channel allowed more.
+        let ttsMaxOverride;
+        try { ttsMaxOverride = Number(this._getChannelChatSettings(p.streamId).tts_max_length) || undefined; } catch { /* use engine default */ }
 
-            let result;
-            if (!voiceId && settings.perUserVoices) {
-                // No equipped cosmetic voice → give this chatter a stable per-username voice.
-                const idKey = identityKey || username || 'anon';
-                result = await ttsEngine.synthesizeUserVoice(text, idKey, username, ttsMaxOverride);
-            } else {
-                result = await ttsEngine.synthesize(text, voiceId || settings.defaultVoice, username, ttsMaxOverride);
-            }
+        let result;
+        if (!voiceId && settings.perUserVoices) {
+            // No equipped cosmetic voice → give this chatter a stable per-username voice.
+            const idKey = p.identityKey || p.username || 'anon';
+            result = await ttsEngine.synthesizeUserVoice(p.text, idKey, p.username, ttsMaxOverride);
+        } else {
+            result = await ttsEngine.synthesize(p.text, voiceId || settings.defaultVoice, p.username, ttsMaxOverride);
+        }
+        if (!result) return null;
 
-            // Decrement queue counter
-            const current = this.ttsQueueSize.get(queueKey) || 1;
-            this.ttsQueueSize.set(queueKey, Math.max(0, current - 1));
-
-            if (!result) return;
-
-            // Broadcast TTS audio to all clients in the stream
-            this._broadcastTtsPayload(streamId, channelUserId, {
+        return {
+            durationMs: audioQueue.estimatePlayMs({ audio: result.audio, mimeType: result.mimeType }),
+            frame: {
                 type: 'tts-audio',
-                username,
+                username: p.username,
                 // Stable sender identity ("user:<login>" / "anon:<id>") so clients can
                 // skip their OWN message's TTS locally — senders were hearing their
                 // message twice (their tab + the stream audio).
-                sender_key: identityKey || undefined,
+                sender_key: p.identityKey || undefined,
                 // Unique per utterance — clients dedupe playback on this, so identical
                 // TEXT from separate messages still reads every time.
-                ttsKey: ttsKey || undefined,
-                message: text,
+                ttsKey: p.ttsKey || undefined,
+                message: p.text,
                 audio: result.audio,
                 mimeType: result.mimeType,
                 engine: result.engine,
                 voiceName: result.voiceName,
                 voiceId: result.voiceId,
                 fallback: result.fallback || false,
-                source_platform: sourcePlatform || undefined,
+                source_platform: p.sourcePlatform || undefined,
                 timestamp: new Date().toISOString(),
-            });
-        } catch (err) {
-            // Ensure queue counter is decremented on error
-            const current = this.ttsQueueSize.get(queueKey) || 1;
-            this.ttsQueueSize.set(queueKey, Math.max(0, current - 1));
-            console.error('[TTS] Synthesis broadcast error:', err.message);
-        }
+            },
+        };
+    }
+
+    /** The queue's channel !sound performer: read the clip now, return the soundboard-audio frame. */
+    async _makeChannelSoundAudio(p) {
+        if (!p.file || !fs.existsSync(p.file)) throw new Error('sound file missing');
+        const audio = (await fs.promises.readFile(p.file)).toString('base64');
+        return {
+            durationMs: audioQueue.estimatePlayMs({ audio, mimeType: p.mimeType, seconds: p.seconds, speed: p.speed }),
+            frame: {
+                type: 'soundboard-audio',
+                username: p.username,
+                title: p.title,
+                audio,
+                mimeType: p.mimeType || 'audio/mpeg',
+                pitch: p.pitch,
+                speed: p.speed,
+                pitchShift: p.pitchShift,
+                source: 'channel-sound',
+                timestamp: new Date().toISOString(),
+            },
+        };
+    }
+
+    /** The queue's 101soundboards performer: the clip (cached since the request), as a soundboard-audio frame. */
+    async _makeSoundboardAudio(p) {
+        const result = await soundboard.getSoundboardAudio(p.soundId);
+        if (!result) return null;
+        return {
+            durationMs: audioQueue.estimatePlayMs({ audio: result.audio, mimeType: result.mimeType, speed: p.speed }),
+            frame: {
+                type: 'soundboard-audio',
+                username: p.username,
+                audio: result.audio,
+                mimeType: result.mimeType,
+                soundId: result.soundId,
+                title: result.title,
+                sourceUrl: result.sourceUrl,
+                pitch: p.pitch,
+                speed: p.speed,
+                pitchShift: p.pitchShift,
+                timestamp: new Date().toISOString(),
+            },
+        };
     }
 
     /**
@@ -1947,18 +2031,14 @@ class ChatServer {
             } catch { /* non-critical */ }
             this.broadcastToStream(streamId, sbMsg);
 
-            this.broadcastToStream(streamId, {
-                type: 'soundboard-audio',
-                username,
-                audio: result.audio,
-                mimeType: result.mimeType,
-                soundId: result.soundId,
-                title: result.title,
-                sourceUrl: result.sourceUrl,
-                pitch: parsed.pitch,
-                speed: parsed.speed,
-                pitchShift: parsed.pitchShift,
-                timestamp: new Date().toISOString(),
+            audioQueue.enqueue({
+                kind: 'soundboard',
+                streamId,
+                requestedBy: username,
+                identityKey: client.user ? `user:${client.user.username}` : `anon:${client.anonId}`,
+                label: result.title,
+                payload: { username, soundId: result.soundId, pitch: parsed.pitch, speed: parsed.speed, pitchShift: parsed.pitchShift },
+                dedupeKey: sbMsg.id ? `m${sbMsg.id}` : null,
             });
         } catch (err) {
             if (String(text || '').trim().startsWith('!sb')) {
@@ -2434,6 +2514,7 @@ class ChatServer {
                 clearInterval(this._autoDeleteSweepInterval);
                 this._autoDeleteSweepInterval = null;
             }
+            audioQueue.stop();
             this.wss.clients.forEach(ws => ws.close());
             this.wss.close();
         }

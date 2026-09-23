@@ -12,6 +12,15 @@
  * Admin routes:
  *   GET  /api/tts/admin/settings  — Full TTS config with API keys
  *   PUT  /api/tts/admin/settings  — Update TTS config
+ *
+ * The room's TTS and sound queue (./audio-queue.js) — the broadcaster and moderators of the room
+ * (channel mods, global mods, admins). The room is `stream_id`, or `channel_user_id` for offline
+ * channel chat (query string for GET, body for POST):
+ *   GET  /api/tts/queue            — { room, playing, queued, recent }
+ *   POST /api/tts/queue/skip       — { id? } skip that request, else the one playing (else the next)
+ *   POST /api/tts/queue/clear      — skip everything playing or waiting
+ *   POST /api/tts/queue/:id/report — { state: 'played' | 'failed', error? } the playing client's
+ *                                    report that its clip ended or could not play
  */
 const express = require('express');
 const router = express.Router();
@@ -19,8 +28,11 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { requireAuth, requireAdmin } = require('../auth/auth');
-const { isOwner } = require('../auth/permissions');
+const permissions = require('../auth/permissions');
+const { isOwner } = permissions;
 const ttsEngine = require('./tts-engine');
+const audioQueue = require('./audio-queue');
+const db = require('../db/database');
 const ctx = require('../live-context');
 const config = require('../config');
 
@@ -159,6 +171,89 @@ router.post('/admin/test', requireAuth, requireAdmin, async (req, res) => {
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
+});
+
+// ── The room's TTS and sound queue ────────────────────────────
+/**
+ * Resolve the room a queue request names and check the caller may control it: the broadcaster
+ * (stream or channel owner), the channel's moderators, global mods and admins. Sends the error and
+ * returns null when not.
+ */
+async function queueRoom(req, res) {
+    const src = req.method === 'GET' ? req.query : (req.body || {});
+    const streamId = parseInt(src.stream_id, 10) || null;
+    const channelUserId = streamId ? null : (parseInt(src.channel_user_id, 10) || null);
+    if (!streamId && !channelUserId) { res.status(400).json({ error: 'stream_id or channel_user_id is required' }); return null; }
+    let allowed = false;
+    let channel = null;
+    if (streamId) {
+        const stream = await ctx.ensureStream(streamId).catch(() => null);
+        if (!stream) { res.status(404).json({ error: 'No such stream' }); return null; }
+        channel = stream.channel_id ? ctx.getChannelById(stream.channel_id) : ctx.getChannelByUserId(stream.user_id);
+        if (channel) await ctx.ensurePolicy(channel.id).catch(() => {});   // channel moderators
+        allowed = permissions.canModerateStream(req.user, streamId);
+    } else {
+        channel = ctx.getChannelByUserId(channelUserId);
+        if (channel) await ctx.ensurePolicy(channel.id).catch(() => {});
+        allowed = req.user.id === channelUserId || permissions.isGlobalModOrAbove(req.user)
+            || (!!channel && permissions.isChannelMod(req.user, channel.id));
+    }
+    if (!allowed) { res.status(403).json({ error: 'Only the broadcaster and moderators can manage the TTS and sound queue' }); return null; }
+    return { room: audioQueue.roomKey({ streamId, channelUserId }), streamId, channelUserId, channel };
+}
+
+function logQueueAction(req, r, action, details) {
+    try {
+        db.logModerationAction({
+            scope_type: r.channel ? 'channel' : 'site',
+            scope_id: r.channel ? r.channel.id : undefined,
+            actor_user_id: req.user.id,
+            action_type: action,
+            details: { stream_id: r.streamId, channel_user_id: r.channelUserId, ...details },
+        });
+    } catch { /* non-critical */ }
+}
+
+router.get('/queue', requireAuth, async (req, res) => {
+    try {
+        const r = await queueRoom(req, res);
+        if (!r) return;
+        res.json(audioQueue.list(r.room, { recent: req.query.recent }));
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/queue/skip', requireAuth, async (req, res) => {
+    try {
+        const r = await queueRoom(req, res);
+        if (!r) return;
+        const id = parseInt(req.body && req.body.id, 10) || null;
+        const skipped = audioQueue.skip(r.room, { id, actor: `user:${req.user.username}` });
+        if (!skipped) return res.status(id ? 404 : 409).json({ error: id ? 'No such request waiting or playing' : 'Nothing to skip' });
+        logQueueAction(req, r, 'tts_skip', { request_id: skipped.id, kind: skipped.kind });
+        res.json({ skipped: { id: skipped.id, kind: skipped.kind, requested_by: skipped.requested_by }, queue: audioQueue.list(r.room) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/queue/clear', requireAuth, async (req, res) => {
+    try {
+        const r = await queueRoom(req, res);
+        if (!r) return;
+        const ids = audioQueue.clear(r.room, { actor: `user:${req.user.username}` });
+        if (ids.length) logQueueAction(req, r, 'tts_clear', { request_ids: ids });
+        res.json({ cleared: ids, queue: audioQueue.list(r.room) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+router.post('/queue/:id/report', requireAuth, async (req, res) => {
+    try {
+        const r = await queueRoom(req, res);
+        if (!r) return;
+        const state = String((req.body && req.body.state) || '');
+        if (state !== 'played' && state !== 'failed') return res.status(400).json({ error: "state must be 'played' or 'failed'" });
+        const ok = audioQueue.report(r.room, parseInt(req.params.id, 10), state, { error: req.body && req.body.error, actor: `user:${req.user.username}` });
+        if (!ok) return res.status(409).json({ error: 'That request is not playing' });
+        res.json({ ok: true, queue: audioQueue.list(r.room) });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Cached one-off clips (admin tests, previews) — streamed same-origin so no blob:/data: is needed.
