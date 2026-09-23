@@ -19,7 +19,6 @@ jobs:
     # Blocking once docs/capabilities-proposal/ is registered in openvibe-contracts and the chat
     # service manifest lists them (docs/cutover.md, prerequisites). Until then it reports the gap.
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
