@@ -13,8 +13,9 @@
  *                           strict instead: 412 when the record moved. A patch that changes nothing
  *                           writes nothing.
  *   handleEvent(envelope)   network.module.updated for chat.preferences newer than the cached copy
- *                           drops it at once (for when Events deliveries reach Chat; until then the TTL
- *                           bounds how long a change made outside Chat takes to show).
+ *                           drops it at once. Called by the Events consumer (server/events/consumer.js,
+ *                           Chat's subscription to network.module.updated); without that subscription
+ *                           the TTL bounds how long a change made outside Chat takes to show.
  *
  * Only usr_ subjects: Network keeps modules for accounts, and Chat learns a person's subject from Live.
  */

@@ -320,6 +320,8 @@ async function boot({ env = {} } = {}) {
     h.server = started.server;
     h.mirrorRelay = started.mirror;
     h.eventsRelay = started.relay;
+    h.eventsConsumer = started.events;
+    h.subscriptions = started.subscriptions;
     h.port = started.server.address().port;
     h.base = `http://127.0.0.1:${h.port}`;
     h.db = require('../server/db/database');
@@ -417,7 +419,7 @@ async function boot({ env = {} } = {}) {
     h.close = async () => {
         for (const c of h.children || []) { if (c.exitCode == null && c.signalCode == null) { c.kill('SIGKILL'); await c.exited; } }
         try { h.chatServer.close(); } catch { /* */ }
-        try { h.ctx.stop(); h.mirrorRelay.stop(); h.eventsRelay.stop(); } catch { /* */ }
+        try { h.ctx.stop(); h.mirrorRelay.stop(); h.eventsRelay.stop(); h.eventsConsumer.stop(); h.subscriptions.stop(); } catch { /* */ }
         await new Promise((r) => h.server.close(() => r()));
         network.close(); liveServer.close();
         try { h.db.close(); } catch { /* */ }

@@ -464,3 +464,29 @@ CREATE TABLE IF NOT EXISTS chat_meta (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+-- Deploys announced in chat, one row per release: Live's head commit (live.release.deployed
+-- subject.id; the first commit of the bridge's deployNotice). The bridge and the Events consumer
+-- both claim the head here in the transaction that stores or folds the card
+-- (server/chat/deploy-notice.js), so a head never makes two cards whichever path comes first.
+-- bridge_at / event_at: when each path delivered it (ms), to see that both carry every deploy.
+CREATE TABLE IF NOT EXISTS deploy_releases (
+    head TEXT PRIMARY KEY,
+    message_id INTEGER,
+    first_via TEXT NOT NULL CHECK(first_via IN ('bridge', 'events')),
+    bridge_at INTEGER,
+    event_at INTEGER,
+    event_id TEXT,
+    commit_count INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+);
+
+-- OpenVibe.Events deliveries already applied (openvibe-sdk inbox: consumer + event id), claimed in
+-- the transaction that applies the event (server/events/consumer.js). Pruned after 35 days
+-- (Events keeps events 30).
+CREATE TABLE IF NOT EXISTS chat_event_inbox (
+    consumer TEXT NOT NULL,
+    event_id TEXT NOT NULL,
+    processed_at INTEGER NOT NULL,
+    PRIMARY KEY (consumer, event_id)
+);

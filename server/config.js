@@ -84,7 +84,8 @@ module.exports = {
     // (server/prefs/). Read and written with Chat's service token (grants network.modules.read and
     // network.modules.write on chat.preferences, audience openvibe.network). Cached per person for
     // ttlMs: Chat's own writes update the cache at once, a change made through Network directly shows
-    // within ttlMs (at once when a network.module.updated event reaches prefs.handleEvent()).
+    // at once when its network.module.updated reaches the Events consumer (prefs.handleEvent()), and
+    // within ttlMs without it.
     prefs: {
         enabled: bool(process.env.CHAT_PREFS_ENABLED, true),
         ttlMs: int(process.env.CHAT_PREFS_TTL_MS, 60_000),
@@ -96,6 +97,17 @@ module.exports = {
     events: {
         url: strip(process.env.EVENTS_URL || ''),
         intervalMs: int(process.env.EVENTS_RELAY_INTERVAL_MS, 5000),
+        // The consumer (server/events/consumer.js): POST /internal/events, deliveries of Chat's
+        // subscriptions (live.release.deployed, network.module.updated), signature v2 under
+        // CHAT_EVENTS_SECRET (comma-separated for rotation; each 32+ characters, the first is the one
+        // handed to Events). Unset = the route answers 503 and no subscription is made.
+        secrets: String(process.env.CHAT_EVENTS_SECRET || '').split(',').map((s) => s.trim()).filter((s) => s.length >= 32),
+        // Create the subscriptions at boot when missing (idempotent; an existing one, even disabled,
+        // is left as it is). Needs EVENTS_URL, the secret, OV_OAUTH_CLIENT_SECRET and the Network
+        // grant chat events.subscription.manage on openvibe.events.
+        subscribe: bool(process.env.CHAT_EVENTS_SUBSCRIBE, true),
+        // Where Events delivers. Default http://127.0.0.1:<PORT>/internal/events.
+        endpoint: strip(process.env.CHAT_EVENTS_ENDPOINT || ''),
     },
 
     // Channel sound clips live on disk. At cutover this is Live's sounds directory: stored rows

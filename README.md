@@ -63,7 +63,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 | Coins, AI viewers, arena, media queue, hardware, pastes, translation, PowerChat, notifications | **Live** | `server/live-context.js` → `POST /internal/chat-effects/*` (`live.chat_effects.write`) |
 | Live's own chat pushes and writes (AI viewers, relays, donations, `/api/mod`, recaps, calls) | **Live → Chat** | `POST /internal/live/calls` (`chat.live_bridge.write`), presence `GET /internal/live/presence` (`chat.presence.read`) |
 | Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |
-| Events | **OpenVibe.Events** | `events_outbox` → `POST /api/v1/events` when `EVENTS_URL` is set (`events.event.publish`) |
+| Events | **OpenVibe.Events** | `events_outbox` → `POST /api/v1/events` when `EVENTS_URL` is set (`events.event.publish`); Chat's subscriptions deliver to `POST /internal/events` (`server/events/consumer.js`, `events.subscription.manage`) |
 | A person's chat preferences | **OpenVibe.Network** user module `chat.preferences` (Chat owns the namespace) | `server/prefs/` → `GET/PUT/DELETE /internal/modules/chat.preferences/:subject` (`network.modules.read` / `.write`), cached per person |
 | Member badges | **OpenVibe.VIP** (Billing holds the entitlement) | `server/vip/badges.js` → `POST /api/v1/entitlements/check` with `product: 'chat'` (`vip.entitlement.check`), behind the shared product cache |
 
@@ -98,6 +98,46 @@ in one transaction with its outbox row, and the relay publishes in outbox order,
 always follows the message it removes. Messages deleted before this existed are redacted by
 OpenVibe.Events' `scripts/redact-backfill.js`.
 
+#### Consumed
+
+Chat subscribes (consumer `chat`) to two topics, delivered to `POST /internal/events`
+(`server/events/consumer.js`):
+
+| Event | From | What Chat does |
+| --- | --- | --- |
+| `live.release.deployed` | Live (`server/events/release-events.js`), subject `{ type: release, id: <head commit> }` | stores or folds the deploy card in global chat, exactly as the bridge op `deployNotice` does (`server/chat/deploy-notice.js`: one rolling card, folded while nobody has spoken in any room and within 3 hours; the broadcast carries the row id; late joiners get it once) |
+| `network.module.updated` | Network (`server/identity/module-events.js`) | for `chat.preferences`, a revision newer than the cached copy drops it (`prefs.handleEvent()`); an older or equal revision and other namespaces change nothing |
+
+- **One card per deploy, whichever path comes first** (compatibility register C-84). Until the bridge
+  op is removed, Live sends each deploy twice: `deployNotice` over the bridge (commits newest first,
+  so the first is the head) and the event. Both claim the head commit in `deploy_releases` in the
+  transaction that stores or folds the card; the second finds it claimed and changes nothing but its
+  `bridge_at` / `event_at`. A retried bridge op, a redelivered event and Live re-announcing after a
+  crash are the same card. A redeploy of a head already announced (a rollback to it) says nothing.
+  A release event older than 6 hours (an operator replay) is `ignored:stale`.
+- **Exactly once.** The openvibe-sdk inbox (`chat_event_inbox`, pruned after 35 days) claims
+  `(chat, event_id)` in the same SQLite transaction as the change, and broadcasts run only after it
+  commits. A failure answers 500 and rolls both back; Events retries.
+- **Signature v2 only** (`parseDelivery` with `requireV2`): HMAC over `"<t>.<raw body>"` under
+  `CHAT_EVENTS_SECRET`, `t` within ±300 s. A bad, stale, v1-only or unsigned delivery is 401; no secret
+  is 503; a request that came through nginx (a forwarding header) is 403.
+- **Subscriptions** are created at boot when missing (`server/events/subscriptions.js`: list, then
+  create; Events answers 409 for a duplicate, so it is idempotent), retried in the background while
+  Network or Events cannot answer. An existing subscription is left as it is, even disabled, so a
+  rollback survives restarts. `CHAT_EVENTS_SUBSCRIBE=0` turns this off. Needs `EVENTS_URL`,
+  `CHAT_EVENTS_SECRET`, `OV_OAUTH_CLIENT_SECRET` and the Network grant
+  `chat events.subscription.manage openvibe.events`.
+
+```bash
+sudo node --env-file=/etc/openvibe/chat.env scripts/subscribe-events.js --dry-run   # list them
+sudo node --env-file=/etc/openvibe/chat.env scripts/subscribe-events.js --disable   # rollback: no more deliveries
+sudo node --env-file=/etc/openvibe/chat.env scripts/subscribe-events.js --enable    # undo it
+```
+
+`/ready` reports the consumer under `events.consumer` (received, applied, duplicates, ignored, refused,
+failed, the last type and outcome); `SELECT * FROM deploy_releases ORDER BY created_at DESC` shows
+which path delivered each deploy first and when the other one arrived.
+
 ### VIP member badges
 
 A member's messages in a creator's room (stream or offline channel chat) carry that creator's VIP
@@ -114,13 +154,13 @@ written by creators, so nothing else of it passes and clients render both as tex
   `chat_translation`) and the row's metadata is updated.
 - **Fails closed.** VIP unreachable or slow, no client secret, a refused grant, a malformed answer, an
   inactive or `unknown` entitlement → no badge. `CHAT_VIP_BADGES=0` turns lookups off.
-- **Convergence bound.** Chat has no Events inbox, so when a membership ends (Billing's
+- **Convergence bound.** Chat does not subscribe to VIP's events yet, so when a membership ends (Billing's
   `billing.entitlement.changed` → VIP's `vip.membership.changed`) the badge stops at most
   `CHAT_VIP_BADGE_TTL_MS` (60 s) after VIP stops granting, never past the entitlement's `expires_at`;
   end to end, add VIP's own bound (seconds with events, at most `VIP_PROJECTION_MAX_AGE_MS` without —
   OpenVibe.VIP README, "The product cache and the convergence bound"). A new member's badge appears
   within `CHAT_VIP_BADGE_DENY_TTL_MS` (30 s). `badges.handleEvent()` drops a pair at once, for when
-  the events are routed to Chat. `test/vip-badge.test.js` drives all of this against a stub VIP with an
+  `vip.membership.changed` is added to the Events consumer. `test/vip-badge.test.js` drives all of this against a stub VIP with an
   injected clock.
 - Needs the Network grant `chat vip.entitlement.check openvibe.vip`; without it VIP answers 403 and
   nobody gets a badge. The client is vendored from OpenVibe.VIP (`server/vip/vip-client.js`, copied
@@ -139,9 +179,10 @@ every write, so another writer is never overwritten (Chat reads again and re-app
 If-Match is strict: 412).
 
 - **Cache.** One entry per person for `CHAT_PREFS_TTL_MS` (60 s). Chat's own writes land in it at once; a
-  change made through Network directly (the person's account page) shows within the TTL, and at once
-  when a `network.module.updated` for it reaches `prefs.handleEvent()` (for when Events deliveries reach
-  Chat). Network down: the cached copy with `stale: true`, else 503; writes 503.
+  change made through Network directly (the person's account page) shows at once: its
+  `network.module.updated` reaches the Events consumer, and `prefs.handleEvent()` drops the cached copy
+  when the revision is newer (without the subscription, within the TTL). Network down: the cached copy
+  with `stale: true`, else 503; writes 503.
 - API tokens read only. A person Live knows without a Network subject gets 409 `prefs.subject_unknown`.
 - **Migration** of what Live kept server-side (`user_preferences.chat_settings`, the browser's whole
   `chatSettings`): `scripts/migrate-chat-preferences.js`. Only choices move (`showTimestamps` →
@@ -166,12 +207,14 @@ npm test                      # Node 22; stub Live and Network in-process
 node scripts/import-from-live.js --live-db /tmp/live-snapshot.db --dry-run
 node scripts/parity-check.js --live https://openvibe.live --chat http://127.0.0.1:4401 --before "…"
 node scripts/mirror-flush.js  # rollback helper: push queued mirror rows to Live
+node scripts/subscribe-events.js --dry-run   # Chat's Events subscriptions (boot creates missing ones)
 ```
 
 `/ready` (openvibe-shared/ready shape: `status` ready/degraded/not_ready and `checks`) is 503 only
 when the `db` check (a read of `chat_messages`) fails. `live_sync` is optional: it reads degraded when
 the last clean Live sync is older than `LIVE_SYNC_STALE_MS` (default 60 s) or a sync step has missed
-its own interval by that much. It also reports the mirror queue and whether events are relayed.
+its own interval by that much. It also reports the mirror queue, whether events are relayed, and the
+Events consumer's counters.
 Production: `deploy/systemd/openvibe-chat.service`, `deploy/nginx/openvibe.live-chat.locations.conf`,
 `/etc/openvibe/chat.env`. The whole switch-over — rehearsal, import, parity checks, nginx, the flag,
 rollback — is `docs/cutover.md`.
@@ -186,10 +229,12 @@ server/chat/               moved from Live: chat-server, dm, dm-routes, routes, 
 server/auth/               token resolution through Live; the chat subset of Live's permissions
 server/bridge/             Live → Chat calls + presence (live-bridge.js); Chat → Live read mirror (live-mirror.js)
 server/events/outbox.js    events.event-envelope@1 outbox and relay
+server/events/consumer.js  POST /internal/events: Chat's Events subscriptions (live.release.deployed, network.module.updated)
+server/events/subscriptions.js  creates them at boot when missing; list/disable/enable for scripts/subscribe-events.js
 server/net/service-auth.js service tokens: client (Chat → others) and guard (others → Chat)
 server/prefs/              chat preferences in the Network user module chat.preferences (routes, cache, migration from Live)
 server/db/                 schema.sql, database.js (Live's chat functions, same names and arguments)
-scripts/                   import-from-live, parity-check, mirror-flush, migrate-chat-preferences
+scripts/                   import-from-live, parity-check, mirror-flush, migrate-chat-preferences, subscribe-events
 docs/                      cutover.md, live-patch.diff, capabilities-proposal/
 ```
 
@@ -223,7 +268,9 @@ to the chat manifest (then the check uses a literal id the contracts check can s
 `chat.room.*`, `chat.message.*`, `chat.dm.*`, `chat.moderation.*`, `chat.tts.*`, `chat.call.*`.
 
 Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat.moderation.action`
-(produced); planned `chat.room.updated`, `chat.call.*`, `chat.tts.queued|played|failed`.
+(produced); planned `chat.room.updated`, `chat.call.*`, `chat.tts.queued|played|failed`. Consumed:
+`live.release.deployed`, `network.module.updated` (Chat's own subscriptions: Network grant
+`chat events.subscription.manage openvibe.events`).
 
 ## Depends on
 

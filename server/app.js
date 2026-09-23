@@ -58,7 +58,7 @@ function getAllowedOrigins() {
     return allowed;
 }
 
-function createApp({ chatServer, bridge, mirror, relay }) {
+function createApp({ chatServer, bridge, mirror, relay, events = null }) {
     const allowedOrigins = getAllowedOrigins();
     const app = express();
     app.disable('x-powered-by');
@@ -74,6 +74,9 @@ function createApp({ chatServer, bridge, mirror, relay }) {
     // ── Internal (loopback; never routed by nginx) ─────────────
     // Alert sounds travel as base64 in broadcasts (uploads up to MAX_SOUND_SIZE_KB): room for them.
     app.use('/internal/live', express.json({ limit: '16mb' }), bridge);
+    // OpenVibe.Events deliveries (live.release.deployed, network.module.updated): signature v2 over
+    // the raw body, so this router reads the body itself (server/events/consumer.js).
+    if (events) app.use('/internal/events', events.router);
     app.get('/health', (req, res) => res.json({ ok: true, service: 'chat' }));
     // Readiness in the openvibe-shared/ready shape (status ready/degraded/not_ready, named checks):
     // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
@@ -121,7 +124,10 @@ function createApp({ chatServer, bridge, mirror, relay }) {
             connections: chatServer.getTotalConnections(),
             live: { last_sync_at: ctx.stats.lastSyncAt, last_success_at: ctx.stats.lastSuccessAt, failures: ctx.stats.failures, last_error: ctx.stats.lastError },
             mirror: mirror ? { enabled: config.live.mirror, pending, last_error: mirror.lastError() } : null,
-            events: { enabled: !!config.events.url },
+            events: {
+                enabled: !!config.events.url,
+                consumer: events ? { enabled: events.enabled, ...events.stats } : null,
+            },
         });
     });
 
