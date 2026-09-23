@@ -76,7 +76,15 @@ Stays in Live (decided with evidence, `docs/cutover.md`): `media_requests`, `med
 | --- | --- | --- |
 | `chat.message.created` | public | every stored message in a public room (global, channel, stream) |
 | `chat.dm.created` | subject | every DM; the payload names the participants, never the text |
+| `chat.message.deleted` | public | every deletion of public-room messages: one message (moderation), a user's, an anon's or a relay user's history (self-delete, `/api/mod` purge), a time-range purge, and the auto-delete sweep. Only ids (`message_ids`, at most 500 per event), never the text, the author or who deleted it |
 | `chat.moderation.action` | internal | every moderation log row (chat commands and Live's `/api/mod`) |
+
+`chat.message.deleted` also carries `payload.redacts: { subject_type: "chat_message", subject_ids }`,
+which makes OpenVibe.Events rewrite the stored `chat.message.created` of each id into a tombstone
+(no text, no anon id, no author) on every read path, public SSE replay included. Every delete runs
+in one transaction with its outbox row, and the relay publishes in outbox order, so the deletion
+always follows the message it removes. Messages deleted before this existed are redacted by
+OpenVibe.Events' `scripts/redact-backfill.js`.
 
 ## Running it
 
@@ -137,8 +145,8 @@ Introduced here and registered in `openvibe-contracts` v0.13.0:
 `live.chat_effects.write`, `live.chat_mirror.write` (owner live). Planned families:
 `chat.room.*`, `chat.message.*`, `chat.dm.*`, `chat.moderation.*`, `chat.tts.*`, `chat.call.*`.
 
-Events: `chat.message.created`, `chat.dm.created`, `chat.moderation.action` (produced);
-planned `chat.message.deleted`, `chat.room.updated`, `chat.call.*`, `chat.tts.queued|played|failed`.
+Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat.moderation.action`
+(produced); planned `chat.room.updated`, `chat.call.*`, `chat.tts.queued|played|failed`.
 
 ## Depends on
 

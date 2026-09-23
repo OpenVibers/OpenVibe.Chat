@@ -146,6 +146,31 @@ function subjectFor(userId) {
 function _outbox() { return require('../events/outbox'); }
 function _ctx() { return require('../live-context'); }
 
+// Ids per chat.message.deleted event (OpenVibe.Events takes up to 1000 per redaction directive).
+const DELETED_EVENT_IDS = 500;
+
+/**
+ * Announce deleted messages: one chat.message.deleted per DELETED_EVENT_IDS ids, in the caller's
+ * transaction. Public like chat.message.created, and it carries only ids (never the text, the
+ * author or who deleted it). payload.redacts asks OpenVibe.Events to turn the stored
+ * chat.message.created of each id into a tombstone, so the text stops being replayable there.
+ */
+function _announceDeleted(ids) {
+    const list = [...new Set((ids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    for (let i = 0; i < list.length; i += DELETED_EVENT_IDS) {
+        const part = list.slice(i, i + DELETED_EVENT_IDS);
+        _outbox().enqueue({
+            event_type: 'chat.message.deleted',
+            visibility: 'public',
+            subject: { type: 'chat_message', id: String(part[0]) },
+            payload: {
+                message_ids: part,
+                redacts: { subject_type: 'chat_message', subject_ids: part.map(String) },
+            },
+        });
+    }
+}
+
 // ── Chat messages ─────────────────────────────────────────────
 
 function saveChatMessage({ stream_id, channel_user_id, user_id, anon_id, username, message, message_type, is_global, reply_to_id, source_platform, auto_delete_at, metadata }) {
@@ -271,13 +296,18 @@ function mergeChatMessageMetadata(id, patch) {
 }
 
 /**
- * Soft-delete a chat message by ID. Sets is_deleted=1 and records who deleted it.
+ * Soft-delete a chat message by ID. Sets is_deleted=1 and records who deleted it. Every delete below
+ * also announces chat.message.deleted in the same transaction (_announceDeleted).
  */
 function deleteChatMessage(id, deletedBy = null) {
-    return run(
-        'UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP WHERE id = ?',
-        [deletedBy, id]
-    );
+    return transaction(() => {
+        const res = run(
+            'UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP WHERE id = ?',
+            [deletedBy, id]
+        );
+        if (res.changes) _announceDeleted([id]);
+        return res;
+    });
 }
 
 /**
@@ -289,15 +319,12 @@ function deleteUserChatMessages(userId, { streamId = null, deletedBy = null } = 
         ? 'user_id = ? AND stream_id = ? AND is_deleted = 0'
         : 'user_id = ? AND is_deleted = 0';
     const params = streamId ? [userId, streamId] : [userId];
-    const messages = all(`SELECT id FROM chat_messages WHERE ${condition}`, params);
-    const ids = messages.map(m => m.id);
-    if (ids.length === 0) return [];
-    const placeholders = ids.map(() => '?').join(',');
-    run(
-        `UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
-        [deletedBy, ...ids]
-    );
-    return ids;
+    return transaction(() => {
+        const ids = all(`SELECT id FROM chat_messages WHERE ${condition}`, params).map(m => m.id);
+        if (ids.length === 0) return [];
+        _softDeleteIds(ids, deletedBy);
+        return ids;
+    });
 }
 
 /**
@@ -308,15 +335,12 @@ function deleteAnonChatMessages(anonId, { streamId = null, deletedBy = null } = 
         ? 'anon_id = ? AND stream_id = ? AND is_deleted = 0'
         : 'anon_id = ? AND is_deleted = 0';
     const params = streamId ? [anonId, streamId] : [anonId];
-    const messages = all(`SELECT id FROM chat_messages WHERE ${condition}`, params);
-    const ids = messages.map(m => m.id);
-    if (ids.length === 0) return [];
-    const placeholders = ids.map(() => '?').join(',');
-    run(
-        `UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
-        [deletedBy, ...ids]
-    );
-    return ids;
+    return transaction(() => {
+        const ids = all(`SELECT id FROM chat_messages WHERE ${condition}`, params).map(m => m.id);
+        if (ids.length === 0) return [];
+        _softDeleteIds(ids, deletedBy);
+        return ids;
+    });
 }
 
 /**
@@ -327,15 +351,24 @@ function deleteRelayUserMessages(username, { streamId = null, deletedBy = null }
         ? 'username = ? AND stream_id = ? AND is_deleted = 0'
         : 'username = ? AND is_deleted = 0';
     const params = streamId ? [username, streamId] : [username];
-    const messages = all(`SELECT id FROM chat_messages WHERE ${condition}`, params);
-    const ids = messages.map(m => m.id);
-    if (ids.length === 0) return [];
-    const placeholders = ids.map(() => '?').join(',');
-    run(
-        `UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP WHERE id IN (${placeholders})`,
-        [deletedBy, ...ids]
-    );
-    return ids;
+    return transaction(() => {
+        const ids = all(`SELECT id FROM chat_messages WHERE ${condition}`, params).map(m => m.id);
+        if (ids.length === 0) return [];
+        _softDeleteIds(ids, deletedBy);
+        return ids;
+    });
+}
+
+/** Mark `ids` deleted (in chunks, under SQLite's variable limit) and announce them. In a transaction. */
+function _softDeleteIds(ids, deletedBy) {
+    for (let i = 0; i < ids.length; i += DELETED_EVENT_IDS) {
+        const part = ids.slice(i, i + DELETED_EVENT_IDS);
+        run(
+            `UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP WHERE id IN (${part.map(() => '?').join(',')})`,
+            [deletedBy, ...part]
+        );
+    }
+    _announceDeleted(ids);
 }
 
 function deleteExpiredChatMessages(limit = 500) {
@@ -357,29 +390,33 @@ function deleteExpiredChatMessages(limit = 500) {
 
     const ids = rows.map(row => row.id);
     const placeholders = ids.map(() => '?').join(',');
-    run(
-        `UPDATE chat_messages
-         SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP
-         WHERE id IN (${placeholders})`,
-        ids
-    );
+    transaction(() => {
+        run(
+            `UPDATE chat_messages
+             SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP
+             WHERE id IN (${placeholders})`,
+            ids
+        );
+        _announceDeleted(ids);
+    });
     return rows;
 }
 
 function deleteChatMessagesByTimeRange(streamId, fromTime, toTime, deletedBy) {
-    if (streamId) {
-        return run(
-            `UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP
-             WHERE stream_id = ? AND timestamp >= ? AND timestamp <= ? AND is_deleted = 0`,
-            [deletedBy, streamId, fromTime, toTime]
+    // Global chat is is_global = 1. The ids are read first, in the same transaction, to announce them.
+    const where = streamId
+        ? 'stream_id = ? AND timestamp >= ? AND timestamp <= ? AND is_deleted = 0'
+        : 'is_global = 1 AND timestamp >= ? AND timestamp <= ? AND is_deleted = 0';
+    const params = streamId ? [streamId, fromTime, toTime] : [fromTime, toTime];
+    return transaction(() => {
+        const ids = all(`SELECT id FROM chat_messages WHERE ${where}`, params).map(m => m.id);
+        const res = run(
+            `UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP WHERE ${where}`,
+            [deletedBy, ...params]
         );
-    }
-    // Global chat (is_global = 1)
-    return run(
-        `UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP
-         WHERE is_global = 1 AND timestamp >= ? AND timestamp <= ? AND is_deleted = 0`,
-        [deletedBy, fromTime, toTime]
-    );
+        _announceDeleted(ids);
+        return res;
+    });
 }
 
 function countChatMessagesByTimeRange(streamId, fromTime, toTime) {

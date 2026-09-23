@@ -4,6 +4,9 @@
  * enqueue() runs inside the same SQLite transaction as the change it announces (a chat message,
  * a DM, a moderation action), so an event exists exactly when its effect does:
  *   chat.message.created   visibility public   — a message in a public room (global/channel/stream)
+ *   chat.message.deleted   visibility public   — ids of deleted messages (moderation, the author,
+ *                                                a purge, auto-delete); payload.redacts makes
+ *                                                OpenVibe.Events tombstone their chat.message.created
  *   chat.dm.created        visibility subject  — a DM; the payload names participants, never the text
  *   chat.moderation.action visibility internal — ban/timeout/clear/slow/deletes, from chat or Live
  *
