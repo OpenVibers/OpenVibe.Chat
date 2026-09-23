@@ -54,6 +54,14 @@ module.exports = {
         mirror: bool(process.env.LIVE_MIRROR, false),
         mirrorIntervalMs: int(process.env.LIVE_MIRROR_INTERVAL_MS, 1000),
         requestTimeoutMs: int(process.env.LIVE_TIMEOUT_MS, 4000),
+        // /ready reports the Live sync degraded once its last clean pass is older than this.
+        // The loop ticks every 2 s and the bans and stream projections are due every 10 s, so a
+        // healthy Chat finishes a clean pass at least every ~10 s; 60 s is six missed ban/stream
+        // refreshes: long enough to ride out a Live restart (about 6 s) or a slow pass of 4 s
+        // timeouts, short enough that bans and live state served from stale caches show within
+        // a minute. The same margin applies to each step on top of its own interval
+        // (live-context.js SCHEDULE), so the 5- and 15-minute full syncs are judged fairly too.
+        syncStaleMs: int(process.env.LIVE_SYNC_STALE_MS, 60_000),
     },
 
     // OpenVibe.Events — the outbox relays only when EVENTS_URL is set.

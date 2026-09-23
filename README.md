@@ -88,7 +88,10 @@ node scripts/parity-check.js --live https://openvibe.live --chat http://127.0.0.
 node scripts/mirror-flush.js  # rollback helper: push queued mirror rows to Live
 ```
 
-`/ready` reports the last Live sync, the mirror queue and whether events are relayed.
+`/ready` (openvibe-shared/ready shape: `status` ready/degraded/not_ready and `checks`) is 503 only
+when the `db` check (a read of `chat_messages`) fails. `live_sync` is optional: it reads degraded when
+the last clean Live sync is older than `LIVE_SYNC_STALE_MS` (default 60 s) or a sync step has missed
+its own interval by that much. It also reports the mirror queue and whether events are relayed.
 Production: `deploy/systemd/openvibe-chat.service`, `deploy/nginx/openvibe.live-chat.locations.conf`,
 `/etc/openvibe/chat.env`. The whole switch-over — rehearsal, import, parity checks, nginx, the flag,
 rollback — is `docs/cutover.md`.

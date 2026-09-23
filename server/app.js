@@ -15,6 +15,7 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const ctx = require('./live-context');
+const db = require('./db/database');
 const { extractToken, extractWsToken, authenticateWs } = require('./auth/auth');
 const { trustProxy } = require('./net/client-ip');
 
@@ -74,13 +75,52 @@ function createApp({ chatServer, bridge, mirror, relay }) {
     // Alert sounds travel as base64 in broadcasts (uploads up to MAX_SOUND_SIZE_KB): room for them.
     app.use('/internal/live', express.json({ limit: '16mb' }), bridge);
     app.get('/health', (req, res) => res.json({ ok: true, service: 'chat' }));
+    // Readiness in the openvibe-shared/ready shape (status ready/degraded/not_ready, named checks):
+    // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
+    // without; `live_sync` is optional, because chat keeps flowing from warm caches while Live is
+    // down (live-context.js), so a stale sync degrades the service instead of taking it out.
+    function timed(fn) {
+        const t0 = process.hrtime.bigint();
+        let out;
+        try { out = fn(); } catch (err) { out = { ok: false, error: String((err && err.message) || err).split('\n')[0].slice(0, 200) }; }
+        const { ok, error, detail } = out;
+        return {
+            status: ok ? 'ok' : 'fail', required: false,
+            ...(error ? { error } : {}), ...(detail !== undefined ? { detail } : {}),
+            latency_ms: Math.round(Number(process.hrtime.bigint() - t0) / 1e5) / 10,
+            checked_at: new Date().toISOString(),
+        };
+    }
     app.get('/ready', (req, res) => {
-        const ready = !!ctx.stats.lastSyncAt;
+        const checks = {
+            // A real read of a chat table (MAX of the rowid is an index seek, not a scan).
+            db: { ...timed(() => ({ ok: true, detail: { max_message_id: db.get('SELECT MAX(id) AS id FROM chat_messages').id } })), required: true },
+            live_sync: timed(() => {
+                const s = ctx.syncStatus(config.live.syncStaleMs);
+                const detail = { ...s, threshold_ms: config.live.syncStaleMs };
+                if (s.last_success_at === null) return { ok: false, error: 'no successful Live sync since start', detail };
+                if (s.age_ms > config.live.syncStaleMs) return { ok: false, error: `last successful Live sync ${Math.round(s.age_ms / 1000)}s ago`, detail };
+                if (s.late_steps.length) return { ok: false, error: `Live sync late: ${s.late_steps.join(', ')}`, detail };
+                return { ok: true, detail };
+            }),
+        };
+        const failed = Object.keys(checks).filter((k) => checks[k].required && checks[k].status !== 'ok');
+        const degraded = Object.keys(checks).filter((k) => !checks[k].required && checks[k].status !== 'ok');
+        const ready = failed.length === 0;
+        let pending = null;
+        if (mirror && checks.db.status === 'ok') { try { pending = mirror.pending(); } catch { /* reported by db */ } }
+        res.set('Cache-Control', 'no-store');
         res.status(ready ? 200 : 503).json({
             ready,
+            status: !ready ? 'not_ready' : degraded.length ? 'degraded' : 'ready',
+            service: 'chat',
+            checked_at: new Date().toISOString(),
+            failed,
+            degraded,
+            checks,
             connections: chatServer.getTotalConnections(),
-            live: { last_sync_at: ctx.stats.lastSyncAt, failures: ctx.stats.failures, last_error: ctx.stats.lastError },
-            mirror: mirror ? { enabled: config.live.mirror, pending: mirror.pending(), last_error: mirror.lastError() } : null,
+            live: { last_sync_at: ctx.stats.lastSyncAt, last_success_at: ctx.stats.lastSuccessAt, failures: ctx.stats.failures, last_error: ctx.stats.lastError },
+            mirror: mirror ? { enabled: config.live.mirror, pending, last_error: mirror.lastError() } : null,
             events: { enabled: !!config.events.url },
         });
     });

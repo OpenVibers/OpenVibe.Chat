@@ -109,7 +109,7 @@ report. Run the import again: every `inserted` must be 0 (idempotent).
 # 3. a rehearsal Chat on 4401 against production Live, mirror OFF
 sudo -u ubuntu env $(sudo cat /etc/openvibe/chat.env | xargs) PORT=4401 CHAT_DB_PATH=/tmp/chat-rehearsal.db \
      CHAT_CACHE_DIR=/tmp/chat-rehearsal-cache LIVE_MIRROR=0 EVENTS_URL= node server/index.js &
-curl -s http://127.0.0.1:4401/ready | jq     # ready: true after the first Live sync
+curl -s http://127.0.0.1:4401/ready | jq     # status: "ready" once a Live sync pass succeeded
 
 # 4. parity: the same reads answer the same (history pinned before the snapshot)
 node scripts/parity-check.js --live https://openvibe.live --chat http://127.0.0.1:4401 --before "$SNAP_AT" \
@@ -153,7 +153,7 @@ streamers; `deploy.sh --wait-idle` waits for none).
    Chat's own new rows are already in Live (mirror) and count as `identical`; `chat_kept` counts rows
    Chat edited since pass 1 (Chat wins); `held` must be 0.
 4. **Checks.**
-   - `curl -s 127.0.0.1:4400/ready | jq` — `live.last_sync_at` recent, `mirror.pending` near 0,
+   - `curl -s 127.0.0.1:4400/ready | jq` — `status` "ready" (`live.last_success_at` recent), `mirror.pending` near 0,
      `mirror.last_error` null.
    - Live: `sqlite3 …/live.db "select count(*) from chat_bridge_outbox"` stays near 0 (its forwarded
      writes are acknowledged); `journalctl -u openvibe-live | grep ChatRemote` shows no refusals.

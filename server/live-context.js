@@ -118,7 +118,9 @@ function defaultModerationSettings(channelId) {
 // ── Transport ────────────────────────────────────────────────────────────────────────────────
 
 let _fetch = (...a) => globalThis.fetch(...a);
-const stats = { reads: 0, effects: 0, failures: 0, lastError: null, lastSyncAt: null };
+// lastSyncAt: the last sync pass, whatever its outcome. lastSuccessAt: the last pass in which every
+// projection it ran came back from Live (what /ready judges freshness by).
+const stats = { reads: 0, effects: 0, failures: 0, lastError: null, lastSyncAt: null, lastSuccessAt: null };
 
 class LiveError extends Error {
     constructor(status, message, body) { super(message); this.status = status; this.body = body; }
@@ -655,36 +657,72 @@ const SCHEDULE = [
     ['streams*', 30 * 60_000, () => syncTable('streams', 'ctx_streams', STREAM_COLS, { full: true })],
     ['managed*', 5 * 60_000, () => syncTable('managed-streams', 'ctx_managed_streams', MS_COLS, { full: true })],
     ['channels*', 5 * 60_000, () => syncTable('channels', 'ctx_channels', CHANNEL_COLS, { full: true })],
-    ['bans', TTL.bans, refreshBans],
-    ['settings', TTL.settings, () => ensureSettings(true)],
+    // refreshBans and ensureSettings keep the cached value on a Live error instead of throwing
+    // (callers want the stale value); for the schedule a refresh that did not land is a failure.
+    ['bans', TTL.bans, async () => { const t0 = Date.now(); await refreshBans(); if (_bans.at < t0) throw new Error('bans not refreshed'); }],
+    ['settings', TTL.settings, async () => { const t0 = Date.now(); await ensureSettings(true); if (_settings.at < t0) throw new Error('settings not refreshed'); }],
 ];
 const _lastRun = new Map();
+const _lastOk = new Map();   // step name -> ms of its last success
+let _since = null;           // ms the sync loop began (a step that never succeeded is late from here)
 let _timer = null;
 let _running = false;
+
+/** Run one scheduled step; true when it succeeded. */
+async function runStep(name, fn, label) {
+    try { await fn(); _lastOk.set(name, Date.now()); return true; } catch (err) { console.warn(`[LiveContext] ${label} ${name}: ${err.message}`); return false; }
+}
+function endPass(ran, failed) {
+    stats.lastSyncAt = new Date().toISOString();
+    if (ran && !failed) stats.lastSuccessAt = stats.lastSyncAt;
+}
+
+/**
+ * How current the projections are, for /ready: the last clean pass and its age, and the steps
+ * that have not succeeded for longer than their own interval plus `staleMs` (a step that fails
+ * on every run of its own — say the 5-minute channel sync — never spoils a whole pass for long,
+ * because the 10-second steps pass in between, so it is judged on its own).
+ */
+function syncStatus(staleMs, now = Date.now()) {
+    const lastOk = stats.lastSuccessAt ? Date.parse(stats.lastSuccessAt) : null;
+    const late = [];
+    if (_since !== null) {
+        for (const [name, every] of SCHEDULE) {
+            const at = _lastOk.get(name) || _since;
+            if (now - at > every + staleMs) late.push(name);
+        }
+    }
+    return { last_success_at: stats.lastSuccessAt, age_ms: lastOk === null ? null : now - lastOk, late_steps: late };
+}
 
 async function tick() {
     if (_running) return;
     _running = true;
     try {
+        let ran = 0, failed = 0;
         for (const [name, every, fn] of SCHEDULE) {
             if (Date.now() - (_lastRun.get(name) || 0) < every) continue;
             _lastRun.set(name, Date.now());
-            try { await fn(); } catch (err) { console.warn(`[LiveContext] sync ${name}: ${err.message}`); }
+            ran++;
+            if (!(await runStep(name, fn, 'sync'))) failed++;
         }
-        stats.lastSyncAt = new Date().toISOString();
+        endPass(ran, failed);
     } finally { _running = false; }
 }
 
 /** One full pass over every projection (boot, tests, `npm run` tools). */
 async function sync() {
+    if (_since === null) _since = Date.now();
     _lastRun.clear();
-    for (const [, , fn] of SCHEDULE) { try { await fn(); } catch (err) { console.warn('[LiveContext] initial sync:', err.message); } }
+    let failed = 0;
+    for (const [name, , fn] of SCHEDULE) if (!(await runStep(name, fn, 'initial sync'))) failed++;
     for (const [name] of SCHEDULE) _lastRun.set(name, Date.now());
-    stats.lastSyncAt = new Date().toISOString();
+    endPass(SCHEDULE.length, failed);
 }
 
 function start({ intervalMs = 2000 } = {}) {
     if (_timer) return;
+    if (_since === null) _since = Date.now();
     _timer = setInterval(() => { tick().catch(() => {}); }, intervalMs);
     if (_timer.unref) _timer.unref();
     _batchTimer = setInterval(flushBatches, 2000);
@@ -751,7 +789,7 @@ module.exports = {
     LiveError,
     stats,
     // lifecycle
-    start, stop, sync, tick, warm,
+    start, stop, sync, tick, warm, syncStatus,
     // identity + users
     authenticate, authFailureReason, upsertUser, invalidateUser, subjectFor,
     getUserById, getUserByUsername, getUserByDisplayName, ensureUsers, ensureUserByUsername,
