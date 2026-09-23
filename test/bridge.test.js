@@ -174,11 +174,19 @@ t('deploy notices: stored as one rolling global row, shown to everyone, folded o
     r = await calls([{ op: 'deployNotice', args: [[commit(2)]] }]);
     assert.strictEqual(r.body.results[0].result.id, id1, 'folded into the same row');
     assert.strictEqual(JSON.parse(h.db.getChatMessageById(id1).metadata).deploys, 2);
+    // Someone speaks in a stream room (the global feed shows it): the next deploy is a new card,
+    // so no card's time range runs past a message under it.
+    h.db.saveChatMessage({ stream_id: streamId, user_id: viewer.id, username: viewer.username, message: 'hello brother', message_type: 'chat', is_global: false });
+    r = await calls([{ op: 'deployNotice', args: [[commit(3)]] }]);
+    const id3 = r.body.results[0].result.id;
+    assert.notStrictEqual(id3, id1, 'a message since the last card starts a new card');
+    assert.strictEqual(JSON.parse(h.db.getChatMessageById(id3).metadata).deploys, 1);
+    assert.strictEqual(JSON.parse(h.db.getChatMessageById(id1).metadata).deploys, 2, 'the old card is left as it was');
     // A late joiner gets it once.
     const late = await h.ws({ ip: '198.51.100.52' });
     late.sendJson({ type: 'join' });
     const upd = await late.next((m) => m.type === 'update', 4000);
-    assert.strictEqual(upd.id, id1);
+    assert.strictEqual(upd.id, id3);
     late.close();
 });
 

@@ -15,7 +15,8 @@
 //   • Late joiners of this announcement get it once (replayTo, from the join handler).
 // ═══════════════════════════════════════════════════════════════
 
-const FOLD_WINDOW_MS = 12 * 60 * 60 * 1000;
+// A card covers at most 3 hours of deploys, so its time range stays readable.
+const FOLD_WINDOW_MS = 3 * 60 * 60 * 1000;
 const MAX_COMMITS = 40;
 const ATTEMPTS_MS = [5000, 20000, 45000];        // clients reconnect with backoff after a restart
 
@@ -30,10 +31,15 @@ const parseLog = (raw) => raw.trim().split('\n').filter(Boolean).map((line) => {
 
 const plainText = (meta) => `🚀 ${meta.commits.length} update${meta.commits.length === 1 ? '' : 's'} shipped: ${meta.commits.slice(0, 3).map(c => c.subject).join(' · ')}${meta.commits.length > 3 ? ` · and ${meta.commits.length - 3} more` : ''}`;
 
-/** Insert a notice, or fold into the newest row when that row is itself a recent deploy notice. */
+/**
+ * Insert a notice, or fold into the newest row when that row is itself a recent deploy notice.
+ * "Newest" is across EVERY room: the global feed shows stream and channel messages too, so a card
+ * that kept folding while people chatted in a stream ended up with a time range running past the
+ * messages under it. Anyone speaking anywhere since the last card starts a new card.
+ */
 function persist(db, commits) {
     const nowIso = new Date().toISOString();
-    const newest = db.get('SELECT id, message_type, metadata FROM chat_messages WHERE is_global = 1 AND is_deleted = 0 ORDER BY id DESC LIMIT 1');
+    const newest = db.get('SELECT id, message_type, metadata FROM chat_messages WHERE is_deleted = 0 ORDER BY id DESC LIMIT 1');
     let prev = null;
     if (newest && newest.message_type === 'system' && newest.metadata) {
         try { const m = JSON.parse(newest.metadata); if (m && m.kind === 'deploy' && Date.now() - Date.parse(m.first_at) < FOLD_WINDOW_MS) prev = m; } catch { /* not ours */ }
