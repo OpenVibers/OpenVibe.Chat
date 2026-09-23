@@ -16,6 +16,7 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const ctx = require('./live-context');
 const { extractToken, extractWsToken, authenticateWs } = require('./auth/auth');
+const { trustProxy } = require('./net/client-ip');
 
 function normalizeOrigin(origin) {
     if (!origin || typeof origin !== 'string') return null;
@@ -54,7 +55,9 @@ function createApp({ chatServer, bridge, mirror, relay }) {
     const allowedOrigins = getAllowedOrigins();
     const app = express();
     app.disable('x-powered-by');
-    app.set('trust proxy', config.trustProxy); // Cloudflare → nginx → Node
+    // Cloudflare → nginx → Node: TRUST_PROXY hops, but a hop past nginx only when it is a
+    // Cloudflare address (DNS-only hosts reach nginx directly with a client-written X-Forwarded-For).
+    app.set('trust proxy', trustProxy(config.trustProxy));
 
     /** Exact allow-list first, then *.openvibe.tools over https (Live's isAllowedOrigin). */
     function isAllowedOrigin(origin) {

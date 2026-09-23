@@ -23,6 +23,7 @@ const crypto = require('crypto');
 const db = require('../db/database');
 const ctx = require('../live-context');
 const { extractWsToken, authenticateWs } = require('../auth/auth');
+const { clientIpOf } = require('../net/client-ip');
 const permissions = require('../auth/permissions');
 const wordFilter = require('./word-filter');
 const ttsEngine = require('./tts-engine');
@@ -124,12 +125,8 @@ class ChatServer {
     _isBanExemptAdmin(client) { return !!(client && client.user && !client.user.is_banned && client.user.role === 'admin'); }
 
     getClientIp(req) {
-        const raw = req.headers?.['cf-connecting-ip']
-            || req.headers?.['x-forwarded-for']?.split(',')[0]?.trim()
-            || req.socket?.remoteAddress
-            || req.connection?.remoteAddress
-            || 'unknown';
-        return this.normalizeIp(raw);
+        // CF-Connecting-IP / X-Forwarded-For only when nginx's peer is Cloudflare (net/client-ip.js).
+        return this.normalizeIp(clientIpOf(req));
     }
 
     /**
@@ -369,7 +366,10 @@ class ChatServer {
             const now = Date.now();
             const rateKey = `${client.ip}:${client.streamId || 'global'}`;
             const lastMsg = this.rateLimits.get(rateKey) || 0;
-            const streamSlowMs = this.slowModeByStream.get(client.streamId) || 0;
+            // Slow mode of the stream that governs the room (an offline/channel-room join has no
+            // stream id of its own but posts into the live room).
+            const slowStreamId = client.streamId || (client.channelUserId ? this._moderationStreamFor(client) : null);
+            const streamSlowMs = (slowStreamId && this.slowModeByStream.get(slowStreamId)) || 0;
             const effectiveLimit = Math.max(this.DEFAULT_RATE_LIMIT_MS, streamSlowMs);
             if (now - lastMsg < effectiveLimit) {
                 this.sendTo(ws, { type: 'system', message: 'Slow down! You are sending messages too fast.' });
@@ -637,9 +637,11 @@ class ChatServer {
         }
 
         // ── IP Approval Mode (Anti-VPN) ─────────────────────
-        if (client.streamId && client.ip) {
+        // modStreamId, not client.streamId: a viewer who joins the channel room without the
+        // stream id still posts into the live room (broadcastToChannelRoom).
+        if (modStreamId && client.ip) {
             try {
-                const stream = ctx.getStreamById(client.streamId);
+                const stream = ctx.getStreamById(modStreamId);
                 const channel = stream?.channel_id ? ctx.getChannelById(stream.channel_id) : (stream ? ctx.getChannelByUserId(stream.user_id) : null);
                 if (channel) {
                     const settings = ctx.getChannelModerationSettings(channel.id);
@@ -665,7 +667,7 @@ class ChatServer {
                                     const username = client.user ? client.user.display_name : client.anonId;
                                     db.holdMessageForApproval({
                                         channelId: channel.id,
-                                        streamId: client.streamId,
+                                        streamId: modStreamId,
                                         ip: client.ip,
                                         userId: client.user?.id || null,
                                         anonId: client.anonId || null,
@@ -677,7 +679,7 @@ class ChatServer {
                                         message: 'This channel has IP approval mode enabled. Your message is being held for review by the streamer.',
                                     });
                                     // Notify the streamer that a new IP needs approval
-                                    this._notifyStreamerPendingIp(client.streamId, stream.user_id, username, client.ip);
+                                    this._notifyStreamerPendingIp(modStreamId, stream.user_id, username, client.ip);
                                     return;
                                 }
                             }
@@ -688,85 +690,7 @@ class ChatServer {
         }
 
         // ── Channel moderation settings ──────────────────────
-        if (modStreamId) {
-            const chatSettings = this._getChannelChatSettings(modStreamId);
-            const isStaff = client.user && permissions.isGlobalModOrAbove(client.user);
-            const canModerateThisStream = permissions.canModerateStream(client.user, modStreamId);
-
-            // Max message length
-            const maxLen = Math.max(50, Number(chatSettings.max_message_length || 500));
-            if (text.length > maxLen) {
-                this.sendTo(ws, { type: 'system', message: `Message too long. Max ${maxLen} characters.` });
-                return;
-            }
-
-            // Anonymous not allowed
-            if (!client.user && !chatSettings.allow_anonymous) {
-                this.sendTo(ws, { type: 'system', message: 'This channel requires a logged-in account to chat.' });
-                return;
-            }
-
-            // Links disabled — exempt [gif:url] tags (validated separately)
-            if (chatSettings.links_allowed === 0 && !isStaff) {
-                const textWithoutGifs = text.replace(/\[gif:https?:\/\/[^\]]+\]/gi, '');
-                if (/(https?:\/\/|www\.)/i.test(textWithoutGifs)) {
-                    this.sendTo(ws, { type: 'system', message: 'Links are disabled in this channel chat.' });
-                    return;
-                }
-            }
-
-            // Validate [gif:url] — only allow trusted domains
-            const gifTagMatch = text.match(/\[gif:(https?:\/\/[^\]]+)\]/i);
-            if (gifTagMatch) {
-                const ALLOWED_GIF_DOMAINS = ['tenor.com', 'media.tenor.com', 'media1.tenor.com', 'c.tenor.com', 'giphy.com', 'media.giphy.com', 'media0.giphy.com', 'media1.giphy.com', 'media2.giphy.com', 'media3.giphy.com', 'media4.giphy.com', 'i.giphy.com'];
-                try {
-                    const gifUrl = new URL(gifTagMatch[1]);
-                    if (!ALLOWED_GIF_DOMAINS.includes(gifUrl.hostname)) {
-                        this.sendTo(ws, { type: 'system', message: 'Only Tenor and Giphy GIFs are allowed.' });
-                        return;
-                    }
-                } catch {
-                    this.sendTo(ws, { type: 'system', message: 'Invalid GIF URL.' });
-                    return;
-                }
-            }
-
-            // Followers only
-            if (chatSettings.followers_only && client.user && !isStaff) {
-                const stream = ctx.getStreamById(modStreamId);
-                if (stream && stream.user_id !== client.user.id && !ctx.isFollowing(client.user.id, stream.user_id)) {
-                    this.sendTo(ws, { type: 'system', message: 'This chat is currently followers-only.' });
-                    return;
-                }
-            }
-
-            // Account age gate
-            if (chatSettings.account_age_gate_hours && client.user && !isStaff) {
-                const ageMs = Date.now() - new Date(client.user.created_at).getTime();
-                if (ageMs < Number(chatSettings.account_age_gate_hours) * 3600000) {
-                    this.sendTo(ws, { type: 'system', message: `This chat requires accounts older than ${chatSettings.account_age_gate_hours} hour(s).` });
-                    return;
-                }
-            }
-
-            // Optional per-streamer anti-slur filter
-            if (chatSettings.slur_filter_enabled && !isStaff && !canModerateThisStream) {
-                const blockedTerms = this._parseSlurFilterTerms(chatSettings.slur_filter_terms);
-                const configuredRegexLines = this._parseRegexLines(chatSettings.slur_filter_regexes);
-                const hitConfigured = blockedTerms.length && this._containsConfiguredSlur(text, blockedTerms);
-                const hitCore = chatSettings.slur_filter_use_builtin !== 0 && this._containsCoreSlur(text, (() => { try { return JSON.parse(chatSettings.slur_filter_disabled_categories || '[]') || []; } catch { return []; } })());
-                const hitRegex = configuredRegexLines.length && this._containsRegexSlur(text, configuredRegexLines);
-                if (hitConfigured || hitCore || hitRegex) {
-                    this.sendTo(ws, {
-                        type: 'slur-blocked',
-                        message: String(chatSettings.slur_filter_nudge_message || '').trim() || DEFAULT_SLUR_NUDGE,
-                        streamer_enabled: true,
-                    });
-                    return;
-                }
-            }
-
-        }
+        if (this._chatRulesBlock(ws, client, text, modStreamId)) return;
 
         const username = client.user ? client.user.display_name : client.anonId;
         const coreUsername = client.user ? client.user.username : null;
@@ -993,6 +917,115 @@ class ChatServer {
                 }
             }).catch(() => { /* non-critical */ });
         }
+    }
+
+    /**
+     * The channel's chat rules for a line of text a viewer puts in the room (a chat message, and
+     * the text of /me and /tts): length, anonymous, links, GIF hosts, followers-only, account age,
+     * the anti-slur filter. Tells the sender and returns true when the line is refused.
+     */
+    _chatRulesBlock(ws, client, text, modStreamId) {
+        if (!modStreamId) return false;
+        const chatSettings = this._getChannelChatSettings(modStreamId);
+        const isStaff = client.user && permissions.isGlobalModOrAbove(client.user);
+        const canModerateThisStream = permissions.canModerateStream(client.user, modStreamId);
+
+        // Max message length
+        const maxLen = Math.max(50, Number(chatSettings.max_message_length || 500));
+        if (text.length > maxLen) {
+            this.sendTo(ws, { type: 'system', message: `Message too long. Max ${maxLen} characters.` });
+            return true;
+        }
+
+        // Anonymous not allowed
+        if (!client.user && !chatSettings.allow_anonymous) {
+            this.sendTo(ws, { type: 'system', message: 'This channel requires a logged-in account to chat.' });
+            return true;
+        }
+
+        // Links disabled — exempt [gif:url] tags (validated separately)
+        if (chatSettings.links_allowed === 0 && !isStaff) {
+            const textWithoutGifs = text.replace(/\[gif:https?:\/\/[^\]]+\]/gi, '');
+            if (/(https?:\/\/|www\.)/i.test(textWithoutGifs)) {
+                this.sendTo(ws, { type: 'system', message: 'Links are disabled in this channel chat.' });
+                return true;
+            }
+        }
+
+        // Validate [gif:url] — only allow trusted domains
+        const gifTagMatch = text.match(/\[gif:(https?:\/\/[^\]]+)\]/i);
+        if (gifTagMatch) {
+            const ALLOWED_GIF_DOMAINS = ['tenor.com', 'media.tenor.com', 'media1.tenor.com', 'c.tenor.com', 'giphy.com', 'media.giphy.com', 'media0.giphy.com', 'media1.giphy.com', 'media2.giphy.com', 'media3.giphy.com', 'media4.giphy.com', 'i.giphy.com'];
+            try {
+                const gifUrl = new URL(gifTagMatch[1]);
+                if (!ALLOWED_GIF_DOMAINS.includes(gifUrl.hostname)) {
+                    this.sendTo(ws, { type: 'system', message: 'Only Tenor and Giphy GIFs are allowed.' });
+                    return true;
+                }
+            } catch {
+                this.sendTo(ws, { type: 'system', message: 'Invalid GIF URL.' });
+                return true;
+            }
+        }
+
+        // Followers only
+        if (chatSettings.followers_only && client.user && !isStaff) {
+            const stream = ctx.getStreamById(modStreamId);
+            if (stream && stream.user_id !== client.user.id && !ctx.isFollowing(client.user.id, stream.user_id)) {
+                this.sendTo(ws, { type: 'system', message: 'This chat is currently followers-only.' });
+                return true;
+            }
+        }
+
+        // Account age gate
+        if (chatSettings.account_age_gate_hours && client.user && !isStaff) {
+            const ageMs = Date.now() - new Date(client.user.created_at).getTime();
+            if (ageMs < Number(chatSettings.account_age_gate_hours) * 3600000) {
+                this.sendTo(ws, { type: 'system', message: `This chat requires accounts older than ${chatSettings.account_age_gate_hours} hour(s).` });
+                return true;
+            }
+        }
+
+        // Optional per-streamer anti-slur filter
+        if (chatSettings.slur_filter_enabled && !isStaff && !canModerateThisStream) {
+            const blockedTerms = this._parseSlurFilterTerms(chatSettings.slur_filter_terms);
+            const configuredRegexLines = this._parseRegexLines(chatSettings.slur_filter_regexes);
+            const hitConfigured = blockedTerms.length && this._containsConfiguredSlur(text, blockedTerms);
+            const hitCore = chatSettings.slur_filter_use_builtin !== 0 && this._containsCoreSlur(text, (() => { try { return JSON.parse(chatSettings.slur_filter_disabled_categories || '[]') || []; } catch { return []; } })());
+            const hitRegex = configuredRegexLines.length && this._containsRegexSlur(text, configuredRegexLines);
+            if (hitConfigured || hitCore || hitRegex) {
+                this.sendTo(ws, {
+                    type: 'slur-blocked',
+                    message: String(chatSettings.slur_filter_nudge_message || '').trim() || DEFAULT_SLUR_NUDGE,
+                    streamer_enabled: true,
+                });
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * IP approval mode for text that is not a plain chat line (/me, /tts): refused until the
+     * streamer approves the address (plain chat lines are held for review in handleChatMessage).
+     */
+    _awaitingIpApproval(ws, client, modStreamId) {
+        if (!modStreamId || !client.ip) return false;
+        try {
+            const stream = ctx.getStreamById(modStreamId);
+            const channel = stream?.channel_id ? ctx.getChannelById(stream.channel_id) : (stream ? ctx.getChannelByUserId(stream.user_id) : null);
+            if (!channel || !ctx.getChannelModerationSettings(channel.id)?.ip_approval_mode) return false;
+            if (client.user && (permissions.isGlobalModOrAbove(client.user) || stream.user_id === client.user.id)) return false;
+            if (ctx.isIpApproved(channel.id, client.ip)) return false;
+        } catch { return false; }
+        this.sendTo(ws, { type: 'system', message: 'This channel has IP approval mode enabled. Commands work once the streamer approves you.' });
+        return true;
+    }
+
+    /** /me and /tts put text in the room: the same rules as a chat line. */
+    _commandTextBlocked(ws, client, text) {
+        const modStreamId = client.streamId || this._moderationStreamFor(client);
+        return this._awaitingIpApproval(ws, client, modStreamId) || this._chatRulesBlock(ws, client, text, modStreamId);
     }
 
     handleBangCommand(ws, client, text) {
@@ -1396,6 +1429,7 @@ class ChatServer {
                     this.sendTo(ws, { type: 'system', message: 'Usage: /tts <message>' });
                     return;
                 }
+                if (this._commandTextBlocked(ws, client, args)) return;
                 {
                     const ttsMsg = {
                         type: 'tts',
@@ -1415,7 +1449,7 @@ class ChatServer {
                             }
                         } catch { /* non-critical */ }
                     }
-                    this.broadcastToStream(client.streamId, ttsMsg);
+                    this._broadcastToRoom(client, ttsMsg);
 
                     // Also synthesize server-side TTS for site-wide mode
                     this.synthesizeAndBroadcastTTS(
@@ -1488,8 +1522,9 @@ class ChatServer {
                     this.sendTo(ws, { type: 'system', message: 'Usage: /me <action>' });
                     break;
                 }
+                if (this._commandTextBlocked(ws, client, args)) break;
                 const username = client.user?.display_name || client.anonId;
-                this.broadcastToStream(client.streamId, {
+                this._broadcastToRoom(client, {
                     type: 'chat',
                     username,
                     core_username: client.user?.username || null,
@@ -1515,7 +1550,7 @@ class ChatServer {
 
             case 'clear':
                 if (this.canModerate(client)) {
-                    this.broadcastToStream(client.streamId, { type: 'clear' });
+                    this._broadcastToRoom(client, { type: 'clear' });
                     this.logChatModeration(client, client.streamId ? 'clear_chat' : 'clear_global_chat');
                 } else {
                     this.sendTo(ws, { type: 'system', message: 'You do not have permission.' });
@@ -1543,14 +1578,14 @@ class ChatServer {
                         } catch { /* non-critical */ }
                     }
                     // Dedicated slowmode event so clients can show/hide UI
-                    this.broadcastToStream(client.streamId, {
+                    this._broadcastToRoom(client, {
                         type: 'slowmode',
                         seconds,
                     });
                     const msg = seconds > 0
                         ? `Slow mode enabled: ${seconds}s between messages`
                         : 'Slow mode disabled.';
-                    this.broadcastToStream(client.streamId, {
+                    this._broadcastToRoom(client, {
                         type: 'system',
                         message: msg,
                     });
@@ -1582,7 +1617,7 @@ class ChatServer {
                         const siteUrl = process.env.SITE_URL || '';
                         const pasteUrl = `${siteUrl}/p/${paste.slug}`;
                         // Show link to everyone in stream
-                        this.broadcastToStream(client.streamId, {
+                        this._broadcastToRoom(client, {
                             type: 'system',
                             message: `📋 ${client.displayName || client.username || 'Anonymous'} shared a paste: ${pasteUrl}`,
                         });
@@ -1623,7 +1658,12 @@ class ChatServer {
         if (!target) return;
         // The stream whose moderators may do this (offline channel rooms: the latest stream).
         const moderationStreamId = client.streamId || this._moderationStreamFor(client);
-        const banEffect = (row) => ctx.effects.ban({ ...row, actor_user_id: client.user.id, moderation_stream_id: moderationStreamId });
+        // Where the ban applies. In an offline channel room it is that channel's stream: a null
+        // stream id is a SITE-WIDE ban row (and /unban with null lifts site-wide rows), which
+        // only global chat — where canModerate() already requires global staff — may write.
+        const scopeStreamId = client.streamId || (client.channelUserId ? moderationStreamId : null);
+        const banEffect = (row) => ctx.effects.ban({ ...row, stream_id: scopeStreamId, actor_user_id: client.user.id, moderation_stream_id: moderationStreamId });
+        const scoped = !!scopeStreamId;
 
         switch (action) {
             case 'ban': {
@@ -1634,20 +1674,20 @@ class ChatServer {
                         this.sendTo(ws, { type: 'system', message: 'You cannot ban an admin.' });
                         return;
                     }
-                    await banEffect({ action: 'ban', stream_id: client.streamId, user_id: targetUser.id, reason: 'Banned by moderator', banned_by: client.user.id });
+                    await banEffect({ action: 'ban', user_id: targetUser.id, reason: 'Banned by moderator', banned_by: client.user.id });
                     this.sendTo(ws, { type: 'system', message: `${target} has been banned.` });
-                    this.broadcastToStream(client.streamId, {
+                    this._broadcastToRoom(client, {
                         type: 'system', message: `${target} has been banned.`
                     });
-                    this.logChatModeration(client, client.streamId ? 'channel_ban' : 'site_ban', { username: targetUser.username }, targetUser.id);
+                    this.logChatModeration(client, scoped ? 'channel_ban' : 'site_ban', { username: targetUser.username }, targetUser.id);
                 } else {
                     // Ban by anon ID
                     const anonTarget = this.findClientByAnonId(target, client.streamId);
                     if (anonTarget) {
-                        await banEffect({ action: 'ban', stream_id: client.streamId, ip_address: anonTarget.ip, anon_id: target, reason: 'Banned by moderator', banned_by: client.user.id });
+                        await banEffect({ action: 'ban', ip_address: anonTarget.ip, anon_id: target, reason: 'Banned by moderator', banned_by: client.user.id });
                         this.sendTo(ws, { type: 'system', message: `${target} has been banned.` });
                     }
-                    this.logChatModeration(client, client.streamId ? 'channel_anon_ban' : 'site_anon_ban', { anon_id: target });
+                    this.logChatModeration(client, scoped ? 'channel_anon_ban' : 'site_anon_ban', { anon_id: target });
                 }
                 break;
             }
@@ -1656,8 +1696,8 @@ class ChatServer {
                 const targetUser = await ctx.ensureUserByUsername(target);
                 const expires = new Date(Date.now() + duration * 1000).toISOString();
                 if (targetUser) {
-                    await banEffect({ action: 'ban', stream_id: client.streamId, user_id: targetUser.id, reason: `Timeout ${duration}s`, banned_by: client.user.id, expires_at: expires });
-                    this.logChatModeration(client, client.streamId ? 'channel_timeout' : 'site_timeout', { username: targetUser.username, duration }, targetUser.id);
+                    await banEffect({ action: 'ban', user_id: targetUser.id, reason: `Timeout ${duration}s`, banned_by: client.user.id, expires_at: expires });
+                    this.logChatModeration(client, scoped ? 'channel_timeout' : 'site_timeout', { username: targetUser.username, duration }, targetUser.id);
                 }
                 this.sendTo(ws, { type: 'system', message: `${target} timed out for ${duration}s.` });
                 break;
@@ -1665,8 +1705,8 @@ class ChatServer {
             case 'unban': {
                 const targetUser = await ctx.ensureUserByUsername(target);
                 if (targetUser) {
-                    await banEffect({ action: 'unban', stream_id: client.streamId, user_id: targetUser.id });
-                    this.logChatModeration(client, client.streamId ? 'channel_unban' : 'site_unban', { username: targetUser.username }, targetUser.id);
+                    await banEffect({ action: 'unban', user_id: targetUser.id });
+                    this.logChatModeration(client, scoped ? 'channel_unban' : 'site_unban', { username: targetUser.username }, targetUser.id);
                 }
                 this.sendTo(ws, { type: 'system', message: `${target} has been unbanned.` });
                 break;
@@ -2034,6 +2074,17 @@ class ChatServer {
             else this.forwardToGlobalByChannel(chanUid, evt);
             if (chatMsg.id) { try { db.mergeChatMessageMetadata(chatMsg.id, { translation: tr }); } catch { /* */ } }
         }).catch(() => { /* best-effort */ });
+    }
+
+    /**
+     * Deliver to the room a client is in: its stream room when in a stream, its channel room when
+     * in an offline channel chat, else pure global chat. broadcastToStream(null) would reach every
+     * client without a stream — global chat AND every other channel's offline room.
+     */
+    _broadcastToRoom(client, data) {
+        if (client.streamId) this.broadcastToStream(client.streamId, data);
+        else if (client.channelUserId) this.broadcastToChannelRoom(client.channelUserId, null, data);
+        else this.broadcastGlobal(data);
     }
 
     broadcastToStream(streamId, data) {

@@ -152,7 +152,45 @@ function containsRegexSlur(text, regexLines) {
     if (!normalized) return false;
     const candidates = [normalized, normalized.replace(/\s+/g, '')];
     const compiled = compileRegexList(regexLines, { forceInsensitive: true });
-    return compiled.some((pat) => candidates.some((candidate) => pat.test(candidate)));
+    return compiled.some((pat) => testUserRegex(pat, candidates));
+}
+
+// Streamer-written patterns run on every viewer line in the one chat process: a catastrophic
+// pattern (nested or overlapping quantifiers) would freeze chat for every room. They run in a
+// vm context with a time budget; a pattern that exceeds it is switched off for this process.
+const USER_REGEX_BUDGET_MS = 25;
+const _slowUserPatterns = new Set();
+let _regexSandbox = null;
+function regexSandbox() {
+    if (!_regexSandbox) {
+        const vm = require('vm');
+        const context = vm.createContext(Object.create(null));
+        context.__test = vm.runInContext(
+            '(function (src, flags, texts) { var r = new RegExp(src, flags); for (var i = 0; i < texts.length; i++) { r.lastIndex = 0; if (r.test(texts[i])) return true; } return false; })',
+            context
+        );
+        _regexSandbox = { context, script: new vm.Script('__test(__src, __flags, __texts)') };
+    }
+    return _regexSandbox;
+}
+function testUserRegex(pat, texts) {
+    const key = `${pat.flags}/${pat.source}`;
+    if (_slowUserPatterns.has(key)) return false;
+    const box = regexSandbox();
+    box.context.__src = pat.source;
+    box.context.__flags = pat.flags;
+    box.context.__texts = texts.slice();
+    try {
+        return box.script.runInContext(box.context, { timeout: USER_REGEX_BUDGET_MS }) === true;
+    } catch (err) {
+        if (err && err.code === 'ERR_SCRIPT_EXECUTION_TIMEOUT') {
+            _slowUserPatterns.add(key);
+            console.warn(`[Moderation] custom slur regex exceeded ${USER_REGEX_BUDGET_MS}ms and is disabled: /${pat.source.slice(0, 80)}/`);
+        }
+        return false;
+    } finally {
+        box.context.__texts = null;
+    }
 }
 
 /**
