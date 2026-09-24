@@ -83,8 +83,8 @@ ${o.script ? `<script src="${asset('chat.js')}" defer></script>` : ''}
 <a class="oc-skip" href="#main">Skip to content</a>
 <div id="navbar-mount"></div>
 ${frame.noscriptNav({ name: SITE_NAME, home: '/', links: LINKS.map(({ label, href }) => ({ label, href })) })}
-<header class="oc-bar"><a class="oc-brand" href="/">${SITE_NAME}</a><nav class="oc-tabs" aria-label="Chat">${LINKS.map((l) => `<a href="${l.href}"${o.active === l.key ? ' aria-current="page"' : ''}>${l.label}</a>`).join('')}</nav><noscript><span class="oc-account">${who}</span></noscript></header>
 <main id="main" class="oc-main">
+<noscript><p class="oc-account">${who}</p></noscript>
 ${o.body || ''}
 </main>
 ${frame.footer({ service: 'chat', variant: 'full', updates: '/updates' })}
