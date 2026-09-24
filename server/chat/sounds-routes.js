@@ -84,8 +84,13 @@ const soundUpload = multer({
 });
 
 /** Transcode an audio file to a canonical MP3 (fast decode, small, universal). Returns the
- *  new path on success (original left for the caller to delete), or null on failure. */
-function convertToMp3(srcPath) {
+ *  new path on success (original left for the caller to delete), or null on failure.
+ *  OpenVibe.Tools' mp3 tool does the work when it can; local ffmpeg otherwise. */
+async function convertToMp3(srcPath, mime) {
+    const viaTools = await require('./tools-audio').convertViaTools(srcPath, { mime });
+    return viaTools || convertLocally(srcPath);
+}
+function convertLocally(srcPath) {
     return new Promise((resolve) => {
         const outPath = srcPath.replace(/\.[^.]+$/, '') + '.conv.mp3';
         let proc;
@@ -236,7 +241,7 @@ router.post('/', requireAuth, soundUpload.single('sound'), async (req, res) => {
         let finalPath = req.file.path;
         let finalMime = req.file.mimetype;
         if (path.extname(finalPath).toLowerCase() !== '.mp3') {
-            const mp3 = await convertToMp3(req.file.path);
+            const mp3 = await convertToMp3(req.file.path, req.file.mimetype);
             if (mp3) {
                 try { fs.unlinkSync(req.file.path); } catch { /* ignore */ }
                 finalPath = mp3;
@@ -432,7 +437,7 @@ router.post('/alert/:kind', requireAuth, soundUpload.single('sound'), async (req
         // Normalize to mp3 for universal playback; fall back to the original on failure.
         let finalPath = req.file.path;
         try {
-            const mp3 = await convertToMp3(req.file.path);
+            const mp3 = await convertToMp3(req.file.path, req.file.mimetype);
             if (mp3) { fs.unlink(req.file.path, () => {}); finalPath = mp3; }
         } catch { /* keep original */ }
 
