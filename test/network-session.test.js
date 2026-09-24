@@ -95,4 +95,9 @@ t('REST and the WebSocket keep working for a Network token while Live is down', 
     } finally { h.live.down = false; }
 });
 
+t('/metrics counts where sign-ins were decided', async () => {
+    const m = (await h.http('GET', '/metrics')).text;
+    for (const via of ['local', 'live', 'rejected']) assert.match(m, new RegExp(`chat_auth_resolutions\\{[^}]*via="${via}"[^}]*\\} [1-9]`), via);
+});
+
 t.run(async () => { if (h && h.close) await h.close(); });

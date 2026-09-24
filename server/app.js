@@ -76,6 +76,9 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
     const metrics = require('openvibe-shared/metrics').instrument(app, { service: 'chat', release: release.release });
     release.mount(app, { registry: metrics.registry });
     app.locals.metrics = metrics.registry;
+    // How sign-ins resolve (auth/network-session.js): here, through Live, or refused.
+    metrics.registry.gauge({ name: 'chat_auth_resolutions', help: 'Token resolutions since start, by where they were decided', labelNames: ['via'],
+        collect: () => Object.entries(require('./auth/network-session').stats()).map(([via, n]) => ({ labels: { via }, value: n })) });
 
     /** Exact allow-list only (no subdomain wildcard). */
     function isAllowedOrigin(origin) {
