@@ -65,6 +65,10 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
     // Cloudflare → nginx → Node: TRUST_PROXY hops, but a hop past nginx only when it is a
     // Cloudflare address (DNS-only hosts reach nginx directly with a client-written X-Forwarded-For).
     app.set('trust proxy', trustProxy(config.trustProxy));
+    // The request's W3C trace and request id (openvibe-contracts), carried onto the calls Chat makes.
+    app.use(require('openvibe-contracts').http.middleware());
+    // One W3C trace across services (openvibe-shared/trace): calls made while serving a request carry its traceparent.
+    require('openvibe-shared/trace').install(app);
 
     // GET /release.json (ADR-016, D43) and loopback GET /metrics (Track O): what this deployment is,
     // request rates/latencies and process metrics, from openvibe-shared (before any route).
