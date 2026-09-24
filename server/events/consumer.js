@@ -37,10 +37,13 @@ const { viaProxy } = require('../net/service-auth');
 const deployNotice = require('../chat/deploy-notice');
 const prefs = require('../prefs/chat-preferences');
 const vipBadges = require('../vip/badges');
+const revocations = require('../auth/revocations');
+const ctx = require('../live-context');
 
 const CONSUMER = 'chat';
 const INBOX_TABLE = 'chat_event_inbox';
-const TOPICS = Object.freeze(['live.release.deployed', 'network.module.updated', 'vip.membership.changed']);
+const TOPICS = Object.freeze(['live.release.deployed', 'network.module.updated', 'network.user.token_valid_after', 'vip.membership.changed']);
+const SUBJECT_RE = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const EVENT_ID_RE = /^evt_[0-9A-HJKMNP-TV-Z]{26}$/;
 const INBOX_KEEP_MS = 35 * 24 * 3600 * 1000;       // Events keeps events 30 days: nothing older can be redelivered
 
@@ -70,6 +73,27 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
             const p = event.payload && typeof event.payload === 'object' ? event.payload : {};
             if (p.namespace !== prefs.NAMESPACE) return 'ignored:namespace';
             return () => (prefs.handleEvent(event) ? 'invalidated' : 'unchanged');
+        }
+        if (event.event_type === 'network.user.token_valid_after') {
+            // Signed out everywhere, password changed, banned…: refuse this person's older tokens and
+            // close the sockets they opened (WS-B task 4).
+            if (event.source !== 'network') return 'ignored:source';
+            const p = event.payload && typeof event.payload === 'object' ? event.payload : {};
+            const subject = p.subject && p.subject.id;
+            const ms = Date.parse(p.valid_after);
+            if (!SUBJECT_RE.test(String(subject || '')) || !Number.isFinite(ms)) return 'ignored:payload';
+            return () => {
+                const moved = revocations.record(subject, ms, typeof p.reason === 'string' ? p.reason.slice(0, 40) : null, now());
+                if (!moved) return 'unchanged';
+                return {
+                    outcome: 'revoked',
+                    after: () => {
+                        for (const r of db.all('SELECT id FROM ctx_users WHERE subject_id = ?', [subject])) ctx.invalidateUser(r.id);
+                        const closed = chatServer ? chatServer.revokeSubject(subject, ms) : 0;
+                        if (closed) log.log && log.log(`[Events consumer] ${p.reason || 'revoked'}: closed ${closed} socket(s)`);
+                    },
+                };
+            };
         }
         if (event.event_type === 'vip.membership.changed') {
             // A membership started, lapsed or was revoked: drop that member's cached badge answers for

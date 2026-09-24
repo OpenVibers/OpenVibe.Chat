@@ -23,6 +23,7 @@ const crypto = require('crypto');
 const db = require('../db/database');
 const ctx = require('../live-context');
 const { extractWsToken, authenticateWs } = require('../auth/auth');
+const session = require('../auth/network-session');
 const { clientIpOf } = require('../net/client-ip');
 const permissions = require('../auth/permissions');
 const wordFilter = require('./word-filter');
@@ -283,7 +284,7 @@ class ChatServer {
             ws.off('close', onEarlyClose);
             ws.off('error', onEarlyClose);
             if (closedEarly || ws.readyState !== WebSocket.OPEN) return;
-            this._registerConnection(ws, req, { ip, streamId, user, early });
+            this._registerConnection(ws, req, { ip, streamId, user, early, tokenIat: user ? session.tokenIat(token) : null });
         })().catch((err) => {
             console.warn('[Chat] connection setup failed:', err.message);
             try { ws.close(1011, 'setup failed'); } catch {}
@@ -291,7 +292,7 @@ class ChatServer {
     }
 
     /** The rest of Live's handleConnection, once the socket's identity is known. */
-    _registerConnection(ws, req, { ip, streamId, user, early }) {
+    _registerConnection(ws, req, { ip, streamId, user, early, tokenIat = null }) {
         const perIp = this._ipSockets.get(ip) || 0;
         if (ip && ip !== 'unknown' && perIp >= MAX_CHAT_SOCKETS_PER_IP && !permissions.can(user, 'staff.limits.exempt')) {
             ws.close(4029, 'Too many connections');
@@ -317,6 +318,8 @@ class ChatServer {
             joinedAt: Date.now(),
             // Handle Live can address replies to (arena commands) through the bridge.
             connId: crypto.randomUUID(),
+            // When the socket's token was issued (seconds), so a sign-out everywhere can close it.
+            tokenIat,
         };
         this.clients.set(ws, clientInfo);
 
@@ -404,6 +407,7 @@ class ChatServer {
                     if (user) {
                         if (!client.user || client.user.id === user.id) {
                             client.user = user;
+                            client.tokenIat = session.tokenIat(msg.token);
                             client.anonId = null; // no longer anonymous
                         } else {
                             console.warn(`[Chat] Ignoring token identity mismatch for ${client.user.username} -> ${user.username}`);
@@ -2491,6 +2495,25 @@ class ChatServer {
                 } catch { /* non-critical */ }
             }
         }
+    }
+
+    /**
+     * Network moved this person's token cutoff (network.user.token_valid_after: signed out everywhere,
+     * password changed, banned…). Close every socket they opened with an older Network token; the
+     * browser reconnects and, holding no valid token, carries on as a guest. Bot sockets (hbt_ API
+     * tokens) are not Network sessions and stay. Returns how many closed.
+     */
+    revokeSubject(subjectId, validAfterMs) {
+        let closed = 0;
+        for (const [ws, client] of this.clients) {
+            const u = client.user;
+            if (!u || !subjectId || u.subject_id !== subjectId || u.auth_source === 'api_token' || u._authSource === 'api_token') continue;
+            if (client.tokenIat != null && client.tokenIat * 1000 >= validAfterMs) continue;
+            try { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'auth_revoked', reason: 'signed_out' })); } catch { /* closing anyway */ }
+            try { ws.close(4001, 'Signed out'); } catch { /* already gone */ }
+            closed++;
+        }
+        return closed;
     }
 
     /**

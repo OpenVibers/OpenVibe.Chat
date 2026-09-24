@@ -23,6 +23,7 @@ const config = require('../config');
 const db = require('../db/database');
 const serviceAuth = require('../net/service-auth');
 const ctx = require('../live-context');
+const revocations = require('./revocations');
 
 const ROLE_RANK = { user: 0, streamer: 1, global_mod: 2, admin: 3 };
 const stats = { local: 0, live: 0, rejected: 0 };
@@ -76,17 +77,33 @@ function refuse(token) {
 /** Resolve a browser/bot token to a chat user (a fresh object) or null. */
 async function authenticate(token) {
     if (!token) return null;
-    const viaLive = async () => { stats.live++; return ctx.authenticate(token); };
+    const viaLive = async () => {
+        stats.live++;
+        const u = await ctx.authenticate(token);
+        // Live resolved a Network token (first visit, another key): the same cutoff applies.
+        const iat = u && u.auth_source !== 'api_token' ? tokenIat(token) : null;
+        if (iat != null && iat * 1000 < revocations.cutoffFor(u.subject_id)) return refuse(token);
+        return u;
+    };
     if (String(token).startsWith('hbt_')) return viaLive();
     const key = await serviceAuth.ensureKey();
     if (!key) return viaLive();
     const r = verify(token, key);
     // Only a token signed by the key we hold is decided here; anything else is Live's to judge.
     if (!r.ok) return r.reason === 'signature' || r.reason === 'malformed' ? viaLive() : refuse(token);
+    // Signed out everywhere, password changed, banned…: Network's cutoff for this person (WS-B task 4).
+    if (revocations.isRevoked(r.claims)) return refuse(token);
     const user = userFor(r.claims);
     if (!user) return viaLive();
     stats.local++;
     return user;
+}
+
+/** A JWT's iat (seconds), read without verifying (the token was verified when it was accepted); null otherwise. */
+function tokenIat(token) {
+    const parts = String(token || '').split('.');
+    if (parts.length !== 3) return null;
+    try { const c = b64json(parts[1]); return typeof c.iat === 'number' ? c.iat : null; } catch { return null; }
 }
 
 /** Why the last resolution of this token failed: 'invalid' (bad/expired) or 'unresolved' (no account). */
@@ -94,4 +111,4 @@ function failureReason(token) {
     return (token && _reasons.get(tokenKey(token))) || ctx.authFailureReason(token);
 }
 
-module.exports = { authenticate, failureReason, verify, userFor, stats: () => ({ ...stats }) };
+module.exports = { authenticate, failureReason, verify, userFor, tokenIat, stats: () => ({ ...stats }) };
