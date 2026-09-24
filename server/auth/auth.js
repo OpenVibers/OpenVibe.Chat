@@ -10,6 +10,7 @@
 'use strict';
 
 const ctx = require('../live-context');
+const session = require('./network-session');
 
 /**
  * What an hbt_ API token may do over REST, by scope (Live's apiTokenAllows, verbatim).
@@ -93,7 +94,7 @@ function extractWsToken(req) {
  */
 async function authenticateWs(token) {
     if (!token) return null;
-    const user = await ctx.authenticate(token);
+    const user = await session.authenticate(token);
     if (user && user.auth_source === 'api_token') user._authSource = 'api_token';
     return user;
 }
@@ -107,9 +108,9 @@ async function requireAuth(req, res, next) {
         return res.status(401).json({ error: 'Authentication required' });
     }
     let user = null;
-    try { user = await ctx.authenticate(token); } catch { user = null; }
+    try { user = await session.authenticate(token); } catch { user = null; }
     if (!user) {
-        return ctx.authFailureReason(token) === 'unresolved'
+        return session.failureReason(token) === 'unresolved'
             ? res.status(401).json({ error: 'Unable to resolve account' })
             : res.status(401).json({ error: 'Invalid or expired token' });
     }
@@ -140,7 +141,7 @@ async function optionalAuth(req, res, next) {
     const token = extractToken(req);
     if (token) {
         let user = null;
-        try { user = await ctx.authenticate(token); } catch { user = null; }
+        try { user = await session.authenticate(token); } catch { user = null; }
         if (user && !user.is_banned) {
             if (user.auth_source === 'api_token') {
                 if (apiTokenAllows(req, user.scopes)) {

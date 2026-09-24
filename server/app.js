@@ -175,7 +175,7 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
     async function isBanExemptAdmin(req) {
         if (req._ovBanUser === undefined) {
             let user = null;
-            try { const t = extractToken(req); user = t ? await ctx.authenticate(t) : null; } catch { user = null; }
+            try { const t = extractToken(req); user = t ? await require('./auth/network-session').authenticate(t) : null; } catch { user = null; }
             req._ovBanUser = user;
         }
         const u = req._ovBanUser;

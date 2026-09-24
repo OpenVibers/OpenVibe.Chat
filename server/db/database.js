@@ -103,6 +103,7 @@ function close() {
 const ADDED_COLUMNS = [
     ['emotes', 'media_url', 'TEXT'],          // Live: emote images synced to OpenVibe.Media
     ['emotes', 'media_asset_id', 'INTEGER'],
+    ['ctx_users', 'subject_id', 'TEXT'],      // older Chat databases; auth/network-session.js looks users up by it
 ];
 
 function initDb({ captureMirror = false } = {}) {
@@ -113,6 +114,8 @@ function initDb({ captureMirror = false } = {}) {
         const have = d.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
         if (!have) d.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
     }
+    // auth/network-session.js resolves a verified Network token to its user by subject.
+    d.exec('CREATE INDEX IF NOT EXISTS idx_ctx_users_subject ON ctx_users(subject_id)');
     const upsertAuth = d.prepare('INSERT INTO table_authority (table_name, authority, note) VALUES (?, ?, ?) ON CONFLICT(table_name) DO UPDATE SET authority = excluded.authority, note = excluded.note');
     for (const t of Object.keys(CHAT_TABLES)) upsertAuth.run(t, 'chat', 'Chat writes; Live keeps a read mirror');
     for (const [t, note] of Object.entries(STAGED_TABLES)) upsertAuth.run(t, 'live', note);
