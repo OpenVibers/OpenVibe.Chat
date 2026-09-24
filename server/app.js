@@ -48,6 +48,7 @@ function getAllowedOrigins() {
         } catch { /* */ }
     }
     allowed.add(normalizeOrigin(config.networkUrl) || 'https://openvibe.network');
+    allowed.add(normalizeOrigin(config.web.baseUrl) || 'https://openvibe.chat');
     allowed.add('https://openvibe.games');
     allowed.add('https://openvibe.tools');
     if (!config.isProduction) {
@@ -205,6 +206,9 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
     app.use('/api/dm', require('./chat/dm-routes'));
     app.use('/api/tts', require('./chat/tts-routes'));
     app.use('/api/sounds', require('./chat/sounds-routes'));
+
+    // openvibe.chat, the site: pages, sign-in, the Frame's /shared/ files (server/web/).
+    app.use(require('./web/pages').createWebRoutes({ config }));
 
     app.use((req, res) => res.status(404).json({ error: 'Not found' }));
     app.use((err, req, res, _next) => {

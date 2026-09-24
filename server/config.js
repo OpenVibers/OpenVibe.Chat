@@ -39,11 +39,20 @@ module.exports = {
     // PEM with the Network's RS256 public key. When unset or unreadable the key is fetched from
     // ${networkInternalUrl}/api/.well-known/jwks.
     networkPublicKeyPath: process.env.OV_NETWORK_PUBLIC_KEY || '',
-    // Chat's service principal (client `chat` in the Network's oauth_clients).
+    // Chat's service principal (client `chat` in the Network's oauth_clients). The same client signs
+    // people in to openvibe.chat (redirect <web.baseUrl>/auth/callback), as Wiki and Blog do.
     oauth: {
         clientId: process.env.OV_OAUTH_CLIENT_ID || 'chat',
         clientSecret: process.env.OV_OAUTH_CLIENT_SECRET || '',
+        redirectUri: process.env.CHAT_OAUTH_REDIRECT_URI || `${strip(process.env.CHAT_WEB_URL || (isProduction ? 'https://openvibe.chat' : 'http://localhost:4400'))}/auth/callback`,
+        scope: 'profile theme',
     },
+
+    // openvibe.chat, the site (server/web/): global chat, messages and settings, served by Chat itself.
+    web: {
+        baseUrl: strip(process.env.CHAT_WEB_URL || (isProduction ? 'https://openvibe.chat' : 'http://localhost:4400')),
+    },
+    cookies: { secure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : isProduction },
 
     // OpenVibe.Live — users, streams, channels, bans and every side effect chat triggers.
     live: {

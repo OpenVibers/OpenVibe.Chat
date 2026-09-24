@@ -1,0 +1,73 @@
+/* openvibe.chat. Colours follow the network theme variables (theme-loader.js) with dark defaults that
+   match the critical canvas; everything reads and posts without JavaScript. */
+:root {
+  --oc-bg: var(--bg-primary, #0a0f1c);
+  --oc-panel: var(--bg-secondary, #111a2c);
+  --oc-panel-2: var(--bg-tertiary, #16213a);
+  --oc-text: var(--text-primary, #e6edf7);
+  --oc-muted: var(--text-secondary, #9fb0c8);
+  --oc-line: var(--border-color, rgba(255, 255, 255, .12));
+  --oc-accent: var(--accent, #60a5fa);
+  --oc-on-accent: var(--on-accent, #0a0f1c);
+  --oc-red: #f87171;
+  --oc-ok: #34d399;
+  --oc-scale: 1;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--oc-bg); color: var(--oc-text); font: calc(16px * var(--oc-scale))/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--oc-accent); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+.oc-skip { position: absolute; left: -9999px; }
+.oc-skip:focus { left: 16px; top: 8px; background: var(--oc-panel); padding: 6px 10px; z-index: 10; }
+.oc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.oc-bar { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center; max-width: 960px; margin: 0 auto; padding: 12px 16px; border-bottom: 1px solid var(--oc-line); }
+.oc-brand { font-weight: 800; color: var(--oc-text); text-decoration: none; letter-spacing: -.01em; }
+.oc-tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.oc-tabs a { color: var(--oc-muted); text-decoration: none; padding: 4px 10px; border-radius: 999px; }
+.oc-tabs a[aria-current="page"], .oc-tabs a:hover { color: var(--oc-text); background: var(--oc-panel); }
+.oc-account { font-size: 14px; color: var(--oc-muted); margin-left: auto; }
+.oc-main { max-width: 960px; margin: 0 auto; padding: 16px 16px 48px; overflow-wrap: anywhere; }
+h1 { font-size: 1.6rem; line-height: 1.25; margin: .3em 0 .2em; }
+.oc-muted { color: var(--oc-muted); }
+.oc-live { color: var(--oc-ok); font-size: .85em; margin-left: 6px; }
+.oc-notice { padding: 8px 12px; border-left: 4px solid var(--oc-accent); background: var(--oc-panel); border-radius: 0 8px 8px 0; }
+.oc-notice.oc-error { border-color: var(--oc-red); }
+.oc-notice.oc-ok { border-color: var(--oc-ok); }
+.oc-feed { list-style: none; margin: 12px 0; padding: 8px 4px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; max-height: min(64vh, 720px); overflow-y: auto; overscroll-behavior: contain; }
+.oc-msg { padding: 5px 10px; border-radius: 8px; line-height: 1.45; }
+.oc-msg:hover { background: var(--oc-panel-2); }
+.oc-compact .oc-msg { padding: 1px 10px; }
+.oc-time { display: none; color: var(--oc-muted); font-size: .8em; font-variant-numeric: tabular-nums; margin-right: 4px; }
+.oc-times .oc-time { display: inline; }
+.oc-name { font-weight: 700; text-decoration: none; }
+.oc-anon { color: var(--oc-muted); font-weight: 600; }
+.oc-where { color: var(--oc-muted); font-size: .8em; text-decoration: none; margin-left: 4px; }
+.oc-text { white-space: pre-wrap; }
+.oc-badge { display: inline-block; font-size: .7em; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 0 6px; margin-left: 6px; border-radius: 999px; border: 1px solid var(--oc-line); color: var(--oc-muted); vertical-align: 1px; }
+.oc-badge-staff { color: #fbbf24; border-color: rgba(251, 191, 36, .45); }
+.oc-badge-mod { color: var(--oc-ok); border-color: rgba(52, 211, 153, .45); }
+.oc-nobadges .oc-badge-staff, .oc-nobadges .oc-badge-mod { display: none; }
+.oc-mine .oc-name { color: var(--oc-accent); }
+.oc-empty { padding: 16px; text-align: center; }
+.oc-compose { display: flex; gap: 8px; align-items: flex-end; }
+.oc-compose textarea { flex: 1; min-height: 44px; resize: vertical; }
+input, select, textarea { font: inherit; color: var(--oc-text); background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 10px; padding: 8px 10px; max-width: 100%; }
+button, .oc-button { display: inline-block; background: var(--oc-accent); color: var(--oc-on-accent); border: 0; border-radius: 10px; padding: 9px 16px; font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; }
+button[disabled] { opacity: .6; cursor: default; }
+.oc-signin { margin: 12px 0; }
+.oc-new { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0 16px; }
+.oc-new input { flex: 1 1 180px; }
+.oc-convs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.oc-conv { display: flex; gap: 12px; align-items: center; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; padding: 10px 14px; }
+.oc-conv a { flex: 1; min-width: 0; color: var(--oc-text); text-decoration: none; display: flex; flex-direction: column; }
+.oc-conv .oc-last { font-size: .9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oc-conv.oc-unread { border-color: var(--oc-accent); }
+.oc-form { display: grid; gap: 10px; max-width: 520px; }
+.oc-check { display: flex; gap: 8px; align-items: center; }
+.oc-form select { margin-left: 8px; }
+@media (max-width: 560px) {
+  .oc-main { padding: 12px 12px 40px; }
+  .oc-feed { max-height: 60vh; }
+  .oc-account { margin-left: 0; }
+}
