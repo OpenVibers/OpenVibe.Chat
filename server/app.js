@@ -79,6 +79,9 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
     // How sign-ins resolve (auth/network-session.js): here, through Live, or refused.
     metrics.registry.gauge({ name: 'chat_auth_resolutions', help: 'Token resolutions since start, by where they were decided', labelNames: ['via'],
         collect: () => Object.entries(require('./auth/network-session').stats()).map(([via, n]) => ({ labels: { via }, value: n })) });
+    // Deprecated ?token= on /ws/chat (C-05), by kind, since start: when both stay at 0, the shim goes.
+    metrics.registry.gauge({ name: 'chat_ws_url_token_uses', help: 'WebSocket upgrades that carried the token in the URL (deprecated), by token kind', labelNames: ['kind'],
+        collect: () => Object.entries(require('./auth/auth').urlTokenUses()).map(([kind, n]) => ({ labels: { kind }, value: n })) });
 
     /** Exact allow-list only (no subdomain wildcard). */
     function isAllowedOrigin(origin) {

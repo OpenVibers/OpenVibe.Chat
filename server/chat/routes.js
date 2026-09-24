@@ -4,7 +4,7 @@
  * Same paths, bodies and responses as Live's /api/chat. Messages are Chat's; authors, streams,
  * slots, cosmetics, tags, settings and profile cards are Live's and come through live-context.
  * 
- * POST /api/chat/send                  - Send a chat message (REST fallback)
+ * POST /api/chat/send                  - Post a message to global chat (bots; API tokens need the chat scope)
  * GET  /api/chat/:streamId/history   - Get chat history for a stream
  * GET  /api/chat/:streamId/users     - Get users in chat
  * GET  /api/chat/search              - Search chat messages
@@ -224,7 +224,7 @@ function hydrateReplies(messages) {
     });
 }
 
-// ── Send Chat Message (REST fallback when WS is down) ────────
+// ── Post to global chat over REST (bots; the browser never falls back to it: C-06) ──
 router.post('/send', requireAuth, async (req, res) => {
     try {
         const text = (req.body.message || '').trim();

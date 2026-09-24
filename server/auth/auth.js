@@ -70,14 +70,18 @@ function extractToken(req) {
 /**
  * Extract the token for a WebSocket upgrade request
  */
+const urlTokenUses = { jwt: 0, api_token: 0 };
 function extractWsToken(req) {
-    // Prefer explicit ?token= query param — clients (e.g. broadcast signaling)
-    // put the freshest localStorage token in the URL, which may be newer than
-    // a stale httpOnly cookie from an earlier session.
+    // DEPRECATED (C-05): a ?token= query param. Browsers send the token in their first join message
+    // and bots should use the Authorization header; URLs end up in proxy logs. Still honoured (and
+    // counted, /metrics chat_ws_url_token_uses) while bots move off it.
     try {
         const url = new URL(req.url || '/', 'http://localhost');
         const queryToken = url.searchParams.get('token');
-        if (queryToken && queryToken !== 'null' && queryToken !== 'undefined') return queryToken;
+        if (queryToken && queryToken !== 'null' && queryToken !== 'undefined') {
+            urlTokenUses[queryToken.startsWith('hbt_') ? 'api_token' : 'jwt']++;
+            return queryToken;
+        }
     } catch { /* fall through */ }
 
     // Fall back to cookie / Authorization header
@@ -178,4 +182,5 @@ module.exports = {
     requireAuth,
     optionalAuth,
     requireAdmin,
+    urlTokenUses: () => ({ ...urlTokenUses }),
 };
