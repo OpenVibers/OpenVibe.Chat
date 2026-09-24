@@ -13,6 +13,9 @@
  *                           revision newer than the cached copy drops it (../prefs/chat-preferences.js
  *                           handleEvent), so a change made elsewhere shows at once instead of within
  *                           CHAT_PREFS_TTL_MS. Other namespaces are acknowledged and not recorded.
+ *   vip.membership.changed  a membership started, lapsed or was revoked (source vip): the member's cached
+ *                           subscriber-badge answers for that creator are dropped at once
+ *                           (../vip/badges.js handleEvent) instead of converging by the cache TTL.
  *
  * Exactly once: the openvibe-sdk inbox claims (consumer, event_id) in the same SQLite transaction as
  * the change, so a redelivery does nothing and a failure rolls both back (Events retries). Broadcasts
@@ -33,10 +36,11 @@ const db = require('../db/database');
 const { viaProxy } = require('../net/service-auth');
 const deployNotice = require('../chat/deploy-notice');
 const prefs = require('../prefs/chat-preferences');
+const vipBadges = require('../vip/badges');
 
 const CONSUMER = 'chat';
 const INBOX_TABLE = 'chat_event_inbox';
-const TOPICS = Object.freeze(['live.release.deployed', 'network.module.updated']);
+const TOPICS = Object.freeze(['live.release.deployed', 'network.module.updated', 'vip.membership.changed']);
 const EVENT_ID_RE = /^evt_[0-9A-HJKMNP-TV-Z]{26}$/;
 const INBOX_KEEP_MS = 35 * 24 * 3600 * 1000;       // Events keeps events 30 days: nothing older can be redelivered
 
@@ -66,6 +70,12 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
             const p = event.payload && typeof event.payload === 'object' ? event.payload : {};
             if (p.namespace !== prefs.NAMESPACE) return 'ignored:namespace';
             return () => (prefs.handleEvent(event) ? 'invalidated' : 'unchanged');
+        }
+        if (event.event_type === 'vip.membership.changed') {
+            // A membership started, lapsed or was revoked: drop that member's cached badge answers for
+            // that creator now instead of waiting out the cache TTL (VIP convergence).
+            if (event.source !== 'vip') return 'ignored:source';
+            return () => (vipBadges.handleEvent(event) ? 'invalidated' : 'unchanged');
         }
         return 'ignored:type';
     }

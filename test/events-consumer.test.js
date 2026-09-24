@@ -123,8 +123,8 @@ t('boot with the consumer on and a stub Events', async () => {
 
 t('boot created one subscription per topic, to /internal/events, with the consumer’s secret', async () => {
     const results = await h.subscriptions.done;
-    assert.deepStrictEqual(results.map((r) => [r.topic, r.result]), [['live.release.deployed', 'created'], ['network.module.updated', 'created']]);
-    assert.strictEqual(stubEvents.subs.length, 2);
+    assert.deepStrictEqual(results.map((r) => [r.topic, r.result]), [['live.release.deployed', 'created'], ['network.module.updated', 'created'], ['vip.membership.changed', 'created']]);
+    assert.strictEqual(stubEvents.subs.length, 3);
     for (const s of stubEvents.subs) {
         assert.strictEqual(s.endpoint, `http://127.0.0.1:${h.port}/internal/events`);
         assert.strictEqual(s.secret, SECRET, 'the first CHAT_EVENTS_SECRET is handed to Events');
@@ -139,17 +139,17 @@ t('a second boot changes nothing, and never re-enables a subscription an operato
     const endpoint = subs.endpointFor(config, h.port);
     const posts = stubEvents.posts;
     let r = await subs.ensure({ config, endpoint });
-    assert.deepStrictEqual(r.map((x) => x.result), ['exists', 'exists']);
+    assert.deepStrictEqual(r.map((x) => x.result), ['exists', 'exists', 'exists']);
     assert.strictEqual(stubEvents.posts, posts, 'nothing was created again');
     r = await subs.ensure({ config, endpoint, action: 'disable', topics: ['live.release.deployed'] });
     assert.deepStrictEqual(r.map((x) => [x.result, x.enabled]), [['disabled', false]]);
     r = await subs.ensure({ config, endpoint });
-    assert.deepStrictEqual(r.map((x) => [x.topic, x.result, x.enabled]), [['live.release.deployed', 'exists', false], ['network.module.updated', 'exists', true]]);
+    assert.deepStrictEqual(r.map((x) => [x.topic, x.result, x.enabled]), [['live.release.deployed', 'exists', false], ['network.module.updated', 'exists', true], ['vip.membership.changed', 'exists', true]]);
     assert.strictEqual(stubEvents.subs[0].enabled, false, 'still disabled');
     r = await subs.ensure({ config, endpoint, action: 'enable', topics: ['live.release.deployed'] });
     assert.strictEqual(stubEvents.subs[0].enabled, true);
     r = await subs.ensure({ config, endpoint, action: 'list' });
-    assert.deepStrictEqual(r.map((x) => x.result), ['exists', 'exists']);
+    assert.deepStrictEqual(r.map((x) => x.result), ['exists', 'exists', 'exists']);
 });
 
 t('signature v2 only: bad signature, stale or future timestamp, v1-only, unsigned → 401', async () => {
@@ -342,6 +342,28 @@ t('network.module.updated drops a cached chat.preferences copy when newer; an ol
     r = await deliver(ev);
     assert.strictEqual(r.body.duplicate, true, 'a redelivery is a no-op');
     assert.strictEqual(prefs._cached(ANN).revision, 3);
+});
+
+t('vip.membership.changed from VIP drops the cached badge answers at once; from anyone else it is ignored', async () => {
+    const vipBadges = require('../server/vip/badges');
+    const calls = [];
+    const orig = vipBadges.handleEvent;
+    vipBadges.handleEvent = (e) => { calls.push(e.event_id); return true; };
+    try {
+        const ev = (source) => ({
+            event_id: ids.newId('event'), event_type: 'vip.membership.changed', version: 1, source, actor: { type: 'service', id: 'vip' },
+            timestamp: new Date().toISOString(), priority: 'important', visibility: 'internal', subject: { type: 'membership', id: 'mbr_1', revision: 2 },
+            payload: { member: { type: 'user', id: ANN }, creator: { type: 'user', id: ANN }, status: 'canceled' },
+        });
+        const good = ev('vip');
+        let r = await deliver(good);
+        assert.strictEqual(r.status, 200);
+        assert.strictEqual(r.body.outcome, 'invalidated');
+        assert.deepStrictEqual(calls, [good.event_id]);
+        r = await deliver(ev('live'));
+        assert.strictEqual(r.body.outcome, 'ignored:source');
+        assert.strictEqual(calls.length, 1, 'only VIP speaks for memberships');
+    } finally { vipBadges.handleEvent = orig; }
 });
 
 t('an event delivered with the secret the subscription holds verifies; /ready reports the consumer', async () => {
