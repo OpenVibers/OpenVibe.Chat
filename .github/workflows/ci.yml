@@ -4,29 +4,12 @@ on:
     branches: [main]
   pull_request:
 jobs:
+  # install, node --check, npm test and openvibe-contracts-check: the shared test job (Track Q).
   test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.1   # production runs Node 22
-          cache: npm
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg   # sound uploads are probed/converted
-      - run: npm ci --no-audit --no-fund
-      - run: npm test
-  contracts:
-    # Blocking once docs/capabilities-proposal/ is registered in openvibe-contracts and the chat
-    # service manifest lists them (docs/cutover.md, prerequisites). Until then it reports the gap.
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22.22.1
-          cache: npm
-      - run: npm ci --no-audit --no-fund
-      - run: npx openvibe-contracts-check --service chat --src server
+    uses: OpenVibers/OpenVibe.Shared/.github/workflows/test.yml@e8b0caf086ad1f8fceaac80e2dca6cfe64f63602
+    with:
+      apt-packages: ffmpeg   # sound uploads are probed and converted
+      contracts-service: chat
   # Secret scan (gitleaks) and dependency audit, shared by every OpenVibers repo (Track Q).
   security:
     uses: OpenVibers/OpenVibe.Shared/.github/workflows/security.yml@83c998b65424fb97e6f6de55ad9cc5981767e89c
