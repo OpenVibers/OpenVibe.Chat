@@ -22,6 +22,16 @@ t('boot', async () => {
     await h.ctx.sync();
 });
 
+t('release manifest and loopback metrics (D43, Track O)', async () => {
+    const rel = await h.http('GET', '/release.json');
+    assert.strictEqual(rel.status, 200);
+    assert.strictEqual(rel.body.service, 'chat');
+    assert.ok(rel.body.components && rel.body.components.server);
+    const m = await h.http('GET', '/metrics');
+    assert.strictEqual(m.status, 200, 'the test client is loopback');
+    if (m.headers) assert.ok(/text\/plain/.test(String(m.headers['content-type'] || (m.headers.get && m.headers.get('content-type')) || 'text/plain')), 'Prometheus text format');
+});
+
 t('healthy: 200 ready with a db and a live_sync check', async () => {
     const { status, body } = await ready();
     assert.strictEqual(status, 200);

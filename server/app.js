@@ -66,6 +66,13 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
     // Cloudflare address (DNS-only hosts reach nginx directly with a client-written X-Forwarded-For).
     app.set('trust proxy', trustProxy(config.trustProxy));
 
+    // GET /release.json (ADR-016, D43) and loopback GET /metrics (Track O): what this deployment is,
+    // request rates/latencies and process metrics, from openvibe-shared (before any route).
+    const release = require('openvibe-shared/release').createRelease({ service: 'chat', root: require('path').join(__dirname, '..'), packages: ['openvibe-shared', 'openvibe-sdk', 'openvibe-contracts'] });
+    const metrics = require('openvibe-shared/metrics').instrument(app, { service: 'chat', release: release.release });
+    release.mount(app, { registry: metrics.registry });
+    app.locals.metrics = metrics.registry;
+
     /** Exact allow-list only (no subdomain wildcard). */
     function isAllowedOrigin(origin) {
         return allowedOrigins.has(origin);
