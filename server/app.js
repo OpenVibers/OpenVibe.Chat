@@ -168,7 +168,7 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
             req._ovBanUser = user;
         }
         const u = req._ovBanUser;
-        return !!(u && !u.is_banned && u.role === 'admin');
+        return !!(u && !u.is_banned && require('./auth/permissions').can(u, 'staff.limits.exempt'));
     }
     app.use(async (req, res, next) => {
         try {
@@ -213,7 +213,7 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
             if (ctx.isIpBanned(wsIp, null)) {
                 // Admins pass network bans (shared home network).
                 let exempt = false;
-                try { const u = await authenticateWs(extractWsToken(req)); exempt = !!(u && !u.is_banned && u.role === 'admin'); } catch { exempt = false; }
+                try { const u = await authenticateWs(extractWsToken(req)); exempt = !!(u && !u.is_banned && require('./auth/permissions').can(u, 'staff.limits.exempt')); } catch { exempt = false; }
                 if (!exempt) { socket.destroy(); return; }
             }
         } catch { /* non-critical — allow through on a policy error */ }

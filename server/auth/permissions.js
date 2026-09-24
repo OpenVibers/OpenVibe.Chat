@@ -11,6 +11,7 @@
 'use strict';
 
 const ctx = require('../live-context');
+const { staff } = require('openvibe-contracts');
 
 // ── Role hierarchy (higher = more power) ─────────────────────
 const ROLE_RANK = {
@@ -98,7 +99,7 @@ function getChannelIdForStream(streamId) {
  */
 function canModerateChannel(user, channelId) {
     if (!user) return false;
-    if (isGlobalModOrAbove(user)) return true;
+    if (can(user, 'staff.moderation.chat')) return true;
     if (isChannelOwner(user, channelId)) return true;
     return isChannelMod(user, channelId);
 }
@@ -110,7 +111,7 @@ function canModerateChannel(user, channelId) {
  */
 function canModerateStream(user, streamId) {
     if (!user) return false;
-    if (isGlobalModOrAbove(user)) return true;
+    if (can(user, 'staff.moderation.chat')) return true;
     if (isStreamOwner(user, streamId)) return true;
     const channelId = getChannelIdForStream(streamId);
     if (channelId && isChannelMod(user, channelId)) return true;
@@ -122,7 +123,7 @@ function canModerateStream(user, streamId) {
  */
 function canViewChatLogs(user, scope = 'own') {
     if (!user) return false;
-    if (isGlobalModOrAbove(user)) return true;
+    if (can(user, 'staff.moderation.logs')) return true;
     return scope === 'own';
 }
 
@@ -130,10 +131,24 @@ function canViewChatLogs(user, scope = 'own') {
  * Can this user view another user's chat logs?
  */
 function canViewOtherUserLogs(user) {
-    return isGlobalModOrAbove(user);
+    return can(user, 'staff.moderation.logs');
+}
+
+// ── Staff capabilities (openvibe-contracts manifests/policy/staff-roles.json, ADR-022) ──────
+// Every staff gate asks can(user, 'staff.<area>.<action>'); issued staff_caps claims win when present.
+function staffClaims(user) {
+    if (!user) return null;
+    const c = { role: user.role, is_owner: isOwner(user) };
+    if (Array.isArray(user.staff_caps)) c.staff_caps = user.staff_caps;
+    return c;
+}
+function can(user, capability) {
+    return !!user && staff.can(staffClaims(user), capability);
 }
 
 module.exports = {
+    can,
+    staffClaims,
     ROLE_RANK,
     roleRank,
     isAdmin,

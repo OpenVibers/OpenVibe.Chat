@@ -121,7 +121,7 @@ class ChatServer {
         return anonAge == null ? false : anonAge < DAY;
     }
 
-    _isBanExemptAdmin(client) { return !!(client && client.user && !client.user.is_banned && client.user.role === 'admin'); }
+    _isBanExemptAdmin(client) { return !!(client && client.user && !client.user.is_banned && permissions.can(client.user, 'staff.limits.exempt')); }
 
     getClientIp(req) {
         // CF-Connecting-IP / X-Forwarded-For only when nginx's peer is Cloudflare (net/client-ip.js).
@@ -293,7 +293,7 @@ class ChatServer {
     /** The rest of Live's handleConnection, once the socket's identity is known. */
     _registerConnection(ws, req, { ip, streamId, user, early }) {
         const perIp = this._ipSockets.get(ip) || 0;
-        if (ip && ip !== 'unknown' && perIp >= MAX_CHAT_SOCKETS_PER_IP && !(user && user.role === 'admin')) {
+        if (ip && ip !== 'unknown' && perIp >= MAX_CHAT_SOCKETS_PER_IP && !permissions.can(user, 'staff.limits.exempt')) {
             ws.close(4029, 'Too many connections');
             return;
         }
@@ -661,7 +661,7 @@ class ChatServer {
                 if (channel) {
                     const settings = ctx.getChannelModerationSettings(channel.id);
                     if (settings?.ip_approval_mode) {
-                        const isStaffBypass = client.user && permissions.isGlobalModOrAbove(client.user);
+                        const isStaffBypass = permissions.can(client.user, 'staff.moderation.bypass');
                         const isOwner = client.user && stream && stream.user_id === client.user.id;
                         if (!isStaffBypass && !isOwner) {
                             if (!ctx.isIpApproved(channel.id, client.ip)) {
@@ -962,7 +962,7 @@ class ChatServer {
     _chatRulesBlock(ws, client, text, modStreamId) {
         if (!modStreamId) return false;
         const chatSettings = this._getChannelChatSettings(modStreamId);
-        const isStaff = client.user && permissions.isGlobalModOrAbove(client.user);
+        const isStaff = permissions.can(client.user, 'staff.moderation.bypass');
         const canModerateThisStream = permissions.canModerateStream(client.user, modStreamId);
 
         // Max message length
@@ -1720,7 +1720,7 @@ class ChatServer {
                 const targetUser = await ctx.ensureUserByUsername(target);
                 if (targetUser) {
                     // Prevent non-admins from banning admins
-                    if (permissions.isGlobalModOrAbove(targetUser) && targetUser.role === 'admin' && client.user.role !== 'admin') {
+                    if (permissions.isGlobalModOrAbove(targetUser) && targetUser.role === 'admin' && !permissions.isAdmin(client.user)) {
                         this.sendTo(ws, { type: 'system', message: 'You cannot ban an admin.' });
                         return;
                     }

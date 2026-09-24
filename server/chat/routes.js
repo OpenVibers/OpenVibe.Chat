@@ -630,7 +630,7 @@ router.post('/admin/purge/preview', requireAuth, async (req, res) => {
 
         // Must be admin or stream owner
         let effectiveStreamId = streamId || null;
-        if (!permissions.isAdmin(req.user)) {
+        if (!permissions.can(req.user, 'staff.moderation.purge')) {
             if (streamId) {
                 const stream = await ctx.ensureStream(streamId);
                 if (!stream || stream.user_id !== req.user.id) {
@@ -661,7 +661,7 @@ router.delete('/admin/purge', requireAuth, async (req, res) => {
         if (!from || !to) return res.status(400).json({ error: 'from and to are required' });
 
         let effectiveStreamId = streamId || null;
-        if (!permissions.isAdmin(req.user)) {
+        if (!permissions.can(req.user, 'staff.moderation.purge')) {
             if (streamId) {
                 const stream = await ctx.ensureStream(streamId);
                 if (!stream || stream.user_id !== req.user.id) {
@@ -705,7 +705,7 @@ router.get('/admin/logs', requireAuth, async (req, res) => {
 
         // Must be admin or stream owner
         let effectiveStreamId = streamId ? parseInt(streamId) : undefined;
-        if (!permissions.isAdmin(req.user)) {
+        if (!permissions.can(req.user, 'staff.moderation.purge')) {
             if (streamId) {
                 const stream = await ctx.ensureStream(parseInt(streamId));
                 if (!stream || stream.user_id !== req.user.id) {
@@ -726,7 +726,7 @@ router.get('/admin/logs', requireAuth, async (req, res) => {
             username, search, from, to, messageType,
             page: parseInt(page) || 1,
             limit: Math.min(parseInt(limit) || 50, 200),
-            includeDeleted: includeDeleted === 'true' && permissions.isAdmin(req.user),
+            includeDeleted: includeDeleted === 'true' && permissions.can(req.user, 'staff.moderation.purge'),
         });
         publicRows(result.rows);
         res.json(result);
@@ -741,7 +741,7 @@ router.get('/admin/logs/export', requireAuth, async (req, res) => {
     try {
         const { streamId, username, search, from, to, messageType, format } = req.query;
 
-        if (!permissions.isAdmin(req.user)) {
+        if (!permissions.can(req.user, 'staff.moderation.purge')) {
             if (streamId) {
                 const stream = await ctx.ensureStream(parseInt(streamId));
                 if (!stream || stream.user_id !== req.user.id) {
