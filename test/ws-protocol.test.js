@@ -108,6 +108,18 @@ t('chat into a stream room: room delivery, global cross-feed, persistence, outbo
     assert.strictEqual(reaction.body.powerchat_chat.externalChatterId, `u${alice.id}`);
 });
 
+t('a message that could not be saved is not broadcast; the sender is told', async () => {
+    const orig = h.db.saveChatMessage;
+    h.db.saveChatMessage = () => { throw new Error('disk full'); };
+    try {
+        bobWs.sendJson({ type: 'chat', message: 'ghost line' });   // bob has not spoken yet (no rate limit)
+        const err = await bobWs.next((m) => m.type === 'error' && /could not be sent/.test(m.message));
+        assert.ok(err);
+        await new Promise((r) => setTimeout(r, 200));
+        assert.ok(!aliceWs.all.some((m) => m.type === 'chat' && m.message === 'ghost line'), 'nobody else received it');
+    } finally { h.db.saveChatMessage = orig; }
+});
+
 t('stream history and channel history return the message like Live did', async () => {
     const hist = await h.http('GET', `/api/chat/${streamId}/history`);
     assert.strictEqual(hist.status, 200);

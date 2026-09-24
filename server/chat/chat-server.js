@@ -809,7 +809,13 @@ class ChatServer {
                 metadata: chatMsg.vip_badge ? { vip_badge: chatMsg.vip_badge } : undefined,
             });
             if (result.lastInsertRowid) chatMsg.id = Number(result.lastInsertRowid);
-        } catch { /* non-critical */ }
+        } catch (err) {
+            // Not saved means not sent: a line everyone saw but history, moderation and replays never
+            // have would be a ghost. Tell the sender and stop here.
+            console.warn('[Chat] message not saved, not broadcast:', err && err.message);
+            this.sendTo(ws, { type: 'error', message: 'Your message could not be sent. Please try again.' });
+            return;
+        }
 
         // Attach reply context to broadcast
         if (replyTo) chatMsg.reply_to = replyTo;
