@@ -28,6 +28,7 @@ const session = require('../auth/network-session');
 const historyStore = require('../chat/history-store');
 const dm = require('../chat/dm');
 const prefs = require('../prefs/chat-preferences');
+const prefStores = require('../prefs/stores');
 const ctx = require('../live-context');
 const permissions = require('../auth/permissions');
 
@@ -230,10 +231,14 @@ ${composer}
         })(req, res, next);
     });
 
-    // ── Settings (chat.preferences, the same record Live's chat reads) ──
+    // ── Settings: the chat.* user modules (server/prefs/stores.js), the same records Live's chat reads ──
+    const TTS_SOURCES = [['native', 'OpenVibe chat'], ['robotstreamer', 'RobotStreamer'], ['kick', 'Kick'], ['youtube', 'YouTube'], ['twitch', 'Twitch']];
     router.get('/settings', async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
-        const p = await prefsOf(actor);
+        const sid = actor.user.subject_id;
+        const [p, tts, dmSet, pres] = await Promise.all([prefsOf(actor), prefStores.settingsOf(prefStores.tts, sid), prefStores.settingsOf(prefStores.dm, sid), prefStores.settingsOf(prefStores.presence, sid)]);
+        const src = tts.sources || {};
+        const volume = (name, label, v) => `<label>${label} <input type="number" name="${name}" min="0" max="100" step="5" value="${Number.isInteger(v) ? v : 80}"></label>`;
         const size = p.font_scale == null ? 'default' : p.font_scale < 0.95 ? 'small' : p.font_scale > 1.05 ? 'large' : 'default';
         const box = (name, label, on) => `<label class="oc-check"><input type="checkbox" name="${name}" value="1"${on ? ' checked' : ''}> ${label}</label>`;
         const saved = req.query.saved ? notice('ok', 'Saved. These settings follow you to Live chat and every device.') : '';
@@ -248,6 +253,19 @@ ${box('compact', 'Compact messages', p.compact === true)}
 ${box('show_badges', 'Show staff and moderator badges', p.show_badges !== false)}
 ${box('hide_emotes', 'Hide emotes', p.hide_emotes === true)}
 <label>Text size <select name="font_size">${['small', 'default', 'large'].map((s) => `<option value="${s}"${s === size ? ' selected' : ''}>${s[0].toUpperCase()}${s.slice(1)}</option>`).join('')}</select></label>
+<h2>Messages</h2>
+<label>Who can start a conversation with you <select name="new_conversations"><option value="everyone"${dmSet.new_conversations !== 'nobody' ? ' selected' : ''}>Everyone</option><option value="nobody"${dmSet.new_conversations === 'nobody' ? ' selected' : ''}>Nobody (your existing conversations stay open)</option></select></label>
+${box('group_invites', 'People can add me to group conversations', dmSet.group_invites !== false)}
+${box('previews', 'Show message text in notifications', dmSet.previews !== false)}
+<h2>Presence</h2>
+${box('show_in_user_list', 'Show my name in chat user lists (when off, you are counted but not named)', pres.show_in_user_list !== false)}
+<h2>Text-to-speech and sounds</h2>
+${box('tts_send', 'Read my messages aloud where the streamer has text-to-speech on', tts.send !== false)}
+${box('tts_send_while_live', 'Also while I am broadcasting', tts.send_while_live !== false)}
+${volume('tts_volume', 'Text-to-speech volume', tts.volume)}
+${box('tts_sounds', 'Play chat sounds', tts.sounds !== false)}
+${volume('tts_sound_volume', 'Chat sound volume', tts.sound_volume)}
+<fieldset class="oc-fieldset"><legend>Read messages relayed from</legend>${TTS_SOURCES.map(([k, label]) => box(`tts_src_${k}`, label, src[k] !== false)).join('')}</fieldset>
 <p><button type="submit">Save</button></p>
 </form>`,
         });
@@ -263,8 +281,20 @@ ${box('hide_emotes', 'Hide emotes', p.hide_emotes === true)}
             hide_emotes: b.hide_emotes === '1' ? true : null,
             font_scale: Object.prototype.hasOwnProperty.call(FONT_SCALES, b.font_size) ? FONT_SCALES[b.font_size] : null,
         };
-        try { await prefs.update(actor.user.subject_id, patch); return res.redirect(303, '/settings?saved=1'); }
-        catch (err) { return res.redirect(303, `/settings?error=${encodeURIComponent(err.message || 'Could not save right now')}`); }
+        const on = (k) => b[k] === '1';
+        const pct = (k) => { const n = Math.round(Number(b[k])); return Number.isFinite(n) && n >= 0 && n <= 100 && n !== 80 ? n : null; };
+        const sources = Object.fromEntries(TTS_SOURCES.filter(([k]) => !on(`tts_src_${k}`)).map(([k]) => [k, false]));
+        const sid = actor.user.subject_id;
+        try {
+            await prefs.update(sid, patch);
+            await prefStores.dm.update(sid, { new_conversations: b.new_conversations === 'nobody' ? 'nobody' : null, group_invites: on('group_invites') ? null : false, previews: on('previews') ? null : false });
+            await prefStores.presence.update(sid, { show_in_user_list: on('show_in_user_list') ? null : false });
+            await prefStores.tts.update(sid, {
+                send: on('tts_send') ? null : false, send_while_live: on('tts_send_while_live') ? null : false, volume: pct('tts_volume'),
+                sounds: on('tts_sounds') ? null : false, sound_volume: pct('tts_sound_volume'), sources: Object.keys(sources).length ? sources : null,
+            });
+            return res.redirect(303, '/settings?saved=1');
+        } catch (err) { return res.redirect(303, `/settings?error=${encodeURIComponent(err.message || 'Could not save right now')}`); }
     });
 
     // ── Rooms (server/rooms/) ──

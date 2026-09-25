@@ -18,6 +18,16 @@ const router = express.Router();
 const { requireAuth } = require('../auth/auth');
 const dm = require('./dm');
 const ctx = require('../live-context');
+const prefStores = require('../prefs/stores');
+
+/**
+ * The target's chat.dm_settings (Network user module): does this person accept a new direct
+ * conversation, or being added to a group? When Network cannot answer, the defaults (yes) apply.
+ */
+async function dmSettingsOf(target) {
+    const subject = (target && target.subject_id) || require('../db/database').subjectFor(target && target.id);
+    return prefStores.settingsOf(prefStores.dm, subject);
+}
 
 // Chat-internal columns (the Network subject next to Live's ids) are not part of Live's API.
 function publicMessage(m) {
@@ -102,6 +112,14 @@ router.post('/conversations', async (req, res) => {
             if (target.is_banned) return res.status(400).json({ error: 'Cannot message banned users' });
             if (dm.isBlockedEither(req.user.id, uid)) {
                 return res.status(403).json({ error: 'Cannot start a conversation with this user' });
+            }
+            // Their message settings: a new direct conversation, or a group, only if they accept one.
+            const wants = await dmSettingsOf(target);
+            if (participantIds.length === 2 && wants.new_conversations === 'nobody' && !dm.findDirectConversation(req.user.id, uid)) {
+                return res.status(403).json({ error: `${target.display_name || target.username} is not accepting new conversations`, code: 'dm.not_accepting' });
+            }
+            if (participantIds.length > 2 && wants.group_invites === false) {
+                return res.status(403).json({ error: `${target.display_name || target.username} cannot be added to group conversations`, code: 'dm.no_group_invites' });
             }
         }
 
@@ -272,6 +290,9 @@ router.post('/conversations/:id/participants', async (req, res) => {
         const members = dm.getParticipants(convId) || [];
         if (members.some((p) => dm.isBlockedEither(p.user_id || p.id, user_id))) {
             return res.status(403).json({ error: 'Cannot add this user' });
+        }
+        if ((await dmSettingsOf(target)).group_invites === false) {
+            return res.status(403).json({ error: `${target.display_name || target.username} cannot be added to group conversations`, code: 'dm.no_group_invites' });
         }
 
         // Group size limit

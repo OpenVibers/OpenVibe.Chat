@@ -407,6 +407,7 @@ class ChatServer {
                     if (user) {
                         if (!client.user || client.user.id === user.id) {
                             client.user = user;
+                            this._hiddenFromUserList(user);   // warm chat.presence_prefs before the next user list
                             client.tokenIat = session.tokenIat(msg.token);
                             client.anonId = null; // no longer anonymous
                         } else {
@@ -592,12 +593,14 @@ class ChatServer {
     getUserList(streamId) {
         const seen = new Set();
         const logged = [];
-        let anonCount = 0;
+        let anonCount = 0, hiddenCount = 0;
         for (const [, c] of this.clients) {
             if (c.streamId !== streamId) continue;
             if (c.user) {
                 if (seen.has(c.user.id)) continue;
                 seen.add(c.user.id);
+                // chat.presence_prefs: someone who turned off "show my name in user lists" is counted, not named.
+                if (this._hiddenFromUserList(c.user)) { hiddenCount++; continue; }
                 logged.push({
                     username: c.user.username,
                     display_name: c.user.display_name || c.user.username,
@@ -613,7 +616,33 @@ class ChatServer {
         // Sort: admins first, then mods, then alphabetical
         const rolePriority = { admin: 0, global_mod: 1, streamer: 2, user: 3 };
         logged.sort((a, b) => (rolePriority[a.role] ?? 9) - (rolePriority[b.role] ?? 9) || a.display_name.localeCompare(b.display_name));
-        return { logged, anonCount };
+        return { logged, anonCount, hiddenCount };
+    }
+
+    /**
+     * Whether a signed-in user asked not to be named in user lists (Network user module
+     * chat.presence_prefs). Synchronous: the cached record, fetched at join; not cached yet → fetch it
+     * in the background and name them until it arrives.
+     */
+    _hiddenFromUserList(user) {
+        const subject = this._subjectOfUser(user);
+        if (!subject) return false;
+        const { presence } = require('../prefs/stores');
+        const cached = presence.peek(subject);
+        if (cached) return cached.show_in_user_list === false;
+        presence.get(subject).catch(() => {});
+        return false;
+    }
+
+    /** Someone changed chat.presence_prefs elsewhere: read it again, then refresh the user lists they are in. */
+    presenceChanged(subject) {
+        if (!subject) return;
+        const { presence } = require('../prefs/stores');
+        presence.get(subject).catch(() => {}).then(() => {
+            const streams = new Set();
+            for (const [, c] of this.clients) if (c.user && this._subjectOfUser(c.user) === subject) streams.add(c.streamId ?? null);
+            for (const sid of streams) this.broadcastUsersList(sid);
+        });
     }
 
     _parseSlurFilterTerms(rawTerms) {

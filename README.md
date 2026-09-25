@@ -178,6 +178,16 @@ network.modules.read` and `network.modules.write` on `chat.preferences`) and nam
 every write, so another writer is never overwritten (Chat reads again and re-applies the patch; a browser
 If-Match is strict: 412).
 
+Three more modules work the same way, with `{ settings: { … } }` as the body (openvibe-contracts 0.41.0):
+
+| Route | Module | Fields | Enforced by |
+| --- | --- | --- | --- |
+| `/api/chat/tts-settings` | `chat.tts_defaults` v2 | `send`, `send_while_live`, `volume`, `sounds`, `sound_volume`, `sources` | Live's chat panel |
+| `/api/chat/dm-settings` | `chat.dm_settings` | `new_conversations` (`everyone`/`nobody`), `group_invites`, `previews` | the DM routes. `nobody` refuses a new direct conversation, but an existing one stays open; `group_invites: false` refuses groups (`dm.not_accepting`, `dm.no_group_invites`) |
+| `/api/chat/presence` | `chat.presence_prefs` | `show_in_user_list` | the user list. A hidden person is counted in `hiddenCount`, not named |
+
+openvibe.chat's Settings page edits all four. When Network cannot answer, an enforcement check uses the defaults, so an outage never locks anyone out.
+
 - **Cache.** One entry per person for `CHAT_PREFS_TTL_MS` (60 s). Chat's own writes land in it at once; a
   change made through Network directly (the person's account page) shows at once: its
   `network.module.updated` reaches the Events consumer, and `prefs.handleEvent()` drops the cached copy

@@ -65,6 +65,8 @@ button[disabled] { opacity: .6; cursor: default; }
 .oc-conv.oc-unread { border-color: var(--oc-accent); }
 .oc-form { display: grid; gap: 10px; max-width: 520px; }
 .oc-check { display: flex; gap: 8px; align-items: center; }
+.oc-fieldset { border: 1px solid var(--oc-line); border-radius: 12px; padding: 8px 12px; display: grid; gap: 6px; }
+.oc-form h2 { font-size: 1rem; margin: 18px 0 4px; }
 .oc-form select { margin-left: 8px; }
 @media (max-width: 560px) {
   .oc-main { padding: 12px 12px 40px; }

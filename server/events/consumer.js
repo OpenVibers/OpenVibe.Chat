@@ -9,10 +9,11 @@
  *                           paths claim the head in deploy_releases, so while both run (compatibility
  *                           register C-84) a deploy makes one card whichever arrives first. Older than
  *                           6 hours = ignored:stale.
- *   network.module.updated  a user-module record changed at Network. Only chat.preferences matters: a
- *                           revision newer than the cached copy drops it (../prefs/chat-preferences.js
- *                           handleEvent), so a change made elsewhere shows at once instead of within
- *                           CHAT_PREFS_TTL_MS. Other namespaces are acknowledged and not recorded.
+ *   network.module.updated  a user-module record changed at Network. Only the chat.* namespaces Chat owns
+ *                           matter (../prefs/stores.js): a revision newer than the cached copy drops it
+ *                           (handleEvent), so a change made elsewhere shows at once instead of within
+ *                           CHAT_PREFS_TTL_MS; a chat.presence_prefs change also refreshes the user lists
+ *                           the person is in. Other namespaces are acknowledged and not recorded.
  *   vip.membership.changed  a membership started, lapsed or was revoked (source vip): the member's cached
  *                           subscriber-badge answers for that creator are dropped at once
  *                           (../vip/badges.js handleEvent) instead of converging by the cache TTL.
@@ -35,7 +36,7 @@ const { parseDelivery, createInbox } = require('openvibe-sdk/events');
 const db = require('../db/database');
 const { viaProxy } = require('../net/service-auth');
 const deployNotice = require('../chat/deploy-notice');
-const prefs = require('../prefs/chat-preferences');
+const prefStores = require('../prefs/stores');
 const vipBadges = require('../vip/badges');
 const revocations = require('../auth/revocations');
 const ctx = require('../live-context');
@@ -71,8 +72,14 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
         if (event.event_type === 'network.module.updated') {
             if (event.source !== 'network') return 'ignored:source';
             const p = event.payload && typeof event.payload === 'object' ? event.payload : {};
-            if (p.namespace !== prefs.NAMESPACE) return 'ignored:namespace';
-            return () => (prefs.handleEvent(event) ? 'invalidated' : 'unchanged');
+            const store = prefStores.byNamespace.get(p.namespace);
+            if (!store) return 'ignored:namespace';
+            return () => {
+                if (!store.handleEvent(event)) return 'unchanged';
+                // Someone changed whether they are named in user lists: fetch it again and refresh the lists they are in.
+                if (store === prefStores.presence && chatServer && typeof chatServer.presenceChanged === 'function') chatServer.presenceChanged(p.owner && p.owner.id);
+                return 'invalidated';
+            };
         }
         if (event.event_type === 'network.user.token_valid_after') {
             // Signed out everywhere, password changed, banned…: refuse this person's older tokens and
