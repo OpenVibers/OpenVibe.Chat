@@ -20,6 +20,25 @@ const historyStore = require('./history-store');
 
 const router = express.Router();
 
+// ── Staff reading other people's logs is audited (WS-I task 7) ───────────────
+// A staff member viewing, searching or exporting someone else's chat logs is recorded like any other
+// moderation action (moderation_actions → chat.moderation.action → the network audit log, ADR-022).
+// A person reading their own lines, or a streamer their own stream's, is not.
+function auditLogAccess(req, action_type, { scope_type = 'site', scope_id = null, target_user_id = null, details = {} } = {}) {
+    try {
+        db.logModerationAction({ scope_type, scope_id, actor_user_id: req.user.id, target_user_id, action_type, details });
+    } catch (err) {
+        console.warn('[Chat] log access audit failed:', err.message);
+    }
+}
+// A CSV cell: quoted when needed, and text (not a formula) when it starts with = + - @ in a spreadsheet.
+function csvCell(v) {
+    let s = v == null ? '' : String(v);
+    if (/^[=+\-@\t\r]/.test(s)) s = `'${s}`;
+    return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+
 // Chat-internal columns (the author's Network subject) are not part of Live's API.
 function publicRows(rows) {
     if (Array.isArray(rows)) for (const r of rows) { if (r) delete r.subject_id; }
@@ -342,6 +361,10 @@ router.get('/search', requireAuth, (req, res) => {
         const result = db.searchChatMessages({
             query, userId: effectiveUserId, streamId, limit, offset,
         });
+        if (effectiveUserId !== req.user.id) {
+            auditLogAccess(req, 'chat_log_search', { scope_type: streamId ? 'stream' : 'site', scope_id: streamId, target_user_id: effectiveUserId,
+                details: { query: String(query).slice(0, 100), results: result.messages.length } });
+        }
         publicRows(result.messages);
 
         res.json(result);
@@ -363,6 +386,7 @@ router.get('/user/:userId/history', requireAuth, (req, res) => {
         }
 
         const result = db.getUserChatHistory(userId, limit, offset);
+        if (userId !== req.user.id && offset === 0) auditLogAccess(req, 'chat_log_view', { target_user_id: userId, details: { total: result.total } });
         publicRows(result.messages);
         res.json(result);
     } catch (err) {
@@ -728,6 +752,12 @@ router.get('/admin/logs', requireAuth, async (req, res) => {
             limit: Math.min(parseInt(limit) || 50, 200),
             includeDeleted: includeDeleted === 'true' && permissions.can(req.user, 'staff.moderation.purge'),
         });
+        // Staff browsing beyond their own stream: the first page of each view is recorded.
+        if (permissions.can(req.user, 'staff.moderation.purge') && (parseInt(page) || 1) === 1) {
+            const own = effectiveStreamId && (ctx.getStreamsByUserId(req.user.id, 50) || []).some((st) => st.id === effectiveStreamId);
+            if (!own) auditLogAccess(req, 'chat_log_view', { scope_type: effectiveStreamId ? 'stream' : 'site', scope_id: effectiveStreamId || null,
+                details: { username: username || null, search: search ? String(search).slice(0, 100) : null, from: from || null, to: to || null, include_deleted: includeDeleted === 'true', total: result.total } });
+        }
         publicRows(result.rows);
         res.json(result);
     } catch (e) {
@@ -758,14 +788,16 @@ router.get('/admin/logs/export', requireAuth, async (req, res) => {
             username, search, from, to, messageType,
             page: 1, limit: 50000,
         });
+        if (permissions.can(req.user, 'staff.moderation.purge')) {
+            const own = streamId && (ctx.getStreamsByUserId(req.user.id, 50) || []).some((st) => st.id === parseInt(streamId));
+            if (!own) auditLogAccess(req, 'chat_log_export', { scope_type: streamId ? 'stream' : 'site', scope_id: streamId ? parseInt(streamId) : null,
+                details: { format: format === 'csv' ? 'csv' : 'json', rows: result.rows.length, username: username || null, search: search ? String(search).slice(0, 100) : null, from: from || null, to: to || null } });
+        }
         publicRows(result.rows);
 
         if (format === 'csv') {
             const header = 'id,timestamp,username,message,message_type,stream_id,is_global,source_platform\n';
-            const csvRows = result.rows.map(r => {
-                const msg = (r.message || '').replace(/"/g, '""');
-                return `${r.id},"${r.timestamp}","${(r.username || '').replace(/"/g, '""')}","${msg}","${r.message_type || ''}",${r.stream_id || ''},"${r.is_global || 0}","${r.source_platform || ''}"`;
-            });
+            const csvRows = result.rows.map(r => [r.id, r.timestamp, r.username || '', r.message || '', r.message_type || '', r.stream_id || '', r.is_global || 0, r.source_platform || ''].map(csvCell).join(','));
             res.setHeader('Content-Type', 'text/csv');
             res.setHeader('Content-Disposition', `attachment; filename="chat-logs-${Date.now()}.csv"`);
             res.send(header + csvRows.join('\n'));
@@ -777,6 +809,36 @@ router.get('/admin/logs/export', requireAuth, async (req, res) => {
     } catch (e) {
         console.error('[Chat] Export error:', e.message);
         res.status(500).json({ error: 'Failed to export chat logs' });
+    }
+});
+
+// ── Your own chat, to keep (WS-I task 7) ─────────────────────────────────────
+// Every message you sent that is still visible (not deleted, not expired), newest first, as JSON or
+// CSV. Up to 100,000 lines; `truncated` says when there were more.
+router.get('/me/export', requireAuth, (req, res) => {
+    try {
+        const MAX = 100000, PAGE = 5000;
+        const rows = [];
+        let total = 0;
+        for (let offset = 0; offset < MAX; offset += PAGE) {
+            const r = db.getUserChatHistory(req.user.id, PAGE, offset);
+            total = r.total;
+            rows.push(...r.messages);
+            if (r.messages.length < PAGE) break;
+        }
+        const lines = rows.slice(0, MAX).map((m) => ({ id: m.id, timestamp: m.timestamp, message: m.message, message_type: m.message_type || 'chat', stream_id: m.stream_id || null, stream_title: m.stream_title || null, is_global: !!m.is_global }));
+        const stamp = new Date().toISOString().slice(0, 10);
+        res.set('Cache-Control', 'private, no-store');
+        if (req.query.format === 'csv') {
+            const header = 'id,timestamp,message,message_type,stream_id,stream_title,is_global\n';
+            res.set('Content-Disposition', `attachment; filename="my-chat-${stamp}.csv"`);
+            return res.type('text/csv').send(header + lines.map((l) => [l.id, l.timestamp, l.message, l.message_type, l.stream_id || '', l.stream_title || '', l.is_global ? 1 : 0].map(csvCell).join(',')).join('\n'));
+        }
+        res.set('Content-Disposition', `attachment; filename="my-chat-${stamp}.json"`);
+        res.json({ username: req.user.username, exported_at: new Date().toISOString(), total, truncated: total > lines.length, messages: lines });
+    } catch (e) {
+        console.error('[Chat] Own export error:', e.message);
+        res.status(500).json({ error: 'Failed to export your chat' });
     }
 });
 

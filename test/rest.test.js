@@ -155,6 +155,38 @@ t('chat logs and search are gated like Live', async () => {
     assert.strictEqual((await h.http('GET', '/api/chat/anon/anon5/logs', { token: alice.token })).status, 403);
 });
 
+t('staff reading other people\'s logs is audited; your own chat exports; CSV cells are never formulas', async () => {
+    const audits = () => h.db.all("SELECT action_type, actor_user_id, target_user_id FROM moderation_actions WHERE action_type LIKE 'chat_log_%' ORDER BY id");
+    const before = audits().length;
+    await h.http('GET', `/api/chat/search?q=stream&user_id=${alice.id}`, { token: alice.token });
+    await h.http('GET', `/api/chat/user/${alice.id}/history`, { token: alice.token });
+    await h.http('GET', `/api/chat/admin/logs?streamId=${streamId}`, { token: streamer.token });
+    assert.strictEqual(audits().length, before, 'your own lines and your own stream are not audited');
+    await h.http('GET', `/api/chat/search?q=stream&user_id=${bob.id}`, { token: staff.token });
+    await h.http('GET', `/api/chat/user/${bob.id}/history`, { token: staff.token });
+    await h.http('GET', `/api/chat/user/${bob.id}/history?offset=50`, { token: staff.token });
+    h.db.saveChatMessage({ stream_id: streamId, user_id: bob.id, username: 'Bob', message: '=HYPERLINK("x")', message_type: 'chat' });
+    const admin = h.addUser('exporter', { role: 'admin' });
+    await h.ctx.sync();
+    const ex = await h.http('GET', `/api/chat/admin/logs/export?streamId=${streamId}&format=csv`, { token: admin.token });
+    assert.strictEqual(ex.status, 200);
+    assert.ok(ex.text.includes(`"'=HYPERLINK(""x"")"`), 'a formula-looking message is text');
+    const got = audits().slice(before);
+    assert.deepStrictEqual(got.map((a) => a.action_type), ['chat_log_search', 'chat_log_view', 'chat_log_export'], 'search, first page viewed, export');
+    assert.deepStrictEqual(got.map((a) => a.actor_user_id), [staff.id, staff.id, admin.id]);
+    assert.deepStrictEqual(got.slice(0, 2).map((a) => a.target_user_id), [bob.id, bob.id]);
+
+    const mine = await h.http('GET', '/api/chat/me/export', { token: alice.token });
+    assert.strictEqual(mine.status, 200);
+    assert.strictEqual(mine.body.username, 'alice');
+    assert.ok(mine.body.messages.length >= 3 && mine.body.messages.every((m) => typeof m.message === 'string'));
+    assert.ok(!mine.body.messages.some((m) => m.message === 'in the stream'), 'only your own lines');
+    assert.strictEqual(mine.body.truncated, false);
+    const csv = await h.http('GET', '/api/chat/me/export?format=csv', { token: alice.token });
+    assert.ok(csv.text.startsWith('id,timestamp,message,message_type,stream_id,stream_title,is_global\n'));
+    assert.strictEqual((await h.http('GET', '/api/chat/me/export')).status, 401);
+});
+
 t('profile card and anon info come from Live', async () => {
     const p = await h.http('GET', '/api/chat/user/alice/profile', { token: bob.token });
     assert.strictEqual(p.body.username, 'alice');
