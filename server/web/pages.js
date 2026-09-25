@@ -69,7 +69,7 @@ function globalMessage(m) {
     const t = hhmm(m.timestamp);
     const handle = m.core_username || (m.user_id ? m.username : null);
     const name = esc(m.display_name || m.username || m.anon_id || 'someone');
-    const who = handle ? `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(handle)}" style="color:${esc(/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? m.profile_color : 'inherit')}">${name}</a>` : `<span class="oc-name oc-anon">${name}</span>`;
+    const who = handle ? `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(handle)}" style="--nc:${esc(/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? m.profile_color : 'inherit')}">${name}</a>` : `<span class="oc-name oc-anon">${name}</span>`;
     const where = m.stream_channel ? ` <a class="oc-where" href="${LIVE}/@${encodeURIComponent(m.stream_channel)}" title="Sent from ${esc(m.stream_channel)}'s channel">@${esc(m.stream_channel)}</a>` : '';
     return `<li class="oc-msg" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who}${roleBadge(m.role)}${where} <span class="oc-text">${linkify(m.message)}</span></li>`;
 }
@@ -312,7 +312,7 @@ ${volume('tts_sound_volume', 'Chat sound volume', tts.sound_volume)}
     const roomMessage = (m, can, slug, me) => {
         const t = hhmm(m.created_at);
         const del = (can.moderate || (me && m.user_id === me.id)) ? `<form class="oc-del" method="post" action="/r/${esc(slug)}/delete/${Number(m.id)}"><button type="submit" title="Delete this message" aria-label="Delete this message">×</button></form>` : '';
-        return `<li class="oc-msg" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="color:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)} <span class="oc-text">${linkify(m.message)}</span>${del}</li>`;
+        return `<li class="oc-msg" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? esc(m.profile_color) : 'inherit'}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)} <span class="oc-text">${linkify(m.message)}</span>${del}</li>`;
     };
 
     router.get('/rooms', async (req, res) => {

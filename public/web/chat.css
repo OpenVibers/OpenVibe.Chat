@@ -40,7 +40,10 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: .3em 0 .2em; }
 .oc-compact .oc-msg { padding: 1px 10px; }
 .oc-time { display: none; color: var(--oc-muted); font-size: .8em; font-variant-numeric: tabular-nums; margin-right: 4px; }
 .oc-times .oc-time { display: inline; }
-.oc-name { font-weight: 700; text-decoration: none; }
+.oc-name { font-weight: 700; text-decoration: none; color: var(--nc, inherit); }
+/* A person's own colour (--nc) mixed half-and-half with the theme's text colour: the hue stays theirs,
+   and it reads on any theme's background (their raw colour was below 4.5:1 on the dark panel). */
+.oc-name { color: color-mix(in oklab, var(--nc, var(--oc-text)) 50%, var(--oc-text)); }
 .oc-anon { color: var(--oc-muted); font-weight: 600; }
 .oc-where { color: var(--oc-muted); font-size: .8em; text-decoration: none; margin-left: 4px; }
 .oc-text { white-space: pre-wrap; }
