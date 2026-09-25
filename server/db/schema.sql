@@ -490,3 +490,28 @@ CREATE TABLE IF NOT EXISTS chat_event_inbox (
     processed_at INTEGER NOT NULL,
     PRIMARY KEY (consumer, event_id)
 );
+
+-- Calls (server/calls/lifecycle.js): one row per call. kind 'direct' is a ring from one person to
+-- another (POST /api/streams/voice-channels/call-user): pending → ringing → active → ended, or
+-- missed (no answer within the ring timeout, or the callee's no-answer), declined (declined or busy)
+-- or failed (the invite could not be delivered; `end_reason` says why). kind 'channel' / 'stream' is
+-- a session of a voice channel (a stream-linked one for 'stream'): active from the first person in
+-- until the channel empties or is closed → ended. Times are ms.
+CREATE TABLE IF NOT EXISTS calls (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK(kind IN ('channel', 'direct', 'stream')),
+    state TEXT NOT NULL DEFAULT 'pending' CHECK(state IN ('pending', 'ringing', 'active', 'ended', 'missed', 'declined', 'failed')),
+    channel_id TEXT NOT NULL,
+    stream_id INTEGER,
+    created_by INTEGER,
+    created_by_subject TEXT,
+    target_user_id INTEGER,
+    target_subject TEXT,
+    end_reason TEXT,
+    created_at INTEGER NOT NULL,
+    started_at INTEGER,
+    answered_at INTEGER,
+    ended_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_calls_channel_state ON calls(channel_id, state);
+CREATE INDEX IF NOT EXISTS idx_calls_open ON calls(state) WHERE state IN ('pending', 'ringing', 'active');

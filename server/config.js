@@ -119,6 +119,17 @@ module.exports = {
         endpoint: strip(process.env.CHAT_EVENTS_ENDPOINT || ''),
     },
 
+    // Voice/video calls (server/calls/): Live's call server, moved. Off until the calls cutover
+    // (docs/calls-cutover.md): Chat's chat sockets and openvibe.chat's /api/ are already public,
+    // so while calls are Live's this keeps /api/streams/voice-channels…, /api/streams/:id/call and
+    // /ws/call unanswered here (404 / refused) and /internal/calls/* answering 409, and Chat never
+    // pushes a voice-channel list or a call invite of its own. A direct call nobody answers is
+    // missed after ringTimeoutMs (the callee's browser gives up after 30 s by itself).
+    calls: {
+        enabled: bool(process.env.CHAT_CALLS, false),
+        ringTimeoutMs: int(process.env.CALL_RING_TIMEOUT_MS, 45_000),
+    },
+
     // Channel sound clips live on disk. At cutover this is Live's sounds directory: stored rows
     // hold absolute paths into it, and Live's donation alerts read the alert sounds from there.
     sounds: {

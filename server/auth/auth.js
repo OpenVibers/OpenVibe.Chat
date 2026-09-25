@@ -21,6 +21,7 @@ const session = require('./network-session');
 const TOKEN_DENIED_PREFIXES = ['/api/admin', '/api/mod', '/api/funds', '/api/payments', '/api/auth/stream-key', '/api/auth/tokens', '/api/cosmetics', '/api/analytics'];
 const TOKEN_WRITE_SCOPES = [
     ['/api/chat', ['chat']], ['/api/dm', ['chat']], ['/api/emotes', ['chat']], ['/api/sounds', ['chat']], ['/api/tts', ['chat']],
+    ['/api/streams', ['stream']],   // the call routes (server/calls/routes.js), as on Live
 ];
 function apiTokenAllows(req, scopes) {
     const path = String(req.originalUrl || req.url || '').split('?')[0];

@@ -2,7 +2,8 @@
  * OpenVibe.Chat — HTTP app and WebSocket upgrade handling.
  *
  * Browsers reach Chat on Live's origin: nginx sends /ws/chat and the chat REST prefixes
- * (/api/chat/, /api/dm/, /api/tts/, /api/sounds) here (docs/cutover.md), so the guards Live ran
+ * (/api/chat/, /api/dm/, /api/tts/, /api/sounds) here (docs/cutover.md), and at the calls cutover
+ * /ws/call and the call routes under /api/streams (docs/calls-cutover.md), so the guards Live ran
  * in front of those routes run here too, with Live's values: credentialed CORS for an explicit
  * list of origins (never a wildcard), the /api rate limit, IP/network bans (admins exempt) and the ov_banned cookie, the
  * WebSocket origin allow-list and IP-ban check at upgrade.
@@ -59,7 +60,7 @@ function getAllowedOrigins() {
     return allowed;
 }
 
-function createApp({ chatServer, bridge, mirror, relay, events = null }) {
+function createApp({ chatServer, bridge, mirror, relay, events = null, callServer = null }) {
     const allowedOrigins = getAllowedOrigins();
     const app = express();
     app.disable('x-powered-by');
@@ -95,6 +96,8 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
     // OpenVibe.Events deliveries (live.release.deployed, network.module.updated): signature v2 over
     // the raw body, so this router reads the body itself (server/events/consumer.js).
     if (events) app.use('/internal/events', events.router);
+    // Live's stream hooks for calls (CALLS_AUTHORITY=chat): stream voice channels (server/calls/internal.js).
+    app.use('/internal/calls', express.json({ limit: '64kb' }), require('./calls/internal').createInternalRouter());
     app.get('/health', (req, res) => res.json({ ok: true, service: 'chat' }));
     // Readiness in the openvibe-shared/ready shape (status ready/degraded/not_ready, named checks):
     // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
@@ -208,6 +211,10 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
     app.use('/api/dm', require('./chat/dm-routes'));
     app.use('/api/tts', require('./chat/tts-routes'));
     app.use('/api/sounds', require('./chat/sounds-routes'));
+    // Calls on Live's paths (server/calls/routes.js): /api/streams/voice-channels… and /api/streams/:id/call.
+    // Nothing answers here until CHAT_CALLS is on (docs/calls-cutover.md).
+    const callRoutes = require('./calls/routes');
+    app.use('/api/streams', (req, res, next) => (config.calls.enabled ? callRoutes(req, res, next) : next()));
 
     // openvibe.chat, the site: pages, sign-in, the Frame's /shared/ files (server/web/).
     app.use(require('./web/pages').createWebRoutes({ config }));
@@ -221,7 +228,7 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
         if (!res.headersSent) res.status(500).json({ error: 'Internal server error' });
     });
 
-    /** Live's upgrade guard for /ws/chat: exact origin allow-list, then IP / network bans. */
+    /** Live's upgrade guard for /ws/chat and /ws/call: exact origin allow-list, then IP / network bans. */
     async function handleUpgrade(req, socket, head) {
         const url = req.url || '';
         const origin = normalizeOrigin(req.headers.origin);
@@ -230,7 +237,8 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
             socket.destroy();
             return;
         }
-        if (!url.startsWith('/ws/chat')) { socket.destroy(); return; }
+        const isCall = url.startsWith('/ws/call') && !!callServer && config.calls.enabled;
+        if (!url.startsWith('/ws/chat') && !isCall) { socket.destroy(); return; }
         try {
             const wsIp = chatServer.getClientIp(req);
             if (ctx.isIpBanned(wsIp, null)) {
@@ -240,7 +248,8 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
                 if (!exempt) { socket.destroy(); return; }
             }
         } catch { /* non-critical — allow through on a policy error */ }
-        chatServer.handleUpgrade(req, socket, head);
+        if (isCall) callServer.handleUpgrade(req, socket, head);
+        else chatServer.handleUpgrade(req, socket, head);
     }
 
     return { app, handleUpgrade, allowedOrigins, isAllowedOrigin };

@@ -119,6 +119,14 @@ function canModerateStream(user, streamId) {
 }
 
 /**
+ * Can this user moderate a call on a specific stream?
+ * Same rules as chat moderation.
+ */
+function canModerateCall(user, streamId) {
+    return canModerateStream(user, streamId);
+}
+
+/**
  * Can this user view chat logs?
  */
 function canViewChatLogs(user, scope = 'own') {
@@ -163,6 +171,7 @@ module.exports = {
     getChannelIdForStream,
     canModerateChannel,
     canModerateStream,
+    canModerateCall,
     canViewChatLogs,
     canViewOtherUserLogs,
 };

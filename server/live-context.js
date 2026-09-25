@@ -29,7 +29,8 @@
  * users          getUserById, getUserByUsername, getUserByDisplayName (sync, projection)
  *                ensureUsers(ids), ensureUserByUsername(name)    (async, fetch misses)
  * streams        getStreamById, latestStreamIdForUser, getLiveStreamsByUserId,
- *                getStreamsByUserId, getManagedStreamsByUserId   (sync) · ensureStream(id)
+ *                getStreamsByUserId, getManagedStreamsByUserId   (sync) · ensureStream(id),
+ *                refreshStream(id) (a fresh read past the cache)
  * channels       getChannelById, getChannelByUserId (sync) · ensureChannelForUser(uid),
  *                createChannel(uid) (effect)
  * policy         getChannelModerationSettings(channelId), isChannelModerator(uid, channelId),
@@ -274,6 +275,16 @@ async function ensureStream(id) {
     const sid = parseInt(id, 10);
     if (!sid) return null;
     if (!db.get('SELECT 1 FROM ctx_streams WHERE id = ?', [sid])) await _streamFetch.ensure(sid);
+    return db.get(`${STREAM_SELECT} WHERE s.id = ?`, [sid]) || null;
+}
+/**
+ * Read one stream from Live now, past the cache (a call hook or an ownership check wants its live
+ * state this moment, not up to 10 s old). Falls back to the projection when Live does not answer.
+ */
+async function refreshStream(id) {
+    const sid = parseInt(id, 10);
+    if (!sid) return null;
+    try { await _streamFetch.refresh(sid); } catch (err) { console.warn(`[LiveContext] stream ${sid}: ${err.message}`); }
     return db.get(`${STREAM_SELECT} WHERE s.id = ?`, [sid]) || null;
 }
 function latestStreamIdForUser(userId) {
@@ -779,6 +790,8 @@ const effects = {
     translate: (text, channelUserId) => effect('translate', { text, channel_user_id: channelUserId }).then((r) => r.translation || null),
     notifyDm: (body) => fire('notify/dm', body),
     markDmRead: (userId, conversationId) => fire('notify/dm-read', { user_id: userId, conversation_id: conversationId }),
+    // A call-user ring: Live's cross-site VC_CALL_INVITE notification (server/calls/routes.js).
+    notifyCallInvite: (body) => fire('notify/call-invite', body),
     // Awaitable (a sound's Media copy is removed from Live's row before the row goes), never throws.
     assetSync: (op, assetId) => effect('asset-sync', { op, asset_id: assetId || null }).catch((err) => console.warn(`[LiveContext] asset-sync: ${err.message}`)),
     userProfile: (username, viewerId) => read(`/users/profile?username=${encodeURIComponent(username)}${viewerId ? `&viewer_id=${viewerId}` : ''}`),
@@ -794,7 +807,7 @@ module.exports = {
     authenticate, authFailureReason, upsertUser, invalidateUser, subjectFor,
     getUserById, getUserByUsername, getUserByDisplayName, ensureUsers, ensureUserByUsername,
     // streams + channels
-    getStreamById, ensureStream, latestStreamIdForUser, getLiveStreamsByUserId, getStreamsByUserId, getManagedStreamsByUserId,
+    getStreamById, ensureStream, refreshStream, latestStreamIdForUser, getLiveStreamsByUserId, getStreamsByUserId, getManagedStreamsByUserId,
     getChannelById, getChannelByUserId, ensureChannelForUser, createChannel,
     // policy
     getChannelModerationSettings, isChannelModerator, channelLanguage, getChannelAlertSoundsByUser, ensurePolicy, invalidateChannel,

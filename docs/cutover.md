@@ -29,7 +29,8 @@ nginx locations (`deploy/nginx/openvibe.live-chat.locations.conf`, included in L
 
 Stay on Live (do not route): `/api/chat-ai/*` (the trailing slash in `/api/chat/` keeps it out),
 `/api/emotes/*`, `/api/channels/*` (channel moderation dashboard), `/api/mod/*`, `/api/media/*`,
-`/ws/call`, `/ws/broadcast`, `/ws/control`, and everything else.
+`/ws/call` (until the calls cutover, `docs/calls-cutover.md`), `/ws/broadcast`, `/ws/control`, and
+everything else.
 
 Loopback only, never routed: Chat `/internal/live/*`, `/health`, `/ready`; Live
 `/internal/chat-context/*`, `/internal/chat-effects/*` (both refuse anything that came through

@@ -138,6 +138,31 @@ sudo node --env-file=/etc/openvibe/chat.env scripts/subscribe-events.js --enable
 failed, the last type and outcome); `SELECT * FROM deploy_releases ORDER BY created_at DESC` shows
 which path delivered each deploy first and when the other one arrived.
 
+### Calls
+
+Live's voice/video calls moved here (roadmap WS-I task 1, `server/calls/`), **off until the calls
+cutover** (`CHAT_CALLS=1`, `docs/calls-cutover.md`):
+
+- **`/ws/call`** — Live's call server with the same protocol: `?channelId=` (or a stream number),
+  signalling only (full-mesh WebRTC; `offer`/`answer`/`ice-candidate` relayed, `mute`, `camera-off`,
+  `speaking`, `auth-update`, `force-mute`, `force-camera-off`, `kick`, `ban`, `unban`, `end-call`), the
+  permanent `public` lobby, one temporary channel per person (private for a 1:1 call), stream-linked
+  channels, 8 participants, 3 sockets per address, a one-minute kick cooldown, per-channel bans, empty
+  channels deleted after an hour. Sign-in is Chat's (as on `/ws/chat`); accounts, streams and cosmetics
+  come through `live-context`; the voice-channel list and call invites go out through Chat's chat server.
+- **REST on Live's paths** (`server/calls/routes.js`): `GET/POST /api/streams/voice-channels`,
+  `GET/DELETE /api/streams/voice-channels/:channelId`, `POST …/call-user` and `…/call-user/respond`,
+  `GET/PUT /api/streams/:id/call` (the streamer, checked through `live-context`).
+- **Live's stream hooks** (`server/calls/internal.js`, Live `CALLS_AUTHORITY=chat`):
+  `POST /internal/calls/stream-channel { stream_id, mode, user_id }` and
+  `DELETE /internal/calls/stream-channel/:streamId` — the bridge's service token and capability
+  (`chat.live_bridge.write`), loopback only.
+- **Lifecycle** (`server/calls/lifecycle.js`, table `calls`): a ring is `direct`, `pending → ringing →
+  active → ended`, or `missed` (no answer within `CALL_RING_TIMEOUT_MS`, 45 s; the caller is told),
+  `declined` (declined or busy) or `failed` (the invite could not be delivered, with the reason); a
+  channel's occupancy is a `channel` / `stream` session, `active` while anyone is in, `ended` when it
+  empties or closes. A restart closes what was open (reason `restart`).
+
 ### VIP member badges
 
 A member's messages in a creator's room (stream or offline channel chat) carry that creator's VIP
@@ -212,7 +237,7 @@ node scripts/migrate-chat-preferences.js --rollback /root/chat-prefs-<date>.json
 ```bash
 npm install
 cp .env.example .env          # OV_LIVE_INTERNAL_URL, Network URLs, OV_OAUTH_CLIENT_SECRET, SOUNDS_PATH
-npm start                     # 127.0.0.1:4400 — /ws/chat, /api/{chat,dm,tts,sounds}, /health, /ready
+npm start                     # 127.0.0.1:4400 — /ws/chat, /api/{chat,dm,tts,sounds}, /health, /ready (CHAT_CALLS=1: /ws/call, /api/streams/…)
 npm test                      # Node 22; stub Live and Network in-process
 node scripts/import-from-live.js --live-db /tmp/live-snapshot.db --dry-run
 node scripts/parity-check.js --live https://openvibe.live --chat http://127.0.0.1:4401 --before "…"
@@ -243,9 +268,10 @@ server/events/consumer.js  POST /internal/events: Chat's Events subscriptions (l
 server/events/subscriptions.js  creates them at boot when missing; list/disable/enable for scripts/subscribe-events.js
 server/net/service-auth.js service tokens: client (Chat → others) and guard (others → Chat)
 server/prefs/              chat preferences in the Network user module chat.preferences (routes, cache, migration from Live)
+server/calls/              moved from Live: the call server (/ws/call), its REST routes, Live's stream hooks (/internal/calls), the calls lifecycle
 server/db/                 schema.sql, database.js (Live's chat functions, same names and arguments)
 scripts/                   import-from-live, parity-check, mirror-flush, migrate-chat-preferences, subscribe-events
-docs/                      cutover.md, live-patch.diff, capabilities-proposal/
+docs/                      cutover.md, calls-cutover.md, live-patch.diff, capabilities-proposal/
 ```
 
 ## Owns
@@ -257,8 +283,9 @@ docs/                      cutover.md, live-patch.diff, capabilities-proposal/
 - call signalling metadata and the `pending/ringing/active/ended/missed/declined/failed` lifecycle
 
 (Wave 6 moved messages, DMs, TTS, sounds and the chat side of moderation, and gave TTS and sounds a
-persisted queue with skip/clear/failed states; bans, channel moderation settings, the media-request
-queue and calls are still Live's and reached through `live-context`.)
+persisted queue with skip/clear/failed states; bans, channel moderation settings and the media-request
+queue are still Live's and reached through `live-context`. Calls are ported with their lifecycle,
+`server/calls/`, and switch over with `docs/calls-cutover.md`.)
 
 ## Does not own
 
@@ -296,7 +323,7 @@ Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat
 
 - stream/global/DM histories preserved on import; old Live URLs and WS messages keep working through the adapter — *done on production data: 70,860 messages, 11 conversations and 1,522 DMs imported with 0 held (two passes, identical), 15/15 read paths identical at the cutover*
 - restart Live without losing Chat; restart Chat's delivery plane and resume persisted messages — *seen in production (Live restarted several times on 2026-09-23 while Chat stayed up; messages and a queued outbox row survived Chat restarts); `test/restart-resume.test.js` restarts Chat as a real process (SIGTERM, new process on the same database) and proves stream, global and channel readers resume from their `after_id` cursor with no gap and no duplicate, including Live bridge placeholders that straddle the restart (kept in `bridge_refs`)*
-- a call row without a working signalling/media path is not parity — *calls are still Live's (`/ws/call`)*
+- a call row without a working signalling/media path is not parity — *Live's `/ws/call` protocol and call routes run in Chat with a `calls` row per call (`test/calls.test.js`: two signed-in sockets exchange offer/answer/ICE, limits, kick/ban, ringing → active/declined/missed/failed, stream channels); not switched over yet (`docs/calls-cutover.md`)*
 - a paid TTS request is never duplicated by a retry — *forwarded writes are applied once per idempotency key; paid TTS does not exist yet*
 
 ## Launch rule
