@@ -18,6 +18,7 @@ const DEFAULT_DESCRIPTION = 'OpenVibe.Chat: the network-wide chat room and your 
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public', 'web');
 const LINKS = [
     { key: 'global', label: 'Global chat', href: '/' },
+    { key: 'rooms', label: 'Rooms', href: '/rooms' },
     { key: 'messages', label: 'Messages', href: '/messages' },
     { key: 'settings', label: 'Settings', href: '/settings' },
 ];

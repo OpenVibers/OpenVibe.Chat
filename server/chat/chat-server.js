@@ -490,6 +490,33 @@ class ChatServer {
             case 'leave_stream':
                 client.streamId = null;
                 break;
+            // Chat rooms (server/rooms/, openvibe.chat): a socket follows one room at a time.
+            case 'join_room': {
+                const rooms = require('../rooms/rooms');
+                const room = rooms.bySlug(msg.room);
+                const a = room ? rooms.access(room, client.user) : null;
+                if (!room || !a.read) { this.sendTo(ws, { type: 'room_error', room: msg.room || null, code: 'rooms.not_found', message: 'No such room' }); break; }
+                client.roomId = room.id;
+                client.roomSlug = room.slug;
+                this.sendTo(ws, { type: 'room_joined', room: room.slug, role: a.role, can: { post: a.post, moderate: a.moderate } });
+                break;
+            }
+            case 'leave_room':
+                client.roomId = null;
+                client.roomSlug = null;
+                break;
+            case 'room_message': {
+                const rooms = require('../rooms/rooms');
+                const room = client.roomId ? rooms.bySlug(client.roomSlug) : null;
+                if (!room || room.id !== client.roomId) { this.sendTo(ws, { type: 'room_error', code: 'rooms.not_joined', message: 'Open a room first' }); break; }
+                try {
+                    const message = rooms.post(room, client.user, msg.message);
+                    this.broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
+                } catch (err) {
+                    this.sendTo(ws, { type: 'room_error', room: room.slug, code: err.code || 'rooms.error', message: err.code ? err.message : 'Your message could not be sent' });
+                }
+                break;
+            }
             case 'get-users':
                 this.sendTo(ws, { type: 'users-list', users: this.getUserList(client.streamId) });
                 break;
@@ -2264,10 +2291,30 @@ class ChatServer {
         for (const [ws, client] of this.clients) {
             // Pure global clients only (see forwardToGlobal) — channel/stream viewers get
             // global activity via their dedicated cross-feed socket, not their main one.
-            if (!client.streamId && !client.channelUserId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) {
+            if (!client.streamId && !client.channelUserId && !client.roomId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) {
                 ws.send(msg);
             }
         }
+    }
+
+    /** Everyone following a chat room (server/rooms/) on this server. */
+    broadcastToRoom(roomId, data) {
+        const msg = JSON.stringify(data);
+        for (const [ws, client] of this.clients) {
+            if (client.roomId === roomId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) ws.send(msg);
+        }
+    }
+
+    /** A person may no longer read a room (blocked, removed from a private room, left): stop their feed. */
+    removeFromRoom(roomId, userId) {
+        let n = 0;
+        for (const [ws, client] of this.clients) {
+            if (client.roomId === roomId && client.user && client.user.id === userId) {
+                client.roomId = null; client.roomSlug = null; n++;
+                this.sendTo(ws, { type: 'room_left', reason: 'removed' });
+            }
+        }
+        return n;
     }
 
     /**

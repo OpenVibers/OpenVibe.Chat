@@ -161,10 +161,82 @@
     }
   }
 
+  // ── A room ──
+  function roomItem(m) {
+    var li = el('li', 'oc-msg'); li.dataset.id = m.id || ''; li.dataset.user = m.user_id || '';
+    li.appendChild(clock(m.created_at)); li.appendChild(document.createTextNode(' '));
+    var who = el('a', 'oc-name', m.display_name || m.username || 'someone');
+    who.href = LIVE + '/@' + encodeURIComponent(m.username || '');
+    if (/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '')) who.style.color = m.profile_color;
+    li.appendChild(who);
+    var b = badge(m.user_role); if (b) li.appendChild(b);
+    li.appendChild(document.createTextNode(' '));
+    var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
+    if (cfg.moderate || (cfg.me && m.user_id === cfg.me)) {
+      var f = el('form', 'oc-del'); f.method = 'post'; f.action = '/r/' + encodeURIComponent(cfg.room) + '/delete/' + m.id;
+      var x = el('button', null, '×'); x.type = 'submit'; x.title = 'Delete this message'; x.setAttribute('aria-label', 'Delete this message');
+      f.appendChild(x); li.appendChild(f);
+    }
+    return li;
+  }
+  function startRoom() {
+    var live = document.getElementById('oc-live');
+    var ws = null, delay = 1000, opened = false;
+    var api = '/api/chat/rooms/' + encodeURIComponent(cfg.room);
+    function catchUpRoom() {
+      return fetch(api + '/messages?after=' + latest + '&limit=200', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) { if (d && d.messages) d.messages.forEach(function (m) { latest = Math.max(latest, Number(m.id) || 0); append(roomItem(m), m.id); }); })
+        .catch(function () {});
+    }
+    function connect() {
+      ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
+      ws.onopen = function () { delay = 1000; ws.send(JSON.stringify({ type: 'join_room', room: cfg.room })); if (opened) catchUpRoom(); opened = true; };
+      ws.onmessage = function (ev) {
+        var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+        if (m.type === 'room_joined') { if (live) live.hidden = false; }
+        else if (m.type === 'room_message' && m.room === cfg.room && m.message) {
+          latest = Math.max(latest, Number(m.message.id) || 0);
+          append(roomItem(m.message), m.message.id);
+          if (!document.hidden && cfg.me) fetch(api + '/read', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ last_id: latest }) }).catch(function () {});
+        } else if (m.type === 'room_message_deleted' && m.room === cfg.room) {
+          var x = feed.querySelector('[data-id="' + m.id + '"]'); if (x) x.remove();
+        } else if (m.type === 'room_error' && m.message) {
+          showError(m.message);
+        } else if (m.type === 'room_left') {
+          showError('You can no longer read this room.'); setTimeout(function () { location.href = '/rooms'; }, 1500);
+        } else if (m.type === 'auth_revoked') {
+          showError('You were signed out. Sign in again to keep chatting.');
+        }
+      };
+      ws.onclose = function () { if (live) live.hidden = true; setTimeout(connect, delay); delay = Math.min(delay * 2, 30000); };
+    }
+    connect();
+    if (form && input) {
+      form.addEventListener('submit', function (e) {
+        var text = input.value.trim();
+        if (!text) { e.preventDefault(); return; }
+        if (!ws || ws.readyState !== 1) return;
+        e.preventDefault();
+        ws.send(JSON.stringify({ type: 'room_message', message: text }));
+        input.value = ''; input.focus();
+      });
+    }
+    if (feed) feed.addEventListener('submit', function (e) {
+      var f = e.target; if (!f.classList || !f.classList.contains('oc-del')) return;
+      e.preventDefault();
+      var li = f.closest('.oc-msg');
+      fetch(api + '/messages/' + encodeURIComponent(li.dataset.id), { method: 'DELETE', credentials: 'same-origin' })
+        .then(function (r) { if (r.ok) li.remove(); else return r.json().then(function (d) { showError((d && d.error) || 'Could not delete'); }); })
+        .catch(function () { f.submit(); });
+    });
+  }
+
   if (input) input.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (form.requestSubmit) form.requestSubmit(); else form.submit(); }
   });
   toBottom();
   if (cfg.view === 'global') startGlobal();
   else if (cfg.view === 'dm') startDm();
+  else if (cfg.view === 'room') startRoom();
 })();

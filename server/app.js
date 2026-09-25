@@ -202,6 +202,8 @@ function createApp({ chatServer, bridge, mirror, relay, events = null }) {
 
     // The person's chat preferences: Network user module chat.preferences (server/prefs/).
     app.use('/api/chat/preferences', require('./prefs/routes'));
+    // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
+    app.use('/api/chat/rooms', require('./rooms/routes'));
     app.use('/api/chat', require('./chat/routes'));
     app.use('/api/dm', require('./chat/dm-routes'));
     app.use('/api/tts', require('./chat/tts-routes'));

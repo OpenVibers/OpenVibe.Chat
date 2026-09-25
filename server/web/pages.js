@@ -267,15 +267,181 @@ ${box('hide_emotes', 'Hide emotes', p.hide_emotes === true)}
         catch (err) { return res.redirect(303, `/settings?error=${encodeURIComponent(err.message || 'Could not save right now')}`); }
     });
 
+    // ── Rooms (server/rooms/) ──
+    const rooms = require('../rooms/rooms');
+    const roomsOrError = (fn) => async (req, res, next) => {
+        try { return await fn(req, res, next); } catch (err) {
+            if (err instanceof rooms.RoomError) return res.redirect(303, `${req.roomBack || '/rooms'}?error=${encodeURIComponent(err.message)}`);
+            return next(err);
+        }
+    };
+    const roomCard = (r) => `<li class="oc-conv${r.unread ? ' oc-unread' : ''}"><a href="/r/${esc(r.slug)}"><strong>${esc(r.name)}</strong>${r.visibility === 'private' ? ' <span class="oc-badge">private</span>' : ''}${r.unread ? ` <span class="oc-badge">${r.unread} new</span>` : ''}<span class="oc-muted oc-last">${esc(r.topic || `${r.members} member${r.members === 1 ? '' : 's'}`)}</span></a></li>`;
+    const roomMessage = (m, can, slug, me) => {
+        const t = hhmm(m.created_at);
+        const del = (can.moderate || (me && m.user_id === me.id)) ? `<form class="oc-del" method="post" action="/r/${esc(slug)}/delete/${Number(m.id)}"><button type="submit" title="Delete this message" aria-label="Delete this message">×</button></form>` : '';
+        return `<li class="oc-msg" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="color:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)} <span class="oc-text">${linkify(m.message)}</span>${del}</li>`;
+    };
+
+    router.get('/rooms', async (req, res) => {
+        const actor = await viewerOf(req);
+        const me = actor.kind === 'user' ? actor.user : null;
+        const { public: pub, mine } = rooms.list(me);
+        const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
+        const create = me ? `<form class="oc-form oc-create" method="post" action="/rooms/new">
+<h2>Start a room</h2>
+<label>Name <input name="name" required minlength="3" maxlength="40" placeholder="Night Owls"></label>
+<label>Topic <input name="topic" maxlength="200" placeholder="What it is about (optional)"></label>
+<label class="oc-check"><input type="checkbox" name="private" value="1"> Private: only people you invite can read and post</label>
+<p><button type="submit">Create room</button></p>
+</form>` : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=%2Frooms">Sign in with OpenVibe</a> to start or join a room.</p>`;
+        await page(req, res, 200, {
+            actor, title: 'Rooms', path: '/rooms', active: 'rooms', robots: 'index, follow',
+            description: 'Chat rooms on OpenVibe: start one about anything, invite people, or join a public room.',
+            body: `<h1>Rooms</h1>${error}
+${mine.length ? `<h2>Your rooms</h2><ul class="oc-convs">${mine.map(roomCard).join('')}</ul>` : ''}
+<h2>Public rooms</h2><ul class="oc-convs">${pub.map(roomCard).join('') || '<li class="oc-muted">No rooms yet. Start the first one.</li>'}</ul>
+${create}`,
+        });
+    });
+
+    router.post('/rooms/new', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const b = req.body || {};
+        const room = rooms.create(actor.user, { name: b.name, topic: b.topic, visibility: b.private === '1' ? 'private' : 'public' });
+        res.redirect(303, `/r/${room.slug}`);
+    }));
+
+    const loadRoom = async (req, res) => {
+        const actor = await viewerOf(req);
+        const me = actor.kind === 'user' ? actor.user : null;
+        const room = rooms.bySlug(req.params.slug);
+        const can = room ? rooms.access(room, me) : null;
+        if (!room || !can.read) { await page(req, res, 404, { actor, title: 'No such room', path: req.path, robots: 'noindex', body: '<h1>No such room</h1><p><a href="/rooms">All rooms</a></p>' }); return null; }
+        req.roomBack = `/r/${room.slug}`;
+        return { actor, me, room, can };
+    };
+
+    router.get('/r/:slug', async (req, res) => {
+        const x = await loadRoom(req, res); if (!x) return;
+        const { actor, me, room, can } = x;
+        const msgs = rooms.history(room, { limit: 60 });
+        if (me && can.role) rooms.markRead(room, me);
+        const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
+        let composer;
+        if (!me) composer = `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${encodeURIComponent(`/r/${room.slug}`)}">Sign in with OpenVibe</a> to join the conversation.</p>`;
+        else if (can.post) composer = `<form class="oc-compose" method="post" action="/r/${esc(room.slug)}" id="oc-compose"><label for="oc-input" class="oc-sr">Message to ${esc(room.name)}</label><textarea id="oc-input" name="message" maxlength="2000" rows="2" required placeholder="Message ${esc(room.name)}"></textarea><button type="submit">Send</button></form>`;
+        else if (!can.role) composer = `<form method="post" action="/r/${esc(room.slug)}/join"><button type="submit">Join this room</button></form>`;
+        else composer = notice('error', 'You cannot post here right now.');
+        const tools = me && can.role && can.role !== 'owner' ? `<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/leave"><button type="submit" class="oc-link">Leave room</button></form>` : '';
+        const manage = can.moderate ? ` · <a href="/r/${esc(room.slug)}/settings">${can.manage ? 'Room settings' : 'Members'}</a>` : '';
+        await page(req, res, 200, {
+            actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true,
+            description: room.topic || `${room.name}, a chat room on OpenVibe.`,
+            page: { view: 'room', room: room.slug, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate },
+            body: `<p><a href="/rooms">← Rooms</a></p>
+<h1>${esc(room.name)}${room.visibility === 'private' ? ' <span class="oc-badge">private</span>' : ''}</h1>
+<p class="oc-muted">${room.topic ? `${esc(room.topic)} · ` : ''}${rooms.publicRoom(room).members} members${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${manage} <span class="oc-live" id="oc-live" hidden>● live</span></p>
+${error}
+<ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>
+${composer}${tools}`,
+        });
+    });
+
+    router.post('/r/:slug', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = rooms.bySlug(req.params.slug);
+        if (!room) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}`;
+        const message = rooms.post(room, actor.user, req.body && req.body.message);
+        require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
+        res.redirect(303, `/r/${room.slug}#oc-compose`);
+    }));
+
+    router.post('/r/:slug/join', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = rooms.bySlug(req.params.slug);
+        if (!room) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}`;
+        rooms.join(room, actor.user);
+        res.redirect(303, `/r/${room.slug}`);
+    }));
+
+    router.post('/r/:slug/leave', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = rooms.bySlug(req.params.slug);
+        if (!room) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}`;
+        rooms.leave(room, actor.user);
+        require('../chat/chat-server').removeFromRoom(room.id, actor.user.id);
+        res.redirect(303, '/rooms');
+    }));
+
+    router.post('/r/:slug/delete/:id', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = rooms.bySlug(req.params.slug);
+        if (!room) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}`;
+        const id = rooms.deleteMessage(room, actor.user, parseInt(req.params.id, 10));
+        require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message_deleted', room: room.slug, id });
+        res.redirect(303, `/r/${room.slug}`);
+    }));
+
+    router.get('/r/:slug/settings', async (req, res) => {
+        const x = await loadRoom(req, res); if (!x) return;
+        const { actor, room, can } = x;
+        if (!can.moderate) return res.redirect(303, `/r/${room.slug}`);
+        const saved = req.query.saved ? notice('ok', 'Saved.') : '';
+        const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
+        const members = rooms.members(room);
+        const roleForm = (m) => m.role === 'owner' ? '<span class="oc-muted">owner</span>' : `<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/members"><input type="hidden" name="username" value="${esc(m.username || '')}"><select name="role" aria-label="Role for ${esc(m.username || '')}">${[...(can.manage ? ['mod'] : []), 'member', 'blocked', 'none'].map((r) => `<option value="${r}"${r === m.role ? ' selected' : ''}>${r === 'none' ? 'remove' : r}</option>`).join('')}</select> <button type="submit">Set</button></form>`;
+        await page(req, res, 200, {
+            actor, title: `${room.name}: settings`, path: `/r/${room.slug}/settings`, active: 'rooms', robots: 'noindex, nofollow',
+            body: `<p><a href="/r/${esc(room.slug)}">← ${esc(room.name)}</a></p><h1>Room settings</h1>${saved}${error}
+${can.manage ? `<form class="oc-form" method="post" action="/r/${esc(room.slug)}/settings">
+<label>Name <input name="name" required minlength="3" maxlength="40" value="${esc(room.name)}"></label>
+<label>Topic <input name="topic" maxlength="200" value="${esc(room.topic || '')}"></label>
+<label>Who can read <select name="visibility"><option value="public"${room.visibility === 'public' ? ' selected' : ''}>Anyone (public)</option><option value="private"${room.visibility === 'private' ? ' selected' : ''}>Members only (private)</option></select></label>
+<label>Slow mode (seconds between messages, 0 = off) <input name="slow_seconds" type="number" min="0" max="600" value="${Number(room.slow_seconds) || 0}"></label>
+<p><button type="submit">Save</button></p></form>` : ''}
+<h2>Members</h2>
+<form class="oc-new" method="post" action="/r/${esc(room.slug)}/members"><label for="oc-invite">Add someone</label> <input id="oc-invite" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="their username"><input type="hidden" name="role" value="member"> <button type="submit">Add</button></form>
+<ul class="oc-members">${members.map((m) => `<li><strong>${esc(m.display_name || m.username || '?')}</strong> <span class="oc-muted">@${esc(m.username || '')}</span> ${roleForm(m)}</li>`).join('')}</ul>`,
+        });
+    });
+
+    router.post('/r/:slug/settings', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = rooms.bySlug(req.params.slug);
+        if (!room) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}/settings`;
+        const b = req.body || {};
+        rooms.update(room, actor.user, { name: b.name, topic: b.topic, visibility: b.visibility, slow_seconds: b.slow_seconds === undefined ? undefined : Number(b.slow_seconds) });
+        res.redirect(303, `/r/${room.slug}/settings?saved=1`);
+    }));
+
+    router.post('/r/:slug/members', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = rooms.bySlug(req.params.slug);
+        if (!room) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}/settings`;
+        const name = String((req.body && req.body.username) || '').trim();
+        let target = /^[A-Za-z0-9_]{3,24}$/.test(name) ? ctx.getUserByUsername(name) : null;
+        if (!target && /^[A-Za-z0-9_]{3,24}$/.test(name)) target = await ctx.ensureUserByUsername(name).catch(() => null);
+        if (!target) return res.redirect(303, `/r/${room.slug}/settings?error=${encodeURIComponent(`Nobody called ${name.slice(0, 24)} on OpenVibe`)}`);
+        const role = rooms.setRole(room, actor.user, target.id, String((req.body && req.body.role) || 'member'));
+        if (role === 'blocked' || role === 'none') require('../chat/chat-server').removeFromRoom(room.id, target.id);
+        res.redirect(303, `/r/${room.slug}/settings?saved=1`);
+    }));
+
     // ── What shipped, robots, sitemap ──
     router.get('/updates', (req, res) => page(req, res, 200, {
         title: `What shipped on ${SITE_NAME}`, path: '/updates', robots: 'index, follow', cache: 'public, max-age=300',
         body: frame.updatesBody({ service: 'chat', siteName: SITE_NAME }) + `<script src="${ovServe.url('shipped.js')}" defer></script>`,
     }));
     router.get('/robots.txt', (req, res) => res.type('text/plain').set('Cache-Control', 'public, max-age=3600')
-        .send(`User-agent: *\nAllow: /$\nAllow: /updates\nDisallow: /messages\nDisallow: /settings\nDisallow: /auth/\nDisallow: /api/\nSitemap: ${site}/sitemap.xml\n`));
+        .send(`User-agent: *\nAllow: /$\nAllow: /updates\nAllow: /rooms\nAllow: /r/\nDisallow: /r/*/settings\nDisallow: /messages\nDisallow: /settings\nDisallow: /auth/\nDisallow: /api/\nSitemap: ${site}/sitemap.xml\n`));
     router.get('/sitemap.xml', (req, res) => res.type('application/xml').set('Cache-Control', 'public, max-age=3600')
-        .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/updates'].map((p) => `<url><loc>${site}${p}</loc></url>`).join('')}</urlset>\n`));
+        .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/rooms', '/updates', ...rooms.list(null, { limit: 100 }).public.map((r) => `/r/${r.slug}`)].map((p) => `<url><loc>${site}${p}</loc></url>`).join('')}</urlset>\n`));
 
     return router;
 }

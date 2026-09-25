@@ -91,6 +91,47 @@ t('settings save to the chat.preferences record', async () => {
     assert.match(page.text, /<body class="oc-compact oc-times oc-nobadges" style="--oc-scale:1.18">/, 'the site follows them too');
 });
 
+t('rooms: start one, post and join without JavaScript, private rooms stay private, owners manage', async () => {
+    let r = await req('GET', '/rooms');
+    assert.strictEqual(r.status, 200);
+    assert.match(r.text, /Sign in with OpenVibe<\/a> to start or join a room/);
+    r = await req('POST', '/rooms/new', form(alice, { name: 'Coffee Talk', topic: 'Beans and brews' }));
+    assert.deepStrictEqual([r.status, r.headers.get('location')], [303, '/r/coffee-talk']);
+    r = await req('POST', '/r/coffee-talk', form(alice, { message: 'first cup <b>hot</b>' }));
+    assert.strictEqual(r.status, 303);
+    let page = await req('GET', '/r/coffee-talk');
+    assert.strictEqual(page.status, 200);
+    assert.ok(page.text.includes('first cup &lt;b&gt;hot&lt;/b&gt;'), 'escaped');
+    assert.match(page.text, /Beans and brews/);
+    assert.match(page.text, /index, follow/);
+    page = await req('GET', '/r/coffee-talk', { headers: cookie(bob) });
+    assert.match(page.text, /Join this room/);
+    assert.strictEqual((await req('POST', '/r/coffee-talk', form(bob, { message: 'can I?' }))).headers.get('location').includes('error='), true, 'join first');
+    assert.strictEqual((await req('POST', '/r/coffee-talk/join', form(bob, {}))).headers.get('location'), '/r/coffee-talk');
+    assert.strictEqual((await req('POST', '/r/coffee-talk', form(bob, { message: 'now I can' }))).headers.get('location'), '/r/coffee-talk#oc-compose');
+    const rooms = (await req('GET', '/rooms', { headers: cookie(bob) })).text;
+    assert.match(rooms, /Your rooms/);
+
+    r = await req('POST', '/rooms/new', form(alice, { name: 'Inner Circle', private: '1' }));
+    assert.strictEqual(r.headers.get('location'), '/r/inner-circle');
+    assert.strictEqual((await req('GET', '/r/inner-circle', { headers: cookie(bob) })).status, 404, 'private');
+    assert.strictEqual((await req('GET', '/r/inner-circle')).status, 404);
+    assert.ok(!(await req('GET', '/rooms')).text.includes('inner-circle'), 'not listed');
+    assert.match((await req('GET', '/r/inner-circle', { headers: cookie(alice) })).text, /noindex, nofollow/);
+    r = await req('POST', '/r/inner-circle/members', form(alice, { username: 'bob', role: 'member' }));
+    assert.strictEqual(r.headers.get('location'), '/r/inner-circle/settings?saved=1');
+    assert.strictEqual((await req('GET', '/r/inner-circle', { headers: cookie(bob) })).status, 200, 'invited');
+    assert.strictEqual((await req('GET', '/r/inner-circle/settings', { headers: cookie(bob) })).headers.get('location'), '/r/inner-circle', 'members are not managers');
+    const settings = await req('GET', '/r/inner-circle/settings', { headers: cookie(alice) });
+    assert.match(settings.text, /Room settings/);
+    r = await req('POST', '/r/inner-circle/settings', form(alice, { name: 'Inner Circle', topic: 'Quiet', visibility: 'private', slow_seconds: '5' }));
+    assert.strictEqual(r.headers.get('location'), '/r/inner-circle/settings?saved=1');
+    assert.match((await req('GET', '/r/inner-circle', { headers: cookie(alice) })).text, /slow mode 5s/);
+
+    const sitemap = (await req('GET', '/sitemap.xml')).text;
+    assert.ok(sitemap.includes('/r/coffee-talk') && !sitemap.includes('inner-circle'), 'public rooms only');
+});
+
 t('sign-in, the Frame, robots, sitemap and /updates', async () => {
     const r = await req('GET', '/auth/login?next=%2Fmessages');
     assert.strictEqual(r.status, 302);
