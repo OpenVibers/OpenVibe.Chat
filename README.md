@@ -100,13 +100,14 @@ OpenVibe.Events' `scripts/redact-backfill.js`.
 
 #### Consumed
 
-Chat subscribes (consumer `chat`) to two topics, delivered to `POST /internal/events`
+Chat subscribes (consumer `chat`) to these topics (and `network.user.token_valid_after`, `vip.membership.changed`), delivered to `POST /internal/events`
 (`server/events/consumer.js`):
 
 | Event | From | What Chat does |
 | --- | --- | --- |
 | `live.release.deployed` | Live (`server/events/release-events.js`), subject `{ type: release, id: <head commit> }` | stores or folds the deploy card in global chat, exactly as the bridge op `deployNotice` does (`server/chat/deploy-notice.js`: one rolling card, folded while nobody has spoken in any room and within 3 hours; the broadcast carries the row id; late joiners get it once) |
 | `network.module.updated` | Network (`server/identity/module-events.js`) | for `chat.preferences`, a revision newer than the cached copy drops it (`prefs.handleEvent()`); an older or equal revision and other namespaces change nothing |
+| `network.block.changed` | Network (`server/identity/blocks.js`, platform blocks) | keeps the newest revision per (blocker, blocked) in `network_blocks` (`server/chat/network-blocks.js`); while a block is active neither person can start a DM with the other, message them in a 1:1, add them to a group or call them, and the DM user search hides them, exactly like `dm_blocks` (same errors) |
 
 - **One card per deploy, whichever path comes first** (compatibility register C-84). Until the bridge
   op is removed, Live sends each deploy twice: `deployNotice` over the bridge (commits newest first,
@@ -127,6 +128,17 @@ Chat subscribes (consumer `chat`) to two topics, delivered to `POST /internal/ev
   rollback survives restarts. `CHAT_EVENTS_SUBSCRIBE=0` turns this off. Needs `EVENTS_URL`,
   `CHAT_EVENTS_SECRET`, `OV_OAUTH_CLIENT_SECRET` and the Network grant
   `chat events.subscription.manage openvibe.events`.
+
+Platform blocks (WS-E task 5): Chat's own `dm_blocks` stay in force beside Network's. To carry them over
+once, export them as subject pairs and import those on Network (`scripts/import-blocks.js` there):
+
+```bash
+node scripts/migrate-dm-blocks-to-network.js [--resolve]                        # dry run: counts and unmapped Live ids
+node scripts/migrate-dm-blocks-to-network.js --apply --out /root/dm-blocks.json # write the pairs file (0600)
+```
+
+Mentions: Chat produces no mention notifications (the @mention highlight, tab flash and sound are drawn by
+Live's chat client from the broadcast message), so there is nothing in Chat for a block to suppress yet.
 
 ```bash
 sudo node --env-file=/etc/openvibe/chat.env scripts/subscribe-events.js --dry-run   # list them

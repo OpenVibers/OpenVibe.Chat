@@ -13,10 +13,12 @@
  * People are still Live user ids; names and pictures come from the ctx_users projection
  * (server/live-context.js). New participants, messages and blocks also record the Network
  * subject, and every message adds a chat.dm.created event (visibility subject) to the outbox in
- * the same transaction.
+ * the same transaction. Platform blocks (./network-blocks.js) count like dm_blocks everywhere
+ * isBlockedEither is asked: new conversations, group invites, 1:1 messages, calls.
  */
 const db = require('../db/database');
 const outbox = require('../events/outbox');
+const networkBlocks = require('./network-blocks');
 
 // ── Schema & Migrations ──────────────────────────────────────
 
@@ -257,28 +259,33 @@ function getTotalUnread(userId) {
  */
 function searchUsers(query, excludeUserId, limit = 10) {
     if (!query || query.length < 2) return [];
+    networkBlocks.ensureSchema();
+    const me = db.subjectFor(excludeUserId) || '';
     return db.all(`
         SELECT id, username, display_name, avatar_url, profile_color
         FROM ctx_users
         WHERE id != ? AND is_banned = 0
           AND id NOT IN (SELECT blocked_id FROM dm_blocks WHERE blocker_id = ?)
           AND id NOT IN (SELECT blocker_id FROM dm_blocks WHERE blocked_id = ?)
+          AND COALESCE(subject_id, '') NOT IN (SELECT blocked_subject FROM network_blocks WHERE blocker_subject = ? AND active = 1)
+          AND COALESCE(subject_id, '') NOT IN (SELECT blocker_subject FROM network_blocks WHERE blocked_subject = ? AND active = 1)
           AND (username LIKE ? COLLATE NOCASE OR display_name LIKE ? COLLATE NOCASE)
         LIMIT ?
-    `, [excludeUserId, excludeUserId, excludeUserId, `%${query}%`, `%${query}%`, limit]);
+    `, [excludeUserId, excludeUserId, excludeUserId, me, me, `%${query}%`, `%${query}%`, limit]);
 }
 
 // ── Block helpers ────────────────────────────────────────────
 
 /**
- * Check if either user has blocked the other (bidirectional).
+ * Check if either user has blocked the other (bidirectional): in Chat's dm_blocks, or on the network
+ * (platform blocks, ./network-blocks.js, by Network subject).
  */
 function isBlockedEither(userIdA, userIdB) {
     return !!db.get(
         `SELECT 1 FROM dm_blocks
          WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)`,
         [userIdA, userIdB, userIdB, userIdA]
-    );
+    ) || networkBlocks.eitherBlockedUsers(userIdA, userIdB);
 }
 
 /**

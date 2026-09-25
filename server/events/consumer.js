@@ -17,6 +17,9 @@
  *   vip.membership.changed  a membership started, lapsed or was revoked (source vip): the member's cached
  *                           subscriber-badge answers for that creator are dropped at once
  *                           (../vip/badges.js handleEvent) instead of converging by the cache TTL.
+ *   network.block.changed   someone blocked or unblocked someone on the network (platform blocks, Contracts
+ *                           0.49.0). ../chat/network-blocks.js keeps the newest revision per (blocker, blocked);
+ *                           DMs refuse a conversation, invite or message between them while it is active.
  *
  * Exactly once: the openvibe-sdk inbox claims (consumer, event_id) in the same SQLite transaction as
  * the change, so a redelivery does nothing and a failure rolls both back (Events retries). Broadcasts
@@ -39,11 +42,12 @@ const deployNotice = require('../chat/deploy-notice');
 const prefStores = require('../prefs/stores');
 const vipBadges = require('../vip/badges');
 const revocations = require('../auth/revocations');
+const networkBlocks = require('../chat/network-blocks');
 const ctx = require('../live-context');
 
 const CONSUMER = 'chat';
 const INBOX_TABLE = 'chat_event_inbox';
-const TOPICS = Object.freeze(['live.release.deployed', 'network.module.updated', 'network.user.token_valid_after', 'vip.membership.changed']);
+const TOPICS = Object.freeze(['live.release.deployed', 'network.module.updated', 'network.user.token_valid_after', 'vip.membership.changed', 'network.block.changed']);
 const SUBJECT_RE = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const EVENT_ID_RE = /^evt_[0-9A-HJKMNP-TV-Z]{26}$/;
 const INBOX_KEEP_MS = 35 * 24 * 3600 * 1000;       // Events keeps events 30 days: nothing older can be redelivered
@@ -101,6 +105,13 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
                     },
                 };
             };
+        }
+        if (event.event_type === 'network.block.changed') {
+            // Platform blocks: keep the newest revision per pair (an older or replayed one changes nothing).
+            if (event.source !== 'network') return 'ignored:source';
+            const p = networkBlocks.payloadOf(event);
+            if (!p) return 'ignored:payload';
+            return () => (networkBlocks.apply(p, now()) ? (p.active ? 'blocked' : 'unblocked') : 'unchanged');
         }
         if (event.event_type === 'vip.membership.changed') {
             // A membership started, lapsed or was revoked: drop that member's cached badge answers for

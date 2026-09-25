@@ -123,8 +123,8 @@ t('boot with the consumer on and a stub Events', async () => {
 
 t('boot created one subscription per topic, to /internal/events, with the consumer’s secret', async () => {
     const results = await h.subscriptions.done;
-    assert.deepStrictEqual(results.map((r) => [r.topic, r.result]), [['live.release.deployed', 'created'], ['network.module.updated', 'created'], ['network.user.token_valid_after', 'created'], ['vip.membership.changed', 'created']]);
-    assert.strictEqual(stubEvents.subs.length, 4);
+    assert.deepStrictEqual(results.map((r) => [r.topic, r.result]), [['live.release.deployed', 'created'], ['network.module.updated', 'created'], ['network.user.token_valid_after', 'created'], ['vip.membership.changed', 'created'], ['network.block.changed', 'created']]);
+    assert.strictEqual(stubEvents.subs.length, 5);
     for (const s of stubEvents.subs) {
         assert.strictEqual(s.endpoint, `http://127.0.0.1:${h.port}/internal/events`);
         assert.strictEqual(s.secret, SECRET, 'the first CHAT_EVENTS_SECRET is handed to Events');
@@ -139,17 +139,17 @@ t('a second boot changes nothing, and never re-enables a subscription an operato
     const endpoint = subs.endpointFor(config, h.port);
     const posts = stubEvents.posts;
     let r = await subs.ensure({ config, endpoint });
-    assert.deepStrictEqual(r.map((x) => x.result), ['exists', 'exists', 'exists', 'exists']);
+    assert.deepStrictEqual(r.map((x) => x.result), ['exists', 'exists', 'exists', 'exists', 'exists']);
     assert.strictEqual(stubEvents.posts, posts, 'nothing was created again');
     r = await subs.ensure({ config, endpoint, action: 'disable', topics: ['live.release.deployed'] });
     assert.deepStrictEqual(r.map((x) => [x.result, x.enabled]), [['disabled', false]]);
     r = await subs.ensure({ config, endpoint });
-    assert.deepStrictEqual(r.map((x) => [x.topic, x.result, x.enabled]), [['live.release.deployed', 'exists', false], ['network.module.updated', 'exists', true], ['network.user.token_valid_after', 'exists', true], ['vip.membership.changed', 'exists', true]]);
+    assert.deepStrictEqual(r.map((x) => [x.topic, x.result, x.enabled]), [['live.release.deployed', 'exists', false], ['network.module.updated', 'exists', true], ['network.user.token_valid_after', 'exists', true], ['vip.membership.changed', 'exists', true], ['network.block.changed', 'exists', true]]);
     assert.strictEqual(stubEvents.subs[0].enabled, false, 'still disabled');
     r = await subs.ensure({ config, endpoint, action: 'enable', topics: ['live.release.deployed'] });
     assert.strictEqual(stubEvents.subs[0].enabled, true);
     r = await subs.ensure({ config, endpoint, action: 'list' });
-    assert.deepStrictEqual(r.map((x) => x.result), ['exists', 'exists', 'exists', 'exists']);
+    assert.deepStrictEqual(r.map((x) => x.result), ['exists', 'exists', 'exists', 'exists', 'exists']);
 });
 
 t('signature v2 only: bad signature, stale or future timestamp, v1-only, unsigned → 401', async () => {
