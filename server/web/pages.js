@@ -267,7 +267,10 @@ ${box('tts_sounds', 'Play chat sounds', tts.sounds !== false)}
 ${volume('tts_sound_volume', 'Chat sound volume', tts.sound_volume)}
 <fieldset class="oc-fieldset"><legend>Read messages relayed from</legend>${TTS_SOURCES.map(([k, label]) => box(`tts_src_${k}`, label, src[k] !== false)).join('')}</fieldset>
 <p><button type="submit">Save</button></p>
-</form>`,
+</form>
+<h2>Your chat history</h2>
+<p>Download every message you have sent that is still visible, in Live chat and here.</p>
+<p><a class="oc-button" href="/api/chat/me/export" download>Download (JSON)</a> <a class="oc-button" href="/api/chat/me/export?format=csv" download>Download (CSV)</a></p>`,
         });
     });
 
