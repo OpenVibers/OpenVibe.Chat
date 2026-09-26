@@ -51,6 +51,7 @@ function navConfig(o, config) {
         sessionUrl: '/auth/me',
         loginUrl: `/auth/login?next=${encodeURIComponent(o.path || '/')}`,
         logoutUrl: '/auth/logout?next={path}',
+        notificationsRealtime: true,   // the bell hears new notifications over OpenVibe.Events (Shared 1.22.0)
     };
 }
 
