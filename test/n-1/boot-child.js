@@ -12,6 +12,7 @@ const path = require('path');
     console.warn = quiet;
     const helpers = require(path.join(dir, 'test', 'helpers'));
     const h = await helpers.boot({ env: { CHAT_DB_PATH: process.env.N1_DB } });
+    process.on('exit', () => { try { require('fs').rmSync(h.tmp, { recursive: true, force: true }); } catch { /* */ } });
     const star = h.addUser('n1star', { role: 'streamer' });
     const fan = h.addUser('n1fan');
     const channel = h.addChannel(star.id);
