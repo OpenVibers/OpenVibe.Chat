@@ -91,3 +91,22 @@ button[disabled] { opacity: .6; cursor: default; }
 .oc-members li { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 10px; padding: 8px 12px; }
 .oc-members form { margin-left: auto; }
 h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
+/* Room kinds, calls, the inbox */
+.oc-kind-call { color: var(--oc-ok); border-color: rgba(52, 211, 153, .45); }
+.oc-kind-system { color: #fbbf24; border-color: rgba(251, 191, 36, .45); }
+.oc-call { margin: 12px 0; padding: 10px 14px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; }
+.oc-call h2 { margin: 0 0 4px; font-size: 1.05rem; }
+.oc-call-people { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.oc-call-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
+.oc-call-controls button[hidden] { display: none; }
+.oc-call-status:empty { display: none; }
+.oc-tools { display: block; margin-top: 8px; }
+.oc-blocked { margin-top: 20px; }
+.oc-blocked summary { cursor: pointer; color: var(--oc-muted); }
+.oc-blocked .oc-members { margin-top: 8px; }
+.oc-members li form.oc-inline { margin-left: auto; }
+.oc-members select { max-width: 100%; }
+@media (max-width: 560px) {
+  .oc-members form { margin-left: 0; width: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
+  .oc-new select { flex: 1 1 140px; }
+}

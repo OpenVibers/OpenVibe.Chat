@@ -516,7 +516,7 @@ class ChatServer {
                 if (!room || !a.read) { this.sendTo(ws, { type: 'room_error', room: msg.room || null, code: 'rooms.not_found', message: 'No such room' }); break; }
                 client.roomId = room.id;
                 client.roomSlug = room.slug;
-                this.sendTo(ws, { type: 'room_joined', room: room.slug, role: a.role, can: { post: a.post, moderate: a.moderate } });
+                this.sendTo(ws, { type: 'room_joined', room: room.slug, kind: a.kind, role: a.role, can: { post: a.post, moderate: a.moderate, manage: a.manage, join: a.join, talk: a.talk } });
                 break;
             }
             case 'leave_room':
@@ -2430,6 +2430,23 @@ class ChatServer {
         for (const [ws, client] of this.clients) {
             if (client.roomId === roomId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) ws.send(msg);
         }
+    }
+
+    /**
+     * A room's roles or visibility changed: every socket following it learns what it may do now
+     * (`room_access`), and one that may no longer read it leaves (`room_left`). → sockets told
+     */
+    refreshRoomAccess(room) {
+        const rooms = require('../rooms/rooms');
+        let n = 0;
+        for (const [ws, client] of this.clients) {
+            if (!room || client.roomId !== room.id) continue;
+            const a = rooms.access(room, client.user || null);
+            n++;
+            if (!a.read) { client.roomId = null; client.roomSlug = null; this.sendTo(ws, { type: 'room_left', reason: 'removed' }); continue; }
+            this.sendTo(ws, { type: 'room_access', room: room.slug, kind: a.kind, role: a.role, can: { post: a.post, moderate: a.moderate, manage: a.manage, join: a.join, talk: a.talk } });
+        }
+        return n;
     }
 
     /** A person may no longer read a room (blocked, removed from a private room, left): stop their feed. */

@@ -53,7 +53,9 @@ t('private rooms: invisible to outsiders, members by invitation', async () => {
     assert.strictEqual(r.status, 201);
     assert.strictEqual((await api('GET', '/secret-club', bob)).status, 404);
     assert.strictEqual((await api('GET', '/secret-club/messages', null)).status, 404);
-    assert.strictEqual((await api('POST', '/secret-club/join', bob)).status, 403);
+    assert.strictEqual((await api('POST', '/secret-club/join', bob)).status, 404, 'joining says no more than a missing room would');
+    assert.strictEqual((await api('POST', '/no-such-room/join', bob)).status, 404);
+    assert.strictEqual((await api('POST', '/secret-club/messages', bob, { message: 'hi' })).status, 404);
     assert.ok(!(await api('GET', '/', bob)).body.public.some((x) => x.slug === 'secret-club'), 'not listed');
     assert.strictEqual((await api('POST', '/secret-club/members', bob, { username: 'cat' })).status, 404, 'a non-member cannot even see it to invite');
     r = await api('POST', '/secret-club/members', ann, { username: 'bob', role: 'member' });

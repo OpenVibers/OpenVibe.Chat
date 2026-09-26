@@ -209,6 +209,8 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     for (const [mount, router] of Object.entries(require('./prefs/routes').ROUTES)) app.use(`/api/chat/${mount}`, router);
     // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
     app.use('/api/chat/rooms', require('./rooms/routes'));
+    // ICE servers for call rooms (STUN, and TURN with credentials when TURN_URL is set): server/net/turn.js.
+    app.use('/api/chat/ice-servers', require('./net/turn').createIceRoutes());
     app.use('/api/chat', require('./chat/routes'));
     app.use('/api/dm', require('./chat/dm-routes'));
     app.use('/api/tts', require('./chat/tts-routes'));

@@ -35,11 +35,17 @@ function asset(rel) {
     return `/web/${rel}?v=${hashes.get(rel)}`;
 }
 
+/** The site's links, with the signed-in person's unread counts (o.counts: { rooms, messages }). */
+function links(o) {
+    const counts = o.counts || {};
+    return LINKS.map((l) => ({ key: l.key, href: l.href, label: counts[l.key] > 0 ? `${l.label} (${counts[l.key] > 99 ? '99+' : counts[l.key]})` : l.label }));
+}
+
 function navConfig(o, config) {
     return {
         service: 'chat',
         apiBase: NETWORK_URL,
-        links: LINKS.map((l) => ({ label: l.label, href: l.href, active: o.active === l.key })),
+        links: links(o).map((l) => ({ label: l.label, href: l.href, active: o.active === l.key })),
         history: { type: 'page', title: o.title || SITE_NAME },
         silentLogin: `${config.web.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
@@ -50,7 +56,8 @@ function navConfig(o, config) {
 
 /**
  * o: title, description, path, robots (required), body, active, actor, config, page (JSON for chat.js),
- * prefs (the person's chat preferences: timestamps, compact, font_scale, show_badges)
+ * prefs (the person's chat preferences: timestamps, compact, font_scale, show_badges), counts (unread
+ * rooms/messages for the navigation), script / callScript (public/web/chat.js, call.js)
  */
 function renderPage(o) {
     const { config } = o;
@@ -79,11 +86,12 @@ ${appIcon.headTags({ site: 'network' })}
 <script src="${ovServe.url('navbar.js')}" defer></script>
 <script src="${ovServe.url('footer.js')}" defer></script>
 ${o.script ? `<script src="${asset('chat.js')}" defer></script>` : ''}
+${o.callScript ? `<script src="${asset('call.js')}" defer></script>` : ''}
 </head>
 <body class="${cls}"${scale}>
 <a class="oc-skip" href="#main">Skip to content</a>
 <div id="navbar-mount"></div>
-${frame.noscriptNav({ name: SITE_NAME, home: '/', links: LINKS.map(({ label, href }) => ({ label, href })) })}
+${frame.noscriptNav({ name: SITE_NAME, home: '/', links: links(o).map(({ label, href }) => ({ label, href })) })}
 <main id="main" class="oc-main">
 <noscript><p class="oc-account">${who}</p></noscript>
 ${o.body || ''}

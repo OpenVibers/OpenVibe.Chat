@@ -130,7 +130,8 @@ async function boot({ env = {} } = {}) {
         effects: [],               // { name, body }
         mirror: [],                // changes
         mirrorStatus: 200,
-        down: false,
+        down: false,               // Live refuses: every connection is dropped at once
+        hang: false,               // Live hangs: connections are accepted and never answered
         nextAnon: 1,
         mediaState: { queue: [], now_playing: null },
         seenTokens: [],
@@ -156,6 +157,7 @@ async function boot({ env = {} } = {}) {
         live.requests.push(p);
         const send = (status, data) => { res.statusCode = status; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(data)); };
         if (live.down) { req.socket.destroy(); return; }
+        if (live.hang) { live.hung = (live.hung || 0) + 1; return; }
         if (p.startsWith('/internal/chat-context/')) {
             const bad = verify(req, 'live.chat_context.read');
             if (bad) return send(401, { error: bad });
@@ -430,7 +432,7 @@ async function boot({ env = {} } = {}) {
         try { h.chatServer.close(); } catch { /* */ }
         try { h.ctx.stop(); h.mirrorRelay.stop(); h.eventsRelay.stop(); h.eventsConsumer.stop(); h.subscriptions.stop(); } catch { /* */ }
         await new Promise((r) => h.server.close(() => r()));
-        network.close(); liveServer.close();
+        network.close(); liveServer.close(); if (liveServer.closeAllConnections) liveServer.closeAllConnections();
         try { h.db.close(); } catch { /* */ }
         fs.rmSync(tmp, { recursive: true, force: true });
     };

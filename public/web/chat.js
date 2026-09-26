@@ -1,6 +1,6 @@
-/* openvibe.chat client: the live global feed over /ws/chat and a quicker composer; DMs refresh every few
-   seconds. Pages work without this file (server-rendered, forms post); it only adds liveness. User text
-   is always set with textContent, never parsed as HTML. */
+/* openvibe.chat client: the live global feed over /ws/chat and a quicker composer; DMs and the inbox
+   refresh every few seconds. Pages work without this file (server-rendered, forms post); it only adds
+   liveness. User text is always set with textContent, never parsed as HTML. */
 (function () {
   'use strict';
   var cfg = (window.__OV_PAGE && window.__OV_PAGE.chat) || null;
@@ -211,6 +211,9 @@
           showError(m.message);
         } else if (m.type === 'room_left') {
           showError('You can no longer read this room.'); setTimeout(function () { location.href = '/rooms'; }, 1500);
+        } else if (m.type === 'room_access' && m.room === cfg.room && m.can) {
+          // Your role changed (a moderator made you a member, a speaker, a viewer…): the page shows what you may do now.
+          if (!!m.can.post !== !!cfg.post || (m.role || null) !== (cfg.role || null)) { showError('Your role in this room changed.'); setTimeout(function () { location.reload(); }, 1200); }
         } else if (m.type === 'auth_revoked') {
           showError('You were signed out. Sign in again to keep chatting.');
         }
@@ -238,6 +241,42 @@
     });
   }
 
+  // ── The inbox: conversations and unread counts, refreshed while the page is open ──
+  function convItem(c, me) {
+    var li = el('li', 'oc-conv' + (c.unread_count ? ' oc-unread' : ''));
+    var a = el('a'); a.href = '/messages/' + encodeURIComponent(c.id);
+    var others = (c.participants || []).filter(function (p) { return p.id !== me; });
+    a.appendChild(el('strong', null, c.name || others.map(function (p) { return p.display_name || p.username; }).join(', ') || 'Just you'));
+    if (c.unread_count) { a.appendChild(document.createTextNode(' ')); a.appendChild(el('span', 'oc-badge', c.unread_count + ' new')); }
+    a.appendChild(el('span', 'oc-muted oc-last', c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet'));
+    li.appendChild(a);
+    if (c.last_message_at) {
+      var d = new Date(String(c.last_message_at).indexOf('T') < 0 ? String(c.last_message_at).replace(' ', 'T') + 'Z' : c.last_message_at);
+      if (!isNaN(d)) { var t = el('time', 'oc-time', d.toISOString().slice(0, 10)); t.dateTime = d.toISOString(); li.appendChild(t); }
+    }
+    return li;
+  }
+  function startInbox() {
+    var list = document.getElementById('oc-convs');
+    var status = document.getElementById('oc-inbox-status');
+    var me = Number(cfg.me) || null;
+    function poll() {
+      if (document.hidden || !list) return;
+      fetch('/api/dm/conversations', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || !Array.isArray(d.conversations)) return;
+          var unread = 0;
+          list.textContent = '';
+          d.conversations.forEach(function (c) { unread += Number(c.unread_count) || 0; list.appendChild(convItem(c, me)); });
+          if (!d.conversations.length) list.appendChild(el('li', 'oc-muted', 'No conversations yet.'));
+          if (status) status.textContent = unread ? unread + ' unread' : 'All caught up';
+        }).catch(function () {});
+    }
+    setInterval(poll, 15000);
+    document.addEventListener('visibilitychange', poll);
+  }
+
   if (input) input.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (form.requestSubmit) form.requestSubmit(); else form.submit(); }
   });
@@ -245,4 +284,5 @@
   if (cfg.view === 'global') startGlobal();
   else if (cfg.view === 'dm') startDm();
   else if (cfg.view === 'room') startRoom();
+  else if (cfg.view === 'inbox') startInbox();
 })();

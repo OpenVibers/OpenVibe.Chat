@@ -179,6 +179,69 @@ cutover** (`CHAT_CALLS=1`, `docs/calls-cutover.md`):
   channel's occupancy is a `channel` / `stream` session, `active` while anyone is in, `ended` when it
   empties or closes. A restart closes what was open (reason `restart`).
 
+### Rooms (openvibe.chat)
+
+Rooms people create on openvibe.chat (roadmap WS-I task 4, `server/rooms/`), beside the global room and
+Live's stream and channel rooms: `/api/chat/rooms` (REST), `join_room` / `room_message` on `/ws/chat`,
+and the pages `/rooms`, `/r/:slug`, `/r/:slug/settings`. Public rooms: anyone reads, signed-in people
+join. Private rooms: members only; to anyone else they answer exactly like a room that does not exist
+(read, join, post, members, attachments, the call). Unread counts per room (`last_read_id`) and
+`last_seen_at` per member (moderators see it).
+
+Kinds: **community** (anyone starts one), **call** (the room a call happens in: its text chat, and the
+voice/video channel `room-<slug>` on `/ws/call`; anyone starts one) and **system** (announcements
+written by chat staff, read-only for people; only chat staff create them). Roles, and what they may do
+(`rooms.access()` is the one place this is decided):
+
+| Kind | Role | Read | Post | Join the call | Talk | Moderate | Manage |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| community | owner / mod / member / viewer | all | owner, mod, member | – | – | owner, mod | owner |
+| call | owner / mod / speaker / participant / viewer | all | owner, mod, speaker, participant | all | owner, mod, speaker | owner, mod | owner |
+| system | owner / mod / viewer | all | owner, mod | – | – | owner, mod | owner |
+| any | blocked | – | – | – | – | – | – |
+| any | no role | public rooms only | – | public call rooms (listening) | – | – | – |
+
+Chat staff (`staff.moderation.chat`) read, moderate and manage every room, post in system rooms and talk in
+calls; a site ban stops posting and talking. Joining gives the kind's role: member, the call room's
+`join_role` (participant by default; the owner may pick speaker or viewer) or viewer. The owner (and chat
+staff) appoint mods; owners and mods set every other role; roles outside the room's kind are refused
+(`rooms.role_kind`). Role changes on someone else are logged (`room_block`, `room_unblock`,
+`room_mod_add|remove`, `room_speaker_add|remove`) through the moderation log. A change reaches open sockets at
+once: `/ws/chat` followers get `room_access { role, can }` (or `room_left`), and a running call follows the
+room (below).
+
+**Call rooms.** The call server makes the channel `room-<slug>` on first use and keeps it; it is not in Live's
+voice-channel list. Who may read the room may join its call; owner, mods and speakers talk; participants,
+viewers and people without a role (anonymous too, in public rooms) join listen-only: force-muted with the
+camera forced off, their own unmute ignored, and a moderator cannot lift it (make them a speaker instead).
+Peers see `roomRole` / `canTalk` on each participant. Promoting, demoting or blocking someone sends them
+`room-role` and the force-mute state, or drops them; a ban inside the call is also the room's block; making
+the room private drops everyone who is not a member. Media is peer to peer, so listen-only is enforced by
+clients honouring force-mute, as every force-mute here. openvibe.chat's room page carries an audio call
+client (`public/web/call.js`), shown when `CHAT_CALLS=1`; ICE comes from `GET /api/chat/ice-servers`
+(`server/net/turn.js`, Live's `turn.js` logic: STUN, plus TURN when `TURN_URL` is set with
+`TURN_AUTH_SECRET` or `TURN_USERNAME`/`TURN_CREDENTIAL`).
+
+**Attached to a Community space.** `POST /api/chat/rooms/:slug/attachments { service: "community",
+resource: <space slug>, title? }` (201 created, 200 already there), `DELETE
+/api/chat/rooms/:slug/attachments/community/:space` (idempotent), `GET …/attachments`. Only a person who
+manages the room (owner or chat staff), with their own Network token, attaches it (API tokens are refused);
+the room's managers or whoever attached it detach. Community keeps the link on the space and checks its own
+side (the space's owner or staff), so one person holding both ends makes the link, and no service grant is
+involved. Chat shows attachments only to the room's managers (room settings, with Detach), never as a public
+claim on the room page.
+
+**openvibe.chat pages.** `/` global chat, `/rooms` and `/r/:slug` (above), `/messages` the DM inbox
+(conversations with unread counts, refreshed every 15 s with JavaScript; who you blocked, with Unblock),
+`/messages/:id` a conversation (participants only; a guessed id is the same 404 as a missing one; Block
+the other person of a 1:1 conversation, which closes it both ways), `/settings`, `/updates`. The navigation
+counts unread messages and room messages. Everything is server-rendered and works without JavaScript.
+
+**Working with Live down.** Nothing on openvibe.chat waits on Live: people sign in from their Network token
+and the `ctx_users` projection, pages read Chat's own tables, cosmetics are waited for at most 1.5 s, and
+the only openvibe.live URLs are profile links. `test/live-down.test.js` renders every page and uses the
+forms, the core APIs and the socket with Live refusing connections and with Live hanging.
+
 ### VIP member badges
 
 A member's messages in a creator's room (stream or offline channel chat) carry that creator's VIP

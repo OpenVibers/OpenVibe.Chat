@@ -24,6 +24,18 @@
  *   'mic'      — Microphone only
  *   'mic+cam'  — Mic + optional camera
  *   'cam+mic'  — Both mic and camera
+ *
+ * Call rooms (roadmap WS-I task 4, ../rooms/rooms.js): a room of kind `call` has the channel
+ * `room-<slug>`, made when someone first connects to it and kept (permanent) while the room exists.
+ * The room decides who is in: a person who may not read the room is refused (a private room looks
+ * missing), blocked people are refused, and the room's roles decide who talks: owner, mods and
+ * speakers talk; participants, viewers and people without a role (public rooms, anonymous too) join
+ * listen-only — force-muted with the camera forced off, and their own unmute is ignored. The room's
+ * owner and mods (and chat staff) moderate the call. A role change reaches the call at once
+ * (applyRoomAccess: a `room-role` frame, then the force-mute state); a ban in the call also blocks the
+ * person in the room. Room channels are not in the voice-channel list (Live's sidebar): openvibe.chat
+ * lists rooms. Signalling only: media is peer to peer, so listen-only is enforced by the clients
+ * honouring force-mute (as for every force-mute here), and every peer sees who may talk.
  */
 'use strict';
 
@@ -34,6 +46,7 @@ const { extractWsToken, authenticateWs } = require('../auth/auth');
 const permissions = require('../auth/permissions');
 const chatServer = require('../chat/chat-server');
 const lifecycle = require('./lifecycle');
+const rooms = require('../rooms/rooms');
 // Cosmetics are Live's (monetization/cosmetics); read through live-context, warmed when a socket joins.
 const cosmetics = { getCosmeticProfile: (userId) => ctx.getCosmeticProfile(userId) };
 
@@ -43,6 +56,7 @@ const MAX_SOCKETS_PER_IP = 3;          // one household in one channel; never on
 const KICK_COOLDOWN_MS = 60 * 1000;
 const PUBLIC_CHANNEL_ID = 'public';
 const MODES = ['mic', 'mic+cam', 'cam+mic'];
+const ROOM_CHANNEL = /^room-([a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9]))$/;
 
 class CallServer {
     constructor() {
@@ -124,6 +138,7 @@ class CallServer {
     listChannels(viewer = null) {
         const result = [];
         for (const [id, ch] of this.channels) {
+            if (ch.roomSlug) continue;   // call rooms are listed as rooms (openvibe.chat), not in the voice sidebar
             if (ch.private && !this._canSeePrivate(ch, viewer)) continue;
             const room = this.rooms.get(id);
             const participants = [];
@@ -134,6 +149,7 @@ class CallServer {
     }
     _publicChannel(ch) { const { invited, ...rest } = ch; return rest; }
     _canSeePrivate(ch, viewer) {
+        if (ch.roomSlug) { const room = this._roomOf(ch.id); return !!room && rooms.access(room, viewer).read; }
         if (!ch.private) return true;
         if (!viewer) return false;
         if (permissions.can(viewer, 'staff.moderation.calls')) return true;
@@ -159,6 +175,29 @@ class CallServer {
             try { chatServer.broadcastAll({ type: 'voice-channels', channels: this.listChannels(null) }); } catch { /* */ }
         }, 400);
         if (this._notifyTimer.unref) this._notifyTimer.unref();
+    }
+
+    /** The call room behind a `room-<slug>` channel id, or null. */
+    _roomOf(channelId) {
+        const m = ROOM_CHANNEL.exec(String(channelId || ''));
+        if (!m) return null;
+        const room = rooms.bySlug(m[1]);
+        return room && room.kind === 'call' ? room : null;
+    }
+
+    /** The channel of a call room, made on first use and named after the room. → channel | null */
+    ensureRoomChannel(channelId) {
+        const room = this._roomOf(channelId);
+        if (!room) return null;
+        let ch = this.channels.get(channelId);
+        if (!ch) {
+            ch = {
+                id: channelId, name: room.name, mode: 'mic+cam', createdBy: room.owner_id, streamId: null, permanent: true,
+                roomSlug: room.slug, createdAt: Date.now(), maxParticipants: MAX_PARTICIPANTS,
+            };
+            this.channels.set(channelId, ch);
+        } else { ch.name = room.name; ch.createdBy = room.owner_id; }
+        return ch;
     }
 
     getChannel(channelId, viewer = null) {
@@ -252,6 +291,7 @@ class CallServer {
             forceMuted: info.forceMuted || false, forceCameraOff: info.forceCameraOff || false,
             speaking: info.speaking || false,
             nameFX: cosmeticProfile.nameFX || null, particleFX: cosmeticProfile.particleFX || null, hatFX: cosmeticProfile.hatFX || null,
+            ...(info.inRoom ? { roomRole: info.roomRole || null, canTalk: !info.listenOnly } : {}),
         };
     }
 
@@ -271,6 +311,7 @@ class CallServer {
         // Legacy: bare number → stream-<N>
         const resolvedId = /^\d+$/.test(channelId) ? `stream-${channelId}` : channelId;
 
+        if (!this.channels.get(resolvedId)) this.ensureRoomChannel(resolvedId);
         if (!this.channels.get(resolvedId)) { ws.send(JSON.stringify({ type: 'error', message: 'Voice channel not found' })); ws.close(); return; }
 
         // Sign-in, the anon number and the stream are (cached) calls to Live now. Messages that arrive
@@ -314,6 +355,16 @@ class CallServer {
 
         if (channel.private && !this._canSeePrivate(channel, user)) { ws.send(JSON.stringify({ type: 'error', message: 'This is a private call' })); ws.close(); return; }
 
+        // A call room: the room's roles decide who is in and who talks.
+        let roomAccess = null;
+        if (channel.roomSlug) {
+            const room = this._roomOf(resolvedId);
+            roomAccess = room ? rooms.access(room, user) : null;
+            if (!roomAccess || !roomAccess.read) { ws.send(JSON.stringify({ type: 'error', message: 'Voice channel not found' })); ws.close(); return; }
+            if (!roomAccess.join) { ws.send(JSON.stringify({ type: 'error', message: 'You cannot join this call' })); ws.close(); return; }
+        }
+        const listenOnly = !!(roomAccess && !roomAccess.talk);
+
         const peerId = this._generatePeerId();
         const anonId = user ? null : chatServer.getAnonIdForConnection(ip, resolvedId);
         const identity = user ? `u:${user.id}` : (anonId ? `a:${anonId}` : `ip:${ip}`);
@@ -355,7 +406,10 @@ class CallServer {
         const maxP = channel.maxParticipants || MAX_PARTICIPANTS;
         if (room.size >= maxP) { ws.send(JSON.stringify({ type: 'error', message: `Channel full (max ${maxP})` })); ws.close(); return; }
 
-        const clientInfo = { ws, user, anonId, ip, peerId, identity, muted: false, cameraOff: true, forceMuted: false, forceCameraOff: false, speaking: false, isChannelCreator, isStreamer, _msgCount: 0, _msgResetTime: Date.now() };
+        const clientInfo = {
+            ws, user, anonId, ip, peerId, identity, muted: listenOnly, cameraOff: true, forceMuted: listenOnly, forceCameraOff: listenOnly, speaking: false,
+            isChannelCreator, isStreamer, listenOnly, inRoom: !!channel.roomSlug, roomRole: roomAccess ? roomAccess.role : null, _msgCount: 0, _msgResetTime: Date.now(),
+        };
         this.clients.set(ws, { channelId: resolvedId, peerId });
         room.set(peerId, clientInfo);
 
@@ -381,7 +435,12 @@ class CallServer {
             participants,
             isStreamer: isStreamer || isChannelCreator,
             canModerate,
+            ...(channel.roomSlug ? { room: channel.roomSlug, roomRole: clientInfo.roomRole, canTalk: !listenOnly } : {}),
         }));
+        if (listenOnly) {
+            ws.send(JSON.stringify({ type: 'force-muted', forceMuted: true }));
+            ws.send(JSON.stringify({ type: 'force-camera-off', forceCameraOff: true }));
+        }
 
         const joinMsg = JSON.stringify({ type: 'peer-joined', ...this._buildParticipantInfo(peerId, clientInfo) });
         for (const [pid, info] of room) { if (pid !== peerId && info.ws.readyState === WebSocket.OPEN) info.ws.send(joinMsg); }
@@ -409,6 +468,7 @@ class CallServer {
         if (!user) return false;
         if (permissions.can(user, 'staff.moderation.calls')) return true;
         const ch = this.channels.get(channelId);
+        if (ch?.roomSlug) { const room = this._roomOf(channelId); return !!room && rooms.access(room, user).moderate; }
         if (ch?.createdBy === user.id) return true;
         if (ch?.streamId) return permissions.canModerateCall(user, ch.streamId);
         return false;
@@ -429,6 +489,7 @@ class CallServer {
             }
             case 'mute': {
                 const c = room.get(peerId); if (!c) break;
+                if (c.listenOnly && !msg.muted) break;   // a listener in a call room stays muted
                 c.muted = !!msg.muted;
                 const m = JSON.stringify({ type: 'peer-muted', peerId, muted: c.muted });
                 for (const [pid, info] of room) { if (pid !== peerId && info.ws.readyState === WebSocket.OPEN) info.ws.send(m); }
@@ -437,6 +498,7 @@ class CallServer {
             }
             case 'camera-off': {
                 const c = room.get(peerId); if (!c) break;
+                if (c.listenOnly && !msg.cameraOff) break;
                 c.cameraOff = !!msg.cameraOff;
                 const m = JSON.stringify({ type: 'peer-camera', peerId, cameraOff: c.cameraOff });
                 for (const [pid, info] of room) { if (pid !== peerId && info.ws.readyState === WebSocket.OPEN) info.ws.send(m); }
@@ -469,10 +531,16 @@ class CallServer {
                     if (c.ws.readyState === WebSocket.OPEN) { c.ws.send(JSON.stringify({ type: 'error', message: 'Banned' })); c.ws.close(); } break;
                 }
                 const ch = this.channels.get(channelId);
+                if (ch?.roomSlug) {
+                    const callRoom = this._roomOf(channelId);
+                    const a = callRoom ? rooms.access(callRoom, user) : null;
+                    if (!a || !a.read || !a.join) { if (c.ws.readyState === WebSocket.OPEN) { c.ws.send(JSON.stringify({ type: 'error', message: 'You cannot join this call' })); c.ws.close(); } break; }
+                }
                 c.user = user; c.anonId = user ? null : chatServer.getAnonIdForConnection(c.ip, channelId);
                 c.isChannelCreator = !!(user && ch?.createdBy === user.id);
                 c.isStreamer = ch?.streamId ? !!(user && ctx.getStreamById(ch.streamId)?.user_id === user.id) : false;
                 if (user) { try { lifecycle.answeredByJoin(channelId, user.id); } catch { /* */ } }
+                if (ch?.roomSlug) { this._applyRoomAccessTo(channelId, peerId, c); if (room.get(peerId) !== c) break; }
                 const pInfo = this._buildParticipantInfo(peerId, c);
                 if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify({
                     type: 'self-updated',
@@ -487,6 +555,7 @@ class CallServer {
             case 'force-mute': {
                 const sender = room.get(peerId); if (!sender || !this._canModerate(sender.user, channelId)) break;
                 const target = room.get(msg.targetPeerId); if (!target || target.isChannelCreator || target.isStreamer) break;
+                if (target.listenOnly && !msg.forceMuted) break;   // make them a speaker in the room instead
                 target.forceMuted = !!msg.forceMuted;
                 if (target.ws.readyState === WebSocket.OPEN) target.ws.send(JSON.stringify({ type: 'force-muted', forceMuted: target.forceMuted }));
                 const m = JSON.stringify({ type: 'peer-force-muted', peerId: msg.targetPeerId, forceMuted: target.forceMuted });
@@ -496,6 +565,7 @@ class CallServer {
             case 'force-camera-off': {
                 const sender = room.get(peerId); if (!sender || !this._canModerate(sender.user, channelId)) break;
                 const target = room.get(msg.targetPeerId); if (!target || target.isChannelCreator || target.isStreamer) break;
+                if (target.listenOnly && !msg.forceCameraOff) break;
                 target.forceCameraOff = !!msg.forceCameraOff;
                 if (target.ws.readyState === WebSocket.OPEN) target.ws.send(JSON.stringify({ type: 'force-camera-off', forceCameraOff: target.forceCameraOff }));
                 const m = JSON.stringify({ type: 'peer-force-camera-off', peerId: msg.targetPeerId, forceCameraOff: target.forceCameraOff });
@@ -521,6 +591,11 @@ class CallServer {
                 if (target.user?.id) {
                     banSet.add(target.user.id);      // backward compatibility with existing entries
                     banSet.add(`u:${target.user.id}`);
+                    // In a call room the ban is the room's block, so it outlives this process.
+                    const callRoom = this._roomOf(channelId);
+                    if (callRoom && sender.user) {
+                        try { rooms.setRole(callRoom, sender.user, target.user.id, 'blocked'); chatServer.refreshRoomAccess(callRoom); } catch (err) { console.warn('[Call] room block:', err.message); }
+                    }
                 } else {
                     if (target.anonId) banSet.add(`a:${target.anonId}`);
                     if (target.ip) banSet.add(`ip:${target.ip}`);
@@ -595,6 +670,60 @@ class CallServer {
     }
 
     getCallBans(channelId) { const b = this.callBans.get(channelId); return b ? [...b] : []; }
+
+    /**
+     * A call room's roles or visibility changed (../rooms/routes.js, the site): everyone in its call gets
+     * what they may do now. A new speaker may talk, a demoted one is muted, someone who may no longer
+     * read the room (blocked, removed from a private room) is dropped. → peers changed
+     */
+    applyRoomAccess(room) {
+        if (!room || room.kind !== 'call') return 0;
+        const channelId = `room-${room.slug}`;
+        const ch = this.channels.get(channelId);
+        if (ch) { ch.name = room.name; ch.createdBy = room.owner_id; }
+        const r = this.rooms.get(channelId);
+        if (!r) return 0;
+        let changed = 0;
+        for (const [pid, info] of [...r]) if (this._applyRoomAccessTo(channelId, pid, info, room)) changed++;
+        return changed;
+    }
+
+    /** One peer of a call room against the room's current roles. → whether anything changed */
+    _applyRoomAccessTo(channelId, peerId, info, room = null) {
+        const callRoom = room || this._roomOf(channelId);
+        const a = callRoom ? rooms.access(callRoom, info.user || null) : null;
+        const send = (o) => { if (info.ws.readyState === WebSocket.OPEN) info.ws.send(JSON.stringify(o)); };
+        if (!a || !a.read || !a.join) {
+            send({ type: 'error', message: 'You can no longer join this call' });
+            this._handleDisconnect(info.ws, channelId, peerId);
+            try { info.ws.close(); } catch { /* */ }
+            return true;
+        }
+        const listenOnly = !a.talk;
+        if (info.listenOnly === listenOnly && info.roomRole === a.role) return false;
+        info.roomRole = a.role;
+        info.listenOnly = listenOnly;
+        info.isChannelCreator = !!(info.user && callRoom.owner_id === info.user.id);
+        info.forceMuted = listenOnly;
+        info.forceCameraOff = listenOnly;
+        if (listenOnly) { info.muted = true; info.cameraOff = true; info.speaking = false; }
+        send({ type: 'room-role', room: callRoom.slug, role: a.role, canTalk: a.talk, canModerate: this._canModerate(info.user, channelId) });
+        send({ type: 'force-muted', forceMuted: info.forceMuted });
+        send({ type: 'force-camera-off', forceCameraOff: info.forceCameraOff });
+        const r = this.rooms.get(channelId);
+        if (r) {
+            const m1 = JSON.stringify({ type: 'peer-force-muted', peerId, forceMuted: info.forceMuted });
+            const m2 = JSON.stringify({ type: 'peer-force-camera-off', peerId, forceCameraOff: info.forceCameraOff });
+            const m3 = JSON.stringify({ type: 'peer-updated', ...this._buildParticipantInfo(peerId, info) });
+            for (const [pid, other] of r) {
+                if (other.ws.readyState !== WebSocket.OPEN) continue;
+                other.ws.send(m1); other.ws.send(m2);
+                if (pid !== peerId) other.ws.send(m3);
+            }
+        }
+        this._notifyChannelsChanged();
+        return true;
+    }
 
     endCall(channelId, reason = 'ended') {
         const r = this.rooms.get(channelId); if (!r) return;

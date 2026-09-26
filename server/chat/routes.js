@@ -59,10 +59,16 @@ function publicRows(rows) {
     return rows;
 }
 
-/** Load the cosmetics/tags of every author in these rows (one batched call for the misses). */
+/**
+ * Load the cosmetics/tags of every author in these rows (one batched call for the misses), waiting at
+ * most DECOR_WAIT_MS: they are Live's, and history and sending never wait on a slow or hung Live.
+ */
+const DECOR_WAIT_MS = 1500;
 async function loadDecor(rows) {
     const ids = (rows || []).map((m) => m && m.user_id).filter(Boolean);
-    if (ids.length) { try { await ctx.ensureDecor(ids); } catch { /* history still renders */ } }
+    if (!ids.length) return;
+    let timer;
+    try { await Promise.race([ctx.ensureDecor(ids), new Promise((r) => { timer = setTimeout(r, DECOR_WAIT_MS); if (timer.unref) timer.unref(); })]); } catch { /* history still renders */ } finally { clearTimeout(timer); }
 }
 
 /**
@@ -272,7 +278,9 @@ router.post('/send', requireAuth, async (req, res) => {
         }
 
         const chatServer = require('./chat-server');
-        try { await ctx.ensureDecor([req.user.id]); } catch { /* non-critical */ }
+        // Cosmetics are Live's and only decorate the line: wait for them briefly, never for a slow or
+        // hanging Live (openvibe.chat keeps working with Live down).
+        await loadDecor([{ user_id: req.user.id }]);
 
         // Word filter
         const wordFilter = require('./word-filter');

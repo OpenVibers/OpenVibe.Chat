@@ -51,6 +51,8 @@ module.exports = {
     // openvibe.chat, the site (server/web/): global chat, messages and settings, served by Chat itself.
     web: {
         baseUrl: strip(process.env.CHAT_WEB_URL || (isProduction ? 'https://openvibe.chat' : 'http://localhost:4400')),
+        // Where a room's Community attachments link (a space is <communityUrl>/s/<slug>).
+        communityUrl: strip(process.env.OV_COMMUNITY_URL || 'https://openvibe.community'),
     },
     cookies: { secure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : isProduction },
 
