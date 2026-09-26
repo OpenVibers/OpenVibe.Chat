@@ -1,0 +1,2012 @@
+{
+ "service": "chat",
+ "release": "739d3a1cdc22fbb0717e4df4abd6b7e4ad31a8f1",
+ "recorded_at": "2026-09-26T14:07:10.965Z",
+ "note": "N-1 fixture: written by `npm run n-1:record`, replayed by test/n-1.test.js",
+ "clients": {
+  "live": "8caa540466f9af86247febdbba1339b68919a42f"
+ },
+ "manifest": {
+  "service": "chat",
+  "release": "739d3a1cdc22",
+  "released_at": "2026-09-26T13:12:38.000Z",
+  "booted_at": "2026-09-26T14:07:06.104Z",
+  "contracts_version": "0.57.0",
+  "packages": {
+   "openvibe-shared": "1.22.0",
+   "openvibe-sdk": "0.11.0",
+   "openvibe-contracts": "0.57.0"
+  },
+  "min_client_release": null,
+  "mixed_version_window_hours": 24,
+  "components": {
+   "shell": {
+    "kind": "script",
+    "version": "739d3a1cdc22"
+   },
+   "server": {
+    "kind": "server",
+    "version": "739d3a1cdc22"
+   }
+  },
+  "assets": {},
+  "schema_generation": null,
+  "schema_compatible_from": null,
+  "contract_ranges": {},
+  "metrics_url": "/release-metrics"
+ },
+ "dynamic_calls": 53,
+ "calls": [
+  {
+   "method": "GET",
+   "path": "/api/chat/admin/logs",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/dashboard.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/admin/logs",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "rows": "array",
+    "total": "number",
+    "page": "number",
+    "limit": "number",
+    "totalPages": "number"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/dashboard.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/anon/n1fan",
+   "auth": "anon",
+   "status": 400,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/anon/n1fan",
+   "auth": "user",
+   "status": 400,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/channel/1001/history?limit=500",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].source_stream_title": "null",
+    "messages[].source_managed_id": "null",
+    "messages[].source_is_live": "null",
+    "messages[].source_slug": "null",
+    "messages[].source_channel": "string",
+    "latest_id": "number",
+    "liveSlots": "array",
+    "channel": "string",
+    "activeStreamId": "null",
+    "activeManagedId": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/channel/1001/history?limit=500",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].source_stream_title": "null",
+    "messages[].source_managed_id": "null",
+    "messages[].source_is_live": "null",
+    "messages[].source_slug": "null",
+    "messages[].source_channel": "string",
+    "latest_id": "number",
+    "liveSlots": "array",
+    "channel": "string",
+    "activeStreamId": "null",
+    "activeManagedId": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/filters/friendly",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "categories": "array",
+    "categories[]": "object",
+    "categories[].key": "string",
+    "categories[].label": "string",
+    "categories[].patterns": "array",
+    "categories[].patterns[]": "string"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/filters/friendly",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "categories": "array",
+    "categories[]": "object",
+    "categories[].key": "string",
+    "categories[].label": "string",
+    "categories[].patterns": "array",
+    "categories[].patterns[]": "string"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/gif/providers",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "providers": "object",
+    "providers.tenor": "boolean",
+    "providers.giphy": "boolean",
+    "defaultProvider": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/emotes.js",
+    "OpenVibe.Live:public/js/gif-picker.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/gif/providers",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "providers": "object",
+    "providers.tenor": "boolean",
+    "providers.giphy": "boolean",
+    "defaultProvider": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/emotes.js",
+    "OpenVibe.Live:public/js/gif-picker.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/gif/search?provider=tenor&q=n1",
+   "auth": "anon",
+   "status": 503,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/gif-picker.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/gif/search?provider=tenor&q=n1",
+   "auth": "user",
+   "status": 503,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/gif-picker.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/gif/trending?provider=tenor",
+   "auth": "anon",
+   "status": 503,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/gif-picker.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/gif/trending?provider=tenor",
+   "auth": "user",
+   "status": 503,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/gif-picker.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/global/history",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].stream_channel": "string",
+    "messages[].source_is_live": "null",
+    "messages[].source_managed_id": "null",
+    "messages[].source_stream_title": "null",
+    "messages[].source_slug": "null",
+    "latest_id": "number"
+   },
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/global/history",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].stream_channel": "string",
+    "messages[].source_is_live": "null",
+    "messages[].source_managed_id": "null",
+    "messages[].source_stream_title": "null",
+    "messages[].source_slug": "null",
+    "latest_id": "number"
+   },
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/global/history?after_id=&limit=200",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].stream_channel": "string",
+    "messages[].source_is_live": "null",
+    "messages[].source_managed_id": "null",
+    "messages[].source_stream_title": "null",
+    "messages[].source_slug": "null",
+    "latest_id": "number",
+    "complete": "boolean",
+    "deleted_ids": "array"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/global/history?after_id=&limit=200",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].stream_channel": "string",
+    "messages[].source_is_live": "null",
+    "messages[].source_managed_id": "null",
+    "messages[].source_stream_title": "null",
+    "messages[].source_slug": "null",
+    "latest_id": "number",
+    "complete": "boolean",
+    "deleted_ids": "array"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/global/history?after_id=0&limit=200",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].stream_channel": "string",
+    "messages[].source_is_live": "null",
+    "messages[].source_managed_id": "null",
+    "messages[].source_stream_title": "null",
+    "messages[].source_slug": "null",
+    "latest_id": "number",
+    "complete": "boolean",
+    "deleted_ids": "array"
+   },
+   "from": [
+    "public/web/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/global/history?after_id=0&limit=200",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].stream_channel": "string",
+    "messages[].source_is_live": "null",
+    "messages[].source_managed_id": "null",
+    "messages[].source_stream_title": "null",
+    "messages[].source_slug": "null",
+    "latest_id": "number",
+    "complete": "boolean",
+    "deleted_ids": "array"
+   },
+   "from": [
+    "public/web/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/global/history?limit=500",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].stream_channel": "string",
+    "messages[].source_is_live": "null",
+    "messages[].source_managed_id": "null",
+    "messages[].source_stream_title": "null",
+    "messages[].source_slug": "null",
+    "latest_id": "number"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/global/history?limit=500",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].stream_channel": "string",
+    "messages[].source_is_live": "null",
+    "messages[].source_managed_id": "null",
+    "messages[].source_stream_title": "null",
+    "messages[].source_slug": "null",
+    "latest_id": "number"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/ice-servers",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "iceServers": "array",
+    "iceServers[]": "object",
+    "iceServers[].urls": "string"
+   },
+   "from": [
+    "public/web/call.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/ice-servers",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "iceServers": "array",
+    "iceServers[]": "object",
+    "iceServers[].urls": "string"
+   },
+   "from": [
+    "public/web/call.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/me/export",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/me/export",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "username": "string",
+    "total": "number",
+    "messages": "array"
+   },
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/relay-user/1/n1fan",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "relayUser": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/relay-user/1/n1fan",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "relayUser": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/rooms",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "public": "array",
+    "public[]": "object",
+    "public[].id": "number",
+    "public[].slug": "string",
+    "public[].name": "string",
+    "public[].topic": "null",
+    "public[].kind": "string",
+    "public[].visibility": "string",
+    "public[].slow_seconds": "number",
+    "public[].message_count": "number",
+    "public[].last_message_at": "string",
+    "public[].created_at": "string",
+    "public[].members": "number",
+    "mine": "array"
+   },
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/rooms",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "public": "array",
+    "public[]": "object",
+    "public[].id": "number",
+    "public[].slug": "string",
+    "public[].name": "string",
+    "public[].topic": "null",
+    "public[].kind": "string",
+    "public[].visibility": "string",
+    "public[].slow_seconds": "number",
+    "public[].message_count": "number",
+    "public[].last_message_at": "string",
+    "public[].created_at": "string",
+    "public[].members": "number",
+    "mine": "array",
+    "mine[]": "object",
+    "mine[].id": "number",
+    "mine[].slug": "string",
+    "mine[].name": "string",
+    "mine[].topic": "null",
+    "mine[].kind": "string",
+    "mine[].visibility": "string",
+    "mine[].slow_seconds": "number",
+    "mine[].message_count": "number",
+    "mine[].last_message_at": "string",
+    "mine[].created_at": "string",
+    "mine[].members": "number",
+    "mine[].role": "string",
+    "mine[].unread": "number",
+    "mine[].last_seen_at": "string"
+   },
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/rooms/n1-room/messages?after=0&limit=200",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].user_id": "number",
+    "messages[].message": "string",
+    "messages[].created_at": "string",
+    "messages[].is_deleted": "number",
+    "messages[].username": "string",
+    "messages[].display_name": "string",
+    "messages[].profile_color": "string",
+    "messages[].user_role": "string",
+    "latest_id": "number"
+   },
+   "from": [
+    "public/web/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/rooms/n1-room/messages?after=0&limit=200",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].user_id": "number",
+    "messages[].message": "string",
+    "messages[].created_at": "string",
+    "messages[].is_deleted": "number",
+    "messages[].username": "string",
+    "messages[].display_name": "string",
+    "messages[].profile_color": "string",
+    "messages[].user_role": "string",
+    "latest_id": "number"
+   },
+   "from": [
+    "public/web/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/search",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/search",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "total": "number"
+   },
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/user/n1fan/profile",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "id": "number",
+    "username": "string",
+    "display_name": "string",
+    "messageCount": "number",
+    "followerCount": "number"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/user/n1fan/profile",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "id": "number",
+    "username": "string",
+    "display_name": "string",
+    "messageCount": "number",
+    "followerCount": "number"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/500/history?limit=500",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].source_stream_title": "string",
+    "messages[].source_managed_id": "null",
+    "messages[].source_is_live": "number",
+    "messages[].source_slug": "null",
+    "messages[].source_channel": "string",
+    "latest_id": "number",
+    "complete": "boolean",
+    "liveSlots": "array",
+    "channel": "string",
+    "activeStreamId": "number",
+    "activeManagedId": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/500/history?limit=500",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null",
+    "messages[].core_username": "null",
+    "messages[].source_stream_title": "string",
+    "messages[].source_managed_id": "null",
+    "messages[].source_is_live": "number",
+    "messages[].source_slug": "null",
+    "messages[].source_channel": "string",
+    "latest_id": "number",
+    "complete": "boolean",
+    "liveSlots": "array",
+    "channel": "string",
+    "activeStreamId": "number",
+    "activeManagedId": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/500/replay",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/app-media.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/500/replay",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array",
+    "messages[]": "object",
+    "messages[].id": "number",
+    "messages[].stream_id": "number",
+    "messages[].user_id": "number",
+    "messages[].anon_id": "null",
+    "messages[].username": "string",
+    "messages[].message": "string",
+    "messages[].message_type": "string",
+    "messages[].metadata": "null",
+    "messages[].is_global": "number",
+    "messages[].is_deleted": "number",
+    "messages[].reply_to_id": "null",
+    "messages[].source_platform": "null",
+    "messages[].timestamp": "string",
+    "messages[].channel_user_id": "number",
+    "messages[].avatar_url": "null",
+    "messages[].profile_color": "null",
+    "messages[].role": "null",
+    "messages[].display_name": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/app-media.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/blocks",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js",
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/blocks",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "blocked": "array"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js",
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/blocks/check/1002",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/blocks/check/1002",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "blocked": "boolean"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js",
+    "node_modules/openvibe-sdk/src/chat.js",
+    "public/web/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "conversations": "array",
+    "conversations[]": "object",
+    "conversations[].id": "number",
+    "conversations[].name": "null",
+    "conversations[].is_group": "number",
+    "conversations[].updated_at": "string",
+    "conversations[].last_message": "string",
+    "conversations[].last_message_at": "string",
+    "conversations[].unread_count": "number",
+    "conversations[].participants": "array",
+    "conversations[].participants[]": "object",
+    "conversations[].participants[].id": "number",
+    "conversations[].participants[].username": "string",
+    "conversations[].participants[].display_name": "string",
+    "conversations[].participants[].avatar_url": "null",
+    "conversations[].participants[].profile_color": "string"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js",
+    "node_modules/openvibe-sdk/src/chat.js",
+    "public/web/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations/1",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations/1",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "conversation": "object",
+    "conversation.id": "number",
+    "conversation.name": "null",
+    "conversation.is_group": "number",
+    "conversation.created_by": "number",
+    "conversation.created_at": "string",
+    "conversation.updated_at": "string",
+    "conversation.participants": "array",
+    "conversation.participants[]": "object",
+    "conversation.participants[].id": "number",
+    "conversation.participants[].username": "string",
+    "conversation.participants[].display_name": "string",
+    "conversation.participants[].avatar_url": "null",
+    "conversation.participants[].profile_color": "string"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations/1/messages?after=0&limit=50",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations/1/messages?after=0&limit=50",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations/1/messages?limit=50&before=0",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations/1/messages?limit=50&before=0",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations/1/messages?limit=50",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations/1/messages?limit=50",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations/1/messages?after=0&limit=100",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "public/web/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/conversations/1/messages?after=0&limit=100",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "messages": "array"
+   },
+   "from": [
+    "public/web/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/unread",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js",
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/unread",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "unread": "number"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js",
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/users/search?q=",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/users/search?q=",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "users": "array"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/users/search?q=n1fan",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/dm/users/search?q=n1fan",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "users": "array"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/sounds/alert/mine",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/channel-uploads.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/sounds/alert/mine",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "donation": "object",
+    "donation.set": "boolean",
+    "donation.url": "null",
+    "goal": "object",
+    "goal.set": "boolean",
+    "goal.url": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/channel-uploads.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/sounds/all/1",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "sounds": "array"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/emotes.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/sounds/all/1",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "sounds": "array"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/emotes.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "html",
+   "from": [
+    "page"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/web/chat.css?v=f8b0b316ea",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "text",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/shared/theme-loader.js?v=d9b9af081efe",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "other",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/shared/navbar.js?v=b50d9f47fc34",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "other",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/shared/footer.js?v=b99e512398d5",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "other",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/web/chat.js?v=aedc88ef89",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "other",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/rooms",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "html",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/messages",
+   "auth": "anon",
+   "accept": "html",
+   "status": 303,
+   "kind": "html",
+   "location": "/auth/login",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/settings",
+   "auth": "anon",
+   "accept": "html",
+   "status": 303,
+   "kind": "html",
+   "location": "/auth/login",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/login?next=%2F",
+   "auth": "anon",
+   "accept": "html",
+   "status": 302,
+   "kind": "html",
+   "location": "/oauth/authorize",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/sitemap.xml",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "other",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/updates",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "html",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/login?next=%2Frooms",
+   "auth": "anon",
+   "accept": "html",
+   "status": 302,
+   "kind": "html",
+   "location": "/oauth/authorize",
+   "from": [
+    "page /rooms"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/r/{@room}",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "html",
+   "from": [
+    "page /rooms"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/r/n1-room",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "html",
+   "from": [
+    "page"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/login?next=%2Fr%2F{@room}",
+   "auth": "anon",
+   "accept": "html",
+   "status": 302,
+   "kind": "html",
+   "location": "/oauth/authorize",
+   "from": [
+    "page /r/n1-room"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/login?next=%2Fupdates",
+   "auth": "anon",
+   "accept": "html",
+   "status": 302,
+   "kind": "html",
+   "location": "/oauth/authorize",
+   "from": [
+    "page /updates"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/shared/shipped.js?v=18e4e7ae4ec3",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "other",
+   "from": [
+    "page /updates"
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/chat/admin/purge",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/dashboard.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/admin/purge/preview",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/dashboard.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/rooms",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/chat/rooms/n1-room/messages/1",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "public/web/chat.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/rooms/n1-room/read",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "public/web/chat.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/send",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/dm/blocks/1002",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/dm/blocks/1002",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/dm/conversations",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js",
+    "node_modules/openvibe-sdk/src/chat.js"
+   ]
+  },
+  {
+   "method": "PATCH",
+   "path": "/api/dm/conversations/1",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/dm/conversations/1/messages",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/dm/conversations/1/messages/1",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/dm/conversations/1/participants",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/dm/conversations/1/participants/1002",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/dm/conversations/1/read",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/messenger.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/sounds",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/channel-uploads.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/sounds/alert/follow",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/channel-uploads.js"
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/sounds/alert/follow",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/channel-uploads.js"
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/sounds/1",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/channel-uploads.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/tts/admin/test",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/broadcast.js"
+   ]
+  }
+ ],
+ "ws": {
+  "path": "/ws/chat?stream=500",
+  "sends": [
+   {
+    "type": "chat",
+    "keys": [
+     "message",
+     "streamId"
+    ]
+   },
+   {
+    "type": "get-users",
+    "keys": []
+   },
+   {
+    "type": "join",
+    "keys": [
+     "channelUserId",
+     "streamId",
+     "token"
+    ]
+   },
+   {
+    "type": "join_room",
+    "keys": [
+     "room"
+    ]
+   },
+   {
+    "type": "room_message",
+    "keys": [
+     "message"
+    ]
+   },
+   {
+    "type": "self-delete-history",
+    "keys": [
+     "streamId"
+    ]
+   }
+  ],
+  "sessions": [
+   {
+    "auth": "anon",
+    "received": {
+     "auth": {
+      "[].type": "string",
+      "[].authenticated": "boolean",
+      "[].newcomer": "boolean",
+      "[].username": "string",
+      "[].core_username": "null",
+      "[].role": "string",
+      "[].user_id": "null",
+      "[].slowmode_seconds": "number",
+      "[].sub_only": "boolean",
+      "[].allow_auto_delete": "boolean",
+      "[].allow_self_delete_all": "boolean",
+      "[].gifs_enabled": "boolean",
+      "[].custom_emotes_enabled": "boolean",
+      "[].custom_sounds_enabled": "boolean",
+      "[].uploads_mods_only": "boolean",
+      "[].max_sound_seconds": "number",
+      "[].emote_scale": "number",
+      "[].soundboard_enabled": "boolean",
+      "[].soundboard_allow_pitch": "boolean",
+      "[].soundboard_allow_speed": "boolean",
+      "[].slur_filter_enabled": "boolean",
+      "[].slur_filter_use_builtin": "boolean",
+      "[].slur_filter_disabled_categories": "array",
+      "[].slur_filter_terms": "array",
+      "[].slur_filter_regexes": "array",
+      "[].slur_filter_nudge_message": "string",
+      "[].min_auto_delete_minutes": "number",
+      "[].channel_language": "string"
+     },
+     "chat": {
+      "[].type": "string",
+      "[].username": "string",
+      "[].core_username": "null",
+      "[].user_id": "null",
+      "[].anon_id": "string",
+      "[].role": "string",
+      "[].message": "string",
+      "[].stream_id": "number",
+      "[].channel_user_id": "number",
+      "[].is_global": "boolean",
+      "[].avatar_url": "null",
+      "[].profile_color": "string",
+      "[].timestamp": "string",
+      "[].id": "number"
+     },
+     "delete-messages": {
+      "[].type": "string",
+      "[].ids": "array",
+      "[].ids[]": "number"
+     },
+     "room_error": {
+      "[].type": "string",
+      "[].room": "string",
+      "[].code": "string",
+      "[].message": "string"
+     },
+     "room_joined": {
+      "[].type": "string",
+      "[].room": "string",
+      "[].kind": "string",
+      "[].role": "null",
+      "[].can": "object",
+      "[].can.post": "boolean",
+      "[].can.moderate": "boolean",
+      "[].can.manage": "boolean",
+      "[].can.join": "boolean",
+      "[].can.talk": "boolean"
+     },
+     "self-delete-result": {
+      "[].type": "string",
+      "[].count": "number",
+      "[].scope": "string"
+     },
+     "system": {
+      "[].type": "string",
+      "[].message": "string",
+      "[].timestamp": "string"
+     },
+     "user-count": {
+      "[].type": "string",
+      "[].count": "number",
+      "[].stream_id": "number"
+     },
+     "users-list": {
+      "[].type": "string",
+      "[].users": "object",
+      "[].users.logged": "array",
+      "[].users.anonCount": "number"
+     }
+    }
+   },
+   {
+    "auth": "user",
+    "received": {
+     "auth": {
+      "[].type": "string",
+      "[].authenticated": "boolean",
+      "[].newcomer": "boolean",
+      "[].username": "string",
+      "[].core_username": "string",
+      "[].role": "string",
+      "[].user_id": "number",
+      "[].slowmode_seconds": "number",
+      "[].sub_only": "boolean",
+      "[].allow_auto_delete": "boolean",
+      "[].allow_self_delete_all": "boolean",
+      "[].gifs_enabled": "boolean",
+      "[].custom_emotes_enabled": "boolean",
+      "[].custom_sounds_enabled": "boolean",
+      "[].uploads_mods_only": "boolean",
+      "[].max_sound_seconds": "number",
+      "[].emote_scale": "number",
+      "[].soundboard_enabled": "boolean",
+      "[].soundboard_allow_pitch": "boolean",
+      "[].soundboard_allow_speed": "boolean",
+      "[].slur_filter_enabled": "boolean",
+      "[].slur_filter_use_builtin": "boolean",
+      "[].slur_filter_disabled_categories": "array",
+      "[].slur_filter_terms": "array",
+      "[].slur_filter_regexes": "array",
+      "[].slur_filter_nudge_message": "string",
+      "[].min_auto_delete_minutes": "number",
+      "[].channel_language": "string"
+     },
+     "chat": {
+      "[].type": "string",
+      "[].username": "string",
+      "[].core_username": "string",
+      "[].user_id": "number",
+      "[].anon_id": "null",
+      "[].role": "string",
+      "[].message": "string",
+      "[].stream_id": "number",
+      "[].channel_user_id": "number",
+      "[].is_global": "boolean",
+      "[].avatar_url": "null",
+      "[].profile_color": "string",
+      "[].timestamp": "string",
+      "[].id": "number"
+     },
+     "coin_earned": {
+      "[].type": "string",
+      "[].coins": "number",
+      "[].total": "number",
+      "[].streamerId": "number",
+      "[].reason": "string"
+     },
+     "delete-messages": {
+      "[].type": "string",
+      "[].ids": "array",
+      "[].ids[]": "number"
+     },
+     "room_joined": {
+      "[].type": "string",
+      "[].room": "string",
+      "[].kind": "string",
+      "[].role": "string",
+      "[].can": "object",
+      "[].can.post": "boolean",
+      "[].can.moderate": "boolean",
+      "[].can.manage": "boolean",
+      "[].can.join": "boolean",
+      "[].can.talk": "boolean"
+     },
+     "room_message": {
+      "[].type": "string",
+      "[].room": "string",
+      "[].message": "object",
+      "[].message.id": "number",
+      "[].message.user_id": "number",
+      "[].message.message": "string",
+      "[].message.created_at": "string",
+      "[].message.is_deleted": "number",
+      "[].message.username": "string",
+      "[].message.display_name": "string",
+      "[].message.profile_color": "string",
+      "[].message.user_role": "string"
+     },
+     "self-delete-result": {
+      "[].type": "string",
+      "[].count": "number",
+      "[].scope": "string"
+     },
+     "system": {
+      "[].type": "string",
+      "[].message": "string",
+      "[].timestamp": "string"
+     },
+     "user-count": {
+      "[].type": "string",
+      "[].count": "number",
+      "[].stream_id": "number"
+     },
+     "users-list": {
+      "[].type": "string",
+      "[].users": "object",
+      "[].users.logged": "array",
+      "[].users.logged[]": "object",
+      "[].users.logged[].username": "string",
+      "[].users.logged[].display_name": "string",
+      "[].users.logged[].avatar_url": "null",
+      "[].users.logged[].role": "string",
+      "[].users.anonCount": "number"
+     }
+    }
+   }
+  ]
+ }
+}

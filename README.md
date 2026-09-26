@@ -325,7 +325,18 @@ node scripts/table-authority.js           # who writes each staged table (the ha
 node scripts/mirror-flush.js  # rollback helper: push queued mirror rows to Live
 node scripts/subscribe-events.js --dry-run   # Chat's Events subscriptions (boot creates missing ones)
 node scripts/parity.js        # chat parity scenarios: a dry run; --apply only on test accounts (docs/parity.md)
+N1_LIVE_REF=<live sha> npm run n-1:record   # after a deploy: the N-1 fixtures from the deployed commit
 ```
+
+`test/n-1.test.js` (roadmap WS-P task 11, in `npm test`) runs the previous release's clients against
+this one and its SQL against this schema, from `test/fixtures/n-1/`: every call Chat's pages, the
+openvibe.chat pages' links, scripts and forms, and Live's chat widget, messenger and pickers make
+(status, JSON, the fields they read), the `/ws/chat` messages Live's chat sends with the replies it
+reads, and every statement the previous release runs, which must still prepare after this release
+migrated a database the previous one created. After each deploy,
+record the release now in production as the next N-1 (`npm run n-1:record [ref]`, with `N1_LIVE_REF`
+the Live release in production, from a Live checkout at `N1_LIVE_REPO`, default `../OpenVibe.Live`)
+and commit the fixtures.
 
 `/ready` (openvibe-shared/ready shape: `status` ready/degraded/not_ready and `checks`) is 503 only
 when the `db` check (a read of `chat_messages`) fails. `live_sync` is optional: it reads degraded when
@@ -352,7 +363,7 @@ server/net/service-auth.js service tokens: client (Chat → others) and guard (o
 server/prefs/              chat preferences in the Network user module chat.preferences (routes, cache, migration from Live)
 server/calls/              moved from Live: the call server (/ws/call), its REST routes, Live's stream hooks (/internal/calls), the calls lifecycle
 server/db/                 schema.sql, database.js (Live's chat functions, same names and arguments)
-scripts/                   import-from-live, parity-check, parity, mirror-flush, table-authority, migrate-chat-preferences, subscribe-events
+scripts/                   import-from-live, parity-check, parity, mirror-flush, table-authority, migrate-chat-preferences, subscribe-events, n-1-record
 docs/                      cutover.md, calls-cutover.md, staged-tables-cutover.md, parity.md, live-patch.diff, capabilities-proposal/
 ```
 
