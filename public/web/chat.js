@@ -66,11 +66,17 @@
     var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
     return li;
   }
+  function removeIds(ids) {
+    if (!feed || !Array.isArray(ids)) return;
+    ids.forEach(function (id) { var x = feed.querySelector('[data-id="' + Number(id) + '"]'); if (x) x.remove(); });
+  }
+  // After a reconnect: what was written meanwhile, and what was deleted meanwhile (deleted_ids).
   function catchUp() {
     return fetch('/api/chat/global/history?after_id=' + latest + '&limit=200', { credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) {
         if (!d || !d.messages) return;
+        removeIds(d.deleted_ids);
         d.messages.forEach(function (m) { if ((m.message_type || 'chat') === 'chat' && !m.is_deleted) append(globalItem(m), m.id); });
         if (d.latest_id) latest = Math.max(latest, d.latest_id);
       }).catch(function () {});
@@ -93,7 +99,7 @@
           if (m.id) latest = Math.max(latest, Number(m.id));
           append(globalItem(m), m.id);
         } else if (m.type === 'delete-messages' && Array.isArray(m.ids || m.message_ids)) {
-          (m.ids || m.message_ids).forEach(function (id) { var x = feed.querySelector('[data-id="' + id + '"]'); if (x) x.remove(); });
+          removeIds(m.ids || m.message_ids);
         } else if (m.type === 'error' && m.message) {
           showError(m.message);
         } else if (m.type === 'auth_revoked') {

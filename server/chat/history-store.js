@@ -6,6 +6,9 @@
  *   page(room, { limit, before })      newest `limit` rows, oldest→newest — the first paint
  *   delta(room, { afterId, limit })    rows with id > afterId, oldest→newest — reopen, reconnect,
  *                                      tab focus. Cheap: a primary-key range scan, no reverse.
+ *                                      Plus `deleted_ids` (deletedIds below): the rows at or under
+ *                                      the cursor that are deleted now, so a reader that was away
+ *                                      drops them too (reconnect convergence, roadmap D22).
  * Every answer carries `latest_id`, the cursor the client stores; `complete:false` on a delta
  * means the gap was bigger than `limit` and the client should take a fresh page instead.
  *
@@ -20,6 +23,7 @@ const db = require('../db/database');
 const PAGE_MEMO_MS = 2000;
 const MAX_LIMIT = 500;
 
+const GLOBAL_TYPES = "('chat', 'system', 'channel-sound', 'soundboard', 'donation')";
 const GLOBAL_SELECT = `SELECT cm.*, u.avatar_url, u.profile_color, u.role, u.display_name,
               u.username AS core_username,
               COALESCE(su.username, cu.username) AS stream_channel,
@@ -33,7 +37,7 @@ const GLOBAL_SELECT = `SELECT cm.*, u.avatar_url, u.profile_color, u.role, u.dis
        LEFT JOIN ctx_users su ON s.user_id = su.id
        LEFT JOIN ctx_users cu ON cm.channel_user_id = cu.id
        LEFT JOIN ctx_managed_streams ms ON s.managed_stream_id = ms.id
-       WHERE cm.is_deleted = 0 AND cm.message_type IN ('chat', 'system', 'channel-sound', 'soundboard', 'donation')
+       WHERE cm.is_deleted = 0 AND cm.message_type IN ${GLOBAL_TYPES}
          AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)`;
 
 const CHANNEL_SELECT = `SELECT cm.*, u.avatar_url, u.profile_color, u.role, u.display_name,
@@ -138,7 +142,31 @@ function delta(room, { afterId, limit, channelUsername, decorate } = {}) {
     const complete = rows.length <= lim;
     if (!complete) rows = rows.slice(0, lim);
     const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows;
-    return { messages, latest_id: latestIdOf(rows) || after, complete };
+    return { messages, latest_id: latestIdOf(rows) || after, complete, deleted_ids: deletedIds(room, after) };
+}
+
+/**
+ * What a reader holding rows up to `afterId` may still show but a fresh page no longer would: the
+ * ids at or under the cursor, among the room's newest DELETED_WINDOW rows (a page shows at most
+ * MAX_LIMIT), that are deleted or past their auto-delete time. Ids only; one the reader never had
+ * is a no-op for it. Rooms: 'global', 'channel:<userId>', 'stream:<streamId>'.
+ * @returns {number[]} oldest→newest
+ */
+const DELETED_WINDOW = 2 * MAX_LIMIT;
+function deletedIds(room, afterId) {
+    const after = Math.max(0, parseInt(afterId, 10) || 0);
+    if (!after) return [];
+    const m = /^stream:(\d+)$/.exec(String(room || ''));
+    const r = m ? { kind: 'stream', streamId: parseInt(m[1], 10) } : parseRoom(room);
+    const scope = r.kind === 'global' ? { where: `message_type IN ${GLOBAL_TYPES}`, params: [] }
+        : r.kind === 'channel' ? { where: 'channel_user_id = ?', params: [r.userId] }
+            : { where: 'stream_id = ?', params: [r.streamId] };
+    // Visible = what page()/delta() return; everything else in the window is reported.
+    return db.all(`SELECT id FROM (
+            SELECT id, is_deleted, auto_delete_at FROM chat_messages
+            WHERE ${scope.where} AND id <= ? ORDER BY timestamp DESC, id DESC LIMIT ?)
+        WHERE NOT (is_deleted = 0 AND (auto_delete_at IS NULL OR COALESCE(datetime(auto_delete_at) > CURRENT_TIMESTAMP, 0)))
+        ORDER BY id`, [...scope.params, after, DELETED_WINDOW]).map((x) => x.id);
 }
 
 /** Drop memoised pages for a room (or all rooms). Call from write paths when a tier is added. */
@@ -147,4 +175,4 @@ function invalidate(room) {
     for (const k of memo.keys()) if (k.startsWith(`${room}|`)) memo.delete(k);
 }
 
-module.exports = { page, delta, invalidate, clampLimit, PAGE_MEMO_MS };
+module.exports = { page, delta, deletedIds, invalidate, clampLimit, PAGE_MEMO_MS, DELETED_WINDOW };

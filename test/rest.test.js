@@ -123,6 +123,11 @@ t('chat history: global page and cursor delta, deleted and expired rows hidden',
     const delta = await h.http('GET', `/api/chat/global/history?after_id=${ids[3]}`);
     assert.deepStrictEqual(delta.body.messages.map((m) => m.message), ['g4']);
     assert.strictEqual(delta.body.complete, true);
+    // Reconnect convergence: the rows at or under the cursor that a page would no longer show
+    // (deleted, auto-deleted), so a reader who was away drops them too. Ids only.
+    assert.deepStrictEqual(delta.body.deleted_ids.filter((id) => ids.includes(id)), [ids[1], ids[2]]);
+    assert.deepStrictEqual((await h.http('GET', `/api/chat/global/history?after_id=${ids[1] - 1}`)).body.deleted_ids.filter((id) => ids.includes(id)), [], 'above the cursor is the delta’s business');
+    assert.ok(!('deleted_ids' in page.body), 'a page has none');
     const small = await h.http('GET', `/api/chat/global/history?after_id=0&limit=1`);
     assert.strictEqual(small.body.complete, false, 'bigger gap than the limit → take a fresh page');
     // Channel filter by username (the owner of the source stream or the channel room).
@@ -130,6 +135,16 @@ t('chat history: global page and cursor delta, deleted and expired rows hidden',
     const byChan = await h.http('GET', '/api/chat/global/history?username=streamer');
     assert.deepStrictEqual(byChan.body.messages.map((m) => m.message), ['in the stream']);
     assert.strictEqual(byChan.body.messages[0].stream_channel, 'streamer');
+    // The stream and channel cursor reads name deletions in their room too.
+    const inRoom = [0, 1].map((i) => Number(h.db.saveChatMessage({ stream_id: streamId, channel_user_id: streamer.id, user_id: bob.id, username: 'Bob', message: `s${i}`, message_type: 'chat' }).lastInsertRowid));
+    h.db.deleteChatMessage(inRoom[0], staff.id);
+    for (const p of [`/api/chat/${streamId}/history`, `/api/chat/${streamId}/history?scope=stream&`, `/api/chat/channel/${streamer.id}/history`]) {
+        const d = await h.http('GET', `${p}${p.endsWith('&') ? '' : '?'}after_id=${inRoom[1]}`);
+        assert.strictEqual(d.status, 200, p);
+        assert.deepStrictEqual(d.body.deleted_ids, [inRoom[0]], p);
+    }
+    assert.deepStrictEqual((await h.http('GET', `/api/chat/channel/${streamer.id + 999}/history?after_id=${inRoom[1]}`)).body.deleted_ids, [], 'another channel');
+    h.db.deleteChatMessage(inRoom[1], staff.id);   // the log counts below are about 'in the stream'
 });
 
 t('chat logs and search are gated like Live', async () => {

@@ -600,8 +600,10 @@ router.get('/:streamId/history', optionalAuth, async (req, res) => {
                     }));
             } catch { /* non-critical */ }
         }
+        // A cursor read also names the rows at or under the cursor deleted since (history-store.js).
+        const deleted = afterId != null ? { deleted_ids: historyStore.deletedIds(spanStreamer ? `channel:${broadcasterId}` : `stream:${parseInt(req.params.streamId, 10) || 0}`, afterId) } : {};
         res.json({
-            messages, latest_id, complete, liveSlots, channel,
+            messages, latest_id, complete, ...deleted, liveSlots, channel,
             activeStreamId: parseInt(req.params.streamId) || null,
             activeManagedId: stream ? (stream.managed_stream_id || null) : null,
         });
