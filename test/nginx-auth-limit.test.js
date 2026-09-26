@@ -17,4 +17,15 @@ assert.match(auth, /limit_req zone=ovchat_auth burst=10 nodelay;/);
 for (const b of [probe, auth]) assert.match(b, /limit_req_status 429;/);
 const upstream = (b) => (b.match(/proxy_pass (\S+);/) || [])[1];
 assert.ok(upstream(probe) && upstream(probe) === upstream(auth), 'the same upstream');
+// Any location that sets its own proxy_set_header loses the server-level ones, so each must carry the
+// client address and Host itself (a location without them sent every REST request as 127.0.0.1).
+{
+    const conf = require('fs').readFileSync(require('path').join(__dirname, '..', 'deploy', 'nginx', 'openvibe.chat.conf'), 'utf8');
+    const blocks = conf.split(/\n    location /).slice(1);
+    for (const b of blocks) {
+        const body = b.slice(0, b.indexOf('\n    }'));
+        if (!/proxy_set_header/.test(body) || !/proxy_pass/.test(body)) continue;
+        for (const h of ['Host $host', 'X-Real-IP $remote_addr', 'CF-Connecting-IP $remote_addr']) require('assert').ok(body.includes(`proxy_set_header ${h}`), `location ${b.split(' ')[0]} ${b.split(' ')[1] || ''}: proxy_set_header ${h}`);
+    }
+}
 console.log('nginx auth limit: /auth/me on the API zone, 429 when limited');
