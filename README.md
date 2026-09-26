@@ -261,6 +261,7 @@ node scripts/parity-check.js --tables --live-db /tmp/live-snapshot.db --chat-db 
 node scripts/table-authority.js           # who writes each staged table (the handoff is Live's)
 node scripts/mirror-flush.js  # rollback helper: push queued mirror rows to Live
 node scripts/subscribe-events.js --dry-run   # Chat's Events subscriptions (boot creates missing ones)
+node scripts/parity.js        # chat parity scenarios: a dry run; --apply only on test accounts (docs/parity.md)
 ```
 
 `/ready` (openvibe-shared/ready shape: `status` ready/degraded/not_ready and `checks`) is 503 only
@@ -288,8 +289,8 @@ server/net/service-auth.js service tokens: client (Chat → others) and guard (o
 server/prefs/              chat preferences in the Network user module chat.preferences (routes, cache, migration from Live)
 server/calls/              moved from Live: the call server (/ws/call), its REST routes, Live's stream hooks (/internal/calls), the calls lifecycle
 server/db/                 schema.sql, database.js (Live's chat functions, same names and arguments)
-scripts/                   import-from-live, parity-check, mirror-flush, table-authority, migrate-chat-preferences, subscribe-events
-docs/                      cutover.md, calls-cutover.md, staged-tables-cutover.md, live-patch.diff, capabilities-proposal/
+scripts/                   import-from-live, parity-check, parity, mirror-flush, table-authority, migrate-chat-preferences, subscribe-events
+docs/                      cutover.md, calls-cutover.md, staged-tables-cutover.md, parity.md, live-patch.diff, capabilities-proposal/
 ```
 
 ## Owns
@@ -343,6 +344,7 @@ Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat
 - restart Live without losing Chat; restart Chat's delivery plane and resume persisted messages — *seen in production (Live restarted several times on 2026-09-23 while Chat stayed up; messages and a queued outbox row survived Chat restarts); `test/restart-resume.test.js` restarts Chat as a real process (SIGTERM, new process on the same database) and proves stream, global and channel readers resume from their `after_id` cursor with no gap and no duplicate, including Live bridge placeholders that straddle the restart (kept in `bridge_refs`)*
 - a call row without a working signalling/media path is not parity — *Live's `/ws/call` protocol and call routes run in Chat with a `calls` row per call (`test/calls.test.js`: two signed-in sockets exchange offer/answer/ICE, limits, kick/ban, ringing → active/declined/missed/failed, stream channels); not switched over yet (`docs/calls-cutover.md`)*
 - a paid TTS request is never duplicated by a retry — *forwarded writes are applied once per idempotency key; paid TTS does not exist yet*
+- after a reconnect, deleted and blocked state converge; browser parity (join, send, DM, `/tts`, moderation, popout) — *`scripts/parity.js` and `test/parity.test.js` (`docs/parity.md`): a reader that was away converges on what a connected reader saw (cursor reads carry `deleted_ids`); gaps: sub-only mode does not exist, public chat does not apply blocks*
 
 ## Launch rule
 
