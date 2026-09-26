@@ -476,6 +476,19 @@ ${can.manage ? `<form class="oc-form" method="post" action="/r/${esc(room.slug)}
     router.get('/sitemap.xml', (req, res) => res.type('application/xml').set('Cache-Control', 'public, max-age=3600')
         .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/rooms', '/updates', ...rooms.list(null, { limit: 100 }).public.map((r) => `/r/${r.slug}`)].map((p) => `<url><loc>${site}${p}</loc></url>`).join('')}</urlset>\n`));
 
+    // ── Nothing here: a browser asking for a page gets the site's 404 page (the browser check found
+    // JSON). The API, /internal/, /ws/ and any client not asking for HTML keep the JSON 404 that
+    // server/app.js answers after this router.
+    router.use(async (req, res, next) => {
+        if ((req.method !== 'GET' && req.method !== 'HEAD') || /^\/(api|internal|ws)(\/|$)/.test(req.path) || !/\btext\/html\b/.test(req.get('accept') || '')) return next();
+        try {
+            await page(req, res, 404, {
+                title: 'Page not found', path: req.path, robots: 'noindex',
+                body: `<h1>Page not found</h1><p>There is no page at <code>${esc(req.path.slice(0, 200))}</code>. It may have moved, or the link may be wrong.</p><p><a href="/">Global chat</a> · <a href="/rooms">Rooms</a> · <a href="/messages">Messages</a></p>`,
+            });
+        } catch (err) { next(err); }
+    });
+
     return router;
 }
 

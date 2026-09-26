@@ -159,4 +159,26 @@ t('sign-in, the Frame, robots, sitemap and /updates', async () => {
     assert.strictEqual((await req('GET', '/api/nope')).status, 404, 'the API keeps its JSON 404');
 });
 
+t('unknown pages: a browser gets the site\'s HTML 404 page, the API and other clients keep JSON', async () => {
+    const html = { accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' };
+    const r = await req('GET', '/__ovcheck-404', { headers: html });
+    assert.strictEqual(r.status, 404);
+    assert.match(r.headers.get('content-type'), /^text\/html/);
+    assert.match(r.text, /<h1>Page not found<\/h1>/);
+    assert.match(r.text, /<meta name="robots" content="noindex">/);
+    assert.match(r.text, /<code>\/__ovcheck-404<\/code>/);
+    assert.match(r.text, /\/shared\/navbar\.js\?v=/, 'inside the Frame, like every page');
+    const x = await req('GET', '/%3Cscript%3Ex', { headers: html });
+    assert.strictEqual(x.status, 404);
+    assert.ok(!x.text.includes('<script>x'), 'the path is escaped');
+    for (const [path, headers] of [['/api/nope', html], ['/internal/nope', html], ['/nope', {}], ['/nope', { accept: 'application/json' }]]) {
+        const j = await req('GET', path, { headers });
+        assert.strictEqual(j.status, 404, path);
+        assert.match(j.headers.get('content-type'), /^application\/json/, `${path} ${JSON.stringify(headers)}: JSON`);
+    }
+    const post = await req('POST', '/nope', { headers: html });
+    assert.strictEqual(post.status, 404);
+    assert.match(post.headers.get('content-type'), /^application\/json/, 'a form post to nowhere keeps JSON');
+});
+
 t.run(async () => { if (h && h.close) await h.close(); });
