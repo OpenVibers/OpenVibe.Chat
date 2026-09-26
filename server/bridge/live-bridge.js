@@ -24,6 +24,19 @@
  *       without it that op alone is refused ({ ok: false, code: 'capability.denied' }) and the
  *       rest of the batch still runs.
  *
+ *       Staged tables (roadmap C-04, docs/staged-tables-cutover.md), same endpoint and capability:
+ *         db ops addChannelModerator … addChatTimelineEvents   Live's writers once a table is at
+ *             'chat' (awaited one by one, with an idempotency key); each answers { value, mirror }:
+ *             Live's own return value and the rows as they are now, which Live applies to its copy
+ *             at once. Refused while the table is at 'live'.
+ *         stagedApply [changes]        Live's captured changes while a table is at 'live' (this copy
+ *             stays current; refused per change once Chat writes the table)
+ *         stagedSlice [table, where, columns]   { count, hash, … } for Live's dual read
+ *         tableAuthority []            { table: 'live' | 'chat' }
+ *         setTableAuthority [table, authority]  Chat's half of the handoff Live runs (never
+ *             automatic): to 'chat' needs the Live mirror on; back to 'live' first sends every
+ *             queued change of the table to Live and refuses while any is left.
+ *
  *   GET  /internal/live/presence  capability chat.presence.read
  *       Who is connected where (counts, slow modes, user/anon → ip), for Live's synchronous
  *       reads (getTotalConnections, getStreamViewerCount, getConnectedUserIp, findClientByAnonId,
@@ -47,6 +60,10 @@ const DB_OPS = new Set([
     'logModerationAction', 'recordFirstChat', 'setTtsVoiceOverride', 'deleteTtsVoiceOverride',
     'createChannelSound', 'setChannelSoundEmote', 'deleteChannelSound', 'renameChannelSoundCommand',
     'updateChannelSoundEmoteRefs',
+    // Staged tables at 'chat' (each refuses while its table is at 'live').
+    'addChannelModerator', 'removeChannelModerator', 'upsertChannelModerationSettings', 'setChannelAlertSound',
+    'createEmote', 'updateEmote', 'deleteEmote', 'setEmoteMedia', 'grantUserTag', 'revokeUserTag',
+    'upsertChatAiSummary', 'addChatTimelineEvents',
 ]);
 
 // ChatServer methods Live's modules call, and where their stream id argument sits (the stream is
@@ -102,7 +119,35 @@ const REF_TTL_MS = 10 * 60 * 1000;            // in memory
 const REF_KEEP_MS = 24 * 3600 * 1000;          // in bridge_refs
 const REF_MIN = -(2 ** 40);   // Live's placeholders are ≤ this
 
-function createBridge({ chatServer }) {
+/**
+ * Chat's half of a staged table's handoff (Live's server/chat/chat-tables.js runs it, its writers
+ * waiting meanwhile). To 'chat': Chat writes the table from now on and the mirror copies it to Live —
+ * so the mirror must be on. Back to 'live': every change Chat made to the table reaches Live first;
+ * the last check and the switch run in one tick, so no Chat write lands between them.
+ */
+async function handOver(table, authority, { mirror, config }) {
+    if (!db.STAGED_KEYS[table]) throw new Error(`${table} is not a staged table`);
+    if (authority !== 'live' && authority !== 'chat') throw new Error('authority is live or chat');
+    if (authority === 'chat') {
+        if (!mirror || !config.live.mirror) throw new Error('LIVE_MIRROR is off: Live would never get this table back');
+        db.setTableAuthority(table, 'chat');
+        console.log(`[Bridge] ${table}: Chat writes it now (table_authority chat)`);
+        return { table, authority: 'chat', mirror_pending: db.mirrorPending(table) };
+    }
+    const until = Date.now() + 15000;
+    while (db.mirrorPending(table) > 0 && mirror && config.live.mirror && Date.now() < until) {
+        const r = await mirror.flush();
+        if (r && r.error) break;
+        if (r && r.busy) await new Promise((res) => setTimeout(res, 100));
+    }
+    const left = db.mirrorPending(table);
+    if (left) throw new Error(`${left} change(s) to ${table} not in Live yet${mirror && mirror.lastError() ? ` (${mirror.lastError()})` : ''}`);
+    db.setTableAuthority(table, 'live');
+    console.log(`[Bridge] ${table}: back to Live (table_authority live)`);
+    return { table, authority: 'live', mirror_pending: 0 };
+}
+
+function createBridge({ chatServer, mirror = null, config = require('../config') }) {
     const router = express.Router();
     const refs = new Map();   // `${boot}|${ref}` → { id, at }
 
@@ -210,6 +255,15 @@ function createBridge({ chatServer }) {
                 else throw new Error(`invalidate: unknown kind ${kind}`);
                 return null;
             }
+            // Staged tables (C-04).
+            case 'stagedApply':
+                return db.applyStagedChanges(args[0]);
+            case 'stagedSlice':
+                return db.stagedSlice(String(args[0] || ''), args[1] && typeof args[1] === 'object' ? args[1] : {}, Array.isArray(args[2]) ? args[2] : null);
+            case 'tableAuthority':
+                return db.stagedAuthorities();
+            case 'setTableAuthority':
+                return handOver(String(args[0] || ''), String(args[1] || ''), { mirror, config });
             default:
                 throw new Error(`unknown op ${op}`);
         }
@@ -262,4 +316,4 @@ function createBridge({ chatServer }) {
     return router;
 }
 
-module.exports = { createBridge, DB_OPS, SERVER_OPS, MESSAGE_SEND, sendsMessage };
+module.exports = { createBridge, handOver, DB_OPS, SERVER_OPS, MESSAGE_SEND, sendsMessage };

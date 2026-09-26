@@ -1679,7 +1679,7 @@ class ChatServer {
                     // Per-stream slow mode (not global)
                     if (client.streamId) {
                         this.slowModeByStream.set(client.streamId, seconds > 0 ? seconds * 1000 : 0);
-                        // Persist (channel_moderation_settings is written by Live in this wave)
+                        // Persist (by Live, or here once Chat writes channel_moderation_settings: live-context effects)
                         try {
                             const stream = ctx.getStreamById(client.streamId);
                             if (stream?.channel_id) {

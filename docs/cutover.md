@@ -41,7 +41,7 @@ nginx).
 | Table (Live baseline, target OpenVibe.Chat) | W6 authority | Notes |
 | --- | --- | --- |
 | `chat_messages`, `dm_conversations`, `dm_participants`, `dm_messages`, `dm_blocks`, `tts_voice_overrides`, `channel_sounds`, `relay_users`, `hidden_relay_users`, `pending_ip_messages`, `stream_first_chats`, `moderation_actions` | **Chat** | Imported with their ids. Live keeps a read mirror (Chat → `POST /internal/chat-effects/mirror`); Live's remaining writers (AI viewers, relays, donations, `/api/mod`, `/api/channels` deletes, emote renames) forward to Chat. |
-| `channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`, `chat_ai_summaries`, `chat_timeline_events` | **Live** (staged in Chat) | Their writers (`/api/channels`, dashboard, `/api/emotes` + Media asset-sync, game tags, chat AI) have not moved. Imported into Chat (a later import run refreshes them); Chat reads the live values through `live-context` and Live pushes invalidations. `/slow` and alert sounds are written by Live on Chat's behalf. |
+| `channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`, `chat_ai_summaries`, `chat_timeline_events` | **Live** (staged in Chat) until each is handed over | Moved one table at a time by `docs/staged-tables-cutover.md` (register C-04): at `live` Live writes and its changes reach Chat's copy over the bridge; at `chat` Live's writers call Chat and the mirror copies the table back. Chat reads the moderation tables through `live-context` while Live writes them and in place once Chat does. |
 | `media_requests`, `media_request_settings` | **Live** (not moved) | Decision with evidence: every writer is `server/media/media-queue.js` / `server/media/routes.js` (`/api/media`: gold payment, yt-dlp download, playback state, the streamer's overlay and dashboard). Chat only has the `!sr/!queue/!np/!skip` entry points, which call Live (`POST /internal/chat-effects/media-queue`). Not chat-owned in practice; it moves with the queue lifecycle the charter describes, not before. The importer reports them as `not_moved`. |
 | `chat_messages_new`, `emotes_new`, `channel_sounds_new` | — | Transient tables of Live's table rebuilds; empty in a consistent snapshot. Rows found there go to `import_hold`. |
 
@@ -101,8 +101,8 @@ SNAP_AT="$(date -u '+%Y-%m-%d %H:%M:%S')"
 
 # 2. import into a scratch database
 cd /opt/openvibe.chat
-node scripts/import-from-live.js --live-db /tmp/live-rehearsal.db --chat-db /tmp/chat-rehearsal.db --dry-run
 node scripts/import-from-live.js --live-db /tmp/live-rehearsal.db --chat-db /tmp/chat-rehearsal.db
+node scripts/import-from-live.js --live-db /tmp/live-rehearsal.db --chat-db /tmp/chat-rehearsal.db --apply --no-backup
 ```
 
 Check the report: per table `live` = `inserted` (first run), `held_total` 0 (anything held: look at
@@ -136,7 +136,7 @@ streamers; `deploy.sh --wait-idle` waits for none).
    ```bash
    sudo systemctl start openvibe-chat && curl -s http://127.0.0.1:4400/ready | jq
    sqlite3 /opt/openvibe.live/data/live.db ".backup /tmp/live-cutover-1.db"
-   sudo -u ubuntu node scripts/import-from-live.js --live-db /tmp/live-cutover-1.db --chat-db /var/lib/openvibe-chat/chat.db
+   sudo -u ubuntu node scripts/import-from-live.js --live-db /tmp/live-cutover-1.db --chat-db /var/lib/openvibe-chat/chat.db --apply
    ```
    Chat now holds everything up to snapshot 1 and its id sequences start 10000 above Live's
    (`--headroom`), so rows Live writes until the flip still fit below.
@@ -153,7 +153,7 @@ streamers; `deploy.sh --wait-idle` waits for none).
 3. **Second import pass** — rows Live wrote between snapshot 1 and its restart:
    ```bash
    sqlite3 /opt/openvibe.live/data/live.db ".backup /tmp/live-cutover-2.db"
-   sudo -u ubuntu node scripts/import-from-live.js --live-db /tmp/live-cutover-2.db --chat-db /var/lib/openvibe-chat/chat.db
+   sudo -u ubuntu node scripts/import-from-live.js --live-db /tmp/live-cutover-2.db --chat-db /var/lib/openvibe-chat/chat.db --apply
    ```
    Chat's own new rows are already in Live (mirror) and count as `identical`; `chat_kept` counts rows
    Chat edited since pass 1 (Chat wins); `held` must be 0.

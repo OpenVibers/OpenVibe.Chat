@@ -5,6 +5,14 @@
  *   node scripts/parity-check.js --live https://openvibe.live --chat http://127.0.0.1:4401 \
  *        [--before "2026-09-22 10:00:00"] [--stream 123]... [--channel 45]... [--token <jwt>]
  *
+ *   node scripts/parity-check.js --tables --live-db <live.db copy> --chat-db <chat.db or a copy> \
+ *        [--table emotes]...
+ *
+ * --tables compares the staged tables (C-04, docs/staged-tables-cutover.md) row for row: per table
+ * the row count and a sha256 over every row (the columns both copies have, ordered by key — the hash
+ * Chat's dual read uses, database.js sliceHash), and on a difference the first keys that are only in
+ * one copy or differ. Both files are opened read-only. Exit 1 on any difference.
+ *
  * --before pins history pages to messages older than the snapshot, so rows written since do not
  * count as differences. --token (a Network JWT of a test account) adds the DM routes. Prints one
  * line per path (same / DIFFERENT with the first differing keys) and exits 1 on any difference.
@@ -14,13 +22,50 @@
 'use strict';
 
 function parseArgs(argv) {
-    const o = { streams: [], channels: [] };
+    const o = { streams: [], channels: [], only: [] };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i], v = argv[i + 1];
-        if (a === '--live') { o.live = v; i++; } else if (a === '--chat') { o.chat = v; i++; } else if (a === '--before') { o.before = v; i++; } else if (a === '--stream') { o.streams.push(v); i++; } else if (a === '--channel') { o.channels.push(v); i++; } else if (a === '--token') { o.token = v; i++; } else throw new Error(`unknown argument ${a}`);
+        if (a === '--live') { o.live = v; i++; } else if (a === '--chat') { o.chat = v; i++; } else if (a === '--before') { o.before = v; i++; } else if (a === '--stream') { o.streams.push(v); i++; } else if (a === '--channel') { o.channels.push(v); i++; } else if (a === '--token') { o.token = v; i++; } else if (a === '--tables') { o.tables = true; } else if (a === '--live-db') { o.liveDb = v; i++; } else if (a === '--chat-db') { o.chatDb = v; i++; } else if (a === '--table') { o.only.push(v); i++; } else throw new Error(`unknown argument ${a}`);
     }
-    if (!o.live || !o.chat) throw new Error('--live and --chat are required');
+    if (o.tables) { if (!o.liveDb || !o.chatDb) throw new Error('--tables needs --live-db and --chat-db'); } else if (!o.live || !o.chat) throw new Error('--live and --chat are required');
     return o;
+}
+
+/** --tables: the staged tables of two database files, row for row. → number of tables that differ */
+function tableParity(o, log = console.log) {
+    const path = require('path');
+    const Database = require('better-sqlite3');
+    const { STAGED_KEYS, sliceHash } = require('../server/db/database');
+    const live = new Database(path.resolve(o.liveDb), { readonly: true, fileMustExist: true });
+    const chat = new Database(path.resolve(o.chatDb), { readonly: true, fileMustExist: true });
+    const colsOf = (conn, t) => conn.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
+    let authority = {};
+    try { authority = Object.fromEntries(chat.prepare('SELECT table_name, authority FROM table_authority').all().map((r) => [r.table_name, r.authority])); } catch { /* an old copy */ }
+    let bad = 0;
+    for (const [t, pk] of Object.entries(STAGED_KEYS)) {
+        if (o.only.length && !o.only.includes(t)) continue;
+        const lc = colsOf(live, t), cc = colsOf(chat, t);
+        if (!lc.length || !cc.length) { bad++; log(`MISSING   ${t}: ${!lc.length ? 'not in the Live copy' : 'not in the Chat copy'}`); continue; }
+        const cols = lc.filter((c) => cc.includes(c)).sort();
+        const q = `SELECT ${cols.join(', ')} FROM ${t} ORDER BY ${pk.join(', ')}`;
+        const a = live.prepare(q).all(), b = chat.prepare(q).all();
+        const ha = sliceHash(cols, a), hb = sliceHash(cols, b);
+        const label = `${t.padEnd(28)} (${authority[t] || '?'})`;
+        if (a.length === b.length && ha === hb) { log(`same      ${label} rows ${a.length}  sha256 ${ha.slice(0, 16)}`); continue; }
+        bad++;
+        const keyOf = (r) => JSON.stringify(pk.map((k) => r[k]));
+        const rowOf = (r) => JSON.stringify(cols.map((c) => (r[c] === undefined ? null : r[c])));
+        const ma = new Map(a.map((r) => [keyOf(r), rowOf(r)])), mb = new Map(b.map((r) => [keyOf(r), rowOf(r)]));
+        const onlyLive = [...ma.keys()].filter((k) => !mb.has(k));
+        const onlyChat = [...mb.keys()].filter((k) => !ma.has(k));
+        const differ = [...ma.keys()].filter((k) => mb.has(k) && mb.get(k) !== ma.get(k));
+        log(`DIFFERENT ${label} rows ${a.length} ≠ ${b.length}  sha256 ${ha.slice(0, 16)} ≠ ${hb.slice(0, 16)}`);
+        const show = (name, list) => { if (list.length) log(`    ${name} (${list.length}): ${list.slice(0, 5).join(' ')}${list.length > 5 ? ' …' : ''}`); };
+        show('only in Live', onlyLive); show('only in Chat', onlyChat); show('differ', differ);
+    }
+    live.close(); chat.close();
+    log(bad ? `\n${bad} table(s) differ` : '\nall staged tables are the same');
+    return bad;
 }
 
 const IGNORE = new Set(['request_id', 'trace_id', 'latest_id']);
@@ -48,6 +93,7 @@ async function get(base, p, token) {
 
 async function main() {
     const o = parseArgs(process.argv.slice(2));
+    if (o.tables) process.exit(tableParity(o) ? 1 : 0);
     const before = o.before ? `&before=${encodeURIComponent(o.before)}` : '';
     const paths = [
         `/api/chat/global/history?limit=200${before}`,
@@ -72,4 +118,6 @@ async function main() {
     process.exit(bad ? 1 : 0);
 }
 
-main().catch((err) => { console.error(err.message); process.exit(2); });
+if (require.main === module) main().catch((err) => { console.error(err.message); process.exit(2); });
+
+module.exports = { parseArgs, tableParity };

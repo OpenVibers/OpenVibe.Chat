@@ -3,8 +3,9 @@
  *
  * After the cutover Chat is the only writer of its tables, but Live still reads some of them in
  * place (home-page stats, recaps, AI chat context, VOD chat replay, /api/mod queues, analytics),
- * and rollback means Live becomes the authority again. So every change Chat makes to its tables
- * is copied into Live's tables of the same name, same ids:
+ * and rollback means Live becomes the authority again. So every change Chat makes to its tables —
+ * and to each staged table once it is at 'chat' (C-04, docs/staged-tables-cutover.md) — is copied
+ * into Live's tables of the same name, same ids:
  *
  *   - this connection's TEMP triggers (db.initDb({ captureMirror: true })) record each change in
  *     live_mirror_outbox — writes by the importer (rows that came from Live) are never recorded;
@@ -39,7 +40,8 @@ function createMirror({ config, fetchImpl = (...a) => globalThis.fetch(...a), lo
         for (const r of rows) byKey.set(`${r.tbl}|${r.pk}`, r);
         const changes = [];
         for (const r of byKey.values()) {
-            const cols = db.CHAT_TABLES[r.tbl];
+            // A staged table (C-04) is queued only while Chat writes it (its triggers check).
+            const cols = db.CHAT_TABLES[r.tbl] || db.STAGED_KEYS[r.tbl];
             if (!cols) continue;
             let pk;
             try { pk = JSON.parse(r.pk); } catch { continue; }

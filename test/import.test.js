@@ -1,11 +1,13 @@
 'use strict';
 /**
  * scripts/import-from-live.js against a fake Live snapshot built from Live's real table
- * definitions (test/fixtures/live-chat-schema.sql): counts per table, dry run writes nothing,
- * ids kept, Network subjects filled in, id headroom, projections seeded, idempotent re-runs,
- * Chat's edits win on chat tables while staged tables refresh from Live, conflicting rows and
- * transient-table rows held (never dropped), rows Live wrote after the first pass brought over,
- * schema drift refused.
+ * definitions (test/fixtures/live-chat-schema.sql): counts per table, a dry run unless --apply (and
+ * it writes nothing), --apply backs Chat's database up first, ids kept, Network subjects filled in,
+ * id headroom, projections seeded, idempotent re-runs, Chat's edits win on chat tables while staged
+ * tables at 'live' are made equal to Live's (refreshed, and pruned of rows Live removed) and staged
+ * tables at 'chat' are only compared, conflicting rows and transient-table rows held (never
+ * dropped), rows Live wrote after the first pass brought over, schema drift refused; and
+ * scripts/parity-check.js --tables (row counts and a content hash per staged table).
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -69,10 +71,15 @@ t('build a Live snapshot with every chat table', () => {
     live.exec("CREATE TABLE chat_messages_new AS SELECT * FROM chat_messages WHERE id = 101");
 });
 
-t('dry run reports and writes nothing', () => {
-    const r = importer(['--dry-run']);
-    assert.strictEqual(r.code, 0, r.stderr);
-    assert.strictEqual(r.report.dry_run, true);
+t('dry run reports and writes nothing (the default; --dry-run says it too)', () => {
+    for (const args of [[], ['--dry-run']]) {
+        const r = importer(args);
+        assert.strictEqual(r.code, 0, r.stderr);
+        assert.strictEqual(r.report.dry_run, true);
+        assert.strictEqual(r.report.backup, null);
+    }
+    const r = importer([]);
+    assert.strictEqual(r.report.tables.channel_moderators.authority, 'live');
     assert.strictEqual(r.report.tables.chat_messages.inserted, 5);
     assert.strictEqual(r.report.tables.chat_messages_new.held, 1);
     const c = new Database(chatDb, { readonly: true });
@@ -83,8 +90,12 @@ t('dry run reports and writes nothing', () => {
 });
 
 t('import copies every table with ids kept, subjects filled, headroom set', () => {
-    const r = importer(['--headroom', '1000']);
+    const r = importer(['--apply', '--headroom', '1000']);
     assert.strictEqual(r.code, 0, r.stderr);
+    assert.ok(r.report.backup && fs.existsSync(r.report.backup), 'backed up first');
+    const b = new Database(r.report.backup, { readonly: true });
+    assert.strictEqual(b.prepare('SELECT COUNT(*) AS n FROM chat_messages').get().n, 0, 'the backup is the database before the run');
+    b.close();
     const T = r.report.tables;
     const expect = { chat_messages: 5, dm_conversations: 1, dm_participants: 2, dm_messages: 1, dm_blocks: 1, tts_voice_overrides: 1, channel_sounds: 1, relay_users: 1, hidden_relay_users: 1, pending_ip_messages: 1, stream_first_chats: 1, moderation_actions: 1, channel_moderators: 1, channel_moderation_settings: 1, emotes: 1, user_tags: 1, chat_ai_summaries: 1, chat_timeline_events: 1 };
     for (const [tbl, n] of Object.entries(expect)) {
@@ -117,7 +128,8 @@ t('import copies every table with ids kept, subjects filled, headroom set', () =
 });
 
 t('re-running is idempotent', () => {
-    const r = importer(['--headroom', '1000']);
+    const r = importer(['--apply', '--no-backup', '--headroom', '1000']);
+    assert.strictEqual(r.report.backup, null);
     assert.strictEqual(r.code, 0, r.stderr);
     for (const [tbl, v] of Object.entries(r.report.tables)) {
         if (v.inserted !== undefined) assert.strictEqual(v.inserted, 0, `${tbl} inserted again`);
@@ -134,7 +146,7 @@ t('after the cutover: Chat’s edits win, staged tables refresh, conflicts are h
     live.prepare('UPDATE channel_moderation_settings SET slow_mode_seconds = 10 WHERE channel_id = 5').run();
     live.prepare("INSERT INTO chat_messages (id, user_id, username, message, timestamp) VALUES (106, 2, 'Alice', 'a different 106', '2026-09-03 00:00:00')").run();
     live.prepare("INSERT INTO chat_messages (id, user_id, username, message, timestamp) VALUES (107, 2, 'Alice', 'written in Live after the first pass', '2026-09-03 00:00:01')").run();
-    const r = importer(['--headroom', '1000']);
+    const r = importer(['--apply', '--no-backup', '--headroom', '1000']);
     assert.strictEqual(r.code, 0, r.stderr);
     const T = r.report.tables;
     assert.strictEqual(T.chat_messages.chat_kept, 1);
@@ -151,6 +163,62 @@ t('after the cutover: Chat’s edits win, staged tables refresh, conflicts are h
     assert.strictEqual(JSON.parse(held.row_json).message, 'a different 106');
     assert.strictEqual(d.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'chat_messages'").get().seq, 1107, 'headroom follows Live’s new max, never lowered');
     d.close();
+});
+
+function parity(args) {
+    const r = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'parity-check.js'), '--tables', '--live-db', liveDb, '--chat-db', chatDb, ...args], {
+        cwd: path.join(__dirname, '..'), encoding: 'utf8', env: { ...process.env, NODE_ENV: 'test' },
+    });
+    return { code: r.status, out: r.stdout, err: r.stderr };
+}
+
+t('parity --tables: after an import every staged table has the same rows and hash', () => {
+    const r = parity([]);
+    assert.strictEqual(r.code, 0, r.out + r.err);
+    for (const tbl of ['channel_moderators', 'channel_moderation_settings', 'emotes', 'user_tags', 'chat_ai_summaries', 'chat_timeline_events']) {
+        assert.match(r.out, new RegExp(`^same\\s+${tbl}\\s+\\(live\\) rows 1\\b`, 'm'), tbl);
+    }
+    assert.match(r.out, /all staged tables are the same/);
+});
+
+t('staged tables at live follow Live: a removed moderator goes, a re-added one comes back; parity sees each step', () => {
+    live.prepare('DELETE FROM channel_moderators WHERE channel_id = 5 AND user_id = 2').run();
+    live.prepare('INSERT INTO channel_moderators (channel_id, user_id, added_by) VALUES (5, 3, 1)').run();
+    let p = parity(['--table', 'channel_moderators']);
+    assert.strictEqual(p.code, 1);
+    assert.match(p.out, /DIFFERENT channel_moderators\s+\(live\) rows 1 ≠ 1/);
+    assert.match(p.out, /only in Live \(1\): \[2\]/);
+    assert.match(p.out, /only in Chat \(1\): \[1\]/);
+    const dry = importer(['--tables', 'channel_moderators']);
+    assert.strictEqual(dry.code, 0, dry.stderr + dry.stdout);
+    assert.deepStrictEqual([dry.report.tables.channel_moderators.pruned, dry.report.tables.channel_moderators.inserted], [1, 1], 'the dry run counts it');
+    assert.strictEqual(parity(['--table', 'channel_moderators']).code, 1, 'and changes nothing');
+    const r = importer(['--apply', '--no-backup', '--tables', 'channel_moderators']);
+    assert.strictEqual(r.code, 0, r.stderr + r.stdout);
+    assert.deepStrictEqual([r.report.tables.channel_moderators.pruned, r.report.tables.channel_moderators.inserted], [1, 1]);
+    p = parity(['--table', 'channel_moderators']);
+    assert.strictEqual(p.code, 0, p.out);
+    // The same user removed and added again under a new id: the old row goes first, no collision.
+    live.prepare('DELETE FROM channel_moderators WHERE user_id = 3').run();
+    live.prepare('INSERT INTO channel_moderators (channel_id, user_id, added_by) VALUES (5, 3, 1)').run();
+    const again = importer(['--apply', '--no-backup', '--tables', 'channel_moderators']);
+    assert.deepStrictEqual([again.report.tables.channel_moderators.pruned, again.report.tables.channel_moderators.inserted, again.report.tables.channel_moderators.held], [1, 1, 0]);
+    assert.strictEqual(parity(['--table', 'channel_moderators']).code, 0);
+});
+
+t('a staged table at chat is only compared: Chat is its authority', () => {
+    const c = new Database(chatDb);
+    c.prepare("UPDATE table_authority SET authority = 'chat' WHERE table_name = 'emotes'").run();
+    c.prepare("UPDATE emotes SET code = 'pogchat' WHERE code = 'pog'").run();
+    c.close();
+    live.prepare("INSERT INTO emotes (user_id, code, url, channel_owner_id) VALUES (1, 'kek', '/e/kek.png', 1)").run();
+    const r = importer(['--apply', '--no-backup', '--tables', 'emotes']);
+    assert.strictEqual(r.code, 0, r.stderr);
+    assert.deepStrictEqual(r.report.tables.emotes, { authority: 'chat', live: 2, identical: 0, differs: 1, live_only: 1, chat_only: 0 });
+    const d = new Database(chatDb, { readonly: true });
+    assert.deepStrictEqual(d.prepare('SELECT code FROM emotes ORDER BY id').all().map((x) => x.code), ['pogchat'], 'nothing written');
+    d.close();
+    assert.match(parity(['--table', 'emotes']).out, /DIFFERENT emotes\s+\(chat\)/);
 });
 
 t('schema drift is refused before anything is written', () => {

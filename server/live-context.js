@@ -338,11 +338,20 @@ const _policy = new Swr(TTL.policy, async (channelId) => {
     };
 });
 function _policyFor(channelId) { return channelId ? _policy.peek(Number(channelId)) : undefined; }
+// Once Chat writes a staged table (table_authority 'chat', roadmap C-04) its rows here are the truth:
+// read in place, like Live's own readers (an indexed row, no network, no cache to go stale).
+const _chatWrites = (table) => db.tableAuthority(table) === 'chat';
 function getChannelModerationSettings(channelId) {
+    if (_chatWrites('channel_moderation_settings')) {
+        return (channelId && db.get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [Number(channelId)])) || defaultModerationSettings(channelId);
+    }
     const p = _policyFor(channelId);
     return (p && p.settings) || defaultModerationSettings(channelId);
 }
 function isChannelModerator(userId, channelId) {
+    if (_chatWrites('channel_moderators')) {
+        return !!(userId && channelId && db.get('SELECT 1 FROM channel_moderators WHERE user_id = ? AND channel_id = ?', [Number(userId), Number(channelId)]));
+    }
     const p = _policyFor(channelId);
     return !!(p && p.moderators.has(Number(userId)));
 }
@@ -778,8 +787,31 @@ const effects = {
     viewerSnapshot(streamId, count, chatActivity) { _snapshots.push({ stream_id: streamId, viewer_count: count, chat_messages_5m: chatActivity }); },
     setUserColor: (userId, color) => effect('user-color', { user_id: userId, color }).then((r) => { db.run('UPDATE ctx_users SET profile_color = ? WHERE id = ?', [color, userId]); return r; }),
     ban: (body) => effect('ban', body).then((r) => { invalidateBans(); return r; }),
-    updateChannelModerationSettings: (channelId, fields, actorUserId) => effect('channel-settings', { channel_id: channelId, fields, actor_user_id: actorUserId }).then((r) => { invalidateChannel(channelId); return r; }),
-    setChannelAlertSound: (channelId, kind, url, mime, actorUserId) => effect('alert-sound', { channel_id: channelId, kind, url, mime, actor_user_id: actorUserId }).then((r) => { invalidateChannel(channelId); return r; }),
+    // /slow and alert sounds: written by Live while it owns channel_moderation_settings, here once Chat
+    // does (C-04; the callers already checked the moderator / the channel owner, as Live re-checks).
+    updateChannelModerationSettings: (channelId, fields, actorUserId) => {
+        if (!_chatWrites('channel_moderation_settings')) return effect('channel-settings', { channel_id: channelId, fields, actor_user_id: actorUserId }).then((r) => { invalidateChannel(channelId); return r; });
+        return Promise.resolve().then(() => {
+            if (!channelId || !fields || fields.slow_mode_seconds === undefined) throw new LiveError(400, 'no chat-settable fields');
+            db.upsertChannelModerationSettings(Number(channelId), { slow_mode_seconds: Math.max(0, parseInt(fields.slow_mode_seconds, 10) || 0) });
+            return { ok: true };
+        });
+    },
+    setChannelAlertSound: (channelId, kind, url, mime, actorUserId) => {
+        if (!_chatWrites('channel_moderation_settings')) return effect('alert-sound', { channel_id: channelId, kind, url, mime, actor_user_id: actorUserId }).then((r) => { invalidateChannel(channelId); return r; });
+        return Promise.resolve().then(() => {
+            const file = url ? require('path').resolve(String(url)) : null;
+            if (file) {
+                // Live's rule: alert sounds are files in the shared sounds directory.
+                const fs = require('fs');
+                let inside = false;
+                try { inside = require('path').dirname(fs.realpathSync(file)) === fs.realpathSync(require('path').resolve(config.sounds.path)); } catch { inside = false; }
+                if (!inside) throw new LiveError(400, 'alert sounds live in the sounds directory');
+            }
+            db.setChannelAlertSound(Number(channelId), kind === 'goal' ? 'goal' : 'donation', file, file ? String(mime || 'audio/mpeg') : null);
+            return { ok: true };
+        });
+    },
     // One call per real chat line: coins chat bonus, AI viewers, PowerChat relay (Live decides each).
     chatMessage: (body) => effect('chat-message', body),
     aiModCommand: (channelUserId, streamId, args, opts) => effect('ai/mod-command', { channel_user_id: channelUserId, stream_id: streamId, args, by: opts && opts.by }).then((r) => r.reply),

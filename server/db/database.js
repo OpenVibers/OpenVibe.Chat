@@ -36,14 +36,27 @@ const CHAT_TABLES = {
     stream_first_chats: ['chatter_key', 'channel_user_id'],
     moderation_actions: ['id'],
 };
-// Chat-target tables Live still writes in this wave: imported here, read through live-context.
+// Chat-target tables whose writer moves per table (roadmap C-04, docs/staged-tables-cutover.md).
+// table_authority says who writes each one: 'live' (the default) — Live writes, and every change
+// it makes reaches this copy over the bridge (applyStagedChanges); 'chat' — the staged writes
+// below are the only writers, Live's writers call them over the bridge and the Live mirror copies
+// the table back. The notes say who wrote them before the move.
 const STAGED_TABLES = {
-    channel_moderators: 'written by Live /api/channels (channel-mod-routes) until that route moves',
-    channel_moderation_settings: 'written by Live /api/channels and the dashboard; /slow and alert sounds go through Live',
-    emotes: 'written by Live /api/emotes and its Media asset-sync',
-    user_tags: 'written by Live game/tags (shop); chat reads tags through live-context',
-    chat_ai_summaries: 'written by Live server/ai/chat-ai.js',
-    chat_timeline_events: 'written by Live server/ai/chat-ai.js',
+    channel_moderators: 'Live /api/channels (channel-mod-routes) while at live',
+    channel_moderation_settings: 'Live /api/channels, the dashboard, /slow and alert sounds while at live',
+    emotes: 'Live /api/emotes and its Media asset-sync while at live',
+    user_tags: 'no writer since Live’s game tags went read-only; data only',
+    chat_ai_summaries: 'Live server/ai/chat-ai.js while at live',
+    chat_timeline_events: 'Live server/ai/chat-ai.js while at live',
+};
+// Their primary keys (the mirror and Live's changes address rows by them).
+const STAGED_KEYS = {
+    channel_moderators: ['id'],
+    channel_moderation_settings: ['channel_id'],
+    emotes: ['id'],
+    user_tags: ['id'],
+    chat_ai_summaries: ['id'],
+    chat_timeline_events: ['id'],
 };
 
 function getDb() {
@@ -118,21 +131,30 @@ function initDb({ captureMirror = false } = {}) {
     d.exec('CREATE INDEX IF NOT EXISTS idx_ctx_users_subject ON ctx_users(subject_id)');
     const upsertAuth = d.prepare('INSERT INTO table_authority (table_name, authority, note) VALUES (?, ?, ?) ON CONFLICT(table_name) DO UPDATE SET authority = excluded.authority, note = excluded.note');
     for (const t of Object.keys(CHAT_TABLES)) upsertAuth.run(t, 'chat', 'Chat writes; Live keeps a read mirror');
-    for (const [t, note] of Object.entries(STAGED_TABLES)) upsertAuth.run(t, 'live', note);
+    // A staged table keeps the authority it was handed (a restart never moves it back).
+    const seedStaged = d.prepare("INSERT INTO table_authority (table_name, authority, note) VALUES (?, 'live', ?) ON CONFLICT(table_name) DO UPDATE SET note = excluded.note");
+    for (const [t, note] of Object.entries(STAGED_TABLES)) seedStaged.run(t, note);
+    _authority.at = 0;
     if (captureMirror) installMirrorTriggers();
     return d;
 }
 
 function installMirrorTriggers() {
     const d = getDb();
-    for (const [table, pk] of Object.entries(CHAT_TABLES)) {
+    const tables = [
+        ...Object.entries(CHAT_TABLES).map(([table, pk]) => [table, pk, '']),
+        // A staged table is mirrored only while Chat writes it (read at each change, so a handoff
+        // made by another process counts at once).
+        ...Object.entries(STAGED_KEYS).map(([table, pk]) => [table, pk, `WHEN (SELECT authority FROM main.table_authority WHERE table_name = '${table}') = 'chat'`]),
+    ];
+    for (const [table, pk, when] of tables) {
         const obj = (alias) => `json_object(${pk.map((c) => `'${c}', ${alias}.${c}`).join(', ')})`;
         d.exec(`
-            CREATE TEMP TRIGGER IF NOT EXISTS mirror_${table}_ins AFTER INSERT ON main.${table}
+            CREATE TEMP TRIGGER IF NOT EXISTS mirror_${table}_ins AFTER INSERT ON main.${table} ${when}
             BEGIN INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('${table}', 'upsert', ${obj('NEW')}); END;
-            CREATE TEMP TRIGGER IF NOT EXISTS mirror_${table}_upd AFTER UPDATE ON main.${table}
+            CREATE TEMP TRIGGER IF NOT EXISTS mirror_${table}_upd AFTER UPDATE ON main.${table} ${when}
             BEGIN INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('${table}', 'upsert', ${obj('NEW')}); END;
-            CREATE TEMP TRIGGER IF NOT EXISTS mirror_${table}_del AFTER DELETE ON main.${table}
+            CREATE TEMP TRIGGER IF NOT EXISTS mirror_${table}_del AFTER DELETE ON main.${table} ${when}
             BEGIN INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('${table}', 'delete', ${obj('OLD')}); END;
         `);
     }
@@ -819,6 +841,386 @@ function updateChannelSoundEmoteRefs(ownerId, oldCode, newCode) {
         [newCode || '', ownerId, oldCode]);
 }
 
+// ── Staged tables (roadmap C-04) ──────────────────────────────
+// Who writes each one is table_authority (STAGED_TABLES above). The reads are cached for a second:
+// a handoff made by another process (scripts/table-authority.js) counts within that.
+const _authority = { at: 0, map: new Map() };
+function tableAuthority(table) {
+    if (Date.now() - _authority.at > 1000) {
+        _authority.map = new Map(all('SELECT table_name, authority FROM table_authority').map((r) => [r.table_name, r.authority]));
+        _authority.at = Date.now();
+    }
+    return _authority.map.get(table) || (CHAT_TABLES[table] ? 'chat' : 'live');
+}
+function setTableAuthority(table, authority) {
+    if (!STAGED_KEYS[table]) throw new Error(`${table} is not a staged table`);
+    if (authority !== 'live' && authority !== 'chat') throw new Error('authority is live or chat');
+    run('UPDATE table_authority SET authority = ? WHERE table_name = ?', [authority, table]);
+    _authority.at = 0;
+    return tableAuthority(table);
+}
+/** { table: authority } for the staged tables. */
+function stagedAuthorities() {
+    return Object.fromEntries(Object.keys(STAGED_KEYS).map((t) => [t, tableAuthority(t)]));
+}
+/** Changes of this table still queued for Live (the mirror drains them). */
+function mirrorPending(table) {
+    return get('SELECT COUNT(*) AS n FROM live_mirror_outbox WHERE tbl = ?', [table])?.n || 0;
+}
+
+const _colCache = new Map();
+function _columns(table) {
+    if (!_colCache.has(table)) _colCache.set(table, new Set(getDb().prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name)));
+    return _colCache.get(table);
+}
+
+/** A staged write refuses while Live still writes the table: one writer at a time. */
+function _assertChatWrites(table) {
+    if (tableAuthority(table) === 'chat') return;
+    const err = new Error(`${table} is written by Live (table_authority live)`);
+    err.code = 'table.not_chat';
+    throw err;
+}
+
+/**
+ * What a staged write returns over the bridge: `value` — what Live's function of the same name
+ * returns (its callers keep working), and `mirror` — the rows as they are now, in the Live mirror's
+ * change shape, so Live's copy is right at once (the mirror sends the same rows again later).
+ */
+function _staged(value, table, rows = [], deletedPks = []) {
+    const plainValue = value && typeof value === 'object' && 'changes' in value && 'lastInsertRowid' in value
+        ? { changes: value.changes, lastInsertRowid: Number(value.lastInsertRowid) } : value;
+    return {
+        value: plainValue === undefined ? null : plainValue,
+        mirror: [
+            ...deletedPks.map((pk) => ({ table, op: 'delete', pk })),
+            ...rows.filter(Boolean).map((row) => ({ table, op: 'upsert', row })),
+        ],
+    };
+}
+
+// Channel moderators, settings and alert sounds (Live's /api/channels, the dashboard, /slow).
+function addChannelModerator(channelId, userId, addedBy) {
+    _assertChatWrites('channel_moderators');
+    const out = transaction(() => {
+        const res = run('INSERT OR IGNORE INTO channel_moderators (channel_id, user_id, added_by) VALUES (?, ?, ?)', [channelId, userId, addedBy]);
+        return _staged(res, 'channel_moderators', all('SELECT * FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]));
+    });
+    _ctx().invalidateChannel(channelId);
+    return out;
+}
+
+function removeChannelModerator(channelId, userId) {
+    _assertChatWrites('channel_moderators');
+    const out = transaction(() => {
+        const gone = all('SELECT id FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]);
+        const res = run('DELETE FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]);
+        return _staged(res, 'channel_moderators', [], gone.map((r) => ({ id: r.id })));
+    });
+    _ctx().invalidateChannel(channelId);
+    return out;
+}
+
+// Live's upsertChannelModerationSettings, clamps and all.
+function upsertChannelModerationSettings(channelId, fields) {
+    _assertChatWrites('channel_moderation_settings');
+    const out = transaction(() => {
+        const existing = get('SELECT 1 FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
+        if (existing) {
+            const updates = [];
+            const params = [];
+            const set = (col, v) => { updates.push(`${col} = ?`); params.push(v); };
+            if (fields.slow_mode_seconds !== undefined) set('slow_mode_seconds', fields.slow_mode_seconds);
+            if (fields.followers_only !== undefined) set('followers_only', fields.followers_only ? 1 : 0);
+            if (fields.emote_only !== undefined) set('emote_only', fields.emote_only ? 1 : 0);
+            if (fields.allow_anonymous !== undefined) set('allow_anonymous', fields.allow_anonymous ? 1 : 0);
+            if (fields.links_allowed !== undefined) set('links_allowed', fields.links_allowed ? 1 : 0);
+            if (fields.gifs_enabled !== undefined) set('gifs_enabled', fields.gifs_enabled ? 1 : 0);
+            if (fields.account_age_gate_hours !== undefined) set('account_age_gate_hours', Number(fields.account_age_gate_hours) || 0);
+            if (fields.caps_percentage_limit !== undefined) set('caps_percentage_limit', Number(fields.caps_percentage_limit) || 0);
+            if (fields.aggressive_filter !== undefined) set('aggressive_filter', fields.aggressive_filter ? 1 : 0);
+            if (fields.max_message_length !== undefined) set('max_message_length', Math.max(50, Number(fields.max_message_length) || 500));
+            if (fields.slur_filter_enabled !== undefined) set('slur_filter_enabled', fields.slur_filter_enabled ? 1 : 0);
+            if (fields.slur_filter_use_builtin !== undefined) set('slur_filter_use_builtin', fields.slur_filter_use_builtin ? 1 : 0);
+            if (fields.slur_filter_terms !== undefined) set('slur_filter_terms', String(fields.slur_filter_terms || '').slice(0, 4000));
+            if (fields.slur_filter_regexes !== undefined) set('slur_filter_regexes', String(fields.slur_filter_regexes || '').slice(0, 8000));
+            if (fields.slur_filter_nudge_message !== undefined) set('slur_filter_nudge_message', String(fields.slur_filter_nudge_message || '').slice(0, 800));
+            if (fields.slur_filter_disabled_categories !== undefined) set('slur_filter_disabled_categories', String(fields.slur_filter_disabled_categories || '[]').slice(0, 200));
+            if (fields.ip_approval_mode !== undefined) set('ip_approval_mode', fields.ip_approval_mode ? 1 : 0);
+            if (fields.soundboard_enabled !== undefined) set('soundboard_enabled', fields.soundboard_enabled ? 1 : 0);
+            if (fields.soundboard_allow_pitch !== undefined) set('soundboard_allow_pitch', fields.soundboard_allow_pitch ? 1 : 0);
+            if (fields.soundboard_allow_speed !== undefined) set('soundboard_allow_speed', fields.soundboard_allow_speed ? 1 : 0);
+            if (fields.soundboard_banned_ids !== undefined) set('soundboard_banned_ids', String(fields.soundboard_banned_ids || '').slice(0, 4000));
+            if (fields.viewer_auto_delete_enabled !== undefined) set('viewer_auto_delete_enabled', fields.viewer_auto_delete_enabled ? 1 : 0);
+            if (fields.viewer_delete_all_enabled !== undefined) set('viewer_delete_all_enabled', fields.viewer_delete_all_enabled ? 1 : 0);
+            if (fields.custom_emotes_enabled !== undefined) set('custom_emotes_enabled', fields.custom_emotes_enabled ? 1 : 0);
+            if (fields.custom_sounds_enabled !== undefined) set('custom_sounds_enabled', fields.custom_sounds_enabled ? 1 : 0);
+            if (fields.max_sound_seconds !== undefined) set('max_sound_seconds', Math.min(30, Math.max(1, Number(fields.max_sound_seconds) || 10)));
+            if (fields.uploads_mods_only !== undefined) set('uploads_mods_only', fields.uploads_mods_only ? 1 : 0);
+            if (fields.mods_can_edit_about !== undefined) set('mods_can_edit_about', fields.mods_can_edit_about ? 1 : 0);
+            if (fields.emote_scale !== undefined) set('emote_scale', Math.min(300, Math.max(50, Number(fields.emote_scale) || 100)));
+            if (fields.emote_size_min !== undefined) set('emote_size_min', Math.min(200, Math.max(25, Number(fields.emote_size_min) || 50)));
+            if (fields.emote_size_max !== undefined) set('emote_size_max', Math.min(400, Math.max(50, Number(fields.emote_size_max) || 200)));
+            if (fields.sounds_mods_only !== undefined) set('sounds_mods_only', fields.sounds_mods_only ? 1 : 0);
+            if (fields.sound_min_speed !== undefined) set('sound_min_speed', Math.min(1, Math.max(0.1, Number(fields.sound_min_speed) || 0.5)));
+            if (fields.sound_max_speed !== undefined) set('sound_max_speed', Math.min(5, Math.max(1, Number(fields.sound_max_speed) || 3.0)));
+            if (fields.sound_min_pitch_cents !== undefined) set('sound_min_pitch_cents', Math.min(0, Math.max(-2400, Math.round(Number(fields.sound_min_pitch_cents) || -1200))));
+            if (fields.sound_max_pitch_cents !== undefined) set('sound_max_pitch_cents', Math.max(0, Math.min(2400, Math.round(Number(fields.sound_max_pitch_cents) || 1200))));
+            if (updates.length > 0) {
+                updates.push('updated_at = CURRENT_TIMESTAMP');
+                params.push(channelId);
+                run(`UPDATE channel_moderation_settings SET ${updates.join(', ')} WHERE channel_id = ?`, params);
+            }
+        } else {
+            const b = (v, dflt) => (v !== undefined ? (v ? 1 : 0) : dflt);
+            run(
+                `INSERT INTO channel_moderation_settings (
+                    channel_id, slow_mode_seconds, followers_only, emote_only,
+                    allow_anonymous, links_allowed, gifs_enabled, account_age_gate_hours,
+                    caps_percentage_limit, aggressive_filter, max_message_length,
+                    slur_filter_enabled, slur_filter_use_builtin, slur_filter_terms, slur_filter_regexes, slur_filter_nudge_message, slur_filter_disabled_categories,
+                    ip_approval_mode, soundboard_enabled, soundboard_allow_pitch, soundboard_allow_speed, soundboard_banned_ids,
+                    viewer_auto_delete_enabled, viewer_delete_all_enabled,
+                    custom_emotes_enabled, custom_sounds_enabled, max_sound_seconds, uploads_mods_only, emote_scale,
+                    emote_size_min, emote_size_max, sounds_mods_only, mods_can_edit_about
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    channelId,
+                    fields.slow_mode_seconds || 0,
+                    fields.followers_only ? 1 : 0,
+                    fields.emote_only ? 1 : 0,
+                    b(fields.allow_anonymous, 1),
+                    b(fields.links_allowed, 1),
+                    b(fields.gifs_enabled, 1),
+                    Number(fields.account_age_gate_hours) || 0,
+                    Number(fields.caps_percentage_limit) || 0,
+                    fields.aggressive_filter ? 1 : 0,
+                    Math.max(50, Number(fields.max_message_length) || 500),
+                    fields.slur_filter_enabled ? 1 : 0,
+                    b(fields.slur_filter_use_builtin, 1),
+                    String(fields.slur_filter_terms || '').slice(0, 4000),
+                    String(fields.slur_filter_regexes || '').slice(0, 8000),
+                    String(fields.slur_filter_nudge_message || '').slice(0, 800),
+                    String(fields.slur_filter_disabled_categories || '[]').slice(0, 200),
+                    fields.ip_approval_mode ? 1 : 0,
+                    b(fields.soundboard_enabled, 1),
+                    b(fields.soundboard_allow_pitch, 1),
+                    b(fields.soundboard_allow_speed, 1),
+                    String(fields.soundboard_banned_ids || '').slice(0, 4000),
+                    b(fields.viewer_auto_delete_enabled, 1),
+                    b(fields.viewer_delete_all_enabled, 1),
+                    b(fields.custom_emotes_enabled, 1),
+                    b(fields.custom_sounds_enabled, 1),
+                    Math.min(30, Math.max(1, Number(fields.max_sound_seconds) || 10)),
+                    fields.uploads_mods_only ? 1 : 0,
+                    Math.min(300, Math.max(50, Number(fields.emote_scale) || 100)),
+                    Math.min(200, Math.max(25, Number(fields.emote_size_min) || 50)),
+                    Math.min(400, Math.max(50, Number(fields.emote_size_max) || 200)),
+                    fields.sounds_mods_only ? 1 : 0,
+                    fields.mods_can_edit_about ? 1 : 0,
+                ]
+            );
+        }
+        // tts_max_length, as Live: after the UPDATE or the fresh INSERT.
+        if (fields.tts_max_length !== undefined) {
+            run('UPDATE channel_moderation_settings SET tts_max_length = ? WHERE channel_id = ?', [Math.min(1000, Math.max(10, Number(fields.tts_max_length) || 200)), channelId]);
+        }
+        const row = get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
+        return _staged(row, 'channel_moderation_settings', [row]);
+    });
+    _ctx().invalidateChannel(channelId);
+    return out;
+}
+
+// Donation / goal alert sounds live on the settings row (url = the file's path in the sounds dir).
+function setChannelAlertSound(channelId, kind, url, mime) {
+    _assertChatWrites('channel_moderation_settings');
+    const out = transaction(() => {
+        if (!get('SELECT 1 FROM channel_moderation_settings WHERE channel_id = ?', [channelId])) {
+            run('INSERT INTO channel_moderation_settings (channel_id) VALUES (?)', [channelId]);
+        }
+        const col = kind === 'goal' ? 'goal_sound' : 'donation_sound';
+        const res = run(`UPDATE channel_moderation_settings SET ${col}_url = ?, ${col}_mime = ? WHERE channel_id = ?`, [url || null, mime || null, channelId]);
+        return _staged(res, 'channel_moderation_settings', [get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [channelId])]);
+    });
+    _ctx().invalidateChannel(channelId);
+    return out;
+}
+
+// Emotes (Live's /api/emotes; media_url/media_asset_id from its Media asset-sync).
+function createEmote({ user_id, code, url, animated = false, width = 28, height = 28, is_global = false, channel_owner_id = null, size = 100 }) {
+    _assertChatWrites('emotes');
+    return transaction(() => {
+        const res = run(
+            `INSERT INTO emotes (user_id, code, url, animated, width, height, is_global, channel_owner_id, size)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [user_id, code, url, animated ? 1 : 0, width, height, is_global ? 1 : 0, channel_owner_id || null, Math.min(400, Math.max(25, parseInt(size, 10) || 100))]
+        );
+        return _staged(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [res.lastInsertRowid])]);
+    });
+}
+
+function updateEmote(id, { code, size } = {}) {
+    _assertChatWrites('emotes');
+    const sets = [];
+    const params = [];
+    if (code !== undefined) { sets.push('code = ?'); params.push(code); }
+    if (size !== undefined) { sets.push('size = ?'); params.push(Math.min(400, Math.max(25, parseInt(size, 10) || 100))); }
+    if (!sets.length) return _staged({ changes: 0 }, 'emotes');
+    return transaction(() => {
+        const res = run(`UPDATE emotes SET ${sets.join(', ')} WHERE id = ?`, [...params, id]);
+        return _staged(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [id])]);
+    });
+}
+
+function deleteEmote(id) {
+    _assertChatWrites('emotes');
+    return transaction(() => {
+        const had = get('SELECT id FROM emotes WHERE id = ?', [id]);
+        const res = run('DELETE FROM emotes WHERE id = ?', [id]);
+        return _staged(res, 'emotes', [], had ? [{ id: had.id }] : []);
+    });
+}
+
+/** The emote's copy on OpenVibe.Media (Live's asset-sync). */
+function setEmoteMedia(id, mediaUrl, mediaAssetId) {
+    _assertChatWrites('emotes');
+    return transaction(() => {
+        const res = run('UPDATE emotes SET media_url = ?, media_asset_id = ? WHERE id = ?', [mediaUrl || null, mediaAssetId || null, id]);
+        return _staged(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [id])]);
+    });
+}
+
+// User tags (owned chat tags; Live has had no writer since its game tags went read-only).
+function grantUserTag(userId, tagId, source = 'shop') {
+    _assertChatWrites('user_tags');
+    return transaction(() => {
+        const res = run('INSERT OR IGNORE INTO user_tags (user_id, tag_id, source) VALUES (?, ?, ?)', [userId, String(tagId), source || 'shop']);
+        return _staged(res, 'user_tags', [get('SELECT * FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)])]);
+    });
+}
+
+function revokeUserTag(userId, tagId) {
+    _assertChatWrites('user_tags');
+    return transaction(() => {
+        const gone = all('SELECT id FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)]);
+        const res = run('DELETE FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)]);
+        return _staged(res, 'user_tags', [], gone.map((r) => ({ id: r.id })));
+    });
+}
+
+// Chat AI (Live's server/ai/chat-ai.js): rolling summaries and the append-only timeline.
+function upsertChatAiSummary(sfx) {
+    _assertChatWrites('chat_ai_summaries');
+    const {
+        scope, subject_id = 0, window, overview = '', memory_json = '', timeline_json = '[]',
+        message_count = 0, window_message_count = 0, last_message_id = 0,
+        window_label = '', window_start = null, window_end = null,
+    } = sfx || {};
+    return transaction(() => {
+        const res = run(
+            `INSERT INTO chat_ai_summaries
+                (scope, subject_id, window, overview, memory_json, timeline_json, message_count,
+                 window_message_count, last_message_id, window_label, window_start, window_end, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+             ON CONFLICT(scope, subject_id, window) DO UPDATE SET
+                overview = excluded.overview,
+                memory_json = excluded.memory_json,
+                timeline_json = excluded.timeline_json,
+                message_count = excluded.message_count,
+                window_message_count = excluded.window_message_count,
+                last_message_id = excluded.last_message_id,
+                window_label = excluded.window_label,
+                window_start = excluded.window_start,
+                window_end = excluded.window_end,
+                updated_at = CURRENT_TIMESTAMP`,
+            [scope, subject_id || 0, window, overview, memory_json, timeline_json, message_count,
+                window_message_count, last_message_id, window_label, window_start, window_end]
+        );
+        return _staged(res, 'chat_ai_summaries', [get('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? AND window = ?', [scope, subject_id || 0, window])]);
+    });
+}
+
+function addChatTimelineEvents(scope, subjectId, events) {
+    _assertChatWrites('chat_timeline_events');
+    if (!Array.isArray(events) || !events.length) return _staged(0, 'chat_timeline_events');
+    return transaction(() => {
+        let n = 0;
+        const ids = [];
+        for (const e of events) {
+            if (!e || !e.label || !e.ts) continue;
+            try {
+                const res = run('INSERT OR IGNORE INTO chat_timeline_events (scope, subject_id, ts, label, detail) VALUES (?, ?, ?, ?, ?)',
+                    [scope || 'global', subjectId || 0, e.ts, String(e.label).slice(0, 120), String(e.detail || '').slice(0, 400)]);
+                if (res.changes) ids.push(Number(res.lastInsertRowid));
+                n++;   // Live counts every event it tried, the duplicates included
+            } catch { /* */ }
+        }
+        return _staged(n, 'chat_timeline_events', ids.map((id) => get('SELECT * FROM chat_timeline_events WHERE id = ?', [id])));
+    });
+}
+
+/**
+ * Live's changes to a staged table it still writes (its capture, relayed over the bridge): the rows
+ * as they are in Live now, or a delete. Applied only while the table is at 'live' — once Chat writes
+ * it, Live's copy is the mirror and never flows back. REPLACE: the authority's row wins over
+ * whatever holds its key or one of its unique columns here.
+ */
+function applyStagedChanges(changes) {
+    const out = { applied: 0, skipped: [] };
+    transaction(() => {
+        for (const c of Array.isArray(changes) ? changes : []) {
+            const pk = STAGED_KEYS[c && c.table];
+            if (!pk) { out.skipped.push({ table: c && c.table, reason: 'not a staged table' }); continue; }
+            if (tableAuthority(c.table) !== 'live') { out.skipped.push({ table: c.table, reason: 'Chat writes this table (table_authority chat)' }); continue; }
+            const have = _columns(c.table);
+            try {
+                if (c.op === 'delete' && c.pk) {
+                    run(`DELETE FROM ${c.table} WHERE ${pk.map((k) => `${k} = ?`).join(' AND ')}`, pk.map((k) => c.pk[k]));
+                } else if (c.op === 'upsert' && c.row && pk.every((k) => c.row[k] != null)) {
+                    const cols = Object.keys(c.row).filter((k) => have.has(k) && /^[a-z_]+$/.test(k));
+                    run(`INSERT OR REPLACE INTO ${c.table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, cols.map((k) => c.row[k]));
+                } else { out.skipped.push({ table: c.table, reason: 'bad change' }); continue; }
+                out.applied++;
+            } catch (err) {
+                out.skipped.push({ table: c.table, pk: c.pk || (c.row && Object.fromEntries(pk.map((k) => [k, c.row[k]]))), reason: err.message });
+            }
+        }
+    });
+    for (const c of Array.isArray(changes) ? changes : []) {
+        if (c && (c.table === 'channel_moderators' || c.table === 'channel_moderation_settings')) {
+            const ch = (c.row && c.row.channel_id) || (c.pk && c.pk.channel_id);
+            if (ch) _ctx().invalidateChannel(ch);
+        }
+    }
+    return out;
+}
+
+/**
+ * Hash of a list of rows over `columns` (Live's server/chat/chat-tables-sync.js computes the same):
+ * sha256 of the JSON array of rows, each row the array of its values in column order.
+ */
+function sliceHash(columns, rows) {
+    const body = JSON.stringify(rows.map((r) => columns.map((c) => (r[c] === undefined ? null : r[c]))));
+    return require('crypto').createHash('sha256').update(body).digest('hex');
+}
+
+/**
+ * One slice of a staged table for Live's dual read: the rows whose columns equal `where` (null-safe),
+ * ordered by key → { count, hash, columns, rows (when 50 or fewer) }. `columns` limits the hash to
+ * the ones Live has too.
+ */
+function stagedSlice(table, where = {}, columns = null) {
+    const pk = STAGED_KEYS[table];
+    if (!pk) throw new Error(`${table} is not a staged table`);
+    const have = _columns(table);
+    const keys = Object.keys(where || {});
+    if (keys.some((k) => !have.has(k))) throw new Error(`unknown column in ${table}`);
+    const cols = (Array.isArray(columns) && columns.length ? columns.filter((c) => have.has(c)) : [...have]).sort();
+    const rows = all(`SELECT ${cols.join(', ')} FROM ${table} WHERE ${keys.map((k) => `${k} IS ?`).join(' AND ') || '1'} ORDER BY ${pk.join(', ')}`, keys.map((k) => where[k]));
+    return { count: rows.length, hash: sliceHash(cols, rows), columns: cols, rows: rows.length <= 50 ? rows : undefined };
+}
+
 // ── Meta ─────────────────────────────────────────────────────
 function getMeta(key) { return get('SELECT value FROM chat_meta WHERE key = ?', [key])?.value ?? null; }
 function setMeta(key, value) { return run('INSERT INTO chat_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value == null ? null : String(value)]); }
@@ -826,6 +1228,7 @@ function setMeta(key, value) { return run('INSERT INTO chat_meta (key, value) VA
 module.exports = {
     CHAT_TABLES,
     STAGED_TABLES,
+    STAGED_KEYS,
     getDb,
     initDb,
     installMirrorTriggers,
@@ -887,4 +1290,24 @@ module.exports = {
     deleteChannelSound,
     renameChannelSoundCommand,
     updateChannelSoundEmoteRefs,
+    // staged tables (C-04): authority, Live's changes, dual-read slices, and the writes once Chat owns them
+    tableAuthority,
+    setTableAuthority,
+    stagedAuthorities,
+    mirrorPending,
+    applyStagedChanges,
+    stagedSlice,
+    sliceHash,
+    addChannelModerator,
+    removeChannelModerator,
+    upsertChannelModerationSettings,
+    setChannelAlertSound,
+    createEmote,
+    updateEmote,
+    deleteEmote,
+    setEmoteMedia,
+    grantUserTag,
+    revokeUserTag,
+    upsertChatAiSummary,
+    addChatTimelineEvents,
 };

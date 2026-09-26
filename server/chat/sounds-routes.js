@@ -450,7 +450,8 @@ router.post('/alert/:kind', requireAuth, soundUpload.single('sound'), async (req
 
         const ext = path.extname(finalPath).toLowerCase();
         const mime = EXT_TO_MIME[ext] || 'audio/mpeg';
-        // The alert columns are on Live's channel_moderation_settings; Live's alerts read them.
+        // The alert columns are on channel_moderation_settings (Live's until the C-04 handoff, then
+        // Chat's and mirrored); Live's alerts read them.
         await ctx.effects.setChannelAlertSound(channel.id, kind, finalPath, mime, req.user.id);
         res.json({ set: true, kind, url: `/api/sounds/file/${path.basename(finalPath)}` });
     } catch (err) {

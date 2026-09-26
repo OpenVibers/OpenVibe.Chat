@@ -36,8 +36,8 @@ async function start() {
     const server = http.createServer();
     chatServer.init(server);
     callServer.init(server);
-    const bridge = createBridge({ chatServer });
     const mirror = createMirror({ config });
+    const bridge = createBridge({ chatServer, mirror, config });
     const relay = createRelay({ config });
     const events = createEventsConsumer({ chatServer, secrets: config.events.secrets });
     const { app, handleUpgrade } = createApp({ chatServer, bridge, mirror, relay, events, callServer });

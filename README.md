@@ -51,8 +51,12 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   Live's own chat calls here (`POST /internal/live/calls`).
 - **Own database** (`CHAT_DB_PATH`, systemd `StateDirectory=openvibe-chat`) with Live's tables and
   ids, the Network subject on new rows, a transactional events outbox and a read mirror back into Live.
-- **Import:** `scripts/import-from-live.js --live-db <snapshot> [--dry-run]` — idempotent, never drops
-  a row (`import_hold`), reports counts per table.
+- **Import:** `scripts/import-from-live.js --live-db <snapshot> [--apply]` — a dry run unless
+  `--apply` (which backs Chat's database up first), idempotent, never drops a row of Chat's tables
+  (`import_hold`), reports counts per table.
+- **Staged tables** (`channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`,
+  `chat_ai_summaries`, `chat_timeline_events`): Live writes them until each is handed to Chat, one
+  table at a time (`table_authority`, register C-04). Runbook: `docs/staged-tables-cutover.md`.
 
 ## How it fits the network
 
@@ -251,8 +255,10 @@ npm install
 cp .env.example .env          # OV_LIVE_INTERNAL_URL, Network URLs, OV_OAUTH_CLIENT_SECRET, SOUNDS_PATH
 npm start                     # 127.0.0.1:4400 — /ws/chat, /api/{chat,dm,tts,sounds}, /health, /ready (CHAT_CALLS=1: /ws/call, /api/streams/…)
 npm test                      # Node 22; stub Live and Network in-process
-node scripts/import-from-live.js --live-db /tmp/live-snapshot.db --dry-run
+node scripts/import-from-live.js --live-db /tmp/live-snapshot.db            # dry run; --apply writes
 node scripts/parity-check.js --live https://openvibe.live --chat http://127.0.0.1:4401 --before "…"
+node scripts/parity-check.js --tables --live-db /tmp/live-snapshot.db --chat-db /tmp/chat-snapshot.db
+node scripts/table-authority.js           # who writes each staged table (the handoff is Live's)
 node scripts/mirror-flush.js  # rollback helper: push queued mirror rows to Live
 node scripts/subscribe-events.js --dry-run   # Chat's Events subscriptions (boot creates missing ones)
 ```
@@ -282,8 +288,8 @@ server/net/service-auth.js service tokens: client (Chat → others) and guard (o
 server/prefs/              chat preferences in the Network user module chat.preferences (routes, cache, migration from Live)
 server/calls/              moved from Live: the call server (/ws/call), its REST routes, Live's stream hooks (/internal/calls), the calls lifecycle
 server/db/                 schema.sql, database.js (Live's chat functions, same names and arguments)
-scripts/                   import-from-live, parity-check, mirror-flush, migrate-chat-preferences, subscribe-events
-docs/                      cutover.md, calls-cutover.md, live-patch.diff, capabilities-proposal/
+scripts/                   import-from-live, parity-check, mirror-flush, table-authority, migrate-chat-preferences, subscribe-events
+docs/                      cutover.md, calls-cutover.md, staged-tables-cutover.md, live-patch.diff, capabilities-proposal/
 ```
 
 ## Owns

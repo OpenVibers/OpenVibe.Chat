@@ -145,6 +145,8 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
             connections: chatServer.getTotalConnections(),
             live: { last_sync_at: ctx.stats.lastSyncAt, last_success_at: ctx.stats.lastSuccessAt, failures: ctx.stats.failures, last_error: ctx.stats.lastError },
             mirror: mirror ? { enabled: config.live.mirror, pending, last_error: mirror.lastError() } : null,
+            // Who writes each staged table (C-04, docs/staged-tables-cutover.md).
+            table_authority: checks.db.status === 'ok' ? (() => { try { return db.stagedAuthorities(); } catch { return null; } })() : null,
             events: {
                 enabled: !!config.events.url,
                 consumer: events ? { enabled: events.enabled, ...events.stats } : null,

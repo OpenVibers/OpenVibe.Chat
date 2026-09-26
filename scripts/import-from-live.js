@@ -2,10 +2,14 @@
 /**
  * Copy OpenVibe.Live's chat tables into OpenVibe.Chat's database.
  *
- *   node scripts/import-from-live.js --live-db <copy of live.db> [--dry-run] [--chat-db <path>]
- *                                    [--headroom <n>] [--tables a,b] [--no-projections]
+ *   node scripts/import-from-live.js --live-db <copy of live.db> [--apply [--backup <path> | --no-backup]]
+ *                                    [--chat-db <path>] [--headroom <n>] [--tables a,b] [--no-projections]
  *
  * Run it against a SNAPSHOT (sqlite3 live.db ".backup /tmp/live-snapshot.db"), never the live file.
+ *
+ * - A dry run unless --apply: the report says what a run would do and nothing is written. --apply
+ *   first copies Chat's database (VACUUM INTO <chat db>.pre-import-<time>, or --backup <path>) and
+ *   says where in the report.
  *
  * - Idempotent: a row already in Chat is recognised by its primary key and never written twice;
  *   running it again after the cutover copies only what Live wrote since the first run.
@@ -16,7 +20,10 @@
  *   an id already used by a DIFFERENT row, a constraint the row breaks, rows of Live's
  *   transient *_new migration tables.
  * - Chat's tables: an existing Chat row always wins (after the cutover Chat is the authority
- *   and may have edited it). Staged tables (Live still writes them in W6): refreshed from Live.
+ *   and may have edited it). Staged tables (C-04) follow their table_authority: at 'live' this copy
+ *   is made equal to Live's — rows refreshed, and rows Live no longer has removed (`pruned`: a
+ *   moderator removed in Live must not keep powers here); at 'chat' Chat is the authority and the
+ *   run only reports how Live's copy differs (`differs`, `live_only`, `chat_only`).
  * - New columns: *subject_id is filled from Live's linked_accounts (the Network subject).
  * - media_requests / media_request_settings stay in Live (decision: docs/cutover.md) and are
  *   only reported.
@@ -32,12 +39,15 @@ const path = require('path');
 const Database = require('better-sqlite3');
 
 function parseArgs(argv) {
-    const out = { dryRun: false, headroom: 10000, projections: true, tables: null };
+    const out = { dryRun: true, backup: true, headroom: 10000, projections: true, tables: null };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
         if (a === '--live-db') out.liveDb = argv[++i];
         else if (a === '--chat-db') out.chatDb = argv[++i];
         else if (a === '--dry-run') out.dryRun = true;
+        else if (a === '--apply') out.dryRun = false;
+        else if (a === '--backup') out.backupPath = argv[++i];
+        else if (a === '--no-backup') out.backup = false;
         else if (a === '--headroom') out.headroom = Math.max(0, parseInt(argv[++i], 10) || 0);
         else if (a === '--tables') out.tables = String(argv[++i] || '').split(',').map((s) => s.trim()).filter(Boolean);
         else if (a === '--no-projections') out.projections = false;
@@ -74,16 +84,16 @@ const SUBJECT_COLUMNS = {
 };
 const TRANSIENT = ['chat_messages_new', 'emotes_new', 'channel_sounds_new'];
 const NOT_MOVED = ['media_requests', 'media_request_settings'];
-const STAGED_PKS = {
-    channel_moderators: ['id'],
-    channel_moderation_settings: ['channel_id'],
-    emotes: ['id'],
-    user_tags: ['id'],
-    chat_ai_summaries: ['id'],
-    chat_timeline_events: ['id'],
-};
-
 class Rollback extends Error {}
+
+/** Copy Chat's database before a write run (VACUUM INTO: consistent, compact, the WAL included). */
+function backupChat(chat, target) {
+    const fs = require('fs');
+    const file = path.resolve(target || `${chat.name}.pre-import-${new Date().toISOString().replace(/[:.]/g, '-')}`);
+    if (fs.existsSync(file)) throw new Error(`backup ${file} already exists`);
+    chat.prepare('VACUUM INTO ?').run(file);
+    return file;
+}
 
 function run(opts) {
     if (!opts.liveDb) throw new Error('--live-db <snapshot> is required');
@@ -97,9 +107,10 @@ function run(opts) {
     const liveTables = new Set(live.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
     const colsOf = (conn, t) => conn.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
 
+    // A staged table Chat already writes is compared, never written (Chat is its authority).
     const plan = [
         ...Object.entries(db.CHAT_TABLES).map(([t, pk]) => ({ table: t, pk, kind: 'chat' })),
-        ...Object.entries(STAGED_PKS).map(([t, pk]) => ({ table: t, pk, kind: 'staged' })),
+        ...Object.entries(db.STAGED_KEYS).map(([t, pk]) => ({ table: t, pk, kind: db.tableAuthority(t) === 'chat' ? 'staged-chat' : 'staged' })),
     ].filter((p) => !opts.tables || opts.tables.includes(p.table));
 
     // Schema drift check first: nothing is written when Live has columns Chat cannot hold.
@@ -126,12 +137,35 @@ function run(opts) {
     const holdStmt = chat.prepare('INSERT OR IGNORE INTO import_hold (source_table, source_pk, reason, row_json) VALUES (?, ?, ?, ?)');
     const hold = (table, pkObj, reason, row) => holdStmt.run(table, JSON.stringify(pkObj), String(reason).slice(0, 300), JSON.stringify(row)).changes;
 
-    const report = { live_db: path.resolve(opts.liveDb), dry_run: !!opts.dryRun, tables: {} };
+    // A staged table Chat writes: count how Live's copy (its mirror) differs, write nothing.
+    function compareOnly(p, r) {
+        const chatCols = new Set(colsOf(chat, p.table));
+        const cols = colsOf(live, p.table).filter((c) => chatCols.has(c));
+        const getChat = chat.prepare(`SELECT ${cols.join(', ')} FROM ${p.table} WHERE ${p.pk.map((k) => `${k} = ?`).join(' AND ')}`);
+        const seen = new Set();
+        for (const row of live.prepare(`SELECT ${cols.join(', ')} FROM ${p.table}`).iterate()) {
+            r.live++;
+            seen.add(JSON.stringify(p.pk.map((k) => row[k])));
+            const mine = getChat.get(...p.pk.map((k) => row[k]));
+            if (!mine) r.live_only++;
+            else if (cols.every((c) => mine[c] === row[c] || (mine[c] == null && row[c] == null))) r.identical++;
+            else r.differs++;
+        }
+        for (const row of chat.prepare(`SELECT ${p.pk.join(', ')} FROM ${p.table}`).iterate()) {
+            if (!seen.has(JSON.stringify(p.pk.map((k) => row[k])))) r.chat_only++;
+        }
+    }
+
+    const report = { live_db: path.resolve(opts.liveDb), dry_run: !!opts.dryRun, backup: null, tables: {} };
+    if (!opts.dryRun && opts.backup) report.backup = backupChat(chat, opts.backupPath);
 
     for (const p of plan) {
-        const r = { live: 0, inserted: 0, identical: 0, refreshed: 0, chat_kept: 0, held: 0 };
+        const r = p.kind === 'staged-chat'
+            ? { authority: 'chat', live: 0, identical: 0, differs: 0, live_only: 0, chat_only: 0 }
+            : { live: 0, inserted: 0, identical: 0, refreshed: 0, chat_kept: 0, held: 0, ...(p.kind === 'staged' ? { authority: 'live', pruned: 0 } : {}) };
         report.tables[p.table] = r;
         if (!liveTables.has(p.table)) { r.missing_in_live = true; continue; }
+        if (p.kind === 'staged-chat') { compareOnly(p, r); continue; }
         const chatCols = new Set(colsOf(chat, p.table));
         const cols = colsOf(live, p.table).filter((c) => chatCols.has(c));
         const subjectCols = (SUBJECT_COLUMNS[p.table] || []).filter(([sc]) => chatCols.has(sc));
@@ -145,6 +179,16 @@ function run(opts) {
         const orderBy = p.pk.join(', ');
 
         const apply = () => {
+            // A staged table at 'live' is a copy: what Live no longer has goes first (a row Live
+            // removed and added again under a new id would otherwise collide on its unique columns).
+            if (p.kind === 'staged') {
+                const keyOf = (row) => JSON.stringify(p.pk.map((k) => row[k]));
+                const inLive = new Set(live.prepare(`SELECT ${p.pk.join(', ')} FROM ${p.table}`).all().map(keyOf));
+                const del = chat.prepare(`DELETE FROM ${p.table} WHERE ${where}`);
+                for (const row of chat.prepare(`SELECT ${p.pk.join(', ')} FROM ${p.table}`).all()) {
+                    if (!inLive.has(keyOf(row))) r.pruned += del.run(...p.pk.map((k) => row[k])).changes;
+                }
+            }
             for (const row of live.prepare(`SELECT ${cols.join(', ')} FROM ${p.table} ORDER BY ${orderBy}`).iterate()) {
                 r.live++;
                 const pkVals = p.pk.map((k) => row[k]);
@@ -167,8 +211,12 @@ function run(opts) {
                     continue;
                 }
                 if (p.kind === 'staged' && refresh) {
-                    refresh.run(...upd.map((c) => row[c]), ...pkVals);
-                    r.refreshed++;
+                    try {
+                        refresh.run(...upd.map((c) => row[c]), ...pkVals);
+                        r.refreshed++;
+                    } catch (err) {
+                        r.held += hold(p.table, pkObj, `refresh failed: ${err.message}`, row);
+                    }
                 } else {
                     r.chat_kept++;
                 }
@@ -207,7 +255,8 @@ function run(opts) {
         // Chat's new ids start above Live's highest id plus headroom (never lowered).
         chat.transaction(() => {
             for (const [t] of Object.entries(db.CHAT_TABLES)) {
-                if (!liveTables.has(t) || !colsOf(live, t).includes('id')) continue;
+                // (only the tables this run imported: --tables leaves the others as they are)
+                if (!report.tables[t] || !liveTables.has(t) || !colsOf(live, t).includes('id')) continue;
                 const liveMax = live.prepare(`SELECT COALESCE(MAX(id), 0) AS m FROM ${t}`).get().m;
                 const chatMax = chat.prepare(`SELECT COALESCE(MAX(id), 0) AS m FROM ${t}`).get().m;
                 const target = Math.max(liveMax + opts.headroom, chatMax);
@@ -252,7 +301,7 @@ if (require.main === module) {
     let opts;
     try { opts = parseArgs(process.argv.slice(2)); } catch (err) { console.error(err.message); process.exit(2); }
     if (opts.help || !opts.liveDb) {
-        console.log('usage: node scripts/import-from-live.js --live-db <snapshot> [--dry-run] [--chat-db <path>] [--headroom <n>] [--tables a,b] [--no-projections]');
+        console.log('usage: node scripts/import-from-live.js --live-db <snapshot> [--apply [--backup <path> | --no-backup]] [--chat-db <path>] [--headroom <n>] [--tables a,b] [--no-projections]');
         process.exit(opts.help ? 0 : 2);
     }
     try {
