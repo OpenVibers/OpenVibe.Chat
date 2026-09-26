@@ -97,4 +97,34 @@ t('chat.presence_prefs: someone hidden is counted, not named; a change elsewhere
     wsCat.close(); wsAnn.close();
 });
 
+t('online now (ADR-005 amendment 1): connected people read online, hidden ones and unknown preferences offline', async () => {
+    let r = await h.http('PUT', '/api/chat/presence', { token: cat.token, body: { settings: { show_in_user_list: false } } });
+    assert.strictEqual(r.status, 200, r.text);
+    const wsAnn = await h.ws({ ip: '198.51.100.31', token: ann.token });
+    wsAnn.sendJson({ type: 'join', token: ann.token });
+    await wsAnn.next((m) => m.type === 'auth');
+    const wsCat = await h.ws({ ip: '198.51.100.32', token: cat.token });
+    wsCat.sendJson({ type: 'join', token: cat.token });
+    await wsCat.next((m) => m.type === 'auth');
+    r = await h.http('GET', '/api/chat/online?users=ann,cat,bob,ann');
+    assert.strictEqual(r.status, 200, r.text);
+    assert.deepStrictEqual(r.body.users, { ann: 'online', cat: 'offline', bob: 'offline' }, 'cat is connected but hidden; bob is not connected');
+    assert.match(r.headers.get('cache-control'), /no-store/);
+    // A connected person whose preference cannot be read (Network down, nothing cached) reads offline.
+    const eve = h.addUser('eve', { subject: 'usr_01J9EVE0000000000000000AAA' });
+    h.netModules.subjects.add('usr_01J9EVE0000000000000000AAA');
+    h.netModules.down = true;
+    const wsEve = await h.ws({ ip: '198.51.100.33', token: eve.token });
+    wsEve.sendJson({ type: 'join', token: eve.token });
+    await wsEve.next((m) => m.type === 'auth');
+    r = await h.http('GET', '/api/chat/online?users=eve');
+    assert.deepStrictEqual(r.body.users, { eve: 'offline' }, 'never shown when their preference is unknown');
+    h.netModules.down = false;
+    // Input limits.
+    assert.strictEqual((await h.http('GET', '/api/chat/online')).status, 400);
+    assert.strictEqual((await h.http('GET', `/api/chat/online?users=${Array.from({ length: 51 }, (_, i) => `u${i}`).join(',')}`)).status, 400);
+    assert.strictEqual((await h.http('GET', '/api/chat/online?users=bad%20name')).status, 400);
+    wsAnn.close(); wsCat.close(); wsEve.close();
+});
+
 t.run(async () => { if (h) await h.close(); });

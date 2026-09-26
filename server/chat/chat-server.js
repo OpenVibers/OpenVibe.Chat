@@ -634,6 +634,38 @@ class ChatServer {
         return false;
     }
 
+    /**
+     * Who of `usernames` is connected to Chat right now, anywhere (global chat, a room, a DM tab):
+     * { name: 'online' | 'offline' }. Presence is ephemeral and lives here, in Chat's delivery plane
+     * (ADR-005 amendment 1): nothing is stored and no Events topic carries it. Someone who turned off
+     * "show my name in user lists" (chat.presence_prefs) reads as offline, and so does anyone whose
+     * preference cannot be read within a second: never shown when they may have asked not to be.
+     */
+    async presenceOf(usernames) {
+        const connected = new Map();
+        for (const [, c] of this.clients) if (c.user && c.user.username) connected.set(String(c.user.username).toLowerCase(), c.user);
+        const { presence } = require('../prefs/stores');
+        const out = {};
+        for (const name of usernames) {
+            const user = connected.get(String(name).toLowerCase());
+            let state = 'offline';
+            if (user) {
+                const subject = this._subjectOfUser(user);
+                if (!subject) state = 'online';
+                else {
+                    let prefs = presence.peek(subject);
+                    if (!prefs) {
+                        await Promise.race([presence.get(subject).catch(() => {}), new Promise((r) => setTimeout(r, 1000).unref())]);
+                        prefs = presence.peek(subject);
+                    }
+                    if (prefs && prefs.show_in_user_list !== false) state = 'online';
+                }
+            }
+            out[name] = state;
+        }
+        return out;
+    }
+
     /** Someone changed chat.presence_prefs elsewhere: read it again, then refresh the user lists they are in. */
     presenceChanged(subject) {
         if (!subject) return;

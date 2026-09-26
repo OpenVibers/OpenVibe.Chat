@@ -637,6 +637,19 @@ router.get('/channel/:userId/history', optionalAuth, async (req, res) => {
     }
 });
 
+// ── Online now (ADR-005 amendment 1: presence is ephemeral, in Chat's delivery plane) ──
+// GET /api/chat/online?users=ann,bob → { users: { ann: 'online', bob: 'offline' }, as_of }. Anyone may
+// ask about up to 50 usernames; people who hid themselves from user lists always read as offline.
+router.get('/online', async (req, res) => {
+    const names = [...new Set(String(req.query.users || '').split(',').map((n) => n.trim()).filter(Boolean))];
+    if (!names.length) return res.status(400).json({ error: 'users is required: a comma-separated list of usernames', code: 'presence.users_required' });
+    if (names.length > 50) return res.status(400).json({ error: 'at most 50 usernames at a time', code: 'presence.too_many' });
+    if (names.some((n) => !/^[A-Za-z0-9_.-]{1,40}$/.test(n))) return res.status(400).json({ error: 'invalid username', code: 'presence.invalid_username' });
+    const chatServer = require('./chat-server');
+    res.set('Cache-Control', 'no-store');
+    res.json({ users: await chatServer.presenceOf(names), as_of: new Date().toISOString() });
+});
+
 // ── Chat User Count ──────────────────────────────────────────
 router.get('/:streamId/users', (req, res) => {
     const chatServer = require('./chat-server');
