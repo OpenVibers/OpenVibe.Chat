@@ -1,16 +1,16 @@
 {
  "service": "chat",
- "release": "739d3a1cdc22fbb0717e4df4abd6b7e4ad31a8f1",
- "recorded_at": "2026-09-26T14:07:10.965Z",
+ "release": "6181238618da319c38a7d3876a004a9be1d50759",
+ "recorded_at": "2026-09-26T14:47:20.554Z",
  "note": "N-1 fixture: written by `npm run n-1:record`, replayed by test/n-1.test.js",
  "clients": {
-  "live": "8caa540466f9af86247febdbba1339b68919a42f"
+  "live": "13525ebd51a488775929d849bfa103637a2a2e02"
  },
  "manifest": {
   "service": "chat",
-  "release": "739d3a1cdc22",
-  "released_at": "2026-09-26T13:12:38.000Z",
-  "booted_at": "2026-09-26T14:07:06.104Z",
+  "release": "6181238618da",
+  "released_at": "2026-09-26T14:45:40.000Z",
+  "booted_at": "2026-09-26T14:47:15.515Z",
   "contracts_version": "0.57.0",
   "packages": {
    "openvibe-shared": "1.22.0",
@@ -22,11 +22,11 @@
   "components": {
    "shell": {
     "kind": "script",
-    "version": "739d3a1cdc22"
+    "version": "6181238618da"
    },
    "server": {
     "kind": "server",
-    "version": "739d3a1cdc22"
+    "version": "6181238618da"
    }
   },
   "assets": {},
@@ -44,7 +44,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/dashboard.js"
+    "seadragon:public/js/dashboard.js"
    ]
   },
   {
@@ -61,7 +61,7 @@
     "totalPages": "number"
    },
    "from": [
-    "OpenVibe.Live:public/js/dashboard.js"
+    "seadragon:public/js/dashboard.js"
    ]
   },
   {
@@ -71,7 +71,7 @@
    "status": 400,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -81,7 +81,7 @@
    "status": 400,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -124,7 +124,7 @@
     "activeManagedId": "null"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -167,7 +167,7 @@
     "activeManagedId": "null"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -185,7 +185,7 @@
     "categories[].patterns[]": "string"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -203,7 +203,7 @@
     "categories[].patterns[]": "string"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -219,8 +219,8 @@
     "defaultProvider": "null"
    },
    "from": [
-    "OpenVibe.Live:public/js/emotes.js",
-    "OpenVibe.Live:public/js/gif-picker.js"
+    "seadragon:public/js/emotes.js",
+    "seadragon:public/js/gif-picker.js"
    ]
   },
   {
@@ -236,8 +236,8 @@
     "defaultProvider": "null"
    },
    "from": [
-    "OpenVibe.Live:public/js/emotes.js",
-    "OpenVibe.Live:public/js/gif-picker.js"
+    "seadragon:public/js/emotes.js",
+    "seadragon:public/js/gif-picker.js"
    ]
   },
   {
@@ -247,7 +247,7 @@
    "status": 503,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/gif-picker.js"
+    "seadragon:public/js/gif-picker.js"
    ]
   },
   {
@@ -257,7 +257,7 @@
    "status": 503,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/gif-picker.js"
+    "seadragon:public/js/gif-picker.js"
    ]
   },
   {
@@ -267,7 +267,7 @@
    "status": 503,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/gif-picker.js"
+    "seadragon:public/js/gif-picker.js"
    ]
   },
   {
@@ -277,7 +277,7 @@
    "status": 503,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/gif-picker.js"
+    "seadragon:public/js/gif-picker.js"
    ]
   },
   {
@@ -396,7 +396,7 @@
     "deleted_ids": "array"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -437,7 +437,7 @@
     "deleted_ids": "array"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -558,7 +558,7 @@
     "latest_id": "number"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -597,7 +597,7 @@
     "latest_id": "number"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -665,7 +665,7 @@
     "relayUser": "null"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -678,7 +678,7 @@
     "relayUser": "null"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -834,7 +834,7 @@
     "followerCount": "number"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -851,7 +851,7 @@
     "followerCount": "number"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -895,7 +895,7 @@
     "activeManagedId": "null"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -939,7 +939,7 @@
     "activeManagedId": "null"
    },
    "from": [
-    "OpenVibe.Live:public/js/chat.js"
+    "seadragon:public/js/chat.js"
    ]
   },
   {
@@ -971,7 +971,7 @@
     "messages[].display_name": "null"
    },
    "from": [
-    "OpenVibe.Live:public/js/app-media.js"
+    "seadragon:public/js/app-media.js"
    ]
   },
   {
@@ -1003,7 +1003,7 @@
     "messages[].display_name": "null"
    },
    "from": [
-    "OpenVibe.Live:public/js/app-media.js"
+    "seadragon:public/js/app-media.js"
    ]
   },
   {
@@ -1013,8 +1013,8 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js",
-    "node_modules/openvibe-sdk/src/chat.js"
+    "node_modules/openvibe-sdk/src/chat.js",
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1027,8 +1027,8 @@
     "blocked": "array"
    },
    "from": [
-    "OpenVibe.Live:public/js/messenger.js",
-    "node_modules/openvibe-sdk/src/chat.js"
+    "node_modules/openvibe-sdk/src/chat.js",
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1038,7 +1038,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1051,7 +1051,7 @@
     "blocked": "boolean"
    },
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1061,9 +1061,9 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js",
     "node_modules/openvibe-sdk/src/chat.js",
-    "public/web/chat.js"
+    "public/web/chat.js",
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1091,9 +1091,9 @@
     "conversations[].participants[].profile_color": "string"
    },
    "from": [
-    "OpenVibe.Live:public/js/messenger.js",
     "node_modules/openvibe-sdk/src/chat.js",
-    "public/web/chat.js"
+    "public/web/chat.js",
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1103,7 +1103,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1129,7 +1129,7 @@
     "conversation.participants[].profile_color": "string"
    },
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1139,7 +1139,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1152,7 +1152,7 @@
     "messages": "array"
    },
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1162,7 +1162,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1175,7 +1175,7 @@
     "messages": "array"
    },
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1185,7 +1185,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1198,7 +1198,7 @@
     "messages": "array"
    },
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1231,8 +1231,8 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js",
-    "node_modules/openvibe-sdk/src/chat.js"
+    "node_modules/openvibe-sdk/src/chat.js",
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1245,8 +1245,8 @@
     "unread": "number"
    },
    "from": [
-    "OpenVibe.Live:public/js/messenger.js",
-    "node_modules/openvibe-sdk/src/chat.js"
+    "node_modules/openvibe-sdk/src/chat.js",
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1256,7 +1256,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1269,7 +1269,7 @@
     "users": "array"
    },
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1279,7 +1279,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1292,7 +1292,7 @@
     "users": "array"
    },
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1302,7 +1302,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/channel-uploads.js"
+    "seadragon:public/js/channel-uploads.js"
    ]
   },
   {
@@ -1320,7 +1320,7 @@
     "goal.url": "null"
    },
    "from": [
-    "OpenVibe.Live:public/js/channel-uploads.js"
+    "seadragon:public/js/channel-uploads.js"
    ]
   },
   {
@@ -1333,7 +1333,7 @@
     "sounds": "array"
    },
    "from": [
-    "OpenVibe.Live:public/js/emotes.js"
+    "seadragon:public/js/emotes.js"
    ]
   },
   {
@@ -1346,7 +1346,7 @@
     "sounds": "array"
    },
    "from": [
-    "OpenVibe.Live:public/js/emotes.js"
+    "seadragon:public/js/emotes.js"
    ]
   },
   {
@@ -1560,7 +1560,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/dashboard.js"
+    "seadragon:public/js/dashboard.js"
    ]
   },
   {
@@ -1570,7 +1570,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/dashboard.js"
+    "seadragon:public/js/dashboard.js"
    ]
   },
   {
@@ -1640,8 +1640,8 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js",
-    "node_modules/openvibe-sdk/src/chat.js"
+    "node_modules/openvibe-sdk/src/chat.js",
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1651,7 +1651,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1661,7 +1661,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1671,7 +1671,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1681,7 +1681,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1691,7 +1691,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1701,7 +1701,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/messenger.js"
+    "seadragon:public/js/messenger.js"
    ]
   },
   {
@@ -1711,7 +1711,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/channel-uploads.js"
+    "seadragon:public/js/channel-uploads.js"
    ]
   },
   {
@@ -1721,7 +1721,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/channel-uploads.js"
+    "seadragon:public/js/channel-uploads.js"
    ]
   },
   {
@@ -1731,7 +1731,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/channel-uploads.js"
+    "seadragon:public/js/channel-uploads.js"
    ]
   },
   {
@@ -1741,7 +1741,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/channel-uploads.js"
+    "seadragon:public/js/channel-uploads.js"
    ]
   },
   {
@@ -1751,7 +1751,7 @@
    "status": 401,
    "kind": "json",
    "from": [
-    "OpenVibe.Live:public/js/broadcast.js"
+    "seadragon:public/js/broadcast.js"
    ]
   }
  ],

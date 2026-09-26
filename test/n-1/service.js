@@ -25,6 +25,8 @@ const PRELOAD = path.join(__dirname, 'preload.js');
 const CHILD = path.join(__dirname, 'boot-child.js');
 const CHAT_PATHS = /^\/(api\/(chat|dm|tts)\/|api\/sounds(\/|$))/;
 const LIVE_REPO = path.resolve(ROOT, process.env.N1_LIVE_REPO || '../OpenVibe.Live');
+// Files are labelled with their checkout's directory name (harness gitFiles), which need not be OpenVibe.Live.
+const LIVE_LABEL = `${path.basename(LIVE_REPO)}:`;
 let liveRef = null;
 
 function baseEnv(extra) {
@@ -53,7 +55,7 @@ module.exports = {
     ],
     strip: ['API', 'location.origin', 'window.location.origin'],
     /** Live's calls to the paths nginx sends to Chat; everything Chat's own pages call or link to. */
-    keep: (pathname, method, file) => !String(file || '').startsWith('OpenVibe.Live:') || CHAT_PATHS.test(pathname),
+    keep: (pathname, method, file) => !String(file || '').startsWith(LIVE_LABEL) || CHAT_PATHS.test(pathname),
     /** openvibe.chat's pages an open tab may hold (anonymous): their links, scripts and forms are replayed too. */
     crawl: ['/', '/rooms', '/r/n1-room', '/messages', '/settings', '/updates'],
     origins: ['https://openvibe.chat'],
