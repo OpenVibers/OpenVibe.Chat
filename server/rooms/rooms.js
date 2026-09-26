@@ -171,6 +171,43 @@ function rateOk(key, now = Date.now()) {
 }
 
 /** Post a message; returns the stored row (with the author's names) for broadcasting. */
+// ── The realtime plane (WS-I task 9, contracts 0.57.0) ──
+// A PUBLIC room's messages are announced as chat.room.message.created (visibility public), so browsers
+// subscribed to chat.room.* get them over Events realtime; private rooms and DMs never are. Deleting a
+// message, or turning the room private, announces chat.room.message.deleted with a redaction, so what
+// the room had published stops being replayable. Both are written in the transaction of the change.
+const REDACT_CHUNK = 500;
+function announceMessage(room, user, id, message, now) {
+    if (room.visibility !== 'public') return;
+    require('../events/outbox').enqueue({
+        event_type: 'chat.room.message.created',
+        visibility: 'public',
+        actorSubject: user.subject_id || null,
+        subject: { type: 'chat_room_message', id: String(id) },
+        payload: {
+            message_id: id,
+            room: { slug: room.slug, name: room.name },
+            user_subject: user.subject_id || null,
+            username: user.username || null,
+            display_name: user.display_name || user.username || null,
+            text: String(message).slice(0, 2000),
+            created_at: new Date(now).toISOString(),
+        },
+    });
+}
+function announceDeleted(room, ids) {
+    const list = [...new Set(ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    for (let i = 0; i < list.length; i += REDACT_CHUNK) {
+        const part = list.slice(i, i + REDACT_CHUNK);
+        require('../events/outbox').enqueue({
+            event_type: 'chat.room.message.deleted',
+            visibility: 'public',
+            subject: { type: 'chat_room_message', id: String(part[0]) },
+            payload: { room: room.slug, message_ids: part, redacts: { subject_type: 'chat_room_message', subject_ids: part.map(String) } },
+        });
+    }
+}
+
 function post(room, user, text, { now = Date.now() } = {}) {
     const a = access(room, user);
     if (!user) fail(401, 'rooms.sign_in', 'Sign in to chat');
@@ -191,6 +228,7 @@ function post(room, user, text, { now = Date.now() } = {}) {
         const r = db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message) VALUES (?, ?, ?, ?)', [room.id, user.id, user.subject_id || null, message]);
         db.run('UPDATE rooms SET message_count = message_count + 1, last_message_at = CURRENT_TIMESTAMP WHERE id = ?', [room.id]);
         db.run('UPDATE room_members SET last_read_id = ? WHERE room_id = ? AND user_id = ?', [r.lastInsertRowid, room.id, user.id]);
+        announceMessage(room, user, Number(r.lastInsertRowid), message, now);
         return Number(r.lastInsertRowid);
     });
     return messageById(id);
@@ -223,7 +261,10 @@ function deleteMessage(room, user, messageId) {
     const own = user && m.user_id === user.id;
     const a = access(room, user);
     if (!own && !a.moderate) fail(403, 'rooms.not_yours', 'Only the author or a room moderator can delete this');
-    db.run('UPDATE room_messages SET is_deleted = 1, deleted_by = ? WHERE id = ?', [user.id, m.id]);
+    db.transaction(() => {
+        db.run('UPDATE room_messages SET is_deleted = 1, deleted_by = ? WHERE id = ?', [user.id, m.id]);
+        if (room.visibility === 'public') announceDeleted(room, [m.id]);
+    });
     if (!own) db.logModerationAction({ scope_type: 'room', scope_id: room.slug, actor_user_id: user.id, target_user_id: m.user_id, action_type: 'delete_message', details: { message_id: m.id } });
     return m.id;
 }
@@ -256,7 +297,13 @@ function update(room, actor, { name, topic, visibility, slow_seconds } = {}) {
     if (topic != null) next.topic = String(topic).replace(/\s+/g, ' ').trim().slice(0, 200) || null;
     if (visibility != null) { if (!['public', 'private'].includes(visibility)) fail(422, 'rooms.visibility', 'Visibility is public or private'); next.visibility = visibility; }
     if (slow_seconds != null) { const v = Number(slow_seconds); if (!Number.isInteger(v) || v < 0 || v > 600) fail(422, 'rooms.slow', 'Slow mode is 0 to 600 seconds'); next.slow_seconds = v; }
-    db.run('UPDATE rooms SET name = ?, topic = ?, visibility = ?, slow_seconds = ? WHERE id = ?', [next.name, next.topic, next.visibility, next.slow_seconds, room.id]);
+    db.transaction(() => {
+        db.run('UPDATE rooms SET name = ?, topic = ?, visibility = ?, slow_seconds = ? WHERE id = ?', [next.name, next.topic, next.visibility, next.slow_seconds, room.id]);
+        // Public → private: everything the room published stops being replayable on the realtime plane.
+        if (room.visibility === 'public' && next.visibility === 'private') {
+            announceDeleted(room, db.all('SELECT id FROM room_messages WHERE room_id = ? AND is_deleted = 0 ORDER BY id', [room.id]).map((r) => r.id));
+        }
+    });
     return publicRoom(db.get('SELECT * FROM rooms WHERE id = ?', [room.id]));
 }
 
