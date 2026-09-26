@@ -9,6 +9,11 @@
  * DMs (./dm.js isBlockedEither) refuse a conversation, a group invite or a direct message between two
  * people when either blocked the other, here or in Chat's own dm_blocks. Blocks are between Network
  * subjects; Chat's people are Live ids, mapped through ctx_users.subject_id (db.subjectFor).
+ *
+ * Public chat (WS-I task 6) is one-way: the person who blocked someone no longer gets that person's
+ * lines, live (chat-server.js skips their sockets: blockersOf) or in history reads (routes.js drops
+ * them from pages and cursor reads for that reader: blockedUserIds). Everyone else, the blocked
+ * person included, sees the room as before; moderation tools and logs show everything.
  */
 'use strict';
 
@@ -66,7 +71,23 @@ function eitherBlockedUsers(userIdA, userIdB) {
     return eitherBlocked(db.subjectFor(userIdA), db.subjectFor(userIdB));
 }
 
+/** The subjects who blocked `blocked` (a subject), active blocks only. One indexed read. */
+function blockersOf(blocked) {
+    if (!SUBJECT_RE.test(String(blocked || ''))) return [];
+    ensureSchema();
+    return db.all('SELECT blocker_subject FROM network_blocks WHERE blocked_subject = ? AND active = 1', [blocked]).map((r) => r.blocker_subject);
+}
+
+/** The Live user ids a signed-in reader blocked (through their subjects, the ctx_users projection). */
+function blockedUserIds(user) {
+    const subject = user && (user.subject_id || db.subjectFor(user.id));
+    if (!SUBJECT_RE.test(String(subject || ''))) return new Set();
+    ensureSchema();
+    return new Set(db.all(`SELECT u.id FROM network_blocks b JOIN ctx_users u ON u.subject_id = b.blocked_subject
+        WHERE b.blocker_subject = ? AND b.active = 1`, [subject]).map((r) => Number(r.id)));
+}
+
 /** For tests: forget that the table was created (the table stays). */
 function _reset() { ready = false; }
 
-module.exports = { ensureSchema, payloadOf, apply, hasBlocked, eitherBlocked, eitherBlockedUsers, _reset };
+module.exports = { ensureSchema, payloadOf, apply, hasBlocked, eitherBlocked, eitherBlockedUsers, blockersOf, blockedUserIds, _reset };

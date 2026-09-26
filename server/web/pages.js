@@ -130,7 +130,9 @@ function createWebRoutes({ config }) {
     router.get('/', async (req, res) => {
         const actor = await viewerOf(req);
         const { messages, latest_id } = historyStore.page('global', { limit: 60 });
-        const shown = messages.filter((m) => !m.is_deleted && (m.message_type || 'chat') === 'chat');
+        // Not the lines of people this reader blocked on the network (chat/network-blocks.js).
+        const hidden = actor.kind === 'user' ? require('../chat/network-blocks').blockedUserIds(actor.user) : new Set();
+        const shown = messages.filter((m) => !m.is_deleted && (m.message_type || 'chat') === 'chat' && !(m.user_id && hidden.has(Number(m.user_id))));
         const composer = actor.kind === 'user'
             ? (actor.user.is_banned ? notice('error', 'Your account is banned from chat.') : `<form class="oc-compose" method="post" action="/send" id="oc-compose">
 <label for="oc-input" class="oc-sr">Message to everyone</label>

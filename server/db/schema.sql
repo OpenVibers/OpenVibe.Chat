@@ -241,7 +241,8 @@ CREATE TABLE IF NOT EXISTS channel_moderation_settings (
     sound_max_pitch_cents INTEGER DEFAULT 1200,
     emote_size_min INTEGER DEFAULT 50,
     emote_size_max INTEGER DEFAULT 200,
-    sounds_mods_only INTEGER DEFAULT 0
+    sounds_mods_only INTEGER DEFAULT 0,
+    sub_only INTEGER DEFAULT 0              -- sub-only chat: active subscribers and the room's moderators
 );
 
 CREATE TABLE IF NOT EXISTS emotes (

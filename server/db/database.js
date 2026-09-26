@@ -117,6 +117,7 @@ const ADDED_COLUMNS = [
     ['emotes', 'media_url', 'TEXT'],          // Live: emote images synced to OpenVibe.Media
     ['emotes', 'media_asset_id', 'INTEGER'],
     ['ctx_users', 'subject_id', 'TEXT'],      // older Chat databases; auth/network-session.js looks users up by it
+    ['channel_moderation_settings', 'sub_only', 'INTEGER DEFAULT 0'],   // sub-only chat (WS-I task 6), Live has it too
 ];
 
 function initDb({ captureMirror = false } = {}) {
@@ -443,7 +444,8 @@ function deleteChatMessagesByTimeRange(streamId, fromTime, toTime, deletedBy) {
             [deletedBy, ...params]
         );
         _announceDeleted(ids);
-        return res;
+        // The ids too, so the purge reaches every surface that showed them (not only the stream's sockets).
+        return Object.assign(res, { ids });
     });
 }
 
@@ -1024,10 +1026,11 @@ function upsertChannelModerationSettings(channelId, fields) {
                 ]
             );
         }
-        // tts_max_length, as Live: after the UPDATE or the fresh INSERT.
+        // tts_max_length and sub_only, as Live: after the UPDATE or the fresh INSERT.
         if (fields.tts_max_length !== undefined) {
             run('UPDATE channel_moderation_settings SET tts_max_length = ? WHERE channel_id = ?', [Math.min(1000, Math.max(10, Number(fields.tts_max_length) || 200)), channelId]);
         }
+        if (fields.sub_only !== undefined) run('UPDATE channel_moderation_settings SET sub_only = ? WHERE channel_id = ?', [fields.sub_only ? 1 : 0, channelId]);
         const row = get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
         return _staged(row, 'channel_moderation_settings', [row]);
     });

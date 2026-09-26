@@ -23,7 +23,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 
 - **Moved as they were** (from Live `server/chat/`): the WebSocket chat server (`/ws/chat`, every
   message type and command: `join`/`join_stream`/`leave_stream`/`get-users`/`chat`/`self-delete-history`,
-  `/help /tts /color /viewers /uptime /w /me /ban /unban /timeout /clear /slow /paste /ai`, `!sr !queue
+  `/help /tts /color /viewers /uptime /w /me /ban /unban /timeout /clear /slow /subonly /paste /ai`, `!sr !queue
   !np !skip !sb !gotti`, channel `!sounds`, arena `!hype !beef !arena`, hardware `!forward … !say`),
   DMs (`dm.js`, `/api/dm/*`), chat history (`history-store.js`, `/api/chat/*`), TTS (`tts-engine.js`,
   `/api/tts/*`), 101soundboards and channel sounds (`/api/sounds*`), moderation utils and the word

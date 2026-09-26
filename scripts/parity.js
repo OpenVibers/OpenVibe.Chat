@@ -13,10 +13,13 @@
  *   OV_PARITY_TOKEN_A=… OV_PARITY_TOKEN_B=… OV_PARITY_TOKEN_MOD=… [OV_PARITY_TOKEN_STREAMER=…] \
  *   OV_PARITY_TEST_ACCOUNTS=parity_a,parity_b,parity_mod,parity_streamer \
  *   [OV_PARITY_SOUND=honk] [OV_PARITY_ORIGIN=https://openvibe.live] [OV_PARITY_CHANNEL_USER_ID=…] \
+ *   [OV_PARITY_SUBSCRIBER=a] [OV_PARITY_A_BLOCKS_B=1] \
  *   node scripts/parity.js [--apply] [--only join,send,…]
  *
  * Roles: A and B are viewers (B is the one banned, timed out and reconnecting), MOD moderates the
  * stream's channel (a channel moderator or its owner), STREAMER owns it (the purge; optional).
+ * OV_PARITY_SUBSCRIBER=a: A holds an active Live subscription to the test channel and B does not
+ * (the subonly scenario). OV_PARITY_A_BLOCKS_B=1: A has blocked B on openvibe.network (blocked).
  *
  * Without --apply this is a dry run: it prints what each scenario would do and as whom, and opens
  * no connection. With --apply it first signs each token in (one WebSocket join each) and reads the
@@ -24,6 +27,7 @@
  * OV_PARITY_TEST_ACCOUNTS: the messages, DMs, bans, timeouts, slow mode and purges then only ever
  * touch dedicated test accounts and their own channel. Never point --apply at a real channel.
  * Tokens are never printed. Exit 0 = no scenario failed (gaps and skips are reported, not failed).
+ * A driver may offer block(blocker, blocked, active) to set a network block itself (the test does).
  */
 'use strict';
 
@@ -53,8 +57,10 @@ const lower = (s) => String(s || '').toLowerCase();
  * }
  */
 class Parity {
-    constructor({ driver, tokens, streamId, channelUserId = null, sound = null, testAccounts = [], log = () => {} }) {
+    constructor({ driver, tokens, streamId, channelUserId = null, sound = null, testAccounts = [], subscriber = null, aBlocksB = false, log = () => {} }) {
         this.driver = driver;
+        this.subscriber = subscriber ? lower(subscriber) : null;
+        this.aBlocksB = !!aBlocksB;
         this.tokens = tokens;
         this.streamId = Number(streamId);
         this.ownerId = channelUserId ? Number(channelUserId) : null;
@@ -356,9 +362,12 @@ const SCENARIOS = [
     },
     {
         key: 'purge', kind: 'destructive', as: ['streamer', 'a', 'b'], needs: ['a', 'b', 'streamer'],
-        does: 'STREAMER purges a time range of the stream (the dashboard’s ISO range): A and B get the purge frame; the lines in the range are gone from history, the one before stays',
+        does: 'STREAMER purges a time range of the stream (the dashboard’s ISO range): A and B get the purge frame; a channel popout and the global feed drop the same ids; the range is gone from history (cursor reads name it in deleted_ids), the line before stays',
         async run(p) {
             const a = await p.join('a'); const b = await p.join('b');
+            // Other surfaces that show the stream's lines: a channel-room popout and the global feed.
+            const pop = await p.join('a', { stream: false, channel: true });
+            const feed = await p.join('a', { stream: false });
             const before = p.text('before the purge');
             await p.say(a, before);
             const kept = await p.saw(b, before);
@@ -379,10 +388,17 @@ const SCENARIOS = [
             assert.strictEqual(r.status, 200, r.text);
             assert.ok(r.body.deleted >= 2, `purged ${r.body.deleted}`);
             for (const ws of [a, b]) await ws.next((m) => m.type === 'purge' && m.from === from && m.to === to);
+            const both = (m) => m.type === 'delete-messages' && [m1.id, m2.id].every((id) => (m.ids || []).includes(id));
+            await pop.next(both);
+            await feed.next(both);
             const ids = (await p.http('GET', `/api/chat/${p.streamId}/history?limit=200`)).body.messages.map((m) => m.id);
             assert.ok(!ids.includes(m1.id) && !ids.includes(m2.id), 'the range is gone from history');
             assert.ok(ids.includes(kept.id), 'the line before the range stays');
-            return `${r.body.deleted} purged`;
+            for (const room of [`/api/chat/channel/${p.ownerId}/history`, '/api/chat/global/history']) {
+                const d = (await p.http('GET', `${room}?after_id=${m2.id}`)).body;
+                assert.ok([m1.id, m2.id].every((id) => (d.deleted_ids || []).includes(id)), `${room}: a cursor read names the purged ids`);
+            }
+            return `${r.body.deleted} purged; the popout and the global feed dropped them too`;
         },
     },
     {
@@ -395,6 +411,8 @@ const SCENARIOS = [
             assert.strictEqual((await a.next((m) => m.type === 'slowmode')).seconds, secs);
             await p.system(a, `Slow mode enabled: ${secs}s between messages`);
             try {
+                // The saved setting is what chat enforces: a new socket reads it back.
+                assert.strictEqual((await p.join('b')).auth.slowmode_seconds, secs, 'the saved slow mode is read back');
                 // Everyone may share one address (the CLI): let the /slow line's window pass first.
                 await p.sleep(secs * 1000 + 200);
                 const one = p.text('slow one'); const two = p.text('slow two');
@@ -423,10 +441,32 @@ const SCENARIOS = [
         },
     },
     {
-        key: 'subonly', kind: 'gap', as: [], needs: [],
-        does: 'sub-only mode: a non-subscriber is refused, a subscriber may talk',
+        key: 'subonly', kind: 'destructive', as: ['mod', 'a', 'b', 'anon'], needs: ['a', 'b', 'mod'],
+        does: 'MOD /subonly: B (no subscription) and an anonymous viewer are refused and reach nobody; A (an active subscriber) and MOD talk; a new socket is told; /subonly off lets B talk again',
         async run(p) {
-            p.gap('no sub-only mode exists: no channel setting, no command and no check in Chat or Live (followers-only exists), and Chat has no subscriber lookup in live-context (subscriptions are Live’s)');
+            if (p.subscriber !== 'a') p.skip('needs A to hold an active subscription to the test channel and B none (then OV_PARITY_SUBSCRIBER=a)');
+            const a = await p.join('a'); const b = await p.join('b'); const mod = await p.join('mod'); const anon = await p.join('anon');
+            const refused = (m) => m.type === 'system' && /^This chat is in sub-only mode/.test(m.message);
+            await p.say(mod, '/subonly');
+            assert.strictEqual((await b.next((m) => m.type === 'subonly')).enabled, true);
+            await p.system(b, 'Sub-only mode enabled: only subscribers and moderators can chat.');
+            try {
+                assert.strictEqual((await p.join('b')).auth.sub_only, true, 'a new socket is told (the saved setting)');
+                const nb = p.text('B has no subscription');
+                await p.say(b, nb);
+                assert.match((await b.next(refused)).message, /only subscribers/);
+                const na = p.text('anonymous in sub-only');
+                await p.say(anon, na);
+                assert.match((await anon.next(refused)).message, /sign in and subscribe/);
+                assert.ok(await a.none((m) => m.type === 'chat' && (m.message === nb || m.message === na), QUIET_MS), 'refused lines reach nobody');
+                const ya = p.text('A subscribes'); await p.say(a, ya); await p.saw(b, ya);
+                const ym = p.text('MOD is exempt'); await p.say(mod, ym); await p.saw(b, ym);
+            } finally {
+                await p.say(mod, '/subonly off');
+                await p.system(a, 'Sub-only mode disabled.');
+            }
+            const back = p.text('B after sub-only'); await p.say(b, back); await p.saw(a, back);
+            return 'non-subscriber and anonymous refused; subscriber and moderator talk';
         },
     },
     {
@@ -497,10 +537,53 @@ const SCENARIOS = [
         },
     },
     {
-        key: 'blocked', kind: 'gap', as: [], needs: [],
-        does: 'reconnect convergence for blocked messages: lines from someone the reader blocked (network blocks) are hidden live and after a reconnect',
+        key: 'blocked', kind: 'destructive', as: ['a', 'b', 'mod'], needs: ['a', 'b', 'mod'],
+        does: 'A blocked B on the network (one-way): B’s lines never reach A, live or after A reconnects (?after_id= and a fresh page, read as A: channel, stream and global); MOD sees them; A’s lines still reach B',
         async run(p) {
-            p.gap('public chat does not apply blocks: network.block.changed and dm_blocks are honoured for DMs and calls only (server/chat/network-blocks.js, dm.js isBlockedEither); room broadcasts and history pages show a blocked person’s lines to the blocker, live and after a reconnect alike, and Live’s chat.js hides nothing either');
+            if (p.driver.block) await p.driver.block('a', 'b', true);
+            else if (!p.aBlocksB) p.skip('needs A to have blocked B on openvibe.network (then OV_PARITY_A_BLOCKS_B=1)');
+            try {
+                const room = `/api/chat/channel/${p.ownerId}/history`;
+                let a = await p.join('a'); const b = await p.join('b'); const mod = await p.join('mod');
+                const feed = await p.join('a', { stream: false });
+                const viewA = new RoomView((await p.http('GET', `${room}?limit=500`, { as: 'a' })).body); const fromA = a.all.length;
+                const t1 = p.text('B speaks (A blocked B)');
+                await p.say(b, t1);
+                const m1 = await p.saw(mod, t1);
+                const isB = (m) => m.type === 'chat' && m.user_id === p.users.b.id;
+                assert.ok(await a.none(isB, QUIET_MS), 'live: B’s line does not reach A');
+                assert.ok(await feed.none(isB, 50), 'nor A’s global feed');
+                const t2 = p.text('A still reaches B');
+                await p.say(a, t2);
+                await p.saw(b, t2);
+                viewA.frames(a.all.slice(fromA));
+                await p.left(a);
+                const t3 = p.text('B while A is away');
+                await p.say(b, t3);
+                const m3 = await p.saw(mod, t3);
+                a = await p.join('a');
+                const d = await p.http('GET', `${room}?after_id=${viewA.cursor}`, { as: 'a' });
+                assert.strictEqual(d.status, 200);
+                viewA.delta(d.body);
+                assert.ok(!viewA.ids.has(m1.id) && !viewA.ids.has(m3.id), 'A’s cursor read leaves B’s lines out');
+                assert.ok(viewA.cursor >= m3.id, 'the cursor still moves past them');
+                const hidden = [m1.id, m3.id];
+                for (const path of [room, `/api/chat/${p.streamId}/history`, '/api/chat/global/history']) {
+                    const asA = (await p.http('GET', `${path}?limit=500`, { as: 'a' })).body.messages.map((m) => m.id);
+                    assert.ok(!hidden.some((id) => asA.includes(id)), `${path}: a fresh page read as A`);
+                    const asMod = (await p.http('GET', `${path}?limit=500`, { as: 'mod' })).body.messages.map((m) => m.id);
+                    assert.ok(hidden.every((id) => asMod.includes(id)), `${path}: everyone else still reads them`);
+                }
+            } finally {
+                if (p.driver.block) await p.driver.block('a', 'b', false);
+            }
+            if (!p.driver.block) return 'hidden from A live and after a reconnect';
+            // Unblocked: B reaches A again.
+            const a = await p.join('a'); const b = await p.join('b');
+            const t4 = p.text('B after the unblock');
+            await p.say(b, t4);
+            await p.saw(a, t4);
+            return 'hidden from A live and after a reconnect; back after the unblock';
         },
     },
 ];
@@ -578,6 +661,8 @@ function configFrom(env) {
         sound: env.OV_PARITY_SOUND || null,
         tokens: { a: env.OV_PARITY_TOKEN_A || null, b: env.OV_PARITY_TOKEN_B || null, mod: env.OV_PARITY_TOKEN_MOD || null, streamer: env.OV_PARITY_TOKEN_STREAMER || null },
         testAccounts: String(env.OV_PARITY_TEST_ACCOUNTS || '').split(',').map((s) => s.trim()).filter(Boolean),
+        subscriber: env.OV_PARITY_SUBSCRIBER ? String(env.OV_PARITY_SUBSCRIBER).trim().toLowerCase() : null,
+        aBlocksB: env.OV_PARITY_A_BLOCKS_B === '1',
     };
 }
 
@@ -587,7 +672,7 @@ const LABEL = { pass: 'PASS', gap: 'GAP ', skip: 'SKIP', fail: 'FAIL' };
 async function main(argv = process.argv.slice(2), env = process.env, log = console.log, { driver = null } = {}) {
     let o;
     try { o = parseArgs(argv); } catch (err) { log(err.message); return 2; }
-    if (o.help) { log(require('fs').readFileSync(__filename, 'utf8').split('\n').slice(1, 32).join('\n')); return 0; }
+    if (o.help) { log(require('fs').readFileSync(__filename, 'utf8').split('\n').slice(1, 30).join('\n')); return 0; }
     const cfg = configFrom(env);
     const chosen = SCENARIOS.filter((s) => !o.only || o.only.includes(s.key));
     if (o.only && chosen.length !== o.only.length) { log(`unknown scenario in --only (known: ${SCENARIOS.map((s) => s.key).join(', ')})`); return 2; }
@@ -607,7 +692,9 @@ async function main(argv = process.argv.slice(2), env = process.env, log = conso
             const missing = (s.needs || []).filter((r) => !cfg.tokens[r]);
             const would = s.kind === 'gap' ? 'reports a gap, touches nothing'
                 : missing.length ? `would skip: needs ${missing.map((r) => `OV_PARITY_TOKEN_${r.toUpperCase()}`).join(', ')}`
-                    : s.key === 'soundboard' && !cfg.sound ? 'would skip: needs OV_PARITY_SOUND' : `as ${s.as.join(', ')}`;
+                    : s.key === 'soundboard' && !cfg.sound ? 'would skip: needs OV_PARITY_SOUND'
+                        : s.key === 'subonly' && cfg.subscriber !== 'a' ? 'would skip: needs OV_PARITY_SUBSCRIBER=a'
+                            : s.key === 'blocked' && !cfg.aBlocksB ? 'would skip: needs OV_PARITY_A_BLOCKS_B=1' : `as ${s.as.join(', ')}`;
             log(`  ${s.key.padEnd(11)} ${s.kind.padEnd(11)} ${would}`);
             log(`              ${s.does}`);
         }
@@ -618,7 +705,7 @@ async function main(argv = process.argv.slice(2), env = process.env, log = conso
     }
 
     if (problems.length) { for (const p of problems) log(p); return 2; }
-    const p = new Parity({ driver: driver || networkDriver(cfg), tokens: cfg.tokens, streamId: cfg.streamId, channelUserId: cfg.channelUserId, sound: cfg.sound, testAccounts: cfg.testAccounts, log });
+    const p = new Parity({ driver: driver || networkDriver(cfg), tokens: cfg.tokens, streamId: cfg.streamId, channelUserId: cfg.channelUserId, sound: cfg.sound, testAccounts: cfg.testAccounts, subscriber: cfg.subscriber, aBlocksB: cfg.aBlocksB, log });
     try { await p.resolve(); } catch (err) { log(`could not resolve the accounts and the stream: ${err.message}`); return 2; }
     const outside = p.untested();
     if (outside.length) {

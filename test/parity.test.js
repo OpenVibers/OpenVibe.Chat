@@ -3,15 +3,18 @@
  * Chat parity (roadmap WS-I task 6). scripts/parity.js's scenarios (join, send, DM, /tts,
  * soundboard, ban, timeout, purge, slow mode, sub-only mode, the popout, reconnect convergence for
  * deleted and blocked messages) run here against Chat booted with stubs, with two or three people
- * connected, each from their own address: the same code the CLI runs against a running Chat.
+ * connected, each from their own address: the same code the CLI runs against a running Chat. Alice
+ * (A) holds an active subscription to the channel (the stub Live's GET /subscriber); the driver sets
+ * network blocks itself (network.block.changed, as the Events consumer applies it).
  *
  * On top, what only a test can reach: Live's moderator paths through the bridge (the context-menu
  * ban that disconnects, the single-message delete) and the global feed's cursor read (Live's
- * floating widget, openvibe.chat), the DM participant rule on delivery, and the CLI itself: its dry
- * run touches nothing, and --apply refuses to run for an account that is not a named test account.
- *
- * A scenario the product does not support ends as a gap with its reason (sub-only mode, blocks in
- * public chat); nothing here asserts that it works. The matrix is printed at the end.
+ * floating widget, openvibe.chat), sub-only failing closed when Live cannot be asked, slow mode as
+ * the saved setting (a restart of every cache, the dashboard's value), /clear's answer, blocks
+ * leaving moderation logs and DMs as they were, the DM participant rule on delivery, and the CLI
+ * itself: its dry run touches nothing, and --apply refuses to run for an account that is not a
+ * named test account. Every scenario must pass here: none is a gap or a skip. The matrix is printed
+ * at the end.
  */
 const assert = require('assert');
 const { boot, suite } = require('./helpers');
@@ -22,6 +25,7 @@ let h, p, streamer, mod, alice, bob, dave, channelId, streamId;
 const IPS = { a: '198.51.100.101', b: '198.51.100.102', mod: '198.51.100.103', streamer: '198.51.100.104', anon: '198.51.100.105', dave: '198.51.100.106' };
 const results = [];
 let bridgeSeq = 0;
+let blockRev = 0;
 const bridge = (ops) => h.http('POST', '/internal/live/calls', {
     token: h.serviceToken(['chat.live_bridge.write', 'chat.message.send']),
     body: { boot: 'parity-live', ops: ops.map((o) => ({ seq: ++bridgeSeq, ...o })) },
@@ -43,6 +47,11 @@ const driver = {
     address: (role) => IPS[role],
     connect: ({ role, stream }) => h.ws({ ip: IPS[role], stream }),
     http: (method, path, { token, body } = {}) => h.http(method, path, { token, body }),
+    // A network block, as the Events consumer applies network.block.changed.
+    block: (blocker, blocked, active) => {
+        const subject = { a: alice, b: bob, mod, streamer }[blocker].subject_id, target = { a: alice, b: bob, mod, streamer }[blocked].subject_id;
+        require('../server/chat/network-blocks').apply({ blocker: subject, blocked: target, active, revision: ++blockRev });
+    },
 };
 
 t('boot: a channel with a moderator, a live stream, a channel sound, TTS that synthesizes', async () => {
@@ -54,6 +63,7 @@ t('boot: a channel with a moderator, a live stream, a channel sound, TTS that sy
     dave = h.addUser('dave');
     channelId = h.addChannel(streamer.id, { moderators: [mod.id] });
     streamId = h.addStream(streamer.id, channelId);
+    h.live.subscribers.add(`${alice.id}|${streamer.id}`);   // A subscribes to the channel; B does not
     await h.ctx.sync();
     // TTS without an engine: every utterance is 0.2 s of silence.
     const tts = require('../server/chat/tts-engine');
@@ -70,6 +80,7 @@ t('boot: a channel with a moderator, a live stream, a channel sound, TTS that sy
         driver, streamId, sound: 'honk',
         tokens: { a: alice.token, b: bob.token, mod: mod.token, streamer: streamer.token },
         testAccounts: ['alice', 'bob', 'moddy', 'streamer'],
+        subscriber: 'a',
     });
     await p.resolve();
     assert.deepStrictEqual(Object.fromEntries(Object.entries(p.users).map(([r, u]) => [r, u.id])), { a: alice.id, b: bob.id, mod: mod.id, streamer: streamer.id });
@@ -155,6 +166,97 @@ t('reconnect in global chat (Live’s floating widget, openvibe.chat): Live’s 
     await p.closeAll();
 });
 
+t('sub-only fails closed: while Live cannot say whether someone subscribes they are told sub-only is on; the streamer, moderators and a known subscriber talk', async () => {
+    const q = new parity.Parity({ driver, tokens: { ...p.tokens, dave: dave.token }, streamId });
+    q.ownerId = streamer.id;
+    const modWs = await q.join('mod'); const a = await q.join('a');
+    await q.say(modWs, '/subonly');
+    await a.next((m) => m.type === 'subonly' && m.enabled === true);
+    h.live.subscriberDown = true;
+    try {
+        // Nobody has asked Live about dave; Alice's "yes" is cached from the subonly scenario.
+        const daveWs = await q.join('dave');
+        await q.sleep(parity.PACE_MS);   // dave's last line (the ban test) may be under a second old
+        const t1 = q.text('dave while Live cannot say');
+        await q.say(daveWs, t1);
+        assert.match((await daveWs.next((m) => m.type === 'system' && /^This chat is in sub-only mode/.test(m.message))).message, /only subscribers/);
+        assert.ok(await a.none((m) => m.type === 'chat' && m.message === t1), 'fails closed: the line reaches nobody');
+        const t2 = q.text('alice, a known subscriber'); await q.say(a, t2); await q.saw(modWs, t2);
+        const t3 = q.text('the moderator'); await q.say(modWs, t3); await q.saw(a, t3);
+        const own = await q.join('streamer');
+        const t4 = q.text('the streamer'); await q.say(own, t4); await q.saw(a, t4);
+    } finally {
+        h.live.subscriberDown = false;
+        await q.say(modWs, '/subonly off');
+        await a.next((m) => m.type === 'subonly' && m.enabled === false);
+        await q.closeAll();
+    }
+});
+
+t('slow mode is the channel’s saved setting: the dashboard’s value is enforced and announced, and a restart keeps it', async () => {
+    const pol = h.live.policies.get(channelId);
+    const a = await p.join('a'); const b = await p.join('b');
+    // The dashboard saves 3 s in Live, which tells Chat (the bridge's invalidate: Live chat-remote.js OBSERVED_DB).
+    pol.settings = { ...(pol.settings || {}), slow_mode_seconds: 3 };
+    await bridge([{ op: 'invalidate', args: ['channel', channelId] }]);
+    assert.strictEqual((await a.next((m) => m.type === 'slowmode')).seconds, 3, 'the room is told');
+    await p.system(b, 'Slow mode enabled: 3s between messages');
+    const slowed = async (ws, label) => {
+        await p.sleep(3200);
+        const one = p.text(`${label} one`), two = p.text(`${label} two`);
+        await p.say(ws, one); await p.saw(b, one);
+        await p.say(ws, two);
+        await p.system(ws, 'Slow down! You are sending messages too fast.');
+        assert.ok(await b.none((m) => m.type === 'chat' && m.message === two), `${label}: a slowed line reaches nobody`);
+    };
+    await slowed(a, 'dashboard slow');
+    // A restart: every cache is gone and nothing was announced yet; the value is read back from Live.
+    h.ctx._reset();
+    h.chatServer._announcedModes.clear();
+    const again = await p.join('a');
+    assert.strictEqual(again.auth.slowmode_seconds, 3, 'read back after a restart');
+    await slowed(again, 'after a restart');
+    // The dashboard turns it off.
+    pol.settings.slow_mode_seconds = 0;
+    await bridge([{ op: 'invalidate', args: ['channel', channelId] }]);
+    assert.strictEqual((await b.next((m) => m.type === 'slowmode' && m.seconds === 0)).seconds, 0);
+    await p.system(b, 'Slow mode disabled.');
+    await p.closeAll();
+});
+
+t('/clear clears screens only and says so: the lines stay in history', async () => {
+    const a = await p.join('a'); const modWs = await p.join('mod');
+    const line = p.text('still in history after /clear');
+    await p.say(a, line);
+    const m = await p.saw(modWs, line);
+    await p.say(modWs, '/clear');
+    await a.next((f) => f.type === 'clear');
+    await p.system(modWs, 'Chat cleared on screen; messages stay in history — use purge to remove them.');
+    assert.ok((await h.http('GET', `/api/chat/${streamId}/history?limit=50`)).body.messages.some((x) => x.id === m.id), 'still in history');
+    await p.closeAll();
+});
+
+t('blocks in public chat leave the rest alone: the streamer who blocked B does not get B’s lines, their moderation log does; DMs are refused both ways as before', async () => {
+    driver.block('streamer', 'b', true);
+    try {
+        const own = await p.join('streamer'); const b = await p.join('b'); const a = await p.join('a');
+        const t1 = p.text('B, blocked by the streamer');
+        await p.say(b, t1);
+        await p.saw(a, t1);
+        assert.ok(await own.none((m) => m.type === 'chat' && m.message === t1), 'the blocker does not get it');
+        const logs = await h.http('GET', `/api/chat/admin/logs?streamId=${streamId}&search=${encodeURIComponent(t1)}`, { token: streamer.token });
+        assert.strictEqual(logs.status, 200, logs.text);
+        assert.ok(logs.body.rows.some((r) => r.message === t1), 'the moderation log shows everything');
+        for (const [from, to] of [[bob, streamer], [streamer, bob]]) {
+            const conv = await h.http('POST', '/api/dm/conversations', { token: from.token, body: { user_ids: [to.id] } });
+            assert.strictEqual(conv.status, 403, `a DM ${from.username} → ${to.username} (${conv.text})`);
+        }
+    } finally {
+        driver.block('streamer', 'b', false);
+        await p.closeAll();
+    }
+});
+
 t('the CLI: a dry run lists every scenario and opens nothing; --apply refuses accounts that are not named test accounts', async () => {
     const env = {
         OV_PARITY_BASE: h.base, OV_PARITY_STREAM: String(streamId), OV_PARITY_SOUND: 'honk',
@@ -189,7 +291,8 @@ t('the CLI: a dry run lists every scenario and opens nothing; --apply refuses ac
 t('the parity matrix', async () => {
     const width = Math.max(...results.map((r) => r.key.length));
     for (const r of results) console.log(`    ${r.key.padEnd(width)}  ${r.status.toUpperCase().padEnd(4)}  ${r.note}`);
-    assert.deepStrictEqual(results.filter((r) => r.status === 'gap').map((r) => r.key), ['subonly', 'blocked'], 'the known gaps (see scripts/parity.js)');
+    assert.deepStrictEqual(results.map((r) => r.key), parity.SCENARIOS.map((s) => s.key), 'every scenario ran');
+    assert.deepStrictEqual(results.filter((r) => r.status !== 'pass').map((r) => `${r.key}: ${r.status}`), [], 'no gap, skip or failure');
 });
 
 t.run(async () => { if (p) await p.closeAll(); if (h) await h.close(); });

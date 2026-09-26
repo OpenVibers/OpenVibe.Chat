@@ -9,7 +9,7 @@ their authority to Chat **one table at a time**, each move reversible:
 | `chat_ai_summaries` | `server/ai/chat-ai.js` (global, user, relay-user, anon insights) | Live's chat AI calls Chat's `upsertChatAiSummary` |
 | `user_tags` | none (chat tags are read-only in Live since the game moved to OpenVibe.Games) | data only; Chat has `grantUserTag` / `revokeUserTag` |
 | `emotes` | `POST/PATCH/DELETE /api/emotes`, Media asset-sync (`media_url`, `media_asset_id`) | Live's routes and asset-sync call Chat's `createEmote`, `updateEmote`, `deleteEmote`, `setEmoteMedia` |
-| `channel_moderation_settings` | `PUT /api/channels/:id/moderation` (dashboard), Chat's `/slow` and alert sounds (Live's `/internal/chat-effects/channel-settings` and `alert-sound`) | the dashboard calls Chat's `upsertChannelModerationSettings`; `/slow` and alert sounds are written by Chat itself |
+| `channel_moderation_settings` | `PUT /api/channels/:id/moderation` (dashboard), Chat's `/slow`, `/subonly` and alert sounds (Live's `/internal/chat-effects/channel-settings` and `alert-sound`) | the dashboard calls Chat's `upsertChannelModerationSettings`; `/slow`, `/subonly` and alert sounds are written by Chat itself |
 | `channel_moderators` | `POST/DELETE /api/channels/:id/mods` | Live's routes call Chat's `addChannelModerator` / `removeChannelModerator` |
 
 `media_requests` is **not** part of this: it is not a chat table. Its writers are Live's media
@@ -58,7 +58,7 @@ at once. Live's table is from then on a read mirror: Chat's triggers queue every
 in `live_mirror_outbox` and the mirror sends it to Live (`/internal/chat-effects/mirror`, as for
 Chat's own tables), which takes staged rows only for a table Chat writes. Live's readers do not
 change. Chat's chat server reads `channel_moderators` and `channel_moderation_settings` in place,
-and writes `/slow` and alert sounds itself.
+and writes `/slow`, `/subonly` and alert sounds itself.
 
 **The flip back** (`{"authority":"live"}`): Chat sends Live every queued change of the table and
 refuses to give it back while any is left; then Live records `live` and captures again. Running a

@@ -125,7 +125,7 @@ t('joining the channel room without the stream id does not skip slow mode or IP 
     sneaky.sendJson({ type: 'chat', message: 'second within slow mode' });
     await sneaky.next((m) => m.type === 'system' && /too fast/.test(m.message));
     assert.ok(await own.none((m) => m.message === 'second within slow mode'), 'slow mode bypassed from the channel room');
-    h.chatServer.slowModeByStream.set(streamX, 0);   // (the streamer is inside their own 30s window)
+    // (/slow 30 is the channel's saved setting now; the policy set below replaces it)
 
     h.live.policies.get(chanX).settings = { ip_approval_mode: 1 };
     h.ctx.invalidateChannel(chanX);

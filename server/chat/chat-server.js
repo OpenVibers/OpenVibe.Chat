@@ -31,6 +31,7 @@ const ttsEngine = require('./tts-engine');
 const soundboard = require('./soundboard-service');
 const audioQueue = require('./audio-queue');
 const dm = require('./dm');
+const networkBlocks = require('./network-blocks');
 const vipBadges = require('../vip/badges');
 // Cosmetics and tags are Live's (monetization/cosmetics, game/tags); read through live-context.
 const cosmetics = { getCosmeticProfile: (userId) => ctx.getCosmeticProfile(userId) };
@@ -52,6 +53,11 @@ const SOUNDBOARD_STREAM_MAX_PER_WINDOW = 15;
 const SOUNDBOARD_STREAM_WINDOW_MS = 60 * 1000;
 const GOTTI_GIF_URL = 'https://media1.tenor.com/m/Y-GsLUQT9LQAAAAd/deez-something-came-in-the-mail-today.gif';
 const GOTTI_CAPTION = 'Something came in the mail today... deez nuts. GOTTI!';
+// Sub-only mode (WS-I task 6): who may chat is decided in _chatRulesBlock.
+const SUB_ONLY_REFUSED = 'This chat is in sub-only mode: only subscribers of this channel can chat.';
+const SUB_ONLY_ANON = 'This chat is in sub-only mode: sign in and subscribe to chat.';
+// A person's own lines: what someone who blocked them on the network no longer gets (network-blocks.js).
+const LINE_FRAMES = new Set(['chat', 'tts', 'tts-audio']);
 const DEFAULT_SLUR_NUDGE = 'This streamer enabled Anti-Slur Nudge for this chat. Free speech is still alive, but this lane is closed today. Try a different word and keep it funny.';
 // Built-in slur categories and normalization are defined in moderation-utils.js
 // (single source of truth — browser-side chat.js mirrors the same patterns).
@@ -79,8 +85,13 @@ class ChatServer {
         /** @type {Map<string, number>} `${ip}:${streamId}` → last message time (rate limiting) */
         this.rateLimits = new Map();
         this.DEFAULT_RATE_LIMIT_MS = 1000; // 1 message per second
-        /** @type {Map<number, number>} streamId → slow mode ms (0 = off, default rate limit applies) */
-        this.slowModeByStream = new Map();
+        // Slow mode and sub-only mode are the channel's saved settings (slowModeMs, _chatRulesBlock);
+        // channelId → { slow, sub } last announced to its room (_channelSettingsSeen).
+        this._announcedModes = new Map();
+        this._modeWrites = new Map();   // channelId → /slow or /subonly writes running
+        /** @type {WeakMap<object, Set<string>|null>} frame → the subjects who blocked its author (_blockersOf) */
+        this._blockMemo = new WeakMap();
+        ctx.onChannelSettings((channelId, settings) => this._channelSettingsSeen(channelId, settings));
         this.heartbeatInterval = null;
         // TTS and sound requests queue in Chat's database (./audio-queue.js), one room at a time.
         /** @type {Map<string, number>} `${streamId}:${userKey}` → last soundboard trigger */
@@ -383,7 +394,7 @@ class ChatServer {
             // Slow mode of the stream that governs the room (an offline/channel-room join has no
             // stream id of its own but posts into the live room).
             const slowStreamId = client.streamId || (client.channelUserId ? this._moderationStreamFor(client) : null);
-            const streamSlowMs = (slowStreamId && this.slowModeByStream.get(slowStreamId)) || 0;
+            const streamSlowMs = this.slowModeMs(slowStreamId);
             // The room's moderators (broadcaster, channel mods, chat staff) are not slowed: they keep
             // the flood limit only, so they can moderate and turn slow mode off again at once.
             const slowExempt = streamSlowMs > 0 && !!client.user && permissions.canModerateStream(client.user, slowStreamId);
@@ -397,6 +408,7 @@ class ChatServer {
 
         switch (msg.type) {
             case 'chat':
+                await this._warmSubOnly(client).catch(() => {});
                 this.handleChatMessage(ws, client, msg);
                 break;
             case 'self-delete-history':
@@ -456,7 +468,8 @@ class ChatServer {
                 setTimeout(() => { try { require('./deploy-notice').replayTo(ws); } catch { /* optional */ } }, 1200);
                 // Send identity confirmation so the client knows who it is
                 const displayName = client.user ? (client.user.display_name || client.user.username) : client.anonId;
-                const streamSlowSec = client.streamId ? Math.round((this.slowModeByStream.get(client.streamId) || 0) / 1000) : 0;
+                const roomStreamId = client.streamId || this._moderationStreamFor(client);
+                const streamSlowSec = Math.round(this.slowModeMs(roomStreamId) / 1000);
                 const streamSettings = this._getChannelChatSettings(client.streamId);
                 this.sendTo(ws, {
                     type: 'auth',
@@ -467,6 +480,7 @@ class ChatServer {
                     role: client.user ? client.user.role : 'anon',
                     user_id: client.user?.id || null,
                     slowmode_seconds: streamSlowSec,
+                    sub_only: !!(roomStreamId && this._getChannelChatSettings(roomStreamId).sub_only),
                     allow_auto_delete: !client.streamId || streamSettings.viewer_auto_delete_enabled !== 0,
                     allow_self_delete_all: !client.streamId || streamSettings.viewer_delete_all_enabled !== 0,
                     gifs_enabled: !client.streamId || streamSettings.gifs_enabled !== 0,
@@ -1073,6 +1087,18 @@ class ChatServer {
             return true;
         }
 
+        // Sub-only: people with an active subscription to this channel (Live's subscriptions; Network
+        // VIP does not count), the streamer, channel moderators and chat staff. Unknown (Live not
+        // asked yet, or unreachable) counts as not subscribed; _warmSubOnly asked before this line.
+        if (chatSettings.sub_only && !isStaff && !canModerateThisStream) {
+            const ownerId = ctx.getStreamById(modStreamId)?.user_id || null;
+            const allowed = !!(client.user && ownerId && (Number(ownerId) === Number(client.user.id) || ctx.isSubscriber(client.user.id, ownerId)));
+            if (!allowed) {
+                this.sendTo(ws, { type: 'system', message: client.user ? SUB_ONLY_REFUSED : SUB_ONLY_ANON });
+                return true;
+            }
+        }
+
         // Links disabled — exempt [gif:url] tags (validated separately)
         if (chatSettings.links_allowed === 0 && !isStaff) {
             const textWithoutGifs = text.replace(/\[gif:https?:\/\/[^\]]+\]/gi, '');
@@ -1150,6 +1176,22 @@ class ChatServer {
         } catch { return false; }
         this.sendTo(ws, { type: 'system', message: 'This channel has IP approval mode enabled. Commands work once the streamer approves you.' });
         return true;
+    }
+
+    /**
+     * Before a line is judged in a sub-only room: have the sender's subscription answer. Asks Live
+     * (briefly) when there is none yet or when a cached "no" is a few seconds old (they may have just
+     * subscribed); a "yes" is served from the cache. Nothing is asked outside sub-only rooms.
+     */
+    async _warmSubOnly(client) {
+        if (!client || !client.user) return;
+        const modStreamId = client.streamId || this._moderationStreamFor(client);
+        if (!modStreamId || !this._getChannelChatSettings(modStreamId).sub_only) return;
+        if (permissions.canModerateStream(client.user, modStreamId)) return;
+        const ownerId = ctx.getStreamById(modStreamId)?.user_id || null;
+        if (!ownerId || Number(ownerId) === Number(client.user.id)) return;
+        const state = ctx.subscriberState(client.user.id, ownerId);
+        if (state !== true) await ctx.ensureSubscriber(client.user.id, ownerId, { maxAgeMs: state === false ? 5000 : 0 });
     }
 
     /** /me and /tts put text in the room: the same rules as a chat line. */
@@ -1542,7 +1584,7 @@ class ChatServer {
                     message: `Commands: /help, /tts <message>, /color <#hex>, /viewers, /uptime, /me <action>, /paste <content>` +
                         `\nMedia: !sr/!yt/!youtube/!req/!request <url>, !queue, !nowplaying` +
                         (this.canModerate(client)
-                            ? `\nMod: /ban <user>, /unban <user>, /timeout <user> [seconds], /clear, /slow <seconds>, /skiptts [id], /cleartts`
+                            ? `\nMod: /ban <user>, /unban <user>, /timeout <user> [seconds], /clear (screens only), /slow <seconds|off>, /subonly [off], /skiptts [id], /cleartts`
                             : ''),
                 });
                 break;
@@ -1558,6 +1600,7 @@ class ChatServer {
                         type: 'tts',
                         username: client.user?.display_name || client.anonId,
                         core_username: client.user?.username || null,
+                        user_id: client.user?.id || null,
                         message: args,
                         timestamp: new Date().toISOString(),
                     };
@@ -1651,6 +1694,7 @@ class ChatServer {
                     type: 'chat',
                     username,
                     core_username: client.user?.username || null,
+                    user_id: client.user?.id || null,
                     role: client.user?.role || 'anon',
                     message: `* ${username} ${args}`,
                     is_action: true,
@@ -1694,8 +1738,11 @@ class ChatServer {
             }
 
             case 'clear':
+                // Twitch semantics: every screen in the room is cleared, nothing is deleted. Removing
+                // lines for good is a purge (dashboard) or a delete.
                 if (this.canModerate(client)) {
                     this._broadcastToRoom(client, { type: 'clear' });
+                    this.sendTo(ws, { type: 'system', message: 'Chat cleared on screen; messages stay in history — use purge to remove them.' });
                     this.logChatModeration(client, client.streamId ? 'clear_chat' : 'clear_global_chat');
                 } else {
                     this.sendTo(ws, { type: 'system', message: 'You do not have permission.' });
@@ -1703,41 +1750,25 @@ class ChatServer {
                 break;
 
             case 'slow': {
-                if (this.canModerate(client)) {
-                    let seconds;
-                    if (args === 'off' || args === 'disable' || args === '0') {
-                        seconds = 0;
-                    } else {
-                        seconds = parseInt(args);
-                        if (!Number.isFinite(seconds) || seconds < 0) seconds = 3;
-                    }
-                    // Per-stream slow mode (not global)
-                    if (client.streamId) {
-                        this.slowModeByStream.set(client.streamId, seconds > 0 ? seconds * 1000 : 0);
-                        // Persist (by Live, or here once Chat writes channel_moderation_settings: live-context effects)
-                        try {
-                            const stream = ctx.getStreamById(client.streamId);
-                            if (stream?.channel_id) {
-                                ctx.effects.updateChannelModerationSettings(stream.channel_id, { slow_mode_seconds: seconds }, client.user?.id || null).catch(() => { /* non-critical */ });
-                            }
-                        } catch { /* non-critical */ }
-                    }
-                    // Dedicated slowmode event so clients can show/hide UI
-                    this._broadcastToRoom(client, {
-                        type: 'slowmode',
-                        seconds,
-                    });
-                    const msg = seconds > 0
-                        ? `Slow mode enabled: ${seconds}s between messages`
-                        : 'Slow mode disabled.';
-                    this._broadcastToRoom(client, {
-                        type: 'system',
-                        message: msg,
-                    });
-                    this.logChatModeration(client, 'slowmode_update', { seconds });
+                if (!this.canModerate(client)) { this.sendTo(ws, { type: 'system', message: 'You do not have permission.' }); break; }
+                let seconds;
+                if (args === 'off' || args === 'disable' || args === '0') {
+                    seconds = 0;
                 } else {
-                    this.sendTo(ws, { type: 'system', message: 'You do not have permission.' });
+                    seconds = parseInt(args);
+                    if (!Number.isFinite(seconds) || seconds < 0) seconds = 3;
                 }
+                this._setChannelModes(ws, client, { slow_mode_seconds: seconds }, 'slow mode')
+                    .then((ok) => { if (ok) this.logChatModeration(client, 'slowmode_update', { seconds }); });
+                break;
+            }
+
+            case 'subonly': {
+                // /subonly [on] · /subonly off — the streamer, channel mods and chat staff.
+                if (!this.canModerate(client)) { this.sendTo(ws, { type: 'system', message: 'You do not have permission.' }); break; }
+                const off = ['off', 'disable', '0', 'false', 'no'].includes(String(args || '').trim().toLowerCase());
+                this._setChannelModes(ws, client, { sub_only: off ? 0 : 1 }, 'sub-only mode')
+                    .then((ok) => { if (ok) this.logChatModeration(client, 'subonly_update', { enabled: !off }); });
                 break;
             }
 
@@ -2297,6 +2328,33 @@ class ChatServer {
     }
 
     /**
+     * Public chat and blocks (network-blocks.js, one-way): the subjects who blocked the author of a
+     * line frame (chat, /me, /tts and its audio), or null — the usual case, everyone gets it.
+     * Computed once per frame object, however many rooms it goes to.
+     */
+    _blockersOf(data) {
+        if (!data || typeof data !== 'object' || !LINE_FRAMES.has(data.type)) return null;
+        if (this._blockMemo.has(data)) return this._blockMemo.get(data);
+        let out = null;
+        try {
+            let authorId = data.user_id || null;
+            if (!authorId && data.type === 'tts-audio' && /^user:/.test(String(data.sender_key || ''))) {
+                authorId = ctx.getUserByUsername(String(data.sender_key).slice(5))?.id || null;
+            }
+            const subject = authorId ? db.subjectFor(authorId) : null;
+            const list = subject ? networkBlocks.blockersOf(subject) : [];
+            if (list.length) out = new Set(list);
+        } catch { out = null; }
+        this._blockMemo.set(data, out);
+        return out;
+    }
+
+    /** Does this socket's person not get the frame (they blocked its author)? */
+    _blockedFor(client, blockers) {
+        return !!(blockers && client.user && blockers.has(this._subjectOfUser(client.user)));
+    }
+
+    /**
      * Deliver to the room a client is in: its stream room when in a stream, its channel room when
      * in an offline channel chat, else pure global chat. broadcastToStream(null) would reach every
      * client without a stream — global chat AND every other channel's offline room.
@@ -2309,8 +2367,9 @@ class ChatServer {
 
     broadcastToStream(streamId, data) {
         const msg = JSON.stringify(data);
+        const blockers = this._blockersOf(data);
         for (const [ws, client] of this.clients) {
-            if (client.streamId === streamId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) {
+            if (client.streamId === streamId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !this._blockedFor(client, blockers)) {
                 ws.send(msg);
             }
         }
@@ -2324,8 +2383,10 @@ class ChatServer {
      */
     broadcastToChannelRoom(channelUserId, streamId, data) {
         const msg = JSON.stringify(data);
+        const blockers = this._blockersOf(data);
         for (const [ws, client] of this.clients) {
             if (ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > MAX_SEND_BACKPRESSURE) continue;
+            if (this._blockedFor(client, blockers)) continue;
             const inChannel = channelUserId && client.channelUserId === channelUserId;
             const inStream = streamId && client.streamId === streamId;
             if (inChannel || inStream) ws.send(msg);
@@ -2343,8 +2404,9 @@ class ChatServer {
         try { username = ctx.getUserById(channelUserId)?.username; } catch { /* ignore */ }
         if (!username) return;
         const globalMsg = JSON.stringify({ ...data, stream_channel: username, source_channel: username });
+        const blockers = this._blockersOf(data);
         for (const [ws, client] of this.clients) {
-            if (!client.streamId && !client.channelUserId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) {
+            if (!client.streamId && !client.channelUserId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !this._blockedFor(client, blockers)) {
                 ws.send(globalMsg);
             }
         }
@@ -2352,10 +2414,11 @@ class ChatServer {
 
     broadcastGlobal(data) {
         const msg = JSON.stringify(data);
+        const blockers = this._blockersOf(data);
         for (const [ws, client] of this.clients) {
             // Pure global clients only (see forwardToGlobal) — channel/stream viewers get
             // global activity via their dedicated cross-feed socket, not their main one.
-            if (!client.streamId && !client.channelUserId && !client.roomId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) {
+            if (!client.streamId && !client.channelUserId && !client.roomId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !this._blockedFor(client, blockers)) {
                 ws.send(msg);
             }
         }
@@ -2434,7 +2497,9 @@ class ChatServer {
             source_managed_id: info.managedId,
             source_is_live: 1, // this path only fires for a live send
         });
+        const blockers = this._blockersOf(data);
         for (const [ws, client] of this.clients) {
+            if (this._blockedFor(client, blockers)) continue;
             // Only PURE global clients (no stream AND no channel) — otherwise an
             // offline-channel viewer's main socket (streamId null, channelUserId set)
             // would render this via addChatMessage AND get it again as a cross-feed on
@@ -2469,9 +2534,10 @@ class ChatServer {
                 source_channel: stream.username || null,
                 source_is_live: 1,
             });
+            const blockers = this._blockersOf(data);
             for (const [ws, client] of this.clients) {
                 if (client.streamId && client.streamId !== streamId && siblingIds.has(client.streamId)
-                    && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) {
+                    && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !this._blockedFor(client, blockers)) {
                     ws.send(payload);
                 }
             }
@@ -2482,7 +2548,11 @@ class ChatServer {
         if (!Array.isArray(ids) || ids.length === 0) return;
         const payload = { type: 'delete-messages', ids };
         if (streamId) {
-            this.broadcastToStream(streamId, payload);
+            // The stream's room, the rest of its channel room (other slots, the offline room, a
+            // channel popout) and the global feed: everywhere the lines were shown.
+            let ownerId = null;
+            try { ownerId = ctx.getStreamById(streamId)?.user_id || null; } catch { ownerId = null; }
+            this.broadcastToChannelRoom(ownerId, streamId, payload);
             this.forwardToGlobal(streamId, payload);
             return;
         }
@@ -2672,8 +2742,9 @@ class ChatServer {
      */
     broadcastAll(data) {
         const msg = JSON.stringify(data);
-        for (const [ws] of this.clients) {
-            if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) {
+        const blockers = this._blockersOf(data);
+        for (const [ws, client] of this.clients) {
+            if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !this._blockedFor(client, blockers)) {
                 ws.send(msg);
             }
         }
@@ -2717,6 +2788,98 @@ class ChatServer {
                 }
             }
         } catch { /* non-critical */ }
+    }
+
+    /**
+     * A room's slow mode in ms: its channel's saved slow_mode_seconds (channel moderation settings,
+     * the dashboard's value and /slow's). Read from the policy cache, so a restart keeps it.
+     */
+    slowModeMs(streamId) {
+        if (!streamId) return 0;
+        return Math.max(0, parseInt(this._getChannelChatSettings(streamId).slow_mode_seconds, 10) || 0) * 1000;
+    }
+
+    /** streamId → slow mode ms for the streams with sockets here (Live's presence read). */
+    get slowModeByStream() {
+        const out = new Map();
+        for (const [, c] of this.clients) if (c.streamId && !out.has(c.streamId)) out.set(c.streamId, this.slowModeMs(c.streamId));
+        return out;
+    }
+
+    /** The channel a client's room belongs to: { channel, ownerId } or null (global chat). */
+    async _channelOfRoom(client) {
+        const modStreamId = client.streamId || this._moderationStreamFor(client);
+        const stream = modStreamId ? ctx.getStreamById(modStreamId) : null;
+        const ownerId = (stream && stream.user_id) || client.channelUserId || null;
+        let channel = stream && stream.channel_id ? ctx.getChannelById(stream.channel_id) : null;
+        if (!channel && ownerId) channel = await ctx.ensureChannelForUser(ownerId);
+        return channel ? { channel, ownerId: channel.user_id || ownerId } : null;
+    }
+
+    _modesOf(settings) {
+        return { slow: Math.max(0, parseInt(settings && settings.slow_mode_seconds, 10) || 0), sub: settings && Number(settings.sub_only) ? 1 : 0 };
+    }
+
+    /**
+     * /slow and /subonly. The channel's saved setting is the truth: it is written where the table's
+     * authority says (Live's effect, or here once Chat writes channel_moderation_settings), then the
+     * channel's whole room hears it (every live slot, the offline room, popouts). Nothing changes when
+     * the write fails. → true when saved.
+     */
+    async _setChannelModes(ws, client, fields, label) {
+        let room = null;
+        try { room = await this._channelOfRoom(client); } catch { room = null; }
+        if (!room) { this.sendTo(ws, { type: 'system', message: `The ${label} is set per channel: use it in a channel's chat.` }); return false; }
+        const id = Number(room.channel.id);
+        // While the write runs, policy reads of this channel are not announced (one in flight may
+        // still carry the old value); the command announces the result itself.
+        this._modeWrites.set(id, (this._modeWrites.get(id) || 0) + 1);
+        try {
+            await ctx.effects.updateChannelModerationSettings(id, fields, client.user ? client.user.id : null);
+        } catch (err) {
+            this.sendTo(ws, { type: 'system', message: err && err.status === 403 ? 'You do not have permission.' : `Could not change the ${label} right now. Try again.` });
+            return false;
+        } finally {
+            const n = (this._modeWrites.get(id) || 1) - 1;
+            if (n > 0) this._modeWrites.set(id, n); else this._modeWrites.delete(id);
+        }
+        const next = this._modesOf(ctx.getChannelModerationSettings(id));
+        if (fields.slow_mode_seconds !== undefined) next.slow = Math.max(0, parseInt(fields.slow_mode_seconds, 10) || 0);
+        if (fields.sub_only !== undefined) next.sub = fields.sub_only ? 1 : 0;
+        this._announcedModes.set(id, next);
+        // A command is always answered in the room, even when the value did not change.
+        this._announceModes(room.ownerId, client.streamId, { slow: fields.slow_mode_seconds !== undefined ? -1 : next.slow, sub: fields.sub_only !== undefined ? -1 : next.sub }, next);
+        return true;
+    }
+
+    /** Tell a channel's room what changed: the slowmode / subonly frame and a system line for each. */
+    _announceModes(ownerUserId, streamId, prev, next) {
+        if (!ownerUserId && !streamId) return;
+        const say = (frame) => this.broadcastToChannelRoom(ownerUserId || null, streamId || null, frame);
+        if (prev.slow !== next.slow) {
+            say({ type: 'slowmode', seconds: next.slow });
+            say({ type: 'system', message: next.slow > 0 ? `Slow mode enabled: ${next.slow}s between messages` : 'Slow mode disabled.' });
+        }
+        if (prev.sub !== next.sub) {
+            say({ type: 'subonly', enabled: !!next.sub });
+            say({ type: 'system', message: next.sub ? 'Sub-only mode enabled: only subscribers and moderators can chat.' : 'Sub-only mode disabled.' });
+        }
+    }
+
+    /**
+     * A channel's settings were read anew (live-context.onChannelSettings): when its slow mode or
+     * sub-only mode differs from what its room was last told (the dashboard changed it), tell the
+     * room. The first read after a start only records the values.
+     */
+    _channelSettingsSeen(channelId, settings) {
+        const id = Number(channelId);
+        if (!id || this._modeWrites.has(id)) return;
+        const next = this._modesOf(settings);
+        const prev = this._announcedModes.get(id);
+        this._announcedModes.set(id, next);
+        if (!prev || (prev.slow === next.slow && prev.sub === next.sub)) return;
+        const channel = ctx.getChannelById(id);
+        if (channel && channel.user_id) this._announceModes(channel.user_id, null, prev, next);
     }
 
     /**

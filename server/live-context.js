@@ -34,9 +34,13 @@
  * channels       getChannelById, getChannelByUserId (sync) · ensureChannelForUser(uid),
  *                createChannel(uid) (effect)
  * policy         getChannelModerationSettings(channelId), isChannelModerator(uid, channelId),
- *                channelLanguage(channelUserId), getChannelAlertSoundsByUser(uid) · invalidateChannel
+ *                channelLanguage(channelUserId), getChannelAlertSoundsByUser(uid) · invalidateChannel,
+ *                reloadPolicy(channelId) (a fresh read after a write), onChannelSettings(fn)
+ *                (fn(channelId, settings) whenever a channel's settings are read anew)
  * bans           isUserBanned(uid, streamId), getIpBan(ip, streamId), isIpBanned(ip, streamId)
  * follows        isFollowing(followerId, streamerId)
+ * subscriptions  isSubscriber(uid, streamerId), subscriberState(…) → true | false | null (unknown),
+ *                ensureSubscriber(…) (sub-only chat; Live's active channel subscriptions)
  * approvals      isIpApproved(channelId, ip), approveIp(channelId, ip, by, source) (effect)
  * decor          getCosmeticProfile(uid), getTagProfile(uid), ensureDecor(ids)
  * settings       getSetting(key), ensureSettings(), setSettings(map, actor) (effect)
@@ -65,7 +69,10 @@ const TTL = {
     settings: 30_000,
     bans: 10_000,
     streamRow: 30_000,
+    subs: 60_000,
 };
+// A subscription answer older than this is not used at all (sub-only fails closed while Live is away).
+const SUB_MAX_STALE_MS = 10 * 60_000;
 const WARM_TIMEOUT_MS = 2500;
 const PAGE = 1000;
 
@@ -113,6 +120,7 @@ function defaultModerationSettings(channelId) {
         sound_max_speed: 3.0,
         sound_min_pitch_cents: -1200,
         sound_max_pitch_cents: 1200,
+        sub_only: 0,
     };
 }
 
@@ -328,9 +336,22 @@ async function createChannel(userId) {
 
 // ── Channel policy: moderation settings, moderators, language, alert sounds ──────────────────
 
+// Everyone who wants to know when a channel's settings were read anew (the chat server announces a
+// slow mode or sub-only mode the dashboard changed). Called with every fresh read; the listener
+// compares with what it last saw.
+const _settingsListeners = new Set();
+function onChannelSettings(fn) { _settingsListeners.add(fn); return () => _settingsListeners.delete(fn); }
+function _emitSettings(channelId, settings) {
+    for (const fn of _settingsListeners) {
+        try { fn(Number(channelId), settings || defaultModerationSettings(channelId)); } catch (err) { console.warn('[LiveContext] channel settings listener:', err.message); }
+    }
+}
+
 const _policy = new Swr(TTL.policy, async (channelId) => {
     const data = await read(`/channels/${channelId}/policy`);
     if (data.channel) upsertRows('ctx_channels', CHANNEL_COLS, [data.channel]);
+    // While Chat writes the settings itself, Live's copy is a mirror that may lag: not announced.
+    if (!_chatWrites('channel_moderation_settings')) _emitSettings(channelId, data.settings || defaultModerationSettings(channelId));
     return {
         settings: data.settings || null,
         moderators: new Set((data.moderator_ids || []).map(Number)),
@@ -369,7 +390,21 @@ function getChannelAlertSoundsByUser(userId) {
     return pick;
 }
 function ensurePolicy(channelId) { return channelId ? _policy.ensure(Number(channelId)) : Promise.resolve(); }
-function invalidateChannel(channelId) { if (channelId) _policy.invalidate(Number(channelId)); }
+function invalidateChannel(channelId) {
+    if (!channelId) return;
+    _policy.invalidate(Number(channelId));
+    if (_chatWrites('channel_moderation_settings')) _emitSettings(channelId, getChannelModerationSettings(channelId));
+}
+/**
+ * A fresh policy read that starts after the call (Chat just had Live write a setting): a load already
+ * in flight may have left before the write, so it is waited for and followed by another.
+ */
+function reloadPolicy(channelId) {
+    const k = Number(channelId);
+    if (!k) return Promise.resolve();
+    const inflight = _policy.inflight.get(k);
+    return (inflight ? inflight.catch(() => {}) : Promise.resolve()).then(() => _policy.refresh(k));
+}
 
 // ── Bans (Live's `bans`: user, IP and CIDR rows) ────────────────────────────────────────────
 
@@ -468,6 +503,39 @@ const _follows = new Swr(TTL.follows, async (userId) => new Set(((await read(`/u
 function isFollowing(followerId, streamerId) {
     const s = followerId ? _follows.peek(Number(followerId)) : undefined;
     return !!(s && s.has(Number(streamerId)));
+}
+
+// Sub-only chat: does this person hold an ACTIVE subscription to the streamer's channel (Live's
+// subscriptions, GET /subscriber)? Network VIP does not count. Cached per (user, streamer) for a
+// minute; an answer older than SUB_MAX_STALE_MS, or none yet, is unknown (null), which sub-only
+// treats as "no": it fails closed when Live cannot be asked.
+const subKey = (userId, streamerId) => `${Number(userId)}|${Number(streamerId)}`;
+const _subs = new Swr(TTL.subs, async (key) => {
+    const [userId, streamerId] = key.split('|');
+    return !!(await read(`/subscriber?user_id=${userId}&streamer_id=${streamerId}`)).subscriber;
+});
+function subscriberState(userId, streamerId) {
+    if (!userId || !streamerId) return false;
+    const key = subKey(userId, streamerId);
+    const hit = _subs.map.get(key);
+    const age = hit ? Date.now() - hit.at : Infinity;
+    if (age > TTL.subs) _subs.refresh(key).catch(() => {});
+    return age > SUB_MAX_STALE_MS ? null : hit.value;
+}
+function isSubscriber(userId, streamerId) { return subscriberState(userId, streamerId) === true; }
+/** Ask Live when the cached answer is missing or older than `maxAgeMs`; waits at most `timeoutMs`. → true | false | null */
+async function ensureSubscriber(userId, streamerId, { maxAgeMs = TTL.subs, timeoutMs = 2000 } = {}) {
+    if (!userId || !streamerId) return false;
+    const key = subKey(userId, streamerId);
+    const hit = _subs.map.get(key);
+    if (hit && Date.now() - hit.at <= maxAgeMs) return hit.value;
+    let timer;
+    await Promise.race([
+        _subs.refresh(key).catch((err) => console.warn(`[LiveContext] subscriber ${key}: ${err.message}`)),
+        new Promise((r) => { timer = setTimeout(r, timeoutMs); if (timer.unref) timer.unref(); }),
+    ]);
+    clearTimeout(timer);
+    return subscriberState(userId, streamerId);
 }
 
 const _approvals = new Swr(TTL.approval, async (key) => {
@@ -629,6 +697,7 @@ function invalidateUser(userId) {
     for (const [k, v] of _auth) if (v.userId === id) _auth.delete(k);
     _decor.invalidate(id);
     _follows.invalidate(id);
+    for (const k of [..._subs.map.keys()]) if (k.startsWith(`${id}|`)) _subs.delete(k);
 }
 
 // ── Warm-up (connect / join) ─────────────────────────────────────────────────────────────────
@@ -655,6 +724,10 @@ async function warm({ user, streamId, channelUserId, ip } = {}) {
         await Promise.all(tasks.map((t) => Promise.resolve(t).catch(() => {})));
         const policy = channel ? _policyFor(channel.id) : null;
         if (policy && policy.settings && policy.settings.ip_approval_mode && ip) await _approvals.ensure(`${channel.id}|${ip}`).catch(() => {});
+        // Sub-only room: the viewer's subscription answer, so their first line does not wait for it.
+        if (channel && user && user.id && ownerId && Number(ownerId) !== Number(user.id) && getChannelModerationSettings(channel.id).sub_only) {
+            await ensureSubscriber(user.id, ownerId).catch(() => {});
+        }
     })();
     await Promise.race([job.catch(() => {}), new Promise((r) => setTimeout(r, WARM_TIMEOUT_MS).unref?.())]);
 }
@@ -806,11 +879,19 @@ const effects = {
     ban: (body) => effect('ban', body).then((r) => invalidateBans().then(() => r)),
     // /slow and alert sounds: written by Live while it owns channel_moderation_settings, here once Chat
     // does (C-04; the callers already checked the moderator / the channel owner, as Live re-checks).
+    // The saved value is what chat enforces: at 'live' the policy is read again (awaited) before the
+    // caller answers, so the next line already follows it. Chat sets slow_mode_seconds and sub_only.
     updateChannelModerationSettings: (channelId, fields, actorUserId) => {
-        if (!_chatWrites('channel_moderation_settings')) return effect('channel-settings', { channel_id: channelId, fields, actor_user_id: actorUserId }).then((r) => { invalidateChannel(channelId); return r; });
+        const f = {};
+        if (fields && fields.slow_mode_seconds !== undefined) f.slow_mode_seconds = Math.max(0, parseInt(fields.slow_mode_seconds, 10) || 0);
+        if (fields && fields.sub_only !== undefined) f.sub_only = fields.sub_only ? 1 : 0;
+        if (!channelId || !Object.keys(f).length) return Promise.reject(new LiveError(400, 'no chat-settable fields'));
+        if (!_chatWrites('channel_moderation_settings')) {
+            return effect('channel-settings', { channel_id: channelId, fields: f, actor_user_id: actorUserId })
+                .then((r) => reloadPolicy(channelId).catch(() => {}).then(() => r));
+        }
         return Promise.resolve().then(() => {
-            if (!channelId || !fields || fields.slow_mode_seconds === undefined) throw new LiveError(400, 'no chat-settable fields');
-            db.upsertChannelModerationSettings(Number(channelId), { slow_mode_seconds: Math.max(0, parseInt(fields.slow_mode_seconds, 10) || 0) });
+            db.upsertChannelModerationSettings(Number(channelId), f);
             return { ok: true };
         });
     },
@@ -860,7 +941,9 @@ module.exports = {
     getChannelById, getChannelByUserId, ensureChannelForUser, createChannel,
     // policy
     getChannelModerationSettings, isChannelModerator, channelLanguage, getChannelAlertSoundsByUser, ensurePolicy, invalidateChannel,
-    defaultModerationSettings,
+    reloadPolicy, onChannelSettings, defaultModerationSettings,
+    // subscriptions (sub-only chat)
+    isSubscriber, subscriberState, ensureSubscriber,
     // bans, follows, approvals, decor
     isUserBanned, getIpBan, isIpBanned, invalidateBans, refreshBans,
     isFollowing, isIpApproved, approveIp, invalidateApprovals,
@@ -873,7 +956,7 @@ module.exports = {
     // tests
     _setFetch(fn) { _fetch = fn; },
     _reset() {
-        _policy.clear(); _follows.clear(); _approvals.clear(); _decor.clear(); _auth.clear(); _anon.clear(); _anonSeen.clear(); _streamFetch.clear();
+        _policy.clear(); _follows.clear(); _approvals.clear(); _decor.clear(); _auth.clear(); _anon.clear(); _anonSeen.clear(); _streamFetch.clear(); _subs.clear();
         _bans = { rows: [], version: null, at: 0, cidr: [] }; _settings = { values: {}, at: 0 }; _lastRun.clear();
     },
 };

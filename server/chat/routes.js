@@ -17,6 +17,20 @@ const ctx = require('../live-context');
 const { optionalAuth, requireAuth } = require('../auth/auth');
 const permissions = require('../auth/permissions');
 const historyStore = require('./history-store');
+const networkBlocks = require('./network-blocks');
+
+/**
+ * A signed-in reader does not get the lines of people they blocked on the network (one-way; only
+ * their own view: network-blocks.js). Pages and cursor reads alike; latest_id and deleted_ids stay
+ * the room's, so the reader's cursor moves on as everyone's does. Such answers are per reader.
+ */
+function withoutBlocked(req, res, rows) {
+    if (!req.user) return rows;
+    res.set('Cache-Control', 'private, no-store');
+    const hidden = networkBlocks.blockedUserIds(req.user);
+    if (!hidden.size) return rows;
+    return rows.filter((m) => !(m.user_id && hidden.has(Number(m.user_id))));
+}
 
 const router = express.Router();
 
@@ -481,6 +495,7 @@ router.get('/global/history', optionalAuth, async (req, res) => {
         const out = afterId != null
             ? historyStore.delta('global', { afterId, limit, channelUsername })
             : historyStore.page('global', { limit, before, channelUsername });
+        out.messages = withoutBlocked(req, res, out.messages);
         await loadDecor(out.messages);
         out.messages = publicRows(enrichMessagesWithCosmetics(hydrateReplies(out.messages.map((x) => ({ ...x })))));
         res.json(out);
@@ -579,6 +594,7 @@ router.get('/:streamId/history', optionalAuth, async (req, res) => {
         let complete = true;
         if (afterId != null) { complete = rows.length <= limit; rows = rows.slice(0, limit); } else rows.reverse();
         const latest_id = rows.reduce((m, x) => (x.id > m ? x.id : m), 0) || (afterId || 0);
+        rows = withoutBlocked(req, res, rows);
         await loadDecor(rows);
         const messages = publicRows(enrichMessagesWithCosmetics(hydrateReplies(rows)));
 
@@ -623,6 +639,7 @@ router.get('/channel/:userId/history', optionalAuth, async (req, res) => {
         const out = req.query.after_id != null
             ? historyStore.delta(room, { afterId: req.query.after_id, limit: req.query.limit })
             : historyStore.page(room, { limit: req.query.limit, before: req.query.before });
+        out.messages = withoutBlocked(req, res, out.messages);
         await loadDecor(out.messages);
         out.messages = publicRows(enrichMessagesWithCosmetics(hydrateReplies(out.messages.map((x) => ({ ...x })))));
         let liveSlots = [], channel = null;
@@ -718,14 +735,25 @@ router.delete('/admin/purge', requireAuth, async (req, res) => {
 
         const result = db.deleteChatMessagesByTimeRange(effectiveStreamId, from, to, req.user.display_name || req.user.username);
 
-        // Broadcast delete event to live chat
+        // Every surface that showed those lines: the stream's sockets get the range (Live's chat.js
+        // drops it by time, with its "purged" notice) and, by id, the rest of the channel room (other
+        // slots, the offline room, a channel popout) and the global feed. Cursor reads report them
+        // in deleted_ids (history-store.js).
         try {
             const chatServer = require('./chat-server');
             const payload = { type: 'purge', streamId: effectiveStreamId, from, to, by: req.user.display_name };
+            const ids = (result && result.ids) || [];
+            const gone = { type: 'delete-messages', ids };
             if (effectiveStreamId) {
                 chatServer.broadcastToStream(effectiveStreamId, payload);
+                if (ids.length) {
+                    const ownerId = ctx.getStreamById(effectiveStreamId)?.user_id || null;
+                    chatServer.broadcastToChannelRoom(ownerId, effectiveStreamId, gone);
+                    chatServer.forwardToGlobal(effectiveStreamId, gone);
+                }
             } else {
                 chatServer.broadcastGlobal(payload);
+                if (ids.length) chatServer.broadcastGlobal(gone);
             }
         } catch { /* chat server may not be initialized */ }
 

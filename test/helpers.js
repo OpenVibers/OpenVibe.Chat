@@ -120,6 +120,8 @@ async function boot({ env = {} } = {}) {
         channels: new Map(),       // id → { id, user_id, title }
         policies: new Map(),       // channelId → { settings, moderator_ids }
         follows: new Map(),        // userId → [streamerIds]
+        subscribers: new Set(),    // `${userId}|${streamerId}`: an active channel subscription
+        subscriberDown: false,     // GET /subscriber answers 503 (Live cannot say)
         approved: new Set(),       // `${channelId}|${ip}`
         bans: [],                  // rows
         settings: { tts_enabled: true, tts_per_user_voices: true, gif_tenor_api_key: '' },
@@ -174,6 +176,12 @@ async function boot({ env = {} } = {}) {
                 return send(200, { users: out });
             }
             if ((m = /^\/users\/(\d+)\/follows$/.exec(q))) return send(200, { streamer_ids: live.follows.get(Number(m[1])) || [] });
+            if (q === '/subscriber') {
+                if (live.subscriberDown) return send(503, { error: 'subscription lookup failed' });
+                const u = Number(url.searchParams.get('user_id')), st = Number(url.searchParams.get('streamer_id'));
+                if (!u || !st) return send(400, { error: 'user_id (or subject) and streamer_id required' });
+                return send(200, { subscriber: live.subscribers.has(`${u}|${st}`), user_id: u, streamer_id: st });
+            }
             if (q === '/users/profile') {
                 const n = url.searchParams.get('username');
                 const u = [...live.users.values()].find((x) => x.username.toLowerCase() === String(n).toLowerCase());
