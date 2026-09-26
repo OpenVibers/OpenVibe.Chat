@@ -7,7 +7,7 @@
  *   GET  /auth/callback  → server-side code exchange, sets the cookies
  *   POST /auth/fedcm     → the shared navbar's FedCM assertion (nonce checked here, signature by the Network)
  *   GET  /auth/logout    → clears the cookies (best-effort refresh revoke)
- *   GET  /auth/me        → the signed-in profile (offline JWT verification)
+ *   GET  /auth/me        → the signed-in profile (offline JWT verification); a guest gets 200 { user: null }
  *   POST /auth/refresh   → rotates tokens with the refresh token
  *
  * Cookies (host-only): ov_token (access JWT, JS-readable for the navbar), ov_refresh (httpOnly,
@@ -175,9 +175,14 @@ function createSessionRoutes({ config, viewers, fetchImpl = globalThis.fetch, lo
     });
 
     router.get('/me', async (req, res) => {
+        res.set('Cache-Control', 'private, no-store');
+        // No credential at all (a guest) is signed out, not an error: the shared navbar asks this on every
+        // page view, and a 401 logged a console error on each (browser check, OpenVibe.Host). A credential
+        // that is present but invalid or expired still answers 401.
+        if (!(req.cookies && req.cookies[ACCESS_COOKIE]) && !req.get('authorization')) return res.json({ user: null });
         const actor = await viewers.resolve(req, { services: false }).catch(() => null);
         if (!actor || actor.kind !== 'user') return res.status(401).json({ error: 'Not authenticated' });
-        res.set('Cache-Control', 'private, no-store').json({ user: actor.user });
+        res.json({ user: actor.user });
     });
 
     router.post('/refresh', async (req, res) => {

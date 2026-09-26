@@ -132,6 +132,18 @@ t('rooms: start one, post and join without JavaScript, private rooms stay privat
     assert.ok(sitemap.includes('/r/coffee-talk') && !sitemap.includes('inner-circle'), 'public rooms only');
 });
 
+t('the session probe: a guest is signed out (200 { user: null }), a bad credential is 401', async () => {
+    const guest = await req('GET', '/auth/me');
+    assert.strictEqual(guest.status, 200, 'no cookie or token at all: not an error');
+    assert.deepStrictEqual(JSON.parse(guest.text), { user: null });
+    assert.strictEqual(guest.headers.get('cache-control'), 'private, no-store');
+    assert.strictEqual((await req('GET', '/auth/me', { headers: { cookie: 'ov_token=expired.or.forged' } })).status, 401, 'a present but invalid cookie');
+    assert.strictEqual((await req('GET', '/auth/me', { headers: { authorization: 'Bearer nope' } })).status, 401, 'a present but invalid bearer token');
+    const me = await req('GET', '/auth/me', { headers: cookie(alice) });
+    assert.strictEqual(me.status, 200);
+    assert.strictEqual(JSON.parse(me.text).user.username, 'alice');
+});
+
 t('sign-in, the Frame, robots, sitemap and /updates', async () => {
     const r = await req('GET', '/auth/login?next=%2Fmessages');
     assert.strictEqual(r.status, 302);
