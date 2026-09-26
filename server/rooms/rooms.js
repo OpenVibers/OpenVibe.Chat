@@ -454,8 +454,10 @@ function detach(room, user, service, resource) {
     ensureSchema();
     if (!user) fail(401, 'rooms.sign_in', 'Sign in first');
     const row = db.get('SELECT * FROM room_attachments WHERE room_id = ? AND service = ? AND resource = ?', [room.id, String(service || ''), String(resource || '').toLowerCase()]);
+    // Refused before "not attached": otherwise a member could tell which attachments exist (only the
+    // owner may list them) from 403 versus { removed: false }.
+    if (!access(room, user).manage && !(row && row.attached_by === user.id)) fail(403, 'rooms.not_owner', 'Only the room\'s owner, or whoever attached it, detaches it');
     if (!row) return { removed: false };
-    if (!access(room, user).manage && row.attached_by !== user.id) fail(403, 'rooms.not_owner', 'Only the room\'s owner, or whoever attached it, detaches it');
     db.run('DELETE FROM room_attachments WHERE room_id = ? AND service = ? AND resource = ?', [room.id, row.service, row.resource]);
     return { removed: true };
 }
