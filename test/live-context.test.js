@@ -2,8 +2,8 @@
 /**
  * The Live adapter's promises: a chat message makes no read call to Live (only its one effect),
  * warm caches answer while Live is slow or down (stale values, no gaps on invalidation), and ban
- * evaluation matches Live's SQL — including the TEXT comparison of expires_at that makes an ISO
- * timeout outlast its duration until the end of that UTC day.
+ * evaluation matches Live's SQL, except that a ban ends at its expires_at instant: Live's TEXT
+ * comparison kept an ISO timeout ('…T…Z') active until the end of that UTC day.
  */
 const assert = require('assert');
 const { boot, suite } = require('./helpers');
@@ -74,29 +74,45 @@ t('invalidation never leaves a gap: a moderator stays a moderator while the poli
     assert.strictEqual(h.ctx.isChannelModerator(mod.id, channelId), false);
 });
 
-t('bans: user/stream/site scope, CIDR, and Live’s TEXT comparison of expires_at', async () => {
+t('bans: user/stream/site scope, CIDR, and expires_at read as an instant (ISO or SQLite format)', async () => {
     const past = h.sqliteNow(-60e3);
     const future = h.sqliteNow(3600e3);
     h.live.addBan({ user_id: alice.id, stream_id: streamId, expires_at: future });
     h.live.addBan({ user_id: mod.id, expires_at: past });
     h.live.addBan({ ip_address: '2001:db8:1::/48' });
-    // A timeout written as ISO (what /timeout stores) a minute AGO still sorts after today's
-    // 'YYYY-MM-DD HH:MM:SS' ('T' > ' '), so Live treated it as active until the day ended.
+    // A timeout written as ISO (what /timeout stores) a minute AGO sorts after today's
+    // 'YYYY-MM-DD HH:MM:SS' ('T' > ' '), so Live's TEXT comparison kept it active until the day
+    // ended. Chat reads the instant: it is over. One ending in a minute is still on.
     const isoPast = new Date(Date.now() - 60e3).toISOString();
     const other = h.addUser('other');
     h.live.addBan({ user_id: other.id, expires_at: isoPast });
+    const third = h.addUser('third');
+    h.live.addBan({ user_id: third.id, expires_at: new Date(Date.now() + 60e3).toISOString() });
+    const weird = h.addUser('weird');
+    h.live.addBan({ user_id: weird.id, expires_at: 'not a date' });
     await h.ctx.invalidateBans();
     assert.strictEqual(h.ctx.isUserBanned(alice.id, streamId), true);
     assert.strictEqual(h.ctx.isUserBanned(alice.id, 999), false, 'stream ban stays in its stream');
     assert.strictEqual(h.ctx.isUserBanned(mod.id, streamId), false, 'expired');
     assert.strictEqual(h.ctx.isIpBanned('2001:db8:1:ffff::1', null), true);
     assert.strictEqual(h.ctx.isIpBanned('::ffff:10.0.0.1', null), false);
-    if (isoPast.slice(0, 10) === new Date().toISOString().slice(0, 10)) {
-        assert.strictEqual(h.ctx.isUserBanned(other.id, null), true, 'same-day ISO expiry behaves as in Live');
-    }
+    assert.strictEqual(h.ctx.isUserBanned(other.id, null), false, 'an ISO timeout that ended a minute ago is over (Live kept it until midnight UTC)');
+    assert.strictEqual(h.ctx.isUserBanned(third.id, null), true, 'an ISO timeout ending in a minute is on');
+    assert.strictEqual(h.ctx.isUserBanned(weird.id, null), true, 'a value that is not a date keeps Live’s TEXT comparison');
     h.live.clearBans();
     await h.ctx.invalidateBans();
     assert.strictEqual(h.ctx.isUserBanned(alice.id, streamId), false);
+});
+
+t('a ban written through Live is in Chat’s cache when the effect answers, even with a refresh in flight', async () => {
+    const target = h.addUser('target');
+    const inFlight = h.ctx.refreshBans();   // left before the ban is written: it cannot have it
+    await h.ctx.effects.ban({ action: 'ban', user_id: target.id, stream_id: streamId, actor_user_id: mod.id, moderation_stream_id: streamId, reason: 'test', banned_by: mod.id });
+    assert.strictEqual(h.ctx.isUserBanned(target.id, streamId), true, 'in effect by the time the moderator is answered');
+    await inFlight;
+    h.live.clearBans();
+    await h.ctx.invalidateBans();
+    assert.strictEqual(h.ctx.isUserBanned(target.id, streamId), false);
 });
 
 t('followers-only uses the viewer’s warm follow list', async () => {

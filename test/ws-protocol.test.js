@@ -216,8 +216,9 @@ t('moderation: only moderators; /ban goes to Live and takes effect at once', asy
     await h.sleep(1100);
     modWs.sendJson({ type: 'chat', message: '/clear' });
     await aliceWs.next((m) => m.type === 'clear');
-    // /slow: slowmode event + system line to the room, persisted through Live (it applies to
-    // everyone's next message, moderators included — Live's rate limit runs before commands).
+    // /slow: slowmode event + system line to the room, persisted through Live. It applies to
+    // viewers; the room's moderators keep only the 1 s flood limit (the check runs before commands,
+    // so a slowed moderator could not even turn it off).
     await h.sleep(1100);
     modWs.sendJson({ type: 'chat', message: '/slow 5' });
     assert.strictEqual((await aliceWs.next((m) => m.type === 'slowmode')).seconds, 5);
@@ -230,7 +231,13 @@ t('moderation: only moderators; /ban goes to Live and takes effect at once', asy
     for (const a of ['channel_ban', 'channel_unban', 'channel_timeout', 'slowmode_update', 'clear_chat']) assert.ok(actions.includes(a), a);
     const modEv = h.db.all("SELECT event FROM events_outbox WHERE event_type = 'chat.moderation.action'").map((r) => JSON.parse(r.event));
     assert.ok(modEv.length >= 5 && modEv.every((e) => e.visibility === 'internal'));
-    await h.sleep(5100);
+    aliceWs.sendJson({ type: 'chat', message: 'slow one' });
+    await bobWs.next((m) => m.type === 'chat' && m.message === 'slow one');
+    await h.sleep(1100);
+    aliceWs.sendJson({ type: 'chat', message: 'slow two' });
+    await aliceWs.next((m) => m.type === 'system' && m.message === 'Slow down! You are sending messages too fast.');
+    assert.ok(await bobWs.none((m) => m.type === 'chat' && m.message === 'slow two'), 'a viewer is slowed');
+    // The moderator, 1.1 s after /slow 5 (inside the 5 s window), is not.
     modWs.sendJson({ type: 'chat', message: '/slow off' });
     await aliceWs.next((m) => m.type === 'system' && m.message === 'Slow mode disabled.').catch((e) => { console.log('MOD', JSON.stringify(modWs.all.slice(-6))); throw e; });
     modWs.close();

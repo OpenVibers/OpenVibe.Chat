@@ -376,11 +376,22 @@ function invalidateChannel(channelId) { if (channelId) _policy.invalidate(Number
 let _bans = { rows: [], version: null, at: 0, cidr: [] };
 let _bansLoading = null;
 
-// Live compares expires_at with SQLite's CURRENT_TIMESTAMP as TEXT. Timeouts store an ISO string
-// ('…T…Z'), which sorts after the same day's 'YYYY-MM-DD HH:MM:SS'; the comparison is kept
-// byte-for-byte so a ban lasts exactly as long as it did when Live evaluated it.
+// A ban ends at expires_at, read as a UTC instant: /timeout stores an ISO string ('…T…Z'), other
+// writers SQLite's 'YYYY-MM-DD HH:MM:SS'. Live compares the TEXT with CURRENT_TIMESTAMP, where
+// 'T' sorts after ' ', so a 60-second timeout lasted until the end of that UTC day; Chat, which
+// enforces chat bans, ends it on time (parity script, roadmap WS-I task 6). A value that is not a
+// date keeps Live's TEXT comparison.
 function sqliteNow() { return new Date().toISOString().replace('T', ' ').slice(0, 19); }
-function activeBan(r, now) { return r.expires_at == null || String(r.expires_at) > now; }
+const BAN_END_RE = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)(Z|[+-]\d{2}:?\d{2})?$/;
+function banEndsAt(v) {
+    const m = BAN_END_RE.exec(String(v).trim());
+    return m ? Date.parse(`${m[1]}T${m[2]}${m[3] || 'Z'}`) : NaN;
+}
+function activeBan(r, nowMs) {
+    if (r.expires_at == null) return true;
+    const end = banEndsAt(r.expires_at);
+    return Number.isFinite(end) ? end > nowMs : String(r.expires_at) > sqliteNow();
+}
 
 function _normalizeBanIp(ip) {
     let s = String(ip || '').trim();
@@ -418,11 +429,16 @@ async function refreshBans() {
     return _bansLoading;
 }
 function _bansFresh() { if (Date.now() - _bans.at > TTL.bans) refreshBans().catch(() => {}); return _bans; }
-function invalidateBans() { _bans.version = null; _bans.at = 0; return refreshBans(); }
+// A fresh read that starts after the call: a load already in flight may have left before a ban
+// was written, so it is waited for and followed by another.
+function invalidateBans() {
+    const reload = () => { _bans.version = null; _bans.at = 0; return refreshBans(); };
+    return _bansLoading ? _bansLoading.then(reload) : reload();
+}
 
 function isUserBanned(userId, streamId) {
     if (!userId) return false;
-    const now = sqliteNow();
+    const now = Date.now();
     return _bansFresh().rows.some((r) => r.user_id != null && Number(r.user_id) === Number(userId)
         && (r.stream_id == null || Number(r.stream_id) === Number(streamId)) && activeBan(r, now));
 }
@@ -430,7 +446,7 @@ function isUserBanned(userId, streamId) {
 function getIpBan(ip, streamId) {
     const norm = _normalizeBanIp(ip);
     if (!norm) return null;
-    const now = sqliteNow();
+    const now = Date.now();
     const b = _bansFresh();
     const exact = b.rows.find((r) => r.ip_address != null && (r.ip_address === String(ip) || r.ip_address === norm)
         && (r.stream_id == null || Number(r.stream_id) === Number(streamId)) && activeBan(r, now));
@@ -786,7 +802,8 @@ const effects = {
     viewerCount(streamId, count) { if (streamId) _viewerCounts.set(String(streamId), count); },
     viewerSnapshot(streamId, count, chatActivity) { _snapshots.push({ stream_id: streamId, viewer_count: count, chat_messages_5m: chatActivity }); },
     setUserColor: (userId, color) => effect('user-color', { user_id: userId, color }).then((r) => { db.run('UPDATE ctx_users SET profile_color = ? WHERE id = ?', [color, userId]); return r; }),
-    ban: (body) => effect('ban', body).then((r) => { invalidateBans(); return r; }),
+    // The ban is in Chat's cache before the moderator is answered (and before their next check).
+    ban: (body) => effect('ban', body).then((r) => invalidateBans().then(() => r)),
     // /slow and alert sounds: written by Live while it owns channel_moderation_settings, here once Chat
     // does (C-04; the callers already checked the moderator / the channel owner, as Live re-checks).
     updateChannelModerationSettings: (channelId, fields, actorUserId) => {

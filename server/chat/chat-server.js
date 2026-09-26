@@ -384,7 +384,10 @@ class ChatServer {
             // stream id of its own but posts into the live room).
             const slowStreamId = client.streamId || (client.channelUserId ? this._moderationStreamFor(client) : null);
             const streamSlowMs = (slowStreamId && this.slowModeByStream.get(slowStreamId)) || 0;
-            const effectiveLimit = Math.max(this.DEFAULT_RATE_LIMIT_MS, streamSlowMs);
+            // The room's moderators (broadcaster, channel mods, chat staff) are not slowed: they keep
+            // the flood limit only, so they can moderate and turn slow mode off again at once.
+            const slowExempt = streamSlowMs > 0 && !!client.user && permissions.canModerateStream(client.user, slowStreamId);
+            const effectiveLimit = slowExempt ? this.DEFAULT_RATE_LIMIT_MS : Math.max(this.DEFAULT_RATE_LIMIT_MS, streamSlowMs);
             if (now - lastMsg < effectiveLimit) {
                 this.sendTo(ws, { type: 'system', message: 'Slow down! You are sending messages too fast.' });
                 return;

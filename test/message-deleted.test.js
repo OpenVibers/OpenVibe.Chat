@@ -130,6 +130,20 @@ t('a time-range purge (REST) and the auto-delete sweep', async () => {
     assert.strictEqual(r.body.deleted, 2);
     assertDeletion(deletions(from)[0], inRoom);
     assert.ok(!h.db.getChatMessageById(global).is_deleted, 'the other room is untouched');
+    // The dashboard sends ISO instants ('…T…Z'); rows keep 'YYYY-MM-DD HH:MM:SS'. Read as TEXT,
+    // a same-day range matched nothing. Preview, purge and the log filter read both forms.
+    const older = say('s-older', { stream_id: streamId, is_global: 0 });
+    h.db.run('UPDATE chat_messages SET timestamp = ? WHERE id = ?', [h.sqliteNow(-10 * 60e3), older]);
+    const recent = [say('s3', { stream_id: streamId, is_global: 0 }), say('s4', { stream_id: streamId, is_global: 0 })];
+    const range = { streamId, from: new Date(Date.now() - 60e3).toISOString(), to: new Date(Date.now() + 60e3).toISOString() };
+    assert.strictEqual((await h.http('POST', '/api/chat/admin/purge/preview', { token: admin.token, body: range })).body.count, 2);
+    const logs = await h.http('GET', `/api/chat/admin/logs?streamId=${streamId}&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`, { token: admin.token });
+    assert.deepStrictEqual(logs.body.rows.map((m) => m.id).sort(), [...recent].sort(), 'the log filter reads ISO too');
+    from = outboxSeq();
+    const iso = await h.http('DELETE', '/api/chat/admin/purge', { token: admin.token, body: range });
+    assert.strictEqual(iso.body.deleted, 2, iso.text);
+    assertDeletion(deletions(from)[0], recent);
+    assert.ok(!h.db.getChatMessageById(older).is_deleted, 'ten minutes ago is outside the range');
     const expiring = say('ephemeral', { auto_delete_at: h.sqliteNow(-1000) });
     from = outboxSeq();
     const swept = h.db.deleteExpiredChatMessages(500);

@@ -427,11 +427,14 @@ function deleteExpiredChatMessages(limit = 500) {
     return rows;
 }
 
+// Time ranges (purge, its preview, the log filter): the dashboard sends ISO instants ('…T…Z') and
+// rows keep SQLite's 'YYYY-MM-DD HH:MM:SS'. Compared as TEXT, 'T' sorts after ' ', so a range
+// matched nothing on its first day and all of its last; datetime(?) reads both forms as UTC.
 function deleteChatMessagesByTimeRange(streamId, fromTime, toTime, deletedBy) {
     // Global chat is is_global = 1. The ids are read first, in the same transaction, to announce them.
     const where = streamId
-        ? 'stream_id = ? AND timestamp >= ? AND timestamp <= ? AND is_deleted = 0'
-        : 'is_global = 1 AND timestamp >= ? AND timestamp <= ? AND is_deleted = 0';
+        ? 'stream_id = ? AND timestamp >= datetime(?) AND timestamp <= datetime(?) AND is_deleted = 0'
+        : 'is_global = 1 AND timestamp >= datetime(?) AND timestamp <= datetime(?) AND is_deleted = 0';
     const params = streamId ? [streamId, fromTime, toTime] : [fromTime, toTime];
     return transaction(() => {
         const ids = all(`SELECT id FROM chat_messages WHERE ${where}`, params).map(m => m.id);
@@ -449,13 +452,13 @@ function countChatMessagesByTimeRange(streamId, fromTime, toTime) {
     if (streamId) {
         row = get(
             `SELECT COUNT(*) as cnt FROM chat_messages
-             WHERE stream_id = ? AND timestamp >= ? AND timestamp <= ? AND is_deleted = 0`,
+             WHERE stream_id = ? AND timestamp >= datetime(?) AND timestamp <= datetime(?) AND is_deleted = 0`,
             [streamId, fromTime, toTime]
         );
     } else {
         row = get(
             `SELECT COUNT(*) as cnt FROM chat_messages
-             WHERE is_global = 1 AND timestamp >= ? AND timestamp <= ? AND is_deleted = 0`,
+             WHERE is_global = 1 AND timestamp >= datetime(?) AND timestamp <= datetime(?) AND is_deleted = 0`,
             [fromTime, toTime]
         );
     }
@@ -469,8 +472,8 @@ function getChatLogs({ streamId, username, search, from, to, messageType, page =
     if (streamId) { conditions.push('stream_id = ?'); params.push(streamId); }
     if (username) { conditions.push('username LIKE ?'); params.push(`%${username}%`); }
     if (search) { conditions.push('message LIKE ?'); params.push(`%${search}%`); }
-    if (from) { conditions.push('timestamp >= ?'); params.push(from); }
-    if (to) { conditions.push('timestamp <= ?'); params.push(to); }
+    if (from) { conditions.push('timestamp >= datetime(?)'); params.push(from); }
+    if (to) { conditions.push('timestamp <= datetime(?)'); params.push(to); }
     if (messageType) { conditions.push('message_type = ?'); params.push(messageType); }
     if (!includeDeleted) { conditions.push('is_deleted = 0'); }
 
