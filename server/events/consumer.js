@@ -47,7 +47,7 @@ const ctx = require('../live-context');
 
 const CONSUMER = 'chat';
 const INBOX_TABLE = 'chat_event_inbox';
-const TOPICS = Object.freeze(['live.release.deployed', 'network.module.updated', 'network.user.token_valid_after', 'vip.membership.changed', 'network.block.changed']);
+const TOPICS = Object.freeze(['live.release.deployed', 'network.module.updated', 'network.user.token_valid_after', 'vip.membership.changed', 'network.block.changed', 'network.subject.merged']);
 const SUBJECT_RE = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const EVENT_ID_RE = /^evt_[0-9A-HJKMNP-TV-Z]{26}$/;
 const INBOX_KEEP_MS = 35 * 24 * 3600 * 1000;       // Events keeps events 30 days: nothing older can be redelivered
@@ -112,6 +112,14 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
             const p = networkBlocks.payloadOf(event);
             if (!p) return 'ignored:payload';
             return () => (networkBlocks.apply(p, now()) ? (p.active ? 'blocked' : 'unblocked') : 'unchanged');
+        }
+        if (event.event_type === 'network.subject.merged') {
+            // Two accounts became one (ADR-029): the folded-in account's messages, DMs, rooms and blocks are the survivor's.
+            if (event.source !== 'network') return 'ignored:source';
+            const merge = require('../chat/subject-merge');
+            const p = merge.payloadOf(event);
+            if (!p) return 'ignored:payload';
+            return () => merge.apply(p);
         }
         if (event.event_type === 'vip.membership.changed') {
             // A membership started, lapsed or was revoked: drop that member's cached badge answers for
