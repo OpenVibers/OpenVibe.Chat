@@ -1,7 +1,7 @@
 {
  "service": "chat",
- "release": "d4704b221d5ef3291fb0a6cc1a6126057c9f35f3",
- "recorded_at": "2026-09-27T19:07:53.638Z",
+ "release": "4c563fced97c7fbd87c291b883ed27d41fa07092",
+ "recorded_at": "2026-09-27T20:20:56.080Z",
  "note": "N-1 fixture: written by `npm run n-1:record`, replayed by test/n-1.test.js",
  "user_version": 0,
  "schema": [

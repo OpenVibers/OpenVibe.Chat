@@ -1,16 +1,16 @@
 {
  "service": "chat",
- "release": "d4704b221d5ef3291fb0a6cc1a6126057c9f35f3",
- "recorded_at": "2026-09-27T19:07:53.638Z",
+ "release": "4c563fced97c7fbd87c291b883ed27d41fa07092",
+ "recorded_at": "2026-09-27T20:20:56.080Z",
  "note": "N-1 fixture: written by `npm run n-1:record`, replayed by test/n-1.test.js",
  "clients": {
-  "live": "2e6f546444ef378a6e2126702960623635ac97a2"
+  "live": "f0edbc0384fc9a3cf9c5c6e295863cf3391c7411"
  },
  "manifest": {
   "service": "chat",
-  "release": "d4704b221d5e",
-  "released_at": "2026-09-26T17:10:08.000Z",
-  "booted_at": "2026-09-27T19:07:48.592Z",
+  "release": "4c563fced97c",
+  "released_at": "2026-09-27T19:08:15.000Z",
+  "booted_at": "2026-09-27T20:20:51.131Z",
   "contracts_version": "0.57.0",
   "packages": {
    "openvibe-shared": "1.22.0",
@@ -22,11 +22,11 @@
   "components": {
    "shell": {
     "kind": "script",
-    "version": "d4704b221d5e"
+    "version": "4c563fced97c"
    },
    "server": {
     "kind": "server",
-    "version": "d4704b221d5e"
+    "version": "4c563fced97c"
    }
   },
   "assets": {},
@@ -35,7 +35,7 @@
   "contract_ranges": {},
   "metrics_url": "/release-metrics"
  },
- "dynamic_calls": 53,
+ "dynamic_calls": 52,
  "calls": [
   {
    "method": "GET",
