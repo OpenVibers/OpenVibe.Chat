@@ -114,6 +114,7 @@ t('DNS rebinding: public at the check, loopback at the download — refused wher
 t('ratchet: every file that makes an outbound request itself is reviewed', () => {
     const REVIEWED = {
         'server/net/service-auth.js': 'Network JWKS (configured)',
+        'server/chat/account-data.js': 'Network internal API (configured), fixed paths: export parts and deletion confirmations',
         'server/prefs/network-modules.js': 'Network user modules (configured)',
         'server/chat/routes.js': 'GIF providers (fixed hosts)',
         'server/chat/soundboard-service.js': '101soundboards (host allowlist; audio via safeLookup)',

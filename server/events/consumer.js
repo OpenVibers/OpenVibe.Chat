@@ -47,7 +47,7 @@ const ctx = require('../live-context');
 
 const CONSUMER = 'chat';
 const INBOX_TABLE = 'chat_event_inbox';
-const TOPICS = Object.freeze(['live.release.deployed', 'network.module.updated', 'network.user.token_valid_after', 'vip.membership.changed', 'network.block.changed', 'network.subject.merged']);
+const TOPICS = Object.freeze(['live.release.deployed', 'network.module.updated', 'network.user.token_valid_after', 'vip.membership.changed', 'network.block.changed', 'network.subject.merged', 'network.account.export_requested', 'network.account.deleted']);
 const SUBJECT_RE = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const EVENT_ID_RE = /^evt_[0-9A-HJKMNP-TV-Z]{26}$/;
 const INBOX_KEEP_MS = 35 * 24 * 3600 * 1000;       // Events keeps events 30 days: nothing older can be redelivered
@@ -166,6 +166,21 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
         stats.received++;
         stats.last_at = new Date(now()).toISOString();
         stats.last_type = event.event_type;
+        if (event.event_type === 'network.account.export_requested' || event.event_type === 'network.account.deleted') {
+            // Account export and deletion (ADR-033, ../chat/account-data.js): once per export or deletion by its own record,
+            // answered after Network took the part or confirmation, so a failure is redelivered without erasing twice.
+            const onErased = (subjects, ids) => { for (const id of ids) ctx.invalidateUser(id); };
+            return require('../chat/account-data').apply(event, { log, onErased }).then((outcome) => {
+                if (String(outcome).startsWith('ignored:')) stats.ignored++; else stats.applied++;
+                stats.last_outcome = outcome;
+                res.status(200).json({ event_id: event.event_id, duplicate: outcome === 'unchanged', outcome });
+            }, (err) => {
+                stats.failed++;
+                stats.last_error = String(err.message || err).slice(0, 200);
+                log.error(`[Events consumer] ${event.event_id} (${event.event_type}) failed:`, err.message);
+                problem(500, 'chat.event_failed', 'processing failed; it will be retried');
+            });
+        }
         let out;
         try {
             out = apply(event);
