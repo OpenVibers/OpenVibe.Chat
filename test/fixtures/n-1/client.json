@@ -1,16 +1,16 @@
 {
  "service": "chat",
- "release": "4c563fced97c7fbd87c291b883ed27d41fa07092",
- "recorded_at": "2026-09-27T20:20:56.080Z",
+ "release": "88202c14a966a312f05ceda17983cadec9918854",
+ "recorded_at": "2026-09-27T22:05:25.723Z",
  "note": "N-1 fixture: written by `npm run n-1:record`, replayed by test/n-1.test.js",
  "clients": {
-  "live": "f0edbc0384fc9a3cf9c5c6e295863cf3391c7411"
+  "live": "efab01493b4d5d790e96d141f3fe8aa37766a9bd"
  },
  "manifest": {
   "service": "chat",
-  "release": "4c563fced97c",
-  "released_at": "2026-09-27T19:08:15.000Z",
-  "booted_at": "2026-09-27T20:20:51.131Z",
+  "release": "88202c14a966",
+  "released_at": "2026-09-27T22:00:25.000Z",
+  "booted_at": "2026-09-27T22:05:20.815Z",
   "contracts_version": "0.57.0",
   "packages": {
    "openvibe-shared": "1.22.0",
@@ -22,11 +22,11 @@
   "components": {
    "shell": {
     "kind": "script",
-    "version": "4c563fced97c"
+    "version": "88202c14a966"
    },
    "server": {
     "kind": "server",
-    "version": "4c563fced97c"
+    "version": "88202c14a966"
    }
   },
   "assets": {},

@@ -1,7 +1,7 @@
 {
  "service": "chat",
- "release": "4c563fced97c7fbd87c291b883ed27d41fa07092",
- "recorded_at": "2026-09-27T20:20:56.080Z",
+ "release": "88202c14a966a312f05ceda17983cadec9918854",
+ "recorded_at": "2026-09-27T22:05:25.723Z",
  "note": "N-1 fixture: written by `npm run n-1:record`, replayed by test/n-1.test.js",
  "user_version": 0,
  "schema": [
@@ -102,6 +102,7 @@
   "DELETE FROM channel_moderators WHERE channel_id = ? AND user_id = ?",
   "DELETE FROM channel_sounds WHERE id = ?",
   "DELETE FROM dm_blocks WHERE blocker_id = ? AND blocked_id = ?",
+  "DELETE FROM dm_blocks WHERE id = ?",
   "DELETE FROM dm_messages WHERE id = ?",
   "DELETE FROM dm_participants WHERE conversation_id = ? AND user_id = ?",
   "DELETE FROM emotes WHERE id = ?",
@@ -248,6 +249,7 @@
   "SELECT id FROM ctx_streams WHERE is_live = 1",
   "SELECT id FROM ctx_streams WHERE user_id = ? ORDER BY id DESC LIMIT 1",
   "SELECT id FROM ctx_users WHERE subject_id = ?",
+  "SELECT id FROM ctx_users WHERE subject_id = ? ORDER BY id LIMIT 1",
   "SELECT id FROM emotes WHERE id = ?",
   "SELECT id FROM room_messages WHERE room_id = ? AND is_deleted = 0 ORDER BY id",
   "SELECT id FROM user_tags WHERE user_id = ? AND tag_id = ?",
