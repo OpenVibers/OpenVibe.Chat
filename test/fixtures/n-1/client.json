@@ -1,38 +1,41 @@
 {
  "service": "chat",
- "release": "88202c14a966a312f05ceda17983cadec9918854",
- "recorded_at": "2026-09-27T22:05:25.723Z",
+ "release": "a2d100db6ae74616273cfb3d9e96188c68d1cc1f",
+ "recorded_at": "2026-09-27T23:24:33.583Z",
  "note": "N-1 fixture: written by `npm run n-1:record`, replayed by test/n-1.test.js",
  "clients": {
-  "live": "efab01493b4d5d790e96d141f3fe8aa37766a9bd"
+  "live": "06cf38b12faa92ce5ee8bc335ce5f0110b1c6537"
  },
  "manifest": {
   "service": "chat",
-  "release": "88202c14a966",
-  "released_at": "2026-09-27T22:00:25.000Z",
-  "booted_at": "2026-09-27T22:05:20.815Z",
-  "contracts_version": "0.57.0",
+  "release": "a2d100db6ae7",
+  "released_at": "2026-09-27T23:14:50.000Z",
+  "booted_at": "2026-09-27T23:24:28.601Z",
+  "contracts_version": "0.71.0",
   "packages": {
    "openvibe-shared": "1.22.0",
    "openvibe-sdk": "0.11.0",
-   "openvibe-contracts": "0.57.0"
+   "openvibe-contracts": "0.71.0"
   },
   "min_client_release": null,
   "mixed_version_window_hours": 24,
   "components": {
    "shell": {
     "kind": "script",
-    "version": "88202c14a966"
+    "version": "a2d100db6ae7"
    },
    "server": {
     "kind": "server",
-    "version": "88202c14a966"
+    "version": "a2d100db6ae7"
    }
   },
   "assets": {},
   "schema_generation": null,
   "schema_compatible_from": null,
   "contract_ranges": {},
+  "client_generation": null,
+  "min_client_generation": null,
+  "shell": null,
   "metrics_url": "/release-metrics"
  },
  "dynamic_calls": 52,
