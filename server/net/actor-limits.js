@@ -13,9 +13,9 @@
  * hooks at /internal/calls) carry every viewer's chat and are never limited here: a refusal there
  * would drop the whole site's chat, and the WebSocket keeps its own flood control.
  *
- * Reads: every GET/HEAD under /api/chat, /api/dm, /api/tts, /api/sounds (and /api/streams once calls
- * are Chat's) takes CHAT_LIMITS_MINUTE / CHAT_LIMITS_HOUR, 120 and 3000, one budget per API, counted
- * once the caller's token is resolved (identify below). Writes and expensive reads set their own,
+ * Reads: every signed-in GET/HEAD under /api/chat, /api/dm, /api/tts, /api/sounds (and /api/streams once
+ * calls are Chat's) takes CHAT_LIMITS_MINUTE / CHAT_LIMITS_HOUR, 120 and 3000, one budget per API, counted
+ * once the caller's token is resolved (identify below). Signed-out reads keep the per-address limit only. Writes and expensive reads set their own,
  * tighter numbers where they are mounted, after requireAuth. Past a limit the route answers 429
  * problem+json `rate_limited` with Retry-After before it does any work; the refusal is logged once
  * and counted in chat_rate_limited_total{limit,window}. Counters live in this process: a restart
@@ -72,7 +72,10 @@ limits.identify = async function identify(req, res, next) {
  */
 limits.reads = function reads(name, { skip = null } = {}) {
     const limit = limits(name);
-    return (req, res, next) => ((req.method === 'GET' || req.method === 'HEAD') && !(skip && skip(req)) ? limit(req, res, next) : next());
+    // Signed-out reads stay with the per-address limit (900 a minute, app.js): on Live's busiest streams many
+    // viewers share one carrier or campus address, and 120 a minute for all of them would refuse real people.
+    const signedOut = (req) => !personOf(req.user) && !personOf(req.ovActorUser);
+    return (req, res, next) => ((req.method === 'GET' || req.method === 'HEAD') && !signedOut(req) && !(skip && skip(req)) ? limit(req, res, next) : next());
 };
 
 /** Count refusals in this app's registry (chat_rate_limited_total{limit,window}). */

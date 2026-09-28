@@ -3,7 +3,7 @@
  * Per-actor rate limits on the REST API (server/net/actor-limits.js, roadmap WS-R task 4): past its
  * limit one caller gets 429 problem+json `rate_limited` with Retry-After, before the route does any
  * work, while another caller still passes; each API has its own read budget and the window reopens
- * on the clock. A person's API token counts against the person; signed-out callers count by address;
+ * on the clock. A person's API token counts against the person; signed-out reads are left to the per-address limit;
  * media files are left to the per-address limit. Writes have their own, tighter numbers. Health,
  * ready, release.json, metrics and /internal/* are never limited; refusals are logged and counted.
  */
@@ -42,11 +42,9 @@ t('the person\'s API token counts against the person; another API has its own bu
     assert.strictEqual((await h.http('GET', '/api/chat/online?users=alice', { token: alice.token })).status, 200, '/api/chat is another budget');
 });
 
-t('signed-out callers count by address; media files are left to the per-address limit', async () => {
+t('signed-out reads keep only the per-address limit (many viewers share an address); media files too', async () => {
     const from = (ip) => h.http('GET', '/api/chat/online?users=alice', { headers: { 'X-Forwarded-For': ip } });
-    for (let i = 0; i < 3; i++) assert.strictEqual((await from('203.0.113.7')).status, 200);
-    assert.strictEqual((await from('203.0.113.7')).status, 429);
-    assert.strictEqual((await from('203.0.113.8')).status, 200, 'another address still passes');
+    for (let i = 0; i < 8; i++) assert.strictEqual((await from('203.0.113.7')).status, 200, `signed-out read ${i + 1}`);
     for (let i = 0; i < 6; i++) {
         assert.strictEqual((await h.http('GET', '/api/sounds/file/none.mp3', { headers: { 'X-Forwarded-For': '203.0.113.9' } })).status, 404);
     }
@@ -88,7 +86,7 @@ t('refusals are counted in chat_rate_limited_total', async () => {
     const m = (await h.http('GET', '/metrics')).text;
     const lines = m.split('\n').filter((l) => l.includes('chat_rate_limited_total')).join('\n');
     assert.ok(/chat_rate_limited_total\{limit="chat.dm.read",window="minute"\} 2/.test(m), lines);
-    assert.ok(/chat_rate_limited_total\{limit="chat.read",window="minute"\} 1/.test(m), lines);
+    assert.ok(!/limit="chat.read"/.test(m), 'signed-out reads were never refused per actor');
     assert.ok(/chat_rate_limited_total\{limit="chat.message.send",window="minute"\} 1/.test(m), lines);
 });
 
