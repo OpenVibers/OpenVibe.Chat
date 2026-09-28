@@ -18,7 +18,12 @@
 
 const express = require('express');
 const { requireAuth } = require('../auth/auth');
+const { limits } = require('../net/actor-limits');
 const { PrefsError } = require('./module-store');
+
+// Per-actor limits (net/actor-limits.js), after requireAuth: reads take the defaults at app.js. A save
+// is a write to the person's Network user module: a settings page saves on change, a few a minute.
+const saveLimit = limits('chat.preferences.update', { minute: 30, hour: 300 });
 
 function fail(res, err) {
     if (err instanceof PrefsError) {
@@ -35,7 +40,7 @@ function routesFor(store, key) {
     router.get('/', requireAuth, async (req, res) => {
         try { reply(res, await store.get(req.user.subject_id)); } catch (err) { fail(res, err); }
     });
-    router.put('/', requireAuth, async (req, res) => {
+    router.put('/', requireAuth, saveLimit, async (req, res) => {
         if (req.authSource === 'api_token') return res.status(403).json({ error: 'API tokens cannot change chat settings', code: 'prefs.token_denied' });
         let expectedRevision;
         if (req.headers['if-match'] !== undefined) {

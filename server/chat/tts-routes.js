@@ -28,6 +28,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { requireAuth, requireAdmin } = require('../auth/auth');
+const { limits } = require('../net/actor-limits');
 const permissions = require('../auth/permissions');
 const { isOwner } = permissions;
 const ttsEngine = require('./tts-engine');
@@ -127,7 +128,8 @@ router.get('/admin/settings', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // ── Admin: Update TTS config ──────────────────────────────────
-router.put('/admin/settings', requireAuth, requireAdmin, async (req, res) => {
+// Settings are Live's (ctx.setSettings writes them there): an admin saves a form now and then.
+router.put('/admin/settings', requireAuth, requireAdmin, limits('chat.tts.settings.update', { minute: 30, hour: 300 }), async (req, res) => {
     try {
         const allowed = [
             'tts_enabled', 'tts_provider',
@@ -159,7 +161,8 @@ router.put('/admin/settings', requireAuth, requireAdmin, async (req, res) => {
 });
 
 // ── Admin: Test voice synthesis ───────────────────────────────
-router.post('/admin/test', requireAuth, requireAdmin, async (req, res) => {
+// Each test synthesizes speech with the site's provider credentials (a paid call): 10 a minute, 100 an hour.
+router.post('/admin/test', requireAuth, requireAdmin, limits('chat.tts.synthesize', { minute: 10, hour: 100 }), async (req, res) => {
     try {
         const { voiceId, text } = req.body;
         const result = await ttsEngine.synthesize(text || 'This is a TTS test from OpenVibe.Live', voiceId);
@@ -222,7 +225,11 @@ router.get('/queue', requireAuth, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/queue/skip', requireAuth, async (req, res) => {
+// Skipping and clearing: a streamer or moderator by hand, a few at a time.
+const queueModerate = limits('chat.tts.queue.moderate', { minute: 60, hour: 600 });
+// The streamer's player reports each request as it ends; each plays for seconds, so well under one a second.
+const queueReport = limits('chat.tts.queue.report', { minute: 60, hour: 1800 });
+router.post('/queue/skip', requireAuth, queueModerate, async (req, res) => {
     try {
         const r = await queueRoom(req, res);
         if (!r) return;
@@ -234,7 +241,7 @@ router.post('/queue/skip', requireAuth, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/queue/clear', requireAuth, async (req, res) => {
+router.post('/queue/clear', requireAuth, queueModerate, async (req, res) => {
     try {
         const r = await queueRoom(req, res);
         if (!r) return;
@@ -244,7 +251,7 @@ router.post('/queue/clear', requireAuth, async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-router.post('/queue/:id/report', requireAuth, async (req, res) => {
+router.post('/queue/:id/report', requireAuth, queueReport, async (req, res) => {
     try {
         const r = await queueRoom(req, res);
         if (!r) return;

@@ -30,6 +30,14 @@ module.exports = {
     // Exact origins only: a *.openvibe.tools satellite that embeds chat must be listed here.
     extraOrigins: String(process.env.ALLOWED_ORIGINS || '').split(',').map((s) => strip(s.trim())).filter(Boolean),
 
+    // Per-actor limits on the REST API (server/net/actor-limits.js, roadmap WS-R task 4): the reads one
+    // caller (a person, else an address) may make to one API per minute and per hour. Writes and
+    // expensive reads set their own, tighter numbers where they are mounted.
+    limits: {
+        minute: Math.max(1, int(process.env.CHAT_LIMITS_MINUTE, 120)),
+        hour: Math.max(1, int(process.env.CHAT_LIMITS_HOUR, 3000)),
+    },
+
     // Chat's own SQLite database (systemd StateDirectory openvibe-chat).
     dbPath: process.env.CHAT_DB_PATH || './data/chat.db',
 

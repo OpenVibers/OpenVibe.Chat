@@ -30,7 +30,9 @@ const SECRET = { roomName: 'Hidden Den', roomWords: 'whisper-in-the-den', callWo
 const seeded = {};
 
 t('boot and seed: a private room, a private call room, a DM', async () => {
-    h = await boot({ env: { CHAT_WEB_URL: 'https://openvibe.chat' } });
+    // The crawl GETs every route as the same few people, far past one person's per-actor read budget
+    // (server/net/actor-limits.js); this suite reads privacy, test/actor-limits.test.js the limits.
+    h = await boot({ env: { CHAT_WEB_URL: 'https://openvibe.chat', CHAT_LIMITS_MINUTE: '100000', CHAT_LIMITS_HOUR: '100000' } });
     ann = h.addUser('ann', { subject: ids.newId('user') });
     bob = h.addUser('bob', { subject: ids.newId('user') });
     cat = h.addUser('cat', { subject: ids.newId('user') });

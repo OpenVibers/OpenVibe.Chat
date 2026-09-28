@@ -105,6 +105,19 @@ async function authenticateWs(token) {
 }
 
 /**
+ * The account behind this request's token (null without one, or when it does not resolve), resolved
+ * once per request: requireAuth, optionalAuth, the ban exemption and the per-actor limits
+ * (net/actor-limits.js) share the answer.
+ */
+function requestUser(req) {
+    if (!req._ovAuthUser) {
+        const token = extractToken(req);
+        req._ovAuthUser = token ? session.authenticate(token).catch(() => null) : Promise.resolve(null);
+    }
+    return req._ovAuthUser;
+}
+
+/**
  * Express middleware — requires a valid openvibe.network JWT or API token.
  */
 async function requireAuth(req, res, next) {
@@ -113,7 +126,7 @@ async function requireAuth(req, res, next) {
         return res.status(401).json({ error: 'Authentication required' });
     }
     let user = null;
-    try { user = await session.authenticate(token); } catch { user = null; }
+    try { user = await requestUser(req); } catch { user = null; }
     if (!user) {
         return session.failureReason(token) === 'unresolved'
             ? res.status(401).json({ error: 'Unable to resolve account' })
@@ -146,7 +159,7 @@ async function optionalAuth(req, res, next) {
     const token = extractToken(req);
     if (token) {
         let user = null;
-        try { user = await session.authenticate(token); } catch { user = null; }
+        try { user = await requestUser(req); } catch { user = null; }
         if (user && !user.is_banned) {
             if (user.auth_source === 'api_token') {
                 if (apiTokenAllows(req, user.scopes)) {
@@ -178,6 +191,7 @@ function requireAdmin(req, res, next) {
 module.exports = {
     apiTokenAllows,
     extractToken,
+    requestUser,
     extractWsToken,
     authenticateWs,
     requireAuth,

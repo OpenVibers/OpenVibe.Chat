@@ -22,7 +22,15 @@ const multer = require('multer');
 const db = require('../db/database');
 const ctx = require('../live-context');
 const { requireAuth } = require('../auth/auth');
+const { limits } = require('../net/actor-limits');
 const permissions = require('../auth/permissions');
+
+// Per-actor limits (net/actor-limits.js), after requireAuth and before the upload is read: reads take
+// the defaults at app.js (sound files are left to the per-address limit). An upload is up to
+// MAX_SOUND_SIZE_KB on disk plus an ffprobe and an ffmpeg run: 10 a minute, 60 an hour (channel and
+// uploader caps still decide what is kept). Deletes and command edits tell every room of the channel.
+const uploadLimit = limits('chat.sound.upload', { minute: 10, hour: 60 });
+const editLimit = limits('chat.sound.update', { minute: 30, hour: 300 });
 const config = require('../config');
 
 /** The channel of a user plus its moderation policy, loaded before a permission check. */
@@ -162,7 +170,7 @@ router.get('/all/:streamId', async (req, res) => {
 });
 
 // ── Upload a channel sound ───────────────────────────────────
-router.post('/', requireAuth, soundUpload.single('sound'), async (req, res) => {
+router.post('/', requireAuth, uploadLimit, soundUpload.single('sound'), async (req, res) => {
     const cleanup = () => { if (req.file && fs.existsSync(req.file.path)) { try { fs.unlinkSync(req.file.path); } catch {} } };
     try {
         if (!req.file) return res.status(400).json({ error: 'No audio file uploaded' });
@@ -304,7 +312,7 @@ router.use((err, req, res, next) => {
 });
 
 // ── Delete a sound ───────────────────────────────────────────
-router.delete('/:id', requireAuth, async (req, res) => {
+router.delete('/:id', requireAuth, editLimit, async (req, res) => {
     try {
         const sound = db.getChannelSoundById(parseInt(req.params.id));
         if (!sound) return res.status(404).json({ error: 'Sound not found' });
@@ -331,7 +339,7 @@ router.delete('/:id', requireAuth, async (req, res) => {
 // A command may hold several sounds, so edits apply to the whole group.
 // Allowed: channel owner, channel mods, admins, or the creator of every
 // sound in the group (mirrors the add-to-command rule).
-router.patch('/command', requireAuth, async (req, res) => {
+router.patch('/command', requireAuth, editLimit, async (req, res) => {
     try {
         let channelOwnerId = parseInt(req.body.channel_id) || null;
         if (!channelOwnerId && req.body.stream_id) {
@@ -422,7 +430,7 @@ router.get('/alert/mine', requireAuth, async (req, res) => {
 });
 
 // Upload/replace an alert sound. kind = 'donation' | 'goal'.
-router.post('/alert/:kind', requireAuth, soundUpload.single('sound'), async (req, res) => {
+router.post('/alert/:kind', requireAuth, uploadLimit, soundUpload.single('sound'), async (req, res) => {
     const kind = _alertKind(req.params.kind);
     try {
         if (!req.file) return res.status(400).json({ error: 'No sound file' });
@@ -461,7 +469,7 @@ router.post('/alert/:kind', requireAuth, soundUpload.single('sound'), async (req
 });
 
 // Clear an alert sound.
-router.delete('/alert/:kind', requireAuth, async (req, res) => {
+router.delete('/alert/:kind', requireAuth, editLimit, async (req, res) => {
     const kind = _alertKind(req.params.kind);
     try {
         const channel = await channelWithPolicy(req.user.id);

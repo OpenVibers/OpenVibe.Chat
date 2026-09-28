@@ -26,10 +26,20 @@ const ctx = require('../live-context');
 const dm = require('../chat/dm');
 const chatServer = require('../chat/chat-server');
 const { requireAuth, optionalAuth } = require('../auth/auth');
+const { limits } = require('../net/actor-limits');
 const callServer = require('./call-server');
 const lifecycle = require('./lifecycle');
 
 const router = express.Router();
+
+// Per-actor limits (net/actor-limits.js), after requireAuth: reads take the defaults at app.js.
+// Creating and closing voice channels, and a streamer switching a stream's call: pushed to every
+// socket, done by hand a few at a time.
+const channelLimit = limits('chat.call.manage', { minute: 20, hour: 200 });
+// Ringing someone: above the six rings a minute below, which keeps deciding; refusals count.
+const ringLimit = limits('chat.call.ring', { minute: 20, hour: 200 });
+// Answering a ring: once per ring received.
+const answerLimit = limits('chat.call.answer', { minute: 30, hour: 300 });
 const MODES = ['mic', 'mic+cam', 'cam+mic'];
 
 /* ── Voice Channels (global, non-stream) ───────────────────── */
@@ -55,7 +65,7 @@ router.get('/voice-channels/:channelId', optionalAuth, (req, res) => {
     }
 });
 
-router.post('/voice-channels', requireAuth, (req, res) => {
+router.post('/voice-channels', requireAuth, channelLimit, (req, res) => {
     try {
         const { name, mode, maxParticipants } = req.body || {};
         const ch = callServer.createChannel({ name, mode, createdBy: req.user.id, maxParticipants });
@@ -67,7 +77,7 @@ router.post('/voice-channels', requireAuth, (req, res) => {
     }
 });
 
-router.delete('/voice-channels/:channelId', requireAuth, (req, res) => {
+router.delete('/voice-channels/:channelId', requireAuth, channelLimit, (req, res) => {
     try {
         const ok = callServer.deleteChannel(req.params.channelId, req.user);
         if (!ok) return res.status(403).json({ error: 'Cannot delete this channel' });
@@ -105,7 +115,7 @@ function tellCallerNoAnswer(row, channelName, target) {
 }
 
 const _callUserRate = new Map(); // userId → [timestamps]
-router.post('/voice-channels/call-user', requireAuth, async (req, res) => {
+router.post('/voice-channels/call-user', requireAuth, ringLimit, async (req, res) => {
     let call = null;
     try {
         // Six calls a minute per account: a ring is a notification on someone else's screen.
@@ -168,7 +178,7 @@ router.post('/voice-channels/call-user', requireAuth, async (req, res) => {
     }
 });
 
-router.post('/voice-channels/call-user/respond', requireAuth, (req, res) => {
+router.post('/voice-channels/call-user/respond', requireAuth, answerLimit, (req, res) => {
     try {
         const callerUserId = Number(req.body?.caller_user_id || 0);
         const channelId = String(req.body?.channel_id || '').trim();
@@ -218,7 +228,7 @@ function callStatus(streamId, callMode) {
     };
 }
 
-router.put('/:id/call', requireAuth, async (req, res) => {
+router.put('/:id/call', requireAuth, channelLimit, async (req, res) => {
     try {
         // Ownership and live state from Live now, not a cached copy.
         const stream = await ctx.refreshStream(req.params.id);

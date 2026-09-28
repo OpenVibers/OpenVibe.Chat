@@ -16,6 +16,7 @@
 const express = require('express');
 const router = express.Router();
 const { requireAuth } = require('../auth/auth');
+const { limits } = require('../net/actor-limits');
 const dm = require('./dm');
 const ctx = require('../live-context');
 const prefStores = require('../prefs/stores');
@@ -37,6 +38,20 @@ function publicMessage(m) {
 
 // All DM routes require authentication
 router.use(requireAuth);
+
+// Per-actor limits (net/actor-limits.js), after requireAuth: reads take the defaults at app.js; each
+// write below has its own number. The per-person DM limits further down (10 messages a minute, 5 new
+// conversations an hour) keep deciding what is sent; these cap the requests, refused ones included.
+// Starting a conversation checks every invitee with Live and the Network: 10 a minute, 60 an hour.
+const startLimit = limits('chat.dm.conversation.create', { minute: 10, hour: 60 });
+// Sending: three times the message limit, so a person retrying a refused send is not locked out.
+const sendLimit = limits('chat.dm.message.send', { minute: 30, hour: 900 });
+// Marking read clears the person's DM notifications on the Network: once per conversation opened.
+const readLimit = limits('chat.dm.read_mark', { minute: 60, hour: 1200 });
+// Group membership, renames and blocks: a person does a few at a time.
+const manageLimit = limits('chat.dm.manage', { minute: 20, hour: 200 });
+// Deleting their own messages: one at a time, by hand.
+const deleteLimit = limits('chat.dm.message.delete', { minute: 60, hour: 600 });
 
 // ── Per-user rate limiting (in-memory sliding window) ────────
 const _rateBuckets = new Map();
@@ -78,7 +93,7 @@ router.get('/conversations', (req, res) => {
 });
 
 // Create or get a conversation
-router.post('/conversations', async (req, res) => {
+router.post('/conversations', startLimit, async (req, res) => {
     try {
         const { user_ids, name } = req.body;
         if (!user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
@@ -177,7 +192,7 @@ router.get('/conversations/:id/messages', (req, res) => {
 });
 
 // Send a message
-router.post('/conversations/:id/messages', (req, res) => {
+router.post('/conversations/:id/messages', sendLimit, (req, res) => {
     try {
         const convId = parseInt(req.params.id);
         if (!dm.isParticipant(convId, req.user.id)) {
@@ -246,7 +261,7 @@ router.post('/conversations/:id/messages', (req, res) => {
 });
 
 // Mark conversation read
-router.post('/conversations/:id/read', (req, res) => {
+router.post('/conversations/:id/read', readLimit, (req, res) => {
     try {
         const convId = parseInt(req.params.id);
         if (!dm.isParticipant(convId, req.user.id)) {
@@ -267,7 +282,7 @@ router.post('/conversations/:id/read', (req, res) => {
 });
 
 // Add participant to group
-router.post('/conversations/:id/participants', async (req, res) => {
+router.post('/conversations/:id/participants', manageLimit, async (req, res) => {
     try {
         const convId = parseInt(req.params.id);
         if (!dm.isParticipant(convId, req.user.id)) {
@@ -324,7 +339,7 @@ router.post('/conversations/:id/participants', async (req, res) => {
 });
 
 // Remove participant from group
-router.delete('/conversations/:id/participants/:userId', (req, res) => {
+router.delete('/conversations/:id/participants/:userId', manageLimit, (req, res) => {
     try {
         const convId = parseInt(req.params.id);
         const targetUserId = parseInt(req.params.userId);
@@ -345,7 +360,7 @@ router.delete('/conversations/:id/participants/:userId', (req, res) => {
 });
 
 // Rename group conversation
-router.patch('/conversations/:id', (req, res) => {
+router.patch('/conversations/:id', manageLimit, (req, res) => {
     try {
         const convId = parseInt(req.params.id);
         if (!dm.isParticipant(convId, req.user.id)) {
@@ -388,7 +403,7 @@ router.get('/users/search', (req, res) => {
 // ── Block & message management ───────────────────────────────
 
 // Block a user
-router.post('/blocks/:userId', (req, res) => {
+router.post('/blocks/:userId', manageLimit, (req, res) => {
     try {
         const targetId = parseInt(req.params.userId);
         if (!targetId || targetId === req.user.id) {
@@ -403,7 +418,7 @@ router.post('/blocks/:userId', (req, res) => {
 });
 
 // Unblock a user
-router.delete('/blocks/:userId', (req, res) => {
+router.delete('/blocks/:userId', manageLimit, (req, res) => {
     try {
         const targetId = parseInt(req.params.userId);
         dm.unblockUser(req.user.id, targetId);
@@ -435,7 +450,7 @@ router.get('/blocks/check/:userId', (req, res) => {
 });
 
 // Delete own message
-router.delete('/conversations/:id/messages/:msgId', (req, res) => {
+router.delete('/conversations/:id/messages/:msgId', deleteLimit, (req, res) => {
     try {
         const convId = parseInt(req.params.id);
         const msgId = parseInt(req.params.msgId);

@@ -24,10 +24,25 @@
  */
 const express = require('express');
 const { requireAuth, optionalAuth } = require('../auth/auth');
+const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
 const ctx = require('../live-context');
 
 const router = express.Router();
+
+// Per-actor limits (net/actor-limits.js), after requireAuth: reads take the defaults at app.js.
+// Creating a room (owners keep at most MAX_ROOMS_PER_OWNER): 10 a minute, 60 an hour.
+const createLimit = limits('chat.room.create', { minute: 10, hour: 60 });
+// Posting: above the per-room limit (6 every 10 s, and slow mode), which keeps deciding; refusals count.
+const postLimit = limits('chat.room.message.send', { minute: 60, hour: 1200 });
+// Deleting a line (the author, a moderator): one at a time, by hand.
+const deleteLimit = limits('chat.room.message.delete', { minute: 60, hour: 600 });
+// Settings, membership and roles reach every socket and a running call: a few at a time.
+const manageLimit = limits('chat.room.manage', { minute: 30, hour: 300 });
+// Marking read: once per room opened or caught up.
+const readLimit = limits('chat.room.read_mark', { minute: 60, hour: 1200 });
+// Attaching links the room to a Community space: an owner sets up a few.
+const attachLimit = limits('chat.room.attach', { minute: 10, hour: 100 });
 
 function send(res, err) {
     if (err instanceof rooms.RoomError) return res.status(err.status).json({ error: err.message, code: err.code });
@@ -66,7 +81,7 @@ router.get('/', optionalAuth, (req, res) => {
     try { res.set('Cache-Control', 'private, no-store').json(rooms.list(req.user || null, { limit: req.query.limit })); } catch (err) { send(res, err); }
 });
 
-router.post('/', requireAuth, (req, res) => {
+router.post('/', requireAuth, createLimit, (req, res) => {
     try { res.status(201).json({ room: rooms.create(req.user, req.body || {}) }); } catch (err) { send(res, err); }
 });
 
@@ -80,7 +95,7 @@ router.get('/:slug', optionalAuth, (req, res) => {
     });
 });
 
-router.patch('/:slug', requireAuth, (req, res) => {
+router.patch('/:slug', requireAuth, manageLimit, (req, res) => {
     const room = readable(req, res); if (!room) return;
     try { const out = rooms.update(room, req.user, req.body || {}); applyRoomChange(room); res.json({ room: out }); } catch (err) { send(res, err); }
 });
@@ -93,7 +108,7 @@ router.get('/:slug/messages', optionalAuth, (req, res) => {
     } catch (err) { send(res, err); }
 });
 
-router.post('/:slug/messages', requireAuth, (req, res) => {
+router.post('/:slug/messages', requireAuth, postLimit, (req, res) => {
     const room = readable(req, res); if (!room) return;
     try {
         const message = rooms.post(room, req.user, req.body && req.body.message);
@@ -102,7 +117,7 @@ router.post('/:slug/messages', requireAuth, (req, res) => {
     } catch (err) { send(res, err); }
 });
 
-router.delete('/:slug/messages/:id', requireAuth, (req, res) => {
+router.delete('/:slug/messages/:id', requireAuth, deleteLimit, (req, res) => {
     const room = readable(req, res); if (!room) return;
     try {
         const id = rooms.deleteMessage(room, req.user, parseInt(req.params.id, 10));
@@ -111,13 +126,13 @@ router.delete('/:slug/messages/:id', requireAuth, (req, res) => {
     } catch (err) { send(res, err); }
 });
 
-router.post('/:slug/join', requireAuth, (req, res) => {
+router.post('/:slug/join', requireAuth, manageLimit, (req, res) => {
     const room = rooms.bySlug(req.params.slug);
     if (!room) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
     try { const role = rooms.join(room, req.user); applyRoomChange(room); res.json({ ok: true, role }); } catch (err) { send(res, err); }
 });
 
-router.post('/:slug/leave', requireAuth, (req, res) => {
+router.post('/:slug/leave', requireAuth, manageLimit, (req, res) => {
     const room = readable(req, res); if (!room) return;
     try {
         rooms.leave(room, req.user);
@@ -127,7 +142,7 @@ router.post('/:slug/leave', requireAuth, (req, res) => {
     } catch (err) { send(res, err); }
 });
 
-router.post('/:slug/read', requireAuth, (req, res) => {
+router.post('/:slug/read', requireAuth, readLimit, (req, res) => {
     const room = readable(req, res); if (!room) return;
     try { rooms.markRead(room, req.user, req.body && req.body.last_id); res.json({ ok: true }); } catch (err) { send(res, err); }
 });
@@ -138,7 +153,7 @@ router.get('/:slug/members', optionalAuth, (req, res) => {
     res.set('Cache-Control', 'private, no-store').json({ members: rooms.members(room, { seen: moderate }).filter((m) => m.role !== 'blocked' || moderate) });
 });
 
-router.post('/:slug/members', requireAuth, async (req, res) => {
+router.post('/:slug/members', requireAuth, manageLimit, async (req, res) => {
     const room = readable(req, res); if (!room) return;
     try {
         const name = String((req.body && req.body.username) || '').trim();
@@ -158,7 +173,7 @@ router.get('/:slug/attachments', requireAuth, (req, res) => {
     res.set('Cache-Control', 'private, no-store').json({ attachments: rooms.attachments(room) });
 });
 
-router.post('/:slug/attachments', requireAuth, personOnly, (req, res) => {
+router.post('/:slug/attachments', requireAuth, personOnly, attachLimit, (req, res) => {
     const room = readable(req, res); if (!room) return;
     try {
         const b = req.body || {};
@@ -167,7 +182,7 @@ router.post('/:slug/attachments', requireAuth, personOnly, (req, res) => {
     } catch (err) { send(res, err); }
 });
 
-router.delete('/:slug/attachments/:service/:resource', requireAuth, personOnly, (req, res) => {
+router.delete('/:slug/attachments/:service/:resource', requireAuth, personOnly, attachLimit, (req, res) => {
     const room = readable(req, res); if (!room) return;
     try { res.json({ ok: true, ...rooms.detach(room, req.user, req.params.service, req.params.resource) }); } catch (err) { send(res, err); }
 });

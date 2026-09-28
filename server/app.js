@@ -17,7 +17,7 @@ const rateLimit = require('express-rate-limit');
 const config = require('./config');
 const ctx = require('./live-context');
 const db = require('./db/database');
-const { extractToken, extractWsToken, authenticateWs } = require('./auth/auth');
+const { extractWsToken, authenticateWs, requestUser } = require('./auth/auth');
 const { trustProxy } = require('./net/client-ip');
 
 function normalizeOrigin(origin) {
@@ -187,7 +187,7 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     async function isBanExemptAdmin(req) {
         if (req._ovBanUser === undefined) {
             let user = null;
-            try { const t = extractToken(req); user = t ? await require('./auth/network-session').authenticate(t) : null; } catch { user = null; }
+            try { user = await requestUser(req); } catch { user = null; }
             req._ovBanUser = user;
         }
         const u = req._ovBanUser;
@@ -205,6 +205,16 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
         next();
     });
 
+    // Per-actor limits (server/net/actor-limits.js): every read of each API is counted against the
+    // person its token resolves to (else the address), one budget per API; writes and expensive reads
+    // set tighter numbers at their routes. The per-address limit above stays. Media files (TTS clips,
+    // channel sounds) that every viewer's player fetches are left to the per-address limit.
+    const limits = require('./net/actor-limits').limits.attach(metrics.registry);
+    app.use('/api/chat', limits.identify, limits.reads('chat.read'));
+    app.use('/api/dm', limits.identify, limits.reads('chat.dm.read'));
+    app.use('/api/tts', limits.identify, limits.reads('chat.tts.read', { skip: (req) => req.path.startsWith('/audio/') }));
+    app.use('/api/sounds', limits.identify, limits.reads('chat.sounds.read', { skip: (req) => req.path.startsWith('/file/') }));
+
     // The person's chat settings: the Network user modules Chat owns (server/prefs/stores.js).
     for (const [mount, router] of Object.entries(require('./prefs/routes').ROUTES)) app.use(`/api/chat/${mount}`, router);
     // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
@@ -218,7 +228,11 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     // Calls on Live's paths (server/calls/routes.js): /api/streams/voice-channels… and /api/streams/:id/call.
     // Nothing answers here until CHAT_CALLS is on (docs/calls-cutover.md).
     const callRoutes = require('./calls/routes');
-    app.use('/api/streams', (req, res, next) => (config.calls.enabled ? callRoutes(req, res, next) : next()));
+    const callReads = limits.reads('chat.calls.read');
+    app.use('/api/streams', (req, res, next) => {
+        if (!config.calls.enabled) return next();
+        limits.identify(req, res, () => callReads(req, res, () => callRoutes(req, res, next)));
+    });
 
     // openvibe.chat, the site: pages, sign-in, the Frame's /shared/ files (server/web/).
     app.use(require('./web/pages').createWebRoutes({ config }));

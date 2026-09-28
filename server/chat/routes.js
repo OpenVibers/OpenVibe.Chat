@@ -18,6 +18,7 @@ const { optionalAuth, requireAuth } = require('../auth/auth');
 const permissions = require('../auth/permissions');
 const historyStore = require('./history-store');
 const networkBlocks = require('./network-blocks');
+const { limits } = require('../net/actor-limits');
 
 /**
  * A signed-in reader does not get the lines of people they blocked on the network (one-way; only
@@ -33,6 +34,15 @@ function withoutBlocked(req, res, rows) {
 }
 
 const router = express.Router();
+
+// Per-actor limits (net/actor-limits.js): reads take the defaults at app.js; these are tighter.
+// GIF search and trending: each one is a call to Tenor or Giphy on the site's key, whose quota every
+// viewer shares. The picker waits 300 ms after each keystroke, so a person searching sends a few a minute.
+const gifLimit = limits('chat.gif.search', { minute: 60, hour: 600 });
+// Searching or exporting chat logs scans chat_messages: a person or staff member browsing pages asks
+// a few a minute; an export writes up to the whole range at once.
+const searchLimit = limits('chat.search', { minute: 30, hour: 600 });
+const exportLimit = limits('chat.export', { minute: 5, hour: 30 });
 
 // ── Staff reading other people's logs is audited (WS-I task 7) ───────────────
 // A staff member viewing, searching or exporting someone else's chat logs is recorded like any other
@@ -172,7 +182,7 @@ router.get('/gif/providers', optionalAuth, async (req, res) => {
     });
 });
 
-router.get('/gif/trending', optionalAuth, async (req, res) => {
+router.get('/gif/trending', optionalAuth, gifLimit, async (req, res) => {
     try {
         const provider = normalizeGifProvider(req.query.provider);
         await ctx.ensureSettings();
@@ -199,7 +209,7 @@ router.get('/gif/trending', optionalAuth, async (req, res) => {
     }
 });
 
-router.get('/gif/search', optionalAuth, async (req, res) => {
+router.get('/gif/search', optionalAuth, gifLimit, async (req, res) => {
     try {
         const provider = normalizeGifProvider(req.query.provider);
         const query = String(req.query.q || '').trim();
@@ -264,7 +274,9 @@ function hydrateReplies(messages) {
 }
 
 // ── Post to global chat over REST (bots; the browser never falls back to it: C-06) ──
-router.post('/send', requireAuth, async (req, res) => {
+// Every line reaches every global chat socket: a bot posts at most one every 3 s (20 a minute, 300
+// an hour), refusals included; the word and spam filters below still decide each line.
+router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour: 300 }), async (req, res) => {
     try {
         const text = (req.body.message || '').trim();
         // 6000 = the absolute ceiling any channel/admin can configure (see chat-server handleChatMessage).
@@ -369,7 +381,7 @@ router.post('/send', requireAuth, async (req, res) => {
 });
 
 // ── Search Chat Messages (admin or self) ─────────────────────
-router.get('/search', requireAuth, (req, res) => {
+router.get('/search', requireAuth, searchLimit, (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit || '50'), 200);
         const offset = parseInt(req.query.offset || '0');
@@ -686,8 +698,12 @@ router.get('/:streamId/users', (req, res) => {
 
 // ── Chat Log Management ─────────────────────────────────────
 
+// Purges: the preview counts a time range, as a search does (the same budget); the purge soft-deletes
+// every line in it and tells each room, so a streamer or staff member cleaning up runs a few (10 a
+// minute, 100 an hour).
+
 // Preview count of messages in a time range
-router.post('/admin/purge/preview', requireAuth, async (req, res) => {
+router.post('/admin/purge/preview', requireAuth, searchLimit, async (req, res) => {
     try {
         const { streamId, from, to } = req.body;
         if (!from || !to) return res.status(400).json({ error: 'from and to are required' });
@@ -719,7 +735,7 @@ router.post('/admin/purge/preview', requireAuth, async (req, res) => {
 });
 
 // Delete messages in a time range (soft delete)
-router.delete('/admin/purge', requireAuth, async (req, res) => {
+router.delete('/admin/purge', requireAuth, limits('chat.purge', { minute: 10, hour: 100 }), async (req, res) => {
     try {
         const { streamId, from, to } = req.body;
         if (!from || !to) return res.status(400).json({ error: 'from and to are required' });
@@ -774,7 +790,7 @@ router.delete('/admin/purge', requireAuth, async (req, res) => {
 });
 
 // Get paginated chat logs with filters
-router.get('/admin/logs', requireAuth, async (req, res) => {
+router.get('/admin/logs', requireAuth, searchLimit, async (req, res) => {
     try {
         const { streamId, username, search, from, to, messageType, page, limit, includeDeleted } = req.query;
 
@@ -818,7 +834,7 @@ router.get('/admin/logs', requireAuth, async (req, res) => {
 });
 
 // Export chat logs as CSV or JSON
-router.get('/admin/logs/export', requireAuth, async (req, res) => {
+router.get('/admin/logs/export', requireAuth, exportLimit, async (req, res) => {
     try {
         const { streamId, username, search, from, to, messageType, format } = req.query;
 
@@ -866,7 +882,7 @@ router.get('/admin/logs/export', requireAuth, async (req, res) => {
 // ── Your own chat, to keep (WS-I task 7) ─────────────────────────────────────
 // Every message you sent that is still visible (not deleted, not expired), newest first, as JSON or
 // CSV. Up to 100,000 lines; `truncated` says when there were more.
-router.get('/me/export', requireAuth, (req, res) => {
+router.get('/me/export', requireAuth, exportLimit, (req, res) => {
     try {
         const MAX = 100000, PAGE = 5000;
         const rows = [];

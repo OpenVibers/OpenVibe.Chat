@@ -347,6 +347,38 @@ Production: `deploy/systemd/openvibe-chat.service`, `deploy/nginx/openvibe.live-
 `/etc/openvibe/chat.env`. The whole switch-over — rehearsal, import, parity checks, nginx, the flag,
 rollback — is `docs/cutover.md`.
 
+### Per-actor limits
+
+The REST API also limits who calls it (`server/net/actor-limits.js`, openvibe-sdk/limits, roadmap
+WS-R task 4). A person counts as `user:usr_…` whether they call with their Network token or an `hbt_`
+API token (a bot counts as its owner); anyone else by their address. Browsers call these routes
+themselves, so no service speaks for many visitors here; Live's service calls (the bridge at
+`/internal/live`, the stream hooks at `/internal/calls`) carry every viewer's chat and are never
+limited. The per-address `/api/` limit and the chat flood controls (the socket's, DMs 10 a minute and
+5 new conversations an hour, rooms 6 every 10 s, 6 rings a minute) stay. Past a limit: `429`
+problem+json `rate_limited` with `Retry-After`, one `[Limits]` log line and
+`chat_rate_limited_total{limit,window}`.
+
+| Routes | Per caller |
+| --- | --- |
+| Reads of each API (`/api/chat`, `/api/dm`, `/api/tts`, `/api/sounds`, `/api/streams`) | `CHAT_LIMITS_MINUTE` / `CHAT_LIMITS_HOUR` (120 a minute, 3000 an hour) |
+| GIF search and trending (Tenor or Giphy on the site's key) | 60 / 600 |
+| Chat search, staff and streamer logs, purge preview | 30 / 600 |
+| Log export, `GET /api/chat/me/export` | 5 / 30 |
+| `POST /api/chat/send` (bots to global chat) | 20 / 300 |
+| `DELETE /api/chat/admin/purge` | 10 / 100 |
+| DM: new conversation 10 / 60; send 30 / 900; mark read 60 / 1200; members, rename, blocks 20 / 200; delete own message 60 / 600 | as listed |
+| Rooms: create 10 / 60; post 60 / 1200; delete a line 60 / 600; settings, join, leave, members 30 / 300; mark read 60 / 1200; attachments 10 / 100 | as listed |
+| Sounds: upload (channel or alert) 10 / 60; delete, command edit, alert clear 30 / 300 | as listed |
+| TTS: admin settings 30 / 300; admin test (synthesizes) 10 / 100; queue skip and clear 60 / 600; the player's reports 60 / 1800 | as listed |
+| Calls: voice channel create and delete, stream call switch 20 / 200; ring 20 / 200; answer 30 / 300 | as listed |
+| Chat settings save (`PUT /api/chat/preferences` and the other modules) | 30 / 300 |
+
+Never limited: `/health`, `/ready`, `/release.json`, `/metrics`, `/internal/*` (the bridge, the call
+hooks and the signed Events deliveries, which carry account deletions and merges), `/ws/chat` and
+`/ws/call`, the openvibe.chat pages, and the media files players fetch (`/api/tts/audio/…`,
+`/api/sounds/file/…`), which only the per-address limit bounds. `test/actor-limits.test.js`.
+
 ### Layout
 
 ```
