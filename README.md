@@ -4,10 +4,12 @@
 
 **Status:** alpha — deployed. Since the cutover on 2026-09-23 at 02:03 UTC (`docs/cutover.md`),
 Chat is the authority for openvibe.live's chat: the service runs on `openvibe-ovh` (unit
-`openvibe-chat`, 127.0.0.1:4400, release `45f2b1f`), Live runs with `CHAT_AUTHORITY=chat` and keeps
-a read mirror, and chat events go to OpenVibe.Events. `openvibe.chat` still shows its placeholder.  
-**Domain:** `openvibe.chat` (placeholder); Chat is served on Live's origin:
-`https://openvibe.live/ws/chat`, `/api/chat/`, `/api/dm/`, `/api/tts/`, `/api/sounds` via nginx.  
+`openvibe-chat`, 127.0.0.1:4400), Live runs with `CHAT_AUTHORITY=chat` and keeps a read mirror, and
+chat events go to OpenVibe.Events. `openvibe.chat` is Chat's own site (global chat, messages, rooms,
+settings; the service manifest records it live since 2026-09-24).  
+**Domain:** `openvibe.chat` ([deploy/nginx/openvibe.chat.conf](deploy/nginx/openvibe.chat.conf)); Chat
+is also served on Live's origin: `https://openvibe.live/ws/chat`, `/api/chat/`, `/api/dm/`,
+`/api/tts/`, `/api/sounds` via nginx.  
 **Plan:** OpenVibe End-to-End Realignment & Implementation Plan, revision 3 (20 Sep 2026), §9 and §9.5.  
 **License:** AGPL-3.0 (same as every OpenVibe service).
 
@@ -430,10 +432,23 @@ v0.30.2 (so is the `chat.preferences` user module since v0.32.0); the check name
 the contracts check enforces it. Planned families:
 `chat.room.*`, `chat.message.*`, `chat.dm.*`, `chat.moderation.*`, `chat.tts.*`, `chat.call.*`.
 
-Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat.moderation.action`
-(produced); planned `chat.room.updated`, `chat.call.*`, `chat.tts.queued|played|failed`. Consumed:
-`live.release.deployed`, `network.module.updated` (Chat's own subscriptions: Network grant
-`chat events.subscription.manage openvibe.events`).
+Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat.moderation.action`,
+`chat.room.message.created`, `chat.room.message.deleted` (produced); planned `chat.room.updated`,
+`chat.call.*`, `chat.tts.queued|played|failed`. Consumed at `POST /internal/events` (signature v2,
+`CHAT_EVENTS_SECRET`, openvibe-sdk inbox): `live.release.deployed`, `network.module.updated`,
+`network.user.token_valid_after`, `vip.membership.changed`, `network.block.changed`,
+`network.subject.merged`, `network.account.export_requested` and `network.account.deleted` (Chat's own
+subscriptions, created at boot when missing).
+
+Called elsewhere, as the service principal `chat` ([server/net/service-auth.js](server/net/service-auth.js)):
+
+| Service | Grant | Why |
+|---|---|---|
+| OpenVibe.Live | `live.chat_context.read`, `live.chat_effects.write`, `live.chat_mirror.write` | the chat context Live still owns (bans, channel settings), effects, the read mirror |
+| OpenVibe.Events | `events.event.publish`, `events.subscription.manage` | the outbox relay; the subscriptions above |
+| OpenVibe.Network | `network.modules.read`, `network.modules.write` | chat preferences and the other chat user modules |
+| OpenVibe.VIP | `vip.entitlement.check` | subscriber badges (fails closed) |
+| OpenVibe.Tools | `tools.tool.run`, `tools.job.read` | sound uploads to MP3 (local ffmpeg is the fallback) |
 
 ## Depends on
 
@@ -452,6 +467,41 @@ Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat
 - a paid TTS request is never duplicated by a retry — *forwarded writes are applied once per idempotency key; paid TTS does not exist yet*
 - after a reconnect, deleted and blocked state converge; browser parity (join, send, DM, `/tts`, moderation, popout) — *`scripts/parity.js` and `test/parity.test.js` (`docs/parity.md`): a reader that was away converges on what a connected reader saw (cursor reads carry `deleted_ids`); gaps: sub-only mode does not exist, public chat does not apply blocks*
 
+## Security
+
+Reporting a vulnerability: [SECURITY.md](SECURITY.md). The rules the code keeps:
+
+- **Auth.** People sign in with a Network session JWT, verified here with the Network's key (tokens
+  issued before a subject's `token_valid_after` are refused), or an `hbt_` API token resolved through
+  Live; `?token=` on `/ws/chat` is deprecated. Services use client-credentials tokens for audience
+  `openvibe.chat`, checked per capability (`chat.live_bridge.write`, `chat.message.send`,
+  `chat.presence.read`). Staff gates ask the contracts staff map.
+- **Private data.** DMs are delivered only to participants, and private rooms only to members
+  (`test/security-crawl.js` walks every route); network blocks count like DM blocks; a staff member
+  reading someone else's chat logs is recorded as a moderation action; account export and deletion
+  follow Network's events.
+- **Network exposure.** `/internal/*` and `/metrics` answer 404 through nginx, which sets the client
+  address from the connection only; WS upgrades check the origin and IP bans.
+- **Egress.** Chat calls its configured Network, Live, Events, VIP and Tools hosts; the soundboard
+  import fetches only 101soundboards' own addresses, checked on every DNS answer.
+- **Secrets.** `OV_OAUTH_CLIENT_SECRET` and `CHAT_EVENTS_SECRET` live in `/etc/openvibe/chat.env` (0600),
+  by name only.
+
+## Deploy
+
+Production deploys with `sudo ovhost deploy chat` on the host (strategy `git-checkout`: fetch,
+fast-forward `/opt/openvibe.chat`, install on a lockfile change, restart, wait for `/ready`).
+The unit is `openvibe-chat.service` on `127.0.0.1:4400`, the env file `/etc/openvibe/chat.env`. Readiness is
+`/ready` (not `/api/ready`). nginx: [deploy/nginx/openvibe.chat.conf](deploy/nginx/openvibe.chat.conf)
+for openvibe.chat and [deploy/nginx/openvibe.live-chat.locations.conf](deploy/nginx/openvibe.live-chat.locations.conf),
+included in openvibe.live's vhost, for Live's chat paths. After a deploy, record the N-1 fixtures
+(`npm run n-1:record`). Switching chat back to Live is in `docs/cutover.md` (with
+`scripts/mirror-flush.js`).
+
+Rollback: ovhost puts the previous sha back by itself when `/ready` does not answer 2xx after the
+restart; afterwards `sudo ovhost rollback chat --to <sha>`. Nothing blocks a rollback: the schema
+code only adds tables and columns.
+
 ## Launch rule
 
 This repository does not make the product real, and the domain keeps its placeholder page on
@@ -468,7 +518,8 @@ following exist here (plan §12.12):
 
 The launch release removes the domain from `OpenVibe.Sites/sites.json`, switches routing and
 registers maturity in the ecosystem registry atomically. A placeholder is never counted as an
-implemented service.
+implemented service. `openvibe.chat` launched on 2026-09-24 (global chat, messages, settings): it
+left OpenVibe.Sites, and this repository's vhost serves it.
 
 ---
 
