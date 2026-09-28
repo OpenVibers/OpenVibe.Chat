@@ -69,7 +69,7 @@ t('boot (a real OpenVibe.Events on a reserved port when one is checked out next 
             log: quiet,
         });
     } else {
-        console.log(`  (no OpenVibe.Events with redaction at ${EVENTS_DIR}: the end-to-end tests are skipped)`);
+        console.log(`message-deleted end-to-end: skipped (no OpenVibe.Events with redaction at ${EVENTS_DIR})`);
     }
 });
 
