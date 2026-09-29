@@ -14,8 +14,7 @@
  *   POST   /:channelId/moderation/messages/:messageId/delete - Delete a chat message (mod+)
  *
  * Channels, users and moderation policy come through live-context; the moderator and settings rows
- * are Chat's own tables. A write while Live is still the table's writer answers 503
- * { ok: false, error: 'not yet' } and never writes; after the flip a settings or moderator change
+ * are Chat's own tables (C-04 done, Chat is their only writer). A settings or moderator change
  * refreshes Chat's policy cache at once (the db helpers call invalidateChannel).
  */
 'use strict';
@@ -27,12 +26,6 @@ const { requireAuth } = require('../auth/auth');
 const permissions = require('../auth/permissions');
 
 const router = express.Router();
-
-/** A staged-table write while Live is still the authority: 503, never a write. */
-function notYet(res, err) {
-    if (err && err.code === 'table.not_chat') { res.status(503).json({ ok: false, error: 'not yet' }); return true; }
-    return false;
-}
 
 function parseBoolean(value, fallback) {
     if (value === undefined || value === null) return fallback;
@@ -127,7 +120,6 @@ router.post('/:channelId/mods', requireAuth, async (req, res) => {
         });
         res.json({ message: `${targetUser.username} added as channel moderator`, moderators: db.getChannelModerators(channelId) });
     } catch (err) {
-        if (notYet(res, err)) return;
         res.status(500).json({ error: 'Failed to add channel moderator' });
     }
 });
@@ -154,7 +146,6 @@ router.delete('/:channelId/mods/:userId', requireAuth, async (req, res) => {
         });
         res.json({ message: 'Channel moderator removed', moderators: db.getChannelModerators(channelId) });
     } catch (err) {
-        if (notYet(res, err)) return;
         res.status(500).json({ error: 'Failed to remove channel moderator' });
     }
 });
@@ -243,7 +234,6 @@ router.put('/:channelId/moderation', requireAuth, requireChannelAccess, async (r
         });
         res.json({ settings: settings.value });
     } catch (err) {
-        if (notYet(res, err)) return;
         console.error('[ChannelMod] Failed to update moderation settings:', err.message);
         res.status(500).json({ error: 'Failed to update moderation settings' });
     }
@@ -313,7 +303,6 @@ router.post('/:channelId/moderation/messages/:messageId/delete', requireAuth, re
         });
         res.json({ message: 'Message deleted', ids: [messageId] });
     } catch (err) {
-        if (notYet(res, err)) return;
         res.status(500).json({ error: 'Failed to delete message' });
     }
 });

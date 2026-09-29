@@ -56,9 +56,10 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 - **Import:** `scripts/import-from-live.js --live-db <snapshot> [--apply]` — a dry run unless
   `--apply` (which backs Chat's database up first), idempotent, never drops a row of Chat's tables
   (`import_hold`), reports counts per table.
-- **Staged tables** (`channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`,
-  `chat_ai_summaries`, `chat_timeline_events`): Live writes them until each is handed to Chat, one
-  table at a time (`table_authority`, register C-04). Runbook: `docs/staged-tables-cutover.md`.
+- **The six chat tables** (`channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`,
+  `chat_ai_summaries`, `chat_timeline_events`): Chat's own since the C-04 cutover — Chat is their only
+  writer, there is no authority switch any more. Live's current release's writers still call Chat over
+  the bridge (op `db`) until Live N+1 is deployed.
 - **The features on those tables, served by Chat** (plan T3, plan step 1) — built here so Live can
   stop touching them at the flip:
   - `GET /api/emotes/global`, `/channel/:userId`, `/mine`, `/defaults`, `/sources` (GET/PUT),
@@ -81,16 +82,13 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   - **The chat-AI summaries** (plan T3 step 2, decision 5) — Live's `server/ai/chat-ai.js` job moved
     here: a background poller (off unless `CHAT_AI_ENABLED=1`) that folds Chat's own messages into
     rolling global/per-user/per-relay/per-anon insights and the append-only timeline, writing
-    `chat_ai_summaries`/`chat_timeline_events` through the staged writers. The model is OpenVibe.AI
+    Chat's own `chat_ai_summaries`/`chat_timeline_events` tables. The model is OpenVibe.AI
     called with Chat's own service token (`ai.run.create`/`ai.run.read`, audience `openvibe.ai`,
     namespace `chat.*`, workflows `chat.global`/`chat.profile`); when AI does not answer the job
     stores a deterministic extractive summary instead, so the routes always have something to serve.
     Routes (Live's paths, parameters, shapes and public visibility, now under `/api/chat/ai/`):
     `GET /global`, `/timeline` (`?before=&since=&q=&limit=`), `/user/:id`, `/anon/:anonId`,
-    `/relay/:platform/:username`, `/timeline/:username`. A write while Live still owns the two
-    tables is skipped with one log line, never forced.
-  - Every write keeps the `table_authority` gate: while Live still writes the table the route
-    answers `503 { ok: false, error: 'not yet' }` and never writes.
+    `/relay/:platform/:username`, `/timeline/:username`.
 
 ## How it fits the network
 
@@ -100,7 +98,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 | Accounts, roles, streams, channels, bans, IP approvals, follows, cosmetics, tags, site settings | **Live** (Network for identity) | `server/live-context.js` → `GET/POST /internal/chat-context/*` (service token, `live.chat_context.read`) |
 | Coins, AI viewers, arena, media queue, hardware, pastes, translation, PowerChat, notifications | **Live** | `server/live-context.js` → `POST /internal/chat-effects/*` (`live.chat_effects.write`) |
 | Live's own chat pushes and writes (AI viewers, relays, donations, `/api/mod`, recaps, calls) | **Live → Chat** | `POST /internal/live/calls` (`chat.live_bridge.write`), presence `GET /internal/live/presence` (`chat.presence.read`) |
-| The six staged tables (moderators, moderation settings, emotes, tags, AI summaries, timeline) | **Chat** (after the T3 flip; Live until then) | Chat's own SQLite; Live reads through `GET /internal/moderation/*` (`chat.moderation.read`), 30 s cached |
+| The six chat tables (moderators, moderation settings, emotes, tags, AI summaries, timeline) | **Chat** (C-04 done) | Chat's own SQLite; Live reads through `GET /internal/moderation/*` (`chat.moderation.read`), 30 s cached |
 | Emote image bytes | **OpenVibe.Media** (namespace `chat`) | `server/media/client.js` (openvibe-sdk `createObjectsClient`), Chat's service token (`media.object.upload` / `.delete`); the row keeps `media_url` + `media_asset_id` |
 | Chat-AI summaries (global / per-chatter insight + timeline) | **OpenVibe.AI** (namespace `chat.*`) | `server/ai/client.js` (openvibe-sdk `createAiClient`), Chat's service token (`ai.run.create` / `ai.run.read`); workflows `chat.global` / `chat.profile`; extractive fallback when AI does not answer |
 | Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |
@@ -116,10 +114,9 @@ Chat owns (from the cutover): `chat_messages`, `dm_conversations`, `dm_participa
 `subject_id` / `sender_subject_id` / `blocker_subject_id` / `actor_subject_id` /
 `created_by_subject_id` (the Network `usr_…` subject, filled on new rows and by the importer).
 
-Staged here, still written by Live in this wave (their routes have not moved): `channel_moderators`,
-`channel_moderation_settings`, `emotes`, `user_tags`, `chat_ai_summaries`, `chat_timeline_events` —
-imported (and refreshed by later import runs) so their move is a switch; Chat reads the live values
-through `live-context`. `table_authority` records which is which.
+Chat owns too (C-04 done; there is no authority switch any more): `channel_moderators`,
+`channel_moderation_settings`, `emotes`, `user_tags`, `chat_ai_summaries`, `chat_timeline_events`.
+The importer no longer copies them; Live reads them through `GET /internal/moderation/*`.
 
 Stays in Live (decided with evidence, `docs/cutover.md`): `media_requests`, `media_request_settings`.
 
@@ -357,8 +354,6 @@ npm start                     # 127.0.0.1:4400 — /ws/chat, /api/{chat,dm,tts,s
 npm test                      # Node 22; stub Live and Network in-process
 node scripts/import-from-live.js --live-db /tmp/live-snapshot.db            # dry run; --apply writes
 node scripts/parity-check.js --live https://openvibe.live --chat http://127.0.0.1:4401 --before "…"
-node scripts/parity-check.js --tables --live-db /tmp/live-snapshot.db --chat-db /tmp/chat-snapshot.db
-node scripts/table-authority.js           # who writes each staged table (the handoff is Live's)
 node scripts/mirror-flush.js  # rollback helper: push queued mirror rows to Live
 node scripts/subscribe-events.js --dry-run   # Chat's Events subscriptions (boot creates missing ones)
 node scripts/parity.js        # chat parity scenarios: a dry run; --apply only on test accounts (docs/parity.md)
@@ -434,8 +429,8 @@ server/calls/              moved from Live: the call server (/ws/call), its REST
 server/media/client.js     OpenVibe.Media objects (namespace chat): emote image bytes, with Chat's own service token
 server/ai/                 moved from Live: chat-ai.js (the rolling insight job, off unless CHAT_AI_ENABLED), client.js (OpenVibe.AI runs, namespace chat.*), extractive.js (the fallback summary)
 server/db/                 schema.sql, database.js (Live's chat functions, same names and arguments)
-scripts/                   import-from-live, parity-check, parity, mirror-flush, table-authority, migrate-chat-preferences, subscribe-events, n-1-record
-docs/                      cutover.md, calls-cutover.md, staged-tables-cutover.md, parity.md, live-patch.diff, capabilities-proposal/
+scripts/                   import-from-live, parity-check, parity, mirror-flush, migrate-chat-preferences, subscribe-events, n-1-record
+docs/                      cutover.md, calls-cutover.md, parity.md, live-patch.diff, capabilities-proposal/
 ```
 
 ## Owns

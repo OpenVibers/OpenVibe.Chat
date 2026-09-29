@@ -1,7 +1,7 @@
 'use strict';
 /**
- * /api/sounds (upload → MP3, list, serve, !command playback in chat, delete rules, alert sounds
- * written to Live's channel settings) and /api/tts admin settings (admins; credentials owner-only;
+ * /api/sounds (upload → MP3, list, serve, !command playback in chat, delete rules, alert sounds on
+ * Chat's own channel settings row) and /api/tts admin settings (admins; credentials owner-only;
  * written through Live).
  */
 const assert = require('assert');
@@ -88,14 +88,13 @@ t('delete: not someone else’s sound; the uploader can; Live drops the Media co
     assert.strictEqual(h.db.getChannelSoundById(soundId), undefined);
 });
 
-t('alert sounds: the streamer’s own channel, stored through Live', async () => {
+t('alert sounds: the streamer’s own channel, stored on Chat’s own settings row (C-04)', async () => {
     const r = await upload('/api/sounds/alert/donation', streamer.token, {}, wav());
     assert.strictEqual(r.status, 200, JSON.stringify(r.body));
     assert.strictEqual(r.body.kind, 'donation');
-    const fx = h.live.effects.find((e) => e.name === 'alert-sound');
-    assert.strictEqual(fx.body.channel_id, channelId);
-    assert.strictEqual(fx.body.actor_user_id, streamer.id);
-    assert.ok(fx.body.url.startsWith(path.resolve(process.env.SOUNDS_PATH)));
+    const row = h.db.get('SELECT donation_sound_url, donation_sound_mime FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
+    assert.ok(row.donation_sound_url.startsWith(path.resolve(process.env.SOUNDS_PATH)));
+    assert.strictEqual(row.donation_sound_mime, 'audio/mpeg');
 });
 
 t('TTS admin settings: admins only; credentials only the owner; written by Live', async () => {

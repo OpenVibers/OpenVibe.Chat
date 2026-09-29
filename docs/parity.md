@@ -60,9 +60,8 @@ The gaps the script found on 2026-09-25, with the product decisions taken for th
 
 - **Sub-only mode.** A channel setting (`channel_moderation_settings.sub_only`, in Live and Chat),
   set by `/subonly` and `/subonly off` (the streamer, channel moderators and chat staff) and by the
-  dashboard's moderation settings, written where that table's authority says (Live's
-  `channel-settings` effect while it is at `live`, Chat's `upsertChannelModerationSettings` once Chat
-  writes it). When it is on, only people with an **active Live channel subscription** to the streamer
+  dashboard's moderation settings, written by Chat's `upsertChannelModerationSettings` (the table is
+  Chat's own since the C-04 cutover). When it is on, only people with an **active Live channel subscription** to the streamer
   (Live's `subscriptions`: status active, the paid period not over; Billing's entitlement under
   `BILLING_AUTHORITY=billing`), the streamer, channel moderators and chat staff may chat; Network VIP
   does not count and anonymous viewers cannot chat. Chat asks Live `GET

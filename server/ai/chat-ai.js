@@ -13,10 +13,9 @@
  * Lower cost + graceful scaling as Live: a DB poller with the high-water mark in
  * chat_ai_summaries.last_message_id, an adaptive window, a few subjects per tick.
  *
- * Writes go through Chat's staged writers under the _assertChatWrites rule: while Live is still the
- * table's authority a write is skipped with one log line, never forced. The job itself is off
- * unless config.ai.enabled (CHAT_AI_ENABLED=1) — off in development and the test harness, like
- * Chat's other background jobs.
+ * Chat is the only writer of the two summaries tables since the C-04 cutover: the writes are plain
+ * calls, no authority gate. The job itself is off unless config.ai.enabled (CHAT_AI_ENABLED=1) —
+ * off in development and the test harness, like Chat's other background jobs.
  */
 'use strict';
 
@@ -57,7 +56,6 @@ let _running = false;
 let _timer = null;
 let _tickInFlight = false;
 let _lastUserPass = 0;
-let _writeSkipLogged = false;
 
 // ── Small utils ──────────────────────────────────────────────────────────────
 // DB timestamps are UTC 'YYYY-MM-DD HH:MM:SS' (CURRENT_TIMESTAMP). Match that format.
@@ -118,24 +116,7 @@ function _cleanTimeline(arr) {
         .sort((a, b) => _parseSqlTime(a.ts) - _parseSqlTime(b.ts));
 }
 
-// ── The authority gate ───────────────────────────────────────────────────────
-// Live still writes the two summaries tables until the cutover: the job skips (one log line), it
-// never forces a write, and writes that would race the flip are caught the same way.
-function _tablesHold() {
-    return db.tableAuthority('chat_ai_summaries') === 'chat' && db.tableAuthority('chat_timeline_events') === 'chat';
-}
-function _logWriteSkip() {
-    if (_writeSkipLogged) return;
-    _writeSkipLogged = true;
-    console.log('[ChatAI] chat_ai_summaries/chat_timeline_events are still written by Live (table_authority live) — the job skips its writes');
-}
-function _write(fn, ...args) {
-    try { return fn(...args); }
-    catch (err) {
-        if (err && err.code === 'table.not_chat') { _logWriteSkip(); return null; }
-        throw err;
-    }
-}
+// Chat is the only writer of the two summaries tables since the C-04 cutover: no authority gate.
 
 // ── GLOBAL ───────────────────────────────────────────────────────────────────
 async function _refreshGlobal() {
@@ -172,8 +153,8 @@ async function _refreshGlobal() {
     if (!parsed) return false;
 
     const nowIso = _sqlTime(now);
-    _write(db.addChatTimelineEvents, 'global', 0, _stampAdditions(parsed.timeline, nowIso, now));
-    _write(db.upsertChatAiSummary, {
+    db.addChatTimelineEvents('global', 0, _stampAdditions(parsed.timeline, nowIso, now));
+    db.upsertChatAiSummary({
         scope: 'global', subject_id: 0, window: 'global',
         overview: _clip(parsed.recent_overview || '', 2000),
         memory_json: _clip(parsed.memory || priorMemory, MEMORY_MAX_CHARS),
@@ -215,7 +196,7 @@ async function _refreshUser(uid, maxId) {
     const nowIso = _sqlTime(now);
     const _lastRow = dayRows[dayRows.length - 1] || {};
     const activityTs = _lastRow.timestamp || _lastRow.created_at || nowIso;
-    _write(db.upsertChatAiSummary, {
+    db.upsertChatAiSummary({
         scope: 'user', subject_id: uid, window: 'rolling',
         overview: JSON.stringify({
             today: _clip(parsed.overview_24h || '', 1200),
@@ -271,7 +252,7 @@ async function _refreshRelayUser(ru) {
     if (!parsed) return false;
 
     const nowIso = _sqlTime(now);
-    _write(db.upsertChatAiSummary, {
+    db.upsertChatAiSummary({
         scope: 'relay', subject_id: ru.id, window: 'rolling',
         overview: JSON.stringify({
             today: _clip(parsed.overview_24h || '', 1200),
@@ -325,7 +306,7 @@ async function _refreshAnon(anonId) {
     if (!parsed) return false;
 
     const nowIso = _sqlTime(now);
-    _write(db.upsertChatAiSummary, {
+    db.upsertChatAiSummary({
         scope: 'anon', subject_id: subjectId, window: 'rolling',
         overview: JSON.stringify({
             today: _clip(parsed.overview_24h || '', 1200),
@@ -365,7 +346,6 @@ async function _tick() {
     _tickInFlight = true;
     try {
         if (!config.ai.enabled) return;            // the job's switch (off in dev and tests)
-        if (!_tablesHold()) { _logWriteSkip(); return; }
         try { await _refreshGlobal(); }
         catch (e) { console.warn('[ChatAI] global refresh failed:', e.message); }
 
@@ -390,7 +370,7 @@ async function _seedTimelineEvents() {
         if (!row) return;
         let tl = []; try { tl = JSON.parse(row.timeline_json || '[]'); } catch { tl = []; }
         const cleaned = _cleanTimeline(tl);
-        if (cleaned.length) { _write(db.addChatTimelineEvents, 'global', 0, cleaned); console.log(`[ChatAI] Seeded ${cleaned.length} timeline event(s)`); }
+        if (cleaned.length) { db.addChatTimelineEvents('global', 0, cleaned); console.log(`[ChatAI] Seeded ${cleaned.length} timeline event(s)`); }
     } catch { /* */ }
 }
 

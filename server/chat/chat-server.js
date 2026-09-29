@@ -2838,8 +2838,8 @@ class ChatServer {
     }
 
     /**
-     * /slow and /subonly. The channel's saved setting is the truth: it is written where the table's
-     * authority says (Live's effect, or here once Chat writes channel_moderation_settings), then the
+     * /slow and /subonly. The channel's saved setting is the truth: it is written to Chat's own
+     * channel_moderation_settings row (C-04 done), then the
      * channel's whole room hears it (every live slot, the offline room, popouts). Nothing changes when
      * the write fails. → true when saved.
      */

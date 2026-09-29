@@ -318,6 +318,16 @@ async function boot({ env = {} } = {}) {
             live.policies.set(id, { settings, moderator_ids: moderators });
             return id;
         },
+        /** Write the channel's own moderation settings row (the six chat tables are Chat's; C-04). */
+        setChannelSettings(channelId, settings) {
+            const d = h.db.getDb();
+            d.prepare('DELETE FROM channel_moderation_settings WHERE channel_id = ?').run(Number(channelId));
+            if (settings) {
+                const keys = Object.keys(settings).filter((k) => /^[a-z_]+$/.test(k));
+                d.prepare(`INSERT INTO channel_moderation_settings (channel_id, ${keys.join(', ')}) VALUES (?, ${keys.map(() => '?').join(', ')})`).run(Number(channelId), ...keys.map((k) => settings[k]));
+            }
+            h.ctx.invalidateChannel(Number(channelId));
+        },
         addStream(userId, channelId, { title = 'Live now', is_live = 1, managed = null } = {}) {
             const id = 500 + live.streams.size;
             if (managed) live.managed.set(managed.id, { user_id: userId, sort_order: 0, created_at: sqliteNow(), ...managed });

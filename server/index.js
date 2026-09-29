@@ -47,8 +47,8 @@ async function start() {
     mirror.start();
     relay.start();
     events.start();
-    // The chat-AI job (Live's server/ai/chat-ai.js, now Chat's): off unless CHAT_AI_ENABLED=1, and
-    // its writes skip with one log line while Live is still the two summaries tables' authority.
+    // The chat-AI job (Live's server/ai/chat-ai.js, now Chat's): off unless CHAT_AI_ENABLED=1; it
+    // writes Chat's own chat_ai_summaries/chat_timeline_events rows directly (C-04 done).
     chatAi.start();
 
     await new Promise((resolve) => server.listen(config.port, config.host, resolve));

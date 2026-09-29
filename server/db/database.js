@@ -36,29 +36,6 @@ const CHAT_TABLES = {
     stream_first_chats: ['chatter_key', 'channel_user_id'],
     moderation_actions: ['id'],
 };
-// Chat-target tables whose writer moves per table (roadmap C-04, docs/staged-tables-cutover.md).
-// table_authority says who writes each one: 'live' (the default) — Live writes, and every change
-// it makes reaches this copy over the bridge (applyStagedChanges); 'chat' — the staged writes
-// below are the only writers, Live's writers call them over the bridge and the Live mirror copies
-// the table back. The notes say who wrote them before the move.
-const STAGED_TABLES = {
-    channel_moderators: 'Live /api/channels (channel-mod-routes) while at live',
-    channel_moderation_settings: 'Live /api/channels, the dashboard, /slow and alert sounds while at live',
-    emotes: 'Live /api/emotes and its Media asset-sync while at live',
-    user_tags: 'no writer since Live’s game tags went read-only; data only',
-    chat_ai_summaries: 'Live server/ai/chat-ai.js while at live',
-    chat_timeline_events: 'Live server/ai/chat-ai.js while at live',
-};
-// Their primary keys (the mirror and Live's changes address rows by them).
-const STAGED_KEYS = {
-    channel_moderators: ['id'],
-    channel_moderation_settings: ['channel_id'],
-    emotes: ['id'],
-    user_tags: ['id'],
-    chat_ai_summaries: ['id'],
-    chat_timeline_events: ['id'],
-};
-
 function getDb() {
     if (!db) {
         _dbPath = path.resolve(config.dbPath);
@@ -131,12 +108,9 @@ function initDb({ captureMirror = false } = {}) {
     }
     // auth/network-session.js resolves a verified Network token to its user by subject.
     d.exec('CREATE INDEX IF NOT EXISTS idx_ctx_users_subject ON ctx_users(subject_id)');
-    const upsertAuth = d.prepare('INSERT INTO table_authority (table_name, authority, note) VALUES (?, ?, ?) ON CONFLICT(table_name) DO UPDATE SET authority = excluded.authority, note = excluded.note');
-    for (const t of Object.keys(CHAT_TABLES)) upsertAuth.run(t, 'chat', 'Chat writes; Live keeps a read mirror');
-    // A staged table keeps the authority it was handed (a restart never moves it back).
-    const seedStaged = d.prepare("INSERT INTO table_authority (table_name, authority, note) VALUES (?, 'live', ?) ON CONFLICT(table_name) DO UPDATE SET note = excluded.note");
-    for (const [t, note] of Object.entries(STAGED_TABLES)) seedStaged.run(t, note);
-    _authority.at = 0;
+    // C-04 is done: Chat is the only writer of the six tables, so there is no authority left to
+    // record. The table's migration drops it from databases an earlier release created; a new
+    // database never gets it (schema.sql no longer has it).
     if (captureMirror) installMirrorTriggers();
     return d;
 }
@@ -145,9 +119,6 @@ function installMirrorTriggers() {
     const d = getDb();
     const tables = [
         ...Object.entries(CHAT_TABLES).map(([table, pk]) => [table, pk, '']),
-        // A staged table is mirrored only while Chat writes it (read at each change, so a handoff
-        // made by another process counts at once).
-        ...Object.entries(STAGED_KEYS).map(([table, pk]) => [table, pk, `WHEN (SELECT authority FROM main.table_authority WHERE table_name = '${table}') = 'chat'`]),
     ];
     for (const [table, pk, when] of tables) {
         const obj = (alias) => `json_object(${pk.map((c) => `'${c}', ${alias}.${c}`).join(', ')})`;
@@ -993,53 +964,14 @@ function searchChannelChatMessages(channel, { query, userId, limit = 50, offset 
     };
 }
 
-// ── Staged tables (roadmap C-04) ──────────────────────────────
-// Who writes each one is table_authority (STAGED_TABLES above). The reads are cached for a second:
-// a handoff made by another process (scripts/table-authority.js) counts within that.
-const _authority = { at: 0, map: new Map() };
-function tableAuthority(table) {
-    if (Date.now() - _authority.at > 1000) {
-        _authority.map = new Map(all('SELECT table_name, authority FROM table_authority').map((r) => [r.table_name, r.authority]));
-        _authority.at = Date.now();
-    }
-    return _authority.map.get(table) || (CHAT_TABLES[table] ? 'chat' : 'live');
-}
-function setTableAuthority(table, authority) {
-    if (!STAGED_KEYS[table]) throw new Error(`${table} is not a staged table`);
-    if (authority !== 'live' && authority !== 'chat') throw new Error('authority is live or chat');
-    run('UPDATE table_authority SET authority = ? WHERE table_name = ?', [authority, table]);
-    _authority.at = 0;
-    return tableAuthority(table);
-}
-/** { table: authority } for the staged tables. */
-function stagedAuthorities() {
-    return Object.fromEntries(Object.keys(STAGED_KEYS).map((t) => [t, tableAuthority(t)]));
-}
-/** Changes of this table still queued for Live (the mirror drains them). */
-function mirrorPending(table) {
-    return get('SELECT COUNT(*) AS n FROM live_mirror_outbox WHERE tbl = ?', [table])?.n || 0;
-}
-
-const _colCache = new Map();
-function _columns(table) {
-    if (!_colCache.has(table)) _colCache.set(table, new Set(getDb().prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name)));
-    return _colCache.get(table);
-}
-
-/** A staged write refuses while Live still writes the table: one writer at a time. */
-function _assertChatWrites(table) {
-    if (tableAuthority(table) === 'chat') return;
-    const err = new Error(`${table} is written by Live (table_authority live)`);
-    err.code = 'table.not_chat';
-    throw err;
-}
-
-/**
- * What a staged write returns over the bridge: `value` — what Live's function of the same name
- * returns (its callers keep working), and `mirror` — the rows as they are now, in the Live mirror's
- * change shape, so Live's copy is right at once (the mirror sends the same rows again later).
- */
-function _staged(value, table, rows = [], deletedPks = []) {
+// ── The six tables' writes (channel moderators, settings, emotes, tags, chat AI) ──
+// Chat has been the only writer of these six since the C-04 cutover, so there is no authority gate
+// any more. Until Live N+1 is deployed, Live's current release still calls these functions over the
+// bridge (op `db`) and reads both halves of the answer: `value` — what Live's function of the same
+// name returns (its callers keep working) — and `mirror` — the rows as they are now, in the Live
+// mirror's change shape, which Live applies to its own copy at once. Past Live N+1 nothing reads
+// either half; the callers here use `.value` only.
+function _writeResult(value, table, rows = [], deletedPks = []) {
     const plainValue = value && typeof value === 'object' && 'changes' in value && 'lastInsertRowid' in value
         ? { changes: value.changes, lastInsertRowid: Number(value.lastInsertRowid) } : value;
     return {
@@ -1053,21 +985,19 @@ function _staged(value, table, rows = [], deletedPks = []) {
 
 // Channel moderators, settings and alert sounds (Live's /api/channels, the dashboard, /slow).
 function addChannelModerator(channelId, userId, addedBy) {
-    _assertChatWrites('channel_moderators');
     const out = transaction(() => {
         const res = run('INSERT OR IGNORE INTO channel_moderators (channel_id, user_id, added_by) VALUES (?, ?, ?)', [channelId, userId, addedBy]);
-        return _staged(res, 'channel_moderators', all('SELECT * FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]));
+        return _writeResult(res, 'channel_moderators', all('SELECT * FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]));
     });
     _ctx().invalidateChannel(channelId);
     return out;
 }
 
 function removeChannelModerator(channelId, userId) {
-    _assertChatWrites('channel_moderators');
     const out = transaction(() => {
         const gone = all('SELECT id FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]);
         const res = run('DELETE FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]);
-        return _staged(res, 'channel_moderators', [], gone.map((r) => ({ id: r.id })));
+        return _writeResult(res, 'channel_moderators', [], gone.map((r) => ({ id: r.id })));
     });
     _ctx().invalidateChannel(channelId);
     return out;
@@ -1075,7 +1005,6 @@ function removeChannelModerator(channelId, userId) {
 
 // Live's upsertChannelModerationSettings, clamps and all.
 function upsertChannelModerationSettings(channelId, fields) {
-    _assertChatWrites('channel_moderation_settings');
     const out = transaction(() => {
         const existing = get('SELECT 1 FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
         if (existing) {
@@ -1179,7 +1108,7 @@ function upsertChannelModerationSettings(channelId, fields) {
         }
         if (fields.sub_only !== undefined) run('UPDATE channel_moderation_settings SET sub_only = ? WHERE channel_id = ?', [fields.sub_only ? 1 : 0, channelId]);
         const row = get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
-        return _staged(row, 'channel_moderation_settings', [row]);
+        return _writeResult(row, 'channel_moderation_settings', [row]);
     });
     _ctx().invalidateChannel(channelId);
     return out;
@@ -1187,14 +1116,13 @@ function upsertChannelModerationSettings(channelId, fields) {
 
 // Donation / goal alert sounds live on the settings row (url = the file's path in the sounds dir).
 function setChannelAlertSound(channelId, kind, url, mime) {
-    _assertChatWrites('channel_moderation_settings');
     const out = transaction(() => {
         if (!get('SELECT 1 FROM channel_moderation_settings WHERE channel_id = ?', [channelId])) {
             run('INSERT INTO channel_moderation_settings (channel_id) VALUES (?)', [channelId]);
         }
         const col = kind === 'goal' ? 'goal_sound' : 'donation_sound';
         const res = run(`UPDATE channel_moderation_settings SET ${col}_url = ?, ${col}_mime = ? WHERE channel_id = ?`, [url || null, mime || null, channelId]);
-        return _staged(res, 'channel_moderation_settings', [get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [channelId])]);
+        return _writeResult(res, 'channel_moderation_settings', [get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [channelId])]);
     });
     _ctx().invalidateChannel(channelId);
     return out;
@@ -1203,69 +1131,62 @@ function setChannelAlertSound(channelId, kind, url, mime) {
 // Emotes (Live's /api/emotes; media_url/media_asset_id are OpenVibe.Media's copy — Live's
 // asset-sync filled them onto the shared rows, Chat uploads through its own Media token now).
 function createEmote({ user_id, code, url, animated = false, width = 28, height = 28, is_global = false, channel_owner_id = null, size = 100, media_url = null, media_asset_id = null }) {
-    _assertChatWrites('emotes');
     return transaction(() => {
         const res = run(
             `INSERT INTO emotes (user_id, code, url, animated, width, height, is_global, channel_owner_id, size, media_url, media_asset_id)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [user_id, code, url, animated ? 1 : 0, width, height, is_global ? 1 : 0, channel_owner_id || null, Math.min(400, Math.max(25, parseInt(size, 10) || 100)), media_url || null, media_asset_id || null]
         );
-        return _staged(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [res.lastInsertRowid])]);
+        return _writeResult(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [res.lastInsertRowid])]);
     });
 }
 
 function updateEmote(id, { code, size } = {}) {
-    _assertChatWrites('emotes');
     const sets = [];
     const params = [];
     if (code !== undefined) { sets.push('code = ?'); params.push(code); }
     if (size !== undefined) { sets.push('size = ?'); params.push(Math.min(400, Math.max(25, parseInt(size, 10) || 100))); }
-    if (!sets.length) return _staged({ changes: 0 }, 'emotes');
+    if (!sets.length) return _writeResult({ changes: 0 }, 'emotes');
     return transaction(() => {
         const res = run(`UPDATE emotes SET ${sets.join(', ')} WHERE id = ?`, [...params, id]);
-        return _staged(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [id])]);
+        return _writeResult(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [id])]);
     });
 }
 
 function deleteEmote(id) {
-    _assertChatWrites('emotes');
     return transaction(() => {
         const had = get('SELECT id FROM emotes WHERE id = ?', [id]);
         const res = run('DELETE FROM emotes WHERE id = ?', [id]);
-        return _staged(res, 'emotes', [], had ? [{ id: had.id }] : []);
+        return _writeResult(res, 'emotes', [], had ? [{ id: had.id }] : []);
     });
 }
 
 /** The emote's copy on OpenVibe.Media (Live's asset-sync). */
 function setEmoteMedia(id, mediaUrl, mediaAssetId) {
-    _assertChatWrites('emotes');
     return transaction(() => {
         const res = run('UPDATE emotes SET media_url = ?, media_asset_id = ? WHERE id = ?', [mediaUrl || null, mediaAssetId || null, id]);
-        return _staged(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [id])]);
+        return _writeResult(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [id])]);
     });
 }
 
 // User tags (owned chat tags; Live has had no writer since its game tags went read-only).
 function grantUserTag(userId, tagId, source = 'shop') {
-    _assertChatWrites('user_tags');
     return transaction(() => {
         const res = run('INSERT OR IGNORE INTO user_tags (user_id, tag_id, source) VALUES (?, ?, ?)', [userId, String(tagId), source || 'shop']);
-        return _staged(res, 'user_tags', [get('SELECT * FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)])]);
+        return _writeResult(res, 'user_tags', [get('SELECT * FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)])]);
     });
 }
 
 function revokeUserTag(userId, tagId) {
-    _assertChatWrites('user_tags');
     return transaction(() => {
         const gone = all('SELECT id FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)]);
         const res = run('DELETE FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)]);
-        return _staged(res, 'user_tags', [], gone.map((r) => ({ id: r.id })));
+        return _writeResult(res, 'user_tags', [], gone.map((r) => ({ id: r.id })));
     });
 }
 
 // Chat AI (Live's server/ai/chat-ai.js): rolling summaries and the append-only timeline.
 function upsertChatAiSummary(sfx) {
-    _assertChatWrites('chat_ai_summaries');
     const {
         scope, subject_id = 0, window, overview = '', memory_json = '', timeline_json = '[]',
         message_count = 0, window_message_count = 0, last_message_id = 0,
@@ -1291,13 +1212,12 @@ function upsertChatAiSummary(sfx) {
             [scope, subject_id || 0, window, overview, memory_json, timeline_json, message_count,
                 window_message_count, last_message_id, window_label, window_start, window_end]
         );
-        return _staged(res, 'chat_ai_summaries', [get('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? AND window = ?', [scope, subject_id || 0, window])]);
+        return _writeResult(res, 'chat_ai_summaries', [get('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? AND window = ?', [scope, subject_id || 0, window])]);
     });
 }
 
 function addChatTimelineEvents(scope, subjectId, events) {
-    _assertChatWrites('chat_timeline_events');
-    if (!Array.isArray(events) || !events.length) return _staged(0, 'chat_timeline_events');
+    if (!Array.isArray(events) || !events.length) return _writeResult(0, 'chat_timeline_events');
     return transaction(() => {
         let n = 0;
         const ids = [];
@@ -1310,7 +1230,7 @@ function addChatTimelineEvents(scope, subjectId, events) {
                 n++;   // Live counts every event it tried, the duplicates included
             } catch { /* */ }
         }
-        return _staged(n, 'chat_timeline_events', ids.map((id) => get('SELECT * FROM chat_timeline_events WHERE id = ?', [id])));
+        return _writeResult(n, 'chat_timeline_events', ids.map((id) => get('SELECT * FROM chat_timeline_events WHERE id = ?', [id])));
     });
 }
 
@@ -1461,75 +1381,12 @@ function getAnonsNeedingChatAi({ threshold = 12, staleCutoffIso, sinceTs, limit 
     return all(sql, [sinceTs, threshold, staleCutoffIso, Math.max(1, limit)]);
 }
 
-/**
- * Live's changes to a staged table it still writes (its capture, relayed over the bridge): the rows
- * as they are in Live now, or a delete. Applied only while the table is at 'live' — once Chat writes
- * it, Live's copy is the mirror and never flows back. REPLACE: the authority's row wins over
- * whatever holds its key or one of its unique columns here.
- */
-function applyStagedChanges(changes) {
-    const out = { applied: 0, skipped: [] };
-    transaction(() => {
-        for (const c of Array.isArray(changes) ? changes : []) {
-            const pk = STAGED_KEYS[c && c.table];
-            if (!pk) { out.skipped.push({ table: c && c.table, reason: 'not a staged table' }); continue; }
-            if (tableAuthority(c.table) !== 'live') { out.skipped.push({ table: c.table, reason: 'Chat writes this table (table_authority chat)' }); continue; }
-            const have = _columns(c.table);
-            try {
-                if (c.op === 'delete' && c.pk) {
-                    run(`DELETE FROM ${c.table} WHERE ${pk.map((k) => `${k} = ?`).join(' AND ')}`, pk.map((k) => c.pk[k]));
-                } else if (c.op === 'upsert' && c.row && pk.every((k) => c.row[k] != null)) {
-                    const cols = Object.keys(c.row).filter((k) => have.has(k) && /^[a-z_]+$/.test(k));
-                    run(`INSERT OR REPLACE INTO ${c.table} (${cols.join(', ')}) VALUES (${cols.map(() => '?').join(', ')})`, cols.map((k) => c.row[k]));
-                } else { out.skipped.push({ table: c.table, reason: 'bad change' }); continue; }
-                out.applied++;
-            } catch (err) {
-                out.skipped.push({ table: c.table, pk: c.pk || (c.row && Object.fromEntries(pk.map((k) => [k, c.row[k]]))), reason: err.message });
-            }
-        }
-    });
-    for (const c of Array.isArray(changes) ? changes : []) {
-        if (c && (c.table === 'channel_moderators' || c.table === 'channel_moderation_settings')) {
-            const ch = (c.row && c.row.channel_id) || (c.pk && c.pk.channel_id);
-            if (ch) _ctx().invalidateChannel(ch);
-        }
-    }
-    return out;
-}
-
-/**
- * Hash of a list of rows over `columns` (Live's server/chat/chat-tables-sync.js computes the same):
- * sha256 of the JSON array of rows, each row the array of its values in column order.
- */
-function sliceHash(columns, rows) {
-    const body = JSON.stringify(rows.map((r) => columns.map((c) => (r[c] === undefined ? null : r[c]))));
-    return require('crypto').createHash('sha256').update(body).digest('hex');
-}
-
-/**
- * One slice of a staged table for Live's dual read: the rows whose columns equal `where` (null-safe),
- * ordered by key → { count, hash, columns, rows (when 50 or fewer) }. `columns` limits the hash to
- * the ones Live has too.
- */
-function stagedSlice(table, where = {}, columns = null) {
-    const pk = STAGED_KEYS[table];
-    if (!pk) throw new Error(`${table} is not a staged table`);
-    const have = _columns(table);
-    const keys = Object.keys(where || {});
-    if (keys.some((k) => !have.has(k))) throw new Error(`unknown column in ${table}`);
-    const cols = (Array.isArray(columns) && columns.length ? columns.filter((c) => have.has(c)) : [...have]).sort();
-    const rows = all(`SELECT ${cols.join(', ')} FROM ${table} WHERE ${keys.map((k) => `${k} IS ?`).join(' AND ') || '1'} ORDER BY ${pk.join(', ')}`, keys.map((k) => where[k]));
-    return { count: rows.length, hash: sliceHash(cols, rows), columns: cols, rows: rows.length <= 50 ? rows : undefined };
-}
-
 // ── Meta ─────────────────────────────────────────────────────
 function getMeta(key) { return get('SELECT value FROM chat_meta WHERE key = ?', [key])?.value ?? null; }
 function setMeta(key, value) { return run('INSERT INTO chat_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value == null ? null : String(value)]); }
 
 module.exports = {
     CHAT_TABLES,
-    STAGED_TABLES,
-    STAGED_KEYS,
     getDb,
     initDb,
     installMirrorTriggers,
@@ -1605,14 +1462,7 @@ module.exports = {
     getEmotesByUser,
     getModerationActions,
     searchChannelChatMessages,
-    // staged tables (C-04): authority, Live's changes, dual-read slices, and the writes once Chat owns them
-    tableAuthority,
-    setTableAuthority,
-    stagedAuthorities,
-    mirrorPending,
-    applyStagedChanges,
-    stagedSlice,
-    sliceHash,
+    // The six tables Chat owns (C-04 done): moderators, settings, emotes, tags, chat AI
     addChannelModerator,
     removeChannelModerator,
     upsertChannelModerationSettings,

@@ -17,10 +17,9 @@
  *                                       requests, their tags, and the AI summaries and timeline about them;
  *                                     - the channel, stream and user mirrors of their Live account (the user mirror
  *                                       stays as a tombstone).
- *                                     Moderation actions stay as recorded. A staged table (channel_moderators,
- *                                     channel_moderation_settings, emotes, user_tags, chat_ai_summaries,
- *                                     chat_timeline_events) is erased here only while Chat writes it (table_authority);
- *                                     until then Live erases it and its capture keeps this copy current.
+ *                                     Moderation actions stay as recorded. Chat owns the six chat tables
+ *                                     (channel_moderators, channel_moderation_settings, emotes, user_tags,
+ *                                     chat_ai_summaries, chat_timeline_events, C-04 done) and erases them all here.
  *                                     Chat then confirms with counts.
  */
 const db = require('../db/database');
@@ -92,9 +91,6 @@ function exportPart(d, subject) {
 
 // ── Deletion ───────────────────────────────────────────────────
 
-const STAGED = ['channel_moderators', 'channel_moderation_settings', 'emotes', 'user_tags', 'chat_ai_summaries', 'chat_timeline_events'];
-const chatWrites = (d, table) => { try { const r = d.prepare('SELECT authority FROM table_authority WHERE table_name = ?').get(table); return !!r && r.authority === 'chat'; } catch { return false; } };
-
 function erase(d, subjects) {
     const ids = liveIds(d, subjects);
     const erased = {}; const retained = {};
@@ -102,8 +98,6 @@ function erase(d, subjects) {
     const del = (key, table, sc, ic) => {
         const w = whereFor(d, table, sc, ic, subjects, ids);
         if (!w) return;
-        // A staged table Live still writes: Live erases it, and its capture brings the change here.
-        if (STAGED.includes(table) && !chatWrites(d, table)) { add(retained, 'erased_by_live', d.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${w[0]}`).get(...w[1]).n); return; }
         add(erased, key, d.prepare(`DELETE FROM ${table} WHERE ${w[0]}`).run(...w[1]).changes);
     };
     d.transaction(() => {
@@ -137,8 +131,8 @@ function erase(d, subjects) {
         if (ids.length) {
             // Their channel: emotes, sounds, moderators, stats, audio requests, then the Live mirrors.
             const channels = has(d, 'ctx_channels', 'user_id') ? d.prepare(`SELECT id FROM ctx_channels WHERE user_id IN ${inList(ids)}`).all(...ids).map((r) => r.id) : [];
-            if (channels.length && has(d, 'channel_moderators', 'channel_id') && chatWrites(d, 'channel_moderators')) add(erased, 'moderator_roles', d.prepare(`DELETE FROM channel_moderators WHERE channel_id IN ${inList(channels)}`).run(...channels).changes);
-            if (channels.length && has(d, 'channel_moderation_settings', 'channel_id') && chatWrites(d, 'channel_moderation_settings')) d.prepare(`DELETE FROM channel_moderation_settings WHERE channel_id IN ${inList(channels)}`).run(...channels);
+            if (channels.length && has(d, 'channel_moderators', 'channel_id')) add(erased, 'moderator_roles', d.prepare(`DELETE FROM channel_moderators WHERE channel_id IN ${inList(channels)}`).run(...channels).changes);
+            if (channels.length && has(d, 'channel_moderation_settings', 'channel_id')) d.prepare(`DELETE FROM channel_moderation_settings WHERE channel_id IN ${inList(channels)}`).run(...channels);
             del('emotes', 'emotes', [], ['user_id']);
             del('sounds', 'channel_sounds', ['created_by_subject_id'], ['created_by']);
             del('channel_stats', 'stream_first_chats', [], ['channel_user_id']);

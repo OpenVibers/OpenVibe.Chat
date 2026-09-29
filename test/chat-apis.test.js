@@ -1,11 +1,11 @@
 'use strict';
 /**
- * Plan T3 step 1 — the APIs Chat serves for the six staged tables:
+ * Plan T3 step 1 — the APIs Chat serves for the six chat tables:
  *   - Live's internal read API (/internal/moderation/*, capability chat.moderation.read)
  *   - the public emote API (/api/emotes, Live's paths and shapes; bytes on OpenVibe.Media)
  *   - channel moderators & moderation settings (/api/chat/channels/:id/…)
  *   - the bridge alert-sound op (Live says "play the alert", Chat resolves the sound)
- * The authority-not-flipped refusal (503 { ok:false, error:'not yet' }) is checked for every writer.
+ * Chat is the only writer of the six tables (C-04 done), so the writes never refuse.
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -15,7 +15,6 @@ const { boot, suite } = require('./helpers');
 
 const t = suite('chat-apis');
 let h, RO, BRIDGE, streamer, other, admin, mod, stranger, channelId, streamId;
-const STAGED_TABLES = ['channel_moderators', 'channel_moderation_settings', 'emotes'];
 const deletedAssets = [];
 let assets = { upload: null, delete: null };
 
@@ -23,7 +22,6 @@ function checkContract(ref, body) {
     const r = validate(ref, body);
     assert.ok(r.valid, `${ref} invalid: ${JSON.stringify(r.errors)} (${JSON.stringify(body)})`);
 }
-const asChat = (table) => h.db.setTableAuthority(table, 'chat');
 
 t('boot', async () => {
     // 3 emotes per channel, so both the clash check and the cap can be exercised.
@@ -72,7 +70,6 @@ t('internal read API: settings + moderator_ids validate, defaults for a channel 
 });
 
 t('internal read API: moderator_ids oldest first; the channels a user moderates validate', async () => {
-    asChat('channel_moderators');
     h.db.addChannelModerator(channelId, mod.id, streamer.id);
     h.db.run('UPDATE channel_moderators SET created_at = ? WHERE user_id = ?', ['2026-01-01 00:00:00', mod.id]);
     h.db.addChannelModerator(channelId, stranger.id, streamer.id);
@@ -111,15 +108,7 @@ async function upload(userId, token, fields = {}, bytes = PNG, type = 'image/png
     return { status: res.status, body: await res.json().catch(() => null) };
 }
 
-t('emote API: the authority-not-flipped refusal (503 not yet, nothing written)', async () => {
-    const r = await upload(streamer.id, streamer.token, { code: 'refused' });
-    assert.strictEqual(r.status, 503, JSON.stringify(r.body));
-    assert.deepStrictEqual(r.body, { ok: false, error: 'not yet' });
-    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM emotes').n, 0);
-});
-
 t('emote API: create uploads to Media, lists in Live\'s shapes, clash and cap', async () => {
-    asChat('emotes');
     // Public list shapes need no auth.
     let r = await h.http('GET', '/api/emotes/defaults');
     assert.strictEqual(r.status, 200);
@@ -195,7 +184,6 @@ t('emote API: not-mine is refused, sources round-trip through the Live-context e
 
 // ── Moderators & moderation settings ─────────────────────────
 t('moderators: owner and admin add/remove, a stranger is refused', async () => {
-    asChat('channel_moderators');
     let r = await h.http('POST', `/api/chat/channels/${channelId}/mods`, { token: stranger.token, body: { username: 'moddy' } });
     assert.strictEqual(r.status, 403, r.text);
     r = await h.http('POST', `/api/chat/channels/${channelId}/mods`, { token: streamer.token, body: { username: 'moddy' } });
@@ -223,17 +211,9 @@ t('moderators: list is public to any signed-in reader; moderation settings are m
     assert.ok(mine.body.channels.some((c) => c.id === channelId));
 });
 
-t('moderation settings: owner writes, a mod cannot change policy keys, authority gate first', async () => {
-    // While Live writes the settings, the write refuses.
-    h.db.setTableAuthority('channel_moderation_settings', 'live');
-    let r = await h.http('PUT', `/api/chat/channels/${channelId}/moderation`, { token: streamer.token, body: { slow_mode_seconds: 5 } });
-    assert.strictEqual(r.status, 503, r.text);
-    assert.deepStrictEqual(r.body, { ok: false, error: 'not yet' });
-
-    asChat('channel_moderation_settings');
-    asChat('channel_moderators');
+t('moderation settings: owner writes, a mod cannot change policy keys', async () => {
     h.db.addChannelModerator(channelId, mod.id, streamer.id);
-    r = await h.http('PUT', `/api/chat/channels/${channelId}/moderation`, { token: streamer.token, body: { slow_mode_seconds: 12, ip_approval_mode: 1 } });
+    let r = await h.http('PUT', `/api/chat/channels/${channelId}/moderation`, { token: streamer.token, body: { slow_mode_seconds: 12, ip_approval_mode: 1 } });
     assert.strictEqual(r.status, 200, r.text);
     assert.strictEqual(r.body.settings.slow_mode_seconds, 12);
     assert.strictEqual(r.body.settings.ip_approval_mode, 1);
@@ -257,7 +237,6 @@ t('moderation settings: owner writes, a mod cannot change policy keys, authority
 
 // ── Alert-sound op ───────────────────────────────────────────
 t('alert op: Chat resolves the sound from its own row and broadcasts it', async () => {
-    asChat('channel_moderation_settings');
     const snd = path.join(h.tmp, 'sounds', 'donation.mp3');
     fs.writeFileSync(snd, 'ID3alert');
     h.db.setChannelAlertSound(channelId, 'donation', snd, 'audio/mpeg');

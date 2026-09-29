@@ -2,7 +2,6 @@
 /**
  * Plan T3 step 2 — the chat-AI job and its routes, moved into Chat (decision 5):
  *   - the job's selection and write path over Chat's own messages (stub AI client)
- *   - the authority-not-flipped skip (one log line, never forced)
  *   - the extractive fallback when AI does not answer
  *   - each of the six routes' shape, visibility and error codes
  *   - the job's switch (off unless CHAT_AI_ENABLED)
@@ -22,7 +21,6 @@ function msg(o = {}) {
             o.channel_user_id === undefined ? streamer.id : o.channel_user_id, o.timestamp || sqliteNow()]
     ).lastInsertRowid;
 }
-const asChat = () => { db.setTableAuthority('chat_ai_summaries', 'chat'); db.setTableAuthority('chat_timeline_events', 'chat'); };
 
 t('boot', async () => {
     h = await boot({ env: { CHAT_AI_ENABLED: '1' } });
@@ -36,10 +34,9 @@ t('boot', async () => {
     channelId = h.addChannel(streamer.id);
     streamId = h.addStream(streamer.id, channelId);
     await h.ctx.sync();
-    asChat();
 });
 
-t('the job selects Chat messages and writes the summary through the staged writers', async () => {
+t('the job selects Chat messages and writes the summary', async () => {
     const calls = [];
     aiClient._setClient({
         runs: {
@@ -70,18 +67,6 @@ t('the job selects Chat messages and writes the summary through the staged write
     assert.ok(JSON.parse(row.timeline_json).some((x) => x.label === 'a moment'));
     const events = db.getChatTimelineEvents({ scope: 'global', subjectId: 0, limit: 10 });
     assert.ok(events.some((e) => e.label === 'a moment'), 'the timeline event was appended');
-});
-
-t('a write while Live is still the authority is skipped, never forced', async () => {
-    db.setTableAuthority('chat_ai_summaries', 'live');
-    db.setTableAuthority('chat_timeline_events', 'live');
-    const before = db.getChatAiSummary('global', 0, 'global');
-    msg({ user_id: alice.id, username: 'alice', message: 'while Live owns the table' });
-    await chatAi._tick();                       // logs once, returns; no AI call, no write
-    const after = db.getChatAiSummary('global', 0, 'global');
-    assert.strictEqual(after.overview, before.overview);
-    assert.strictEqual(after.message_count, before.message_count);
-    asChat();
 });
 
 t('falls back to the extractive summary when AI does not answer', async () => {

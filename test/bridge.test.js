@@ -190,13 +190,11 @@ t('deploy notices: stored as one rolling global row, shown to everyone, folded o
     late.close();
 });
 
-t('Live’s own writes to data Chat caches invalidate it at once (invalidate op)', async () => {
-    await h.ctx.ensurePolicy(channelId);
+t('the invalidate op is accepted for a channel and refuses an unknown kind', async () => {
     assert.strictEqual(h.ctx.isChannelModerator(viewer.id, channelId), false);
-    h.live.policies.get(channelId).moderator_ids = [viewer.id];       // added on Live's dashboard
+    h.db.addChannelModerator(channelId, viewer.id, streamer.id);       // the moderator row is Chat's own (C-04)
     const r = await calls([{ op: 'invalidate', args: ['channel', channelId] }, { op: 'invalidate', args: ['nonsense', 1] }]);
     assert.deepStrictEqual(r.body.results.map((x) => x.ok), [true, false]);
-    await h.sleep(150);
     assert.strictEqual(h.ctx.isChannelModerator(viewer.id, channelId), true);
 });
 

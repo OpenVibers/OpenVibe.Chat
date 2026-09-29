@@ -17,6 +17,9 @@ t('boot', async () => {
     alice = h.addUser('alice');
     mod = h.addUser('moddy');
     channelId = h.addChannel(streamer.id, { moderators: [mod.id], settings: { max_message_length: 60 } });
+    // The settings and moderator rows are Chat's own (C-04 done); seed them here.
+    h.setChannelSettings(channelId, { max_message_length: 60 });
+    h.db.addChannelModerator(channelId, mod.id, streamer.id);
     streamId = h.addStream(streamer.id, channelId);
     h.live.follows.set(alice.id, [streamer.id]);
     await h.ctx.sync();
@@ -42,7 +45,7 @@ t('no read call to Live per chat message (only the one effect)', async () => {
     assert.strictEqual(during.filter((p) => p === '/internal/chat-effects/chat-message').length, 3, 'one effect per message');
 });
 
-t('channel rules come from the warm policy: message length', async () => {
+t('channel rules come from the local settings row: message length', async () => {
     aliceWs.sendJson({ type: 'chat', message: 'x'.repeat(61) });
     await aliceWs.next((m) => m.type === 'system' && m.message === 'Message too long. Max 60 characters.');
 });
@@ -67,9 +70,8 @@ t('invalidation never leaves a gap: a moderator stays a moderator while the poli
     assert.strictEqual(h.ctx.isChannelModerator(mod.id, channelId), true);
     await h.sleep(100);
     assert.strictEqual(h.ctx.isChannelModerator(mod.id, channelId), true);
-    // A moderator removed in Live loses the power after the reload.
-    h.live.policies.get(channelId).moderator_ids = [];
-    h.ctx.invalidateChannel(channelId);
+    // A moderator removed from Chat's own row loses the power.
+    h.db.removeChannelModerator(channelId, mod.id);
     await h.sleep(150);
     assert.strictEqual(h.ctx.isChannelModerator(mod.id, channelId), false);
 });
@@ -116,8 +118,7 @@ t('a ban written through Live is in Chat’s cache when the effect answers, even
 });
 
 t('followers-only uses the viewer’s warm follow list', async () => {
-    h.live.policies.get(channelId).settings = { followers_only: 1 };
-    h.ctx.invalidateChannel(channelId);
+    h.setChannelSettings(channelId, { followers_only: 1 });
     await h.sleep(150);
     const stranger = h.addUser('stranger');
     await h.ctx.sync();

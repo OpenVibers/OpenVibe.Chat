@@ -62,6 +62,7 @@ t('boot: a channel with a moderator, a live stream, a channel sound, TTS that sy
     bob = h.addUser('bob', { subject: 'usr_01J9PAR1TY00000000000000B1' });
     dave = h.addUser('dave');
     channelId = h.addChannel(streamer.id, { moderators: [mod.id] });
+    h.db.addChannelModerator(channelId, mod.id, streamer.id);   // the moderator row is Chat's own (C-04)
     streamId = h.addStream(streamer.id, channelId);
     h.live.subscribers.add(`${alice.id}|${streamer.id}`);   // A subscribes to the channel; B does not
     await h.ctx.sync();
@@ -194,11 +195,9 @@ t('sub-only fails closed: while Live cannot say whether someone subscribes they 
 });
 
 t('slow mode is the channel’s saved setting: the dashboard’s value is enforced and announced, and a restart keeps it', async () => {
-    const pol = h.live.policies.get(channelId);
     const a = await p.join('a'); const b = await p.join('b');
-    // The dashboard saves 3 s in Live, which tells Chat (the bridge's invalidate: Live chat-remote.js OBSERVED_DB).
-    pol.settings = { ...(pol.settings || {}), slow_mode_seconds: 3 };
-    await bridge([{ op: 'invalidate', args: ['channel', channelId] }]);
+    // The dashboard saves 3 s in Chat's own settings row, which announces the change at once.
+    h.db.upsertChannelModerationSettings(channelId, { slow_mode_seconds: 3 });
     assert.strictEqual((await a.next((m) => m.type === 'slowmode')).seconds, 3, 'the room is told');
     await p.system(b, 'Slow mode enabled: 3s between messages');
     const slowed = async (ws, label) => {
@@ -217,8 +216,7 @@ t('slow mode is the channel’s saved setting: the dashboard’s value is enforc
     assert.strictEqual(again.auth.slowmode_seconds, 3, 'read back after a restart');
     await slowed(again, 'after a restart');
     // The dashboard turns it off.
-    pol.settings.slow_mode_seconds = 0;
-    await bridge([{ op: 'invalidate', args: ['channel', channelId] }]);
+    h.db.upsertChannelModerationSettings(channelId, { slow_mode_seconds: 0 });
     assert.strictEqual((await b.next((m) => m.type === 'slowmode' && m.seconds === 0)).seconds, 0);
     await p.system(b, 'Slow mode disabled.');
     await p.closeAll();

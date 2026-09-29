@@ -22,6 +22,7 @@ t('boot Chat against a stub Live', async () => {
     bob = h.addUser('bob');
     admin = h.addUser('boss', { role: 'admin' });
     channelId = h.addChannel(streamer.id, { moderators: [mod.id] });
+    h.db.addChannelModerator(channelId, mod.id, streamer.id);   // the moderator row is Chat's own (C-04)
     streamId = h.addStream(streamer.id, channelId, { managed: { id: 71, slug: 'main-slot', title: 'Main slot' } });
     await h.ctx.sync();
     assert.ok(h.ctx.getStreamById(streamId), 'stream projected');
@@ -216,15 +217,15 @@ t('moderation: only moderators; /ban goes to Live and takes effect at once', asy
     await h.sleep(1100);
     modWs.sendJson({ type: 'chat', message: '/clear' });
     await aliceWs.next((m) => m.type === 'clear');
-    // /slow: slowmode event + system line to the room, persisted through Live. It applies to
-    // viewers; the room's moderators keep only the 1 s flood limit (the check runs before commands,
-    // so a slowed moderator could not even turn it off).
+    // /slow: slowmode event + system line to the room, persisted in Chat's own settings row (C-04).
+    // It applies to viewers; the room's moderators keep only the 1 s flood limit (the check runs
+    // before commands, so a slowed moderator could not even turn it off).
     await h.sleep(1100);
     modWs.sendJson({ type: 'chat', message: '/slow 5' });
     assert.strictEqual((await aliceWs.next((m) => m.type === 'slowmode')).seconds, 5);
     await aliceWs.next((m) => m.type === 'system' && m.message === 'Slow mode enabled: 5s between messages');
     await h.sleep(100);
-    assert.ok(h.live.effects.some((e) => e.name === 'channel-settings' && e.body.fields.slow_mode_seconds === 5 && e.body.actor_user_id === mod.id));
+    assert.strictEqual(h.ctx.getChannelModerationSettings(channelId).slow_mode_seconds, 5, 'saved on Chat’s own row');
     assert.strictEqual(h.chatServer.slowModeByStream.get(streamId), 5000);
     // Every action is logged (and announced as an internal moderation event).
     const actions = h.db.all('SELECT action_type FROM moderation_actions ORDER BY id').map((r) => r.action_type);

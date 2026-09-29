@@ -19,11 +19,9 @@
  * - Never drops a row. What cannot be represented goes to import_hold with the reason:
  *   an id already used by a DIFFERENT row, a constraint the row breaks, rows of Live's
  *   transient *_new migration tables.
- * - Chat's tables: an existing Chat row always wins (after the cutover Chat is the authority
- *   and may have edited it). Staged tables (C-04) follow their table_authority: at 'live' this copy
- *   is made equal to Live's — rows refreshed, and rows Live no longer has removed (`pruned`: a
- *   moderator removed in Live must not keep powers here); at 'chat' Chat is the authority and the
- *   run only reports how Live's copy differs (`differs`, `live_only`, `chat_only`).
+ * - Chat's tables: an existing Chat row always wins (after the cutover Chat is the authority and may
+ *   have edited it). The six tables Chat owns (channel moderators/settings, emotes, user tags,
+ *   chat-AI summaries/timeline; C-04 done) are not imported — Chat is their only writer.
  * - New columns: *subject_id is filled from Live's linked_accounts (the Network subject).
  * - media_requests / media_request_settings stay in Live (decision: docs/cutover.md) and are
  *   only reported.
@@ -107,10 +105,9 @@ function run(opts) {
     const liveTables = new Set(live.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
     const colsOf = (conn, t) => conn.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name);
 
-    // A staged table Chat already writes is compared, never written (Chat is its authority).
+    // The six tables Chat owns (C-04 done) are not imported: Chat is their only writer.
     const plan = [
-        ...Object.entries(db.CHAT_TABLES).map(([t, pk]) => ({ table: t, pk, kind: 'chat' })),
-        ...Object.entries(db.STAGED_KEYS).map(([t, pk]) => ({ table: t, pk, kind: db.tableAuthority(t) === 'chat' ? 'staged-chat' : 'staged' })),
+        ...Object.entries(db.CHAT_TABLES).map(([t, pk]) => ({ table: t, pk })),
     ].filter((p) => !opts.tables || opts.tables.includes(p.table));
 
     // Schema drift check first: nothing is written when Live has columns Chat cannot hold.
@@ -137,35 +134,13 @@ function run(opts) {
     const holdStmt = chat.prepare('INSERT OR IGNORE INTO import_hold (source_table, source_pk, reason, row_json) VALUES (?, ?, ?, ?)');
     const hold = (table, pkObj, reason, row) => holdStmt.run(table, JSON.stringify(pkObj), String(reason).slice(0, 300), JSON.stringify(row)).changes;
 
-    // A staged table Chat writes: count how Live's copy (its mirror) differs, write nothing.
-    function compareOnly(p, r) {
-        const chatCols = new Set(colsOf(chat, p.table));
-        const cols = colsOf(live, p.table).filter((c) => chatCols.has(c));
-        const getChat = chat.prepare(`SELECT ${cols.join(', ')} FROM ${p.table} WHERE ${p.pk.map((k) => `${k} = ?`).join(' AND ')}`);
-        const seen = new Set();
-        for (const row of live.prepare(`SELECT ${cols.join(', ')} FROM ${p.table}`).iterate()) {
-            r.live++;
-            seen.add(JSON.stringify(p.pk.map((k) => row[k])));
-            const mine = getChat.get(...p.pk.map((k) => row[k]));
-            if (!mine) r.live_only++;
-            else if (cols.every((c) => mine[c] === row[c] || (mine[c] == null && row[c] == null))) r.identical++;
-            else r.differs++;
-        }
-        for (const row of chat.prepare(`SELECT ${p.pk.join(', ')} FROM ${p.table}`).iterate()) {
-            if (!seen.has(JSON.stringify(p.pk.map((k) => row[k])))) r.chat_only++;
-        }
-    }
-
     const report = { live_db: path.resolve(opts.liveDb), dry_run: !!opts.dryRun, backup: null, tables: {} };
     if (!opts.dryRun && opts.backup) report.backup = backupChat(chat, opts.backupPath);
 
     for (const p of plan) {
-        const r = p.kind === 'staged-chat'
-            ? { authority: 'chat', live: 0, identical: 0, differs: 0, live_only: 0, chat_only: 0 }
-            : { live: 0, inserted: 0, identical: 0, refreshed: 0, chat_kept: 0, held: 0, ...(p.kind === 'staged' ? { authority: 'live', pruned: 0 } : {}) };
+        const r = { live: 0, inserted: 0, identical: 0, chat_kept: 0, held: 0 };
         report.tables[p.table] = r;
         if (!liveTables.has(p.table)) { r.missing_in_live = true; continue; }
-        if (p.kind === 'staged-chat') { compareOnly(p, r); continue; }
         const chatCols = new Set(colsOf(chat, p.table));
         const cols = colsOf(live, p.table).filter((c) => chatCols.has(c));
         const subjectCols = (SUBJECT_COLUMNS[p.table] || []).filter(([sc]) => chatCols.has(sc));
@@ -173,22 +148,10 @@ function run(opts) {
         const where = p.pk.map((k) => `${k} = ?`).join(' AND ');
         const getChat = chat.prepare(`SELECT * FROM ${p.table} WHERE ${where}`);
         const ins = chat.prepare(`INSERT INTO ${p.table} (${insertCols.join(', ')}) VALUES (${insertCols.map(() => '?').join(', ')})`);
-        const upd = cols.filter((c) => !p.pk.includes(c));
-        const refresh = upd.length ? chat.prepare(`UPDATE ${p.table} SET ${upd.map((c) => `${c} = ?`).join(', ')} WHERE ${where}`) : null;
         const identity = IDENTITY[p.table] || null;
         const orderBy = p.pk.join(', ');
 
         const apply = () => {
-            // A staged table at 'live' is a copy: what Live no longer has goes first (a row Live
-            // removed and added again under a new id would otherwise collide on its unique columns).
-            if (p.kind === 'staged') {
-                const keyOf = (row) => JSON.stringify(p.pk.map((k) => row[k]));
-                const inLive = new Set(live.prepare(`SELECT ${p.pk.join(', ')} FROM ${p.table}`).all().map(keyOf));
-                const del = chat.prepare(`DELETE FROM ${p.table} WHERE ${where}`);
-                for (const row of chat.prepare(`SELECT ${p.pk.join(', ')} FROM ${p.table}`).all()) {
-                    if (!inLive.has(keyOf(row))) r.pruned += del.run(...p.pk.map((k) => row[k])).changes;
-                }
-            }
             for (const row of live.prepare(`SELECT ${cols.join(', ')} FROM ${p.table} ORDER BY ${orderBy}`).iterate()) {
                 r.live++;
                 const pkVals = p.pk.map((k) => row[k]);
@@ -210,16 +173,7 @@ function run(opts) {
                     r.held += hold(p.table, pkObj, 'id already used by a different row in chat', row);
                     continue;
                 }
-                if (p.kind === 'staged' && refresh) {
-                    try {
-                        refresh.run(...upd.map((c) => row[c]), ...pkVals);
-                        r.refreshed++;
-                    } catch (err) {
-                        r.held += hold(p.table, pkObj, `refresh failed: ${err.message}`, row);
-                    }
-                } else {
-                    r.chat_kept++;
-                }
+                r.chat_kept++;
             }
         };
 

@@ -354,10 +354,10 @@ async function setChannelEmoteSources(userId, sources) {
     return clean;
 }
 
-// ── Channel policy: moderation settings, moderators, language, alert sounds ──────────────────
+// ── Channel policy: language (Live), moderation settings, moderators, alert sounds (Chat) ────
 
-// Everyone who wants to know when a channel's settings were read anew (the chat server announces a
-// slow mode or sub-only mode the dashboard changed). Called with every fresh read; the listener
+// Everyone who wants to know when a channel's settings changed (the chat server announces a slow
+// mode or sub-only mode the dashboard changed). Called with every fresh local read; the listener
 // compares with what it last saw.
 const _settingsListeners = new Set();
 function onChannelSettings(fn) { _settingsListeners.add(fn); return () => _settingsListeners.delete(fn); }
@@ -367,34 +367,23 @@ function _emitSettings(channelId, settings) {
     }
 }
 
+// Live's answer carries the channel projection and its language (the part Live still owns). The
+// moderation settings and moderator ids are Chat's own rows now, read in place.
 const _policy = new Swr(TTL.policy, async (channelId) => {
     const data = await read(`/channels/${channelId}/policy`);
     if (data.channel) upsertRows('ctx_channels', CHANNEL_COLS, [data.channel]);
-    // While Chat writes the settings itself, Live's copy is a mirror that may lag: not announced.
-    if (!_chatWrites('channel_moderation_settings')) _emitSettings(channelId, data.settings || defaultModerationSettings(channelId));
-    return {
-        settings: data.settings || null,
-        moderators: new Set((data.moderator_ids || []).map(Number)),
-        language: data.language || 'en',
-    };
+    // The moderation settings are Chat's own rows: a fresh channel read refreshes the listeners'
+    // baseline (the chat server records what the room was last told; the first read announces nothing).
+    _emitSettings(channelId, getChannelModerationSettings(channelId));
+    return { language: data.language || 'en' };
 });
 function _policyFor(channelId) { return channelId ? _policy.peek(Number(channelId)) : undefined; }
-// Once Chat writes a staged table (table_authority 'chat', roadmap C-04) its rows here are the truth:
-// read in place, like Live's own readers (an indexed row, no network, no cache to go stale).
-const _chatWrites = (table) => db.tableAuthority(table) === 'chat';
+// Chat is the only writer of these tables (C-04 done): an indexed local row, no network, no cache.
 function getChannelModerationSettings(channelId) {
-    if (_chatWrites('channel_moderation_settings')) {
-        return (channelId && db.get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [Number(channelId)])) || defaultModerationSettings(channelId);
-    }
-    const p = _policyFor(channelId);
-    return (p && p.settings) || defaultModerationSettings(channelId);
+    return (channelId && db.get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [Number(channelId)])) || defaultModerationSettings(channelId);
 }
 function isChannelModerator(userId, channelId) {
-    if (_chatWrites('channel_moderators')) {
-        return !!(userId && channelId && db.get('SELECT 1 FROM channel_moderators WHERE user_id = ? AND channel_id = ?', [Number(userId), Number(channelId)]));
-    }
-    const p = _policyFor(channelId);
-    return !!(p && p.moderators.has(Number(userId)));
+    return !!(userId && channelId && db.get('SELECT 1 FROM channel_moderators WHERE user_id = ? AND channel_id = ?', [Number(userId), Number(channelId)]));
 }
 function channelLanguage(channelUserId) {
     const ch = getChannelByUserId(channelUserId);
@@ -413,7 +402,7 @@ function ensurePolicy(channelId) { return channelId ? _policy.ensure(Number(chan
 function invalidateChannel(channelId) {
     if (!channelId) return;
     _policy.invalidate(Number(channelId));
-    if (_chatWrites('channel_moderation_settings')) _emitSettings(channelId, getChannelModerationSettings(channelId));
+    _emitSettings(channelId, getChannelModerationSettings(channelId));
 }
 /**
  * A fresh policy read that starts after the call (Chat just had Live write a setting): a load already
@@ -742,8 +731,7 @@ async function warm({ user, streamId, channelUserId, ip } = {}) {
         if (ownerId && (!channel || channel.id !== ownerId)) tasks.push(ensurePolicy(ownerId));
         if (user && user.id) { tasks.push(_follows.ensure(Number(user.id))); tasks.push(ensureDecor([user.id])); if (ip) tasks.push(ensureAnonFirstSeen(ip)); }
         await Promise.all(tasks.map((t) => Promise.resolve(t).catch(() => {})));
-        const policy = channel ? _policyFor(channel.id) : null;
-        if (policy && policy.settings && policy.settings.ip_approval_mode && ip) await _approvals.ensure(`${channel.id}|${ip}`).catch(() => {});
+        if (channel && getChannelModerationSettings(channel.id).ip_approval_mode && ip) await _approvals.ensure(`${channel.id}|${ip}`).catch(() => {});
         // Sub-only room: the viewer's subscription answer, so their first line does not wait for it.
         if (channel && user && user.id && ownerId && Number(ownerId) !== Number(user.id) && getChannelModerationSettings(channel.id).sub_only) {
             await ensureSubscriber(user.id, ownerId).catch(() => {});
@@ -897,26 +885,19 @@ const effects = {
     setUserColor: (userId, color) => effect('user-color', { user_id: userId, color }).then((r) => { db.run('UPDATE ctx_users SET profile_color = ? WHERE id = ?', [color, userId]); return r; }),
     // The ban is in Chat's cache before the moderator is answered (and before their next check).
     ban: (body) => effect('ban', body).then((r) => invalidateBans().then(() => r)),
-    // /slow and alert sounds: written by Live while it owns channel_moderation_settings, here once Chat
-    // does (C-04; the callers already checked the moderator / the channel owner, as Live re-checks).
-    // The saved value is what chat enforces: at 'live' the policy is read again (awaited) before the
-    // caller answers, so the next line already follows it. Chat sets slow_mode_seconds and sub_only.
+    // /slow and alert sounds: Chat writes channel_moderation_settings itself (C-04 done; the callers
+    // already checked the moderator / the channel owner). Chat sets slow_mode_seconds and sub_only.
     updateChannelModerationSettings: (channelId, fields, actorUserId) => {
         const f = {};
         if (fields && fields.slow_mode_seconds !== undefined) f.slow_mode_seconds = Math.max(0, parseInt(fields.slow_mode_seconds, 10) || 0);
         if (fields && fields.sub_only !== undefined) f.sub_only = fields.sub_only ? 1 : 0;
         if (!channelId || !Object.keys(f).length) return Promise.reject(new LiveError(400, 'no chat-settable fields'));
-        if (!_chatWrites('channel_moderation_settings')) {
-            return effect('channel-settings', { channel_id: channelId, fields: f, actor_user_id: actorUserId })
-                .then((r) => reloadPolicy(channelId).catch(() => {}).then(() => r));
-        }
         return Promise.resolve().then(() => {
             db.upsertChannelModerationSettings(Number(channelId), f);
             return { ok: true };
         });
     },
     setChannelAlertSound: (channelId, kind, url, mime, actorUserId) => {
-        if (!_chatWrites('channel_moderation_settings')) return effect('alert-sound', { channel_id: channelId, kind, url, mime, actor_user_id: actorUserId }).then((r) => { invalidateChannel(channelId); return r; });
         return Promise.resolve().then(() => {
             const file = url ? require('path').resolve(String(url)) : null;
             if (file) {

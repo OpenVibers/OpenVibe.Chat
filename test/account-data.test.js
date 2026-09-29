@@ -4,9 +4,9 @@
  *   - network.account.export_requested sends Chat's part to Network: their messages, DMs they sent, conversations,
  *     blocks, and moderation taken on them without who acted.
  *   - network.account.deleted erases what the subject and its merged-in aliases wrote or set up: chat, room and DM
- *     messages, DM memberships (a conversation left empty goes), blocks both ways, the channel's first-chat stats, and
- *     the Live mirrors (the user mirror as a tombstone). Moderation history stays. A staged table is left to Live
- *     while Live writes it.
+ *     messages, DM memberships (a conversation left empty goes), blocks both ways, the channel's first-chat stats, their
+ *     tags, and the Live mirrors (the user mirror as a tombstone). Moderation history stays. The six chat tables are
+ *     Chat's (C-04 done) and are erased here.
  * Chat confirms with counts; a failed confirmation is retried without erasing again, and a redelivery sends nothing
  * twice. Chat subscribes to both.
  */
@@ -67,12 +67,12 @@ t('export, then erase and confirm', async () => {
     assert.deepStrictEqual(q('SELECT user_id FROM dm_participants WHERE conversation_id = ?', pair).map((p) => p.user_id), [otto.id]);
     assert.strictEqual(q('SELECT * FROM network_blocks').length, 0, 'blocks both ways');
     assert.strictEqual(q('SELECT * FROM moderation_actions').length, 1, 'moderation history stays');
-    assert.strictEqual(q('SELECT * FROM user_tags').length, 1, 'a staged table Live still writes is left to Live');
+    assert.strictEqual(q('SELECT * FROM user_tags').length, 0, 'the tags table is Chat’s and goes');
     assert.strictEqual(d.prepare('SELECT username FROM ctx_users WHERE id = ?').get(dana.id).username, `deleted-${dana.id}`);
     assert.strictEqual(await accountData.apply(del, { send }), 'confirmed', 'the retry confirms without erasing again');
     const conf = sent[1];
     assert.ok(validate('network.account-deletion-confirmation@1', conf.body).valid, JSON.stringify(validate('network.account-deletion-confirmation@1', conf.body).errors));
-    assert.deepStrictEqual([conf.body.erased.messages, conf.body.erased.direct_messages, conf.body.retained.moderation_actions, conf.body.retained.erased_by_live], [2, 1, 1, 1]);
+    assert.deepStrictEqual([conf.body.erased.messages, conf.body.erased.direct_messages, conf.body.erased.tags, conf.body.retained.moderation_actions], [2, 1, 1, 1]);
     assert.strictEqual(await accountData.apply(del, { send }), 'unchanged');
     assert.strictEqual(sent.length, 2);
 });

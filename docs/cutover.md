@@ -41,13 +41,13 @@ nginx).
 | Table (Live baseline, target OpenVibe.Chat) | W6 authority | Notes |
 | --- | --- | --- |
 | `chat_messages`, `dm_conversations`, `dm_participants`, `dm_messages`, `dm_blocks`, `tts_voice_overrides`, `channel_sounds`, `relay_users`, `hidden_relay_users`, `pending_ip_messages`, `stream_first_chats`, `moderation_actions` | **Chat** | Imported with their ids. Live keeps a read mirror (Chat → `POST /internal/chat-effects/mirror`); Live's remaining writers (AI viewers, relays, donations, `/api/mod`, `/api/channels` deletes, emote renames) forward to Chat. |
-| `channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`, `chat_ai_summaries`, `chat_timeline_events` | **Live** (staged in Chat) until each is handed over | Moved one table at a time by `docs/staged-tables-cutover.md` (register C-04): at `live` Live writes and its changes reach Chat's copy over the bridge; at `chat` Live's writers call Chat and the mirror copies the table back. Chat reads the moderation tables through `live-context` while Live writes them and in place once Chat does. |
+| `channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`, `chat_ai_summaries`, `chat_timeline_events` | **Chat** (C-04 done) | Chat's own tables; Chat is their only writer. Live reads what it needs through `GET /internal/moderation/*` (`chat.moderation.read`), and Live's current release's writers call Chat over the bridge (op `db`) until Live N+1 is deployed. There is no authority switch any more. |
 | `media_requests`, `media_request_settings` | **Live** (not moved) | Decision with evidence: every writer is `server/media/media-queue.js` / `server/media/routes.js` (`/api/media`: gold payment, yt-dlp download, playback state, the streamer's overlay and dashboard). Chat only has the `!sr/!queue/!np/!skip` entry points, which call Live (`POST /internal/chat-effects/media-queue`). Not chat-owned in practice; it moves with the queue lifecycle the charter describes, not before. The importer reports them as `not_moved`. |
 | `chat_messages_new`, `emotes_new`, `channel_sounds_new` | — | Transient tables of Live's table rebuilds; empty in a consistent snapshot. Rows found there go to `import_hold`. |
 
 Chat also keeps `ctx_users`, `ctx_streams`, `ctx_managed_streams`, `ctx_channels` — projections of
 Live data maintained by `live-context` (never authority), `events_outbox`, `live_mirror_outbox`,
-`bridge_applied`, `import_hold`, `import_runs`, `table_authority`.
+`bridge_applied`, `import_hold`, `import_runs`.
 
 ## Prerequisites
 

@@ -68,6 +68,7 @@ t('boot', async () => {
     listenerUser = h.addUser('listener');
     chatters = ['ann', 'ben', 'cat', 'dan'].map((n) => h.addUser(n));
     channelId = h.addChannel(streamer.id, { moderators: [mod.id] });
+    h.db.addChannelModerator(channelId, mod.id, streamer.id);   // the moderator row is Chat's own (C-04)
     streamId = h.addStream(streamer.id, channelId);
     await h.ctx.sync();
     listener = await joined(listenerUser, '198.51.100.90');

@@ -19,8 +19,8 @@
  *   GET    /api/emotes/all/:streamId   - All emotes available in a stream context
  *
  * Uploaded bytes go to OpenVibe.Media with Chat's own service token; the row stores media_url and
- * media_asset_id, and responses use media_url (existing Live rows already carry one). Writes answer
- * 503 { ok: false, error: 'not yet' } while Live is still the table's writer (table_authority live).
+ * media_asset_id, and responses use media_url (existing Live rows already carry one). Chat is the
+ * emotes table's only writer (C-04 done).
  */
 'use strict';
 
@@ -73,11 +73,6 @@ function emoteUploadRateLimited(userId) {
     return false;
 }
 
-/** A staged-table write while Live is still the authority: 503, never a write. */
-function notYet(res, err) {
-    if (err && err.code === 'table.not_chat') { res.status(503).json({ ok: false, error: 'not yet' }); return true; }
-    return false;
-}
 const fileUrl = (e) => e.media_url || `/api/emotes/file/${path.basename(e.url)}`;
 
 // ══════════════════════════════════════════════════════════════
@@ -343,7 +338,6 @@ router.post('/', requireAuth, emoteUpload.single('image'), async (req, res) => {
             },
         });
     } catch (err) {
-        if (notYet(res, err)) return;
         console.error('[Emotes] Upload error:', err);
         if (err && /UNIQUE constraint/i.test(err.message || '')) {
             const code = String((req.body && req.body.code) || '').trim();
@@ -413,7 +407,6 @@ router.patch('/:id', requireAuth, async (req, res) => {
         }
         res.json({ message: 'Emote updated', code: patch.code ?? emote.code, size: patch.size ?? emote.size });
     } catch (err) {
-        if (notYet(res, err)) return;
         res.status(500).json({ error: 'Failed to update emote' });
     }
 });
@@ -437,7 +430,6 @@ router.delete('/:id', requireAuth, async (req, res) => {
         }
         res.json({ message: 'Emote deleted' });
     } catch (err) {
-        if (notYet(res, err)) return;
         res.status(500).json({ error: 'Failed to delete emote' });
     }
 });

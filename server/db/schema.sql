@@ -8,10 +8,9 @@
 --      sound keeps the id it had in Live. Rows still carry Live's user ids; *subject_id
 --      columns add the OpenVibe.Network subject (usr_…) where it is known, so later waves can
 --      drop Live ids.
---   2. Staged copies of chat-target tables that Live still writes in W6 (channel moderators
---      and settings, emotes, user tags, chat-AI summaries and timeline). The importer fills
---      them; Chat reads the live values through server/live-context.js until the routes that
---      write them move. See table_authority.
+--   2. The six chat-target tables — channel moderators and settings, emotes, user tags,
+--      chat-AI summaries and timeline. Since the C-04 cutover Chat is their only writer;
+--      there is no authority switch any more (Live's N+1 reads them through Chat's API).
 --   3. Bookkeeping: projections of Live data (ctx_*), the events outbox, the Live mirror
 --      outbox, import holds.
 --
@@ -185,7 +184,15 @@ CREATE INDEX IF NOT EXISTS idx_mod_actions_created ON moderation_actions(created
 CREATE INDEX IF NOT EXISTS idx_mod_actions_actor ON moderation_actions(actor_user_id);
 CREATE INDEX IF NOT EXISTS idx_mod_actions_scope ON moderation_actions(scope_type, scope_id);
 
--- ── 2. Staged: chat targets Live still writes in W6 ─────────────
+-- Kept one release for N-1 (ADR-016): the previous release reads it, and its rows say 'chat' for all six, so a
+-- rollback still leaves Chat the writer. Nothing in this release reads or writes it; the next release drops it.
+CREATE TABLE IF NOT EXISTS table_authority (
+    table_name TEXT PRIMARY KEY,
+    authority TEXT NOT NULL CHECK(authority IN ('chat', 'live')),
+    note TEXT
+);
+
+-- ── 2. The six chat-target tables (Chat is their only writer since C-04) ──
 
 CREATE TABLE IF NOT EXISTS channel_moderators (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -303,13 +310,6 @@ CREATE TABLE IF NOT EXISTS chat_timeline_events (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_chat_tl_dedup ON chat_timeline_events(scope, subject_id, ts, label);
-
--- Who writes each baseline chat table in this wave (docs/cutover.md).
-CREATE TABLE IF NOT EXISTS table_authority (
-    table_name TEXT PRIMARY KEY,
-    authority TEXT NOT NULL CHECK(authority IN ('chat', 'live')),
-    note TEXT
-);
 
 -- ── 3. Bookkeeping ──────────────────────────────────────────────
 
