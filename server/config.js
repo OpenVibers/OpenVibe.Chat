@@ -140,6 +140,26 @@ module.exports = {
         ringTimeoutMs: int(process.env.CALL_RING_TIMEOUT_MS, 45_000),
     },
 
+    // Custom emotes (Live's /api/emotes moved here, plan T3 step 1). Uploaded image bytes go to
+    // OpenVibe.Media (media, below); the limits and provider cache TTLs are Live's own values.
+    emotes: {
+        maxSizeKb: int(process.env.MAX_EMOTE_SIZE_KB, 2048),
+        maxPerUser: int(process.env.MAX_EMOTES_PER_USER, 30),
+        maxPerChannel: int(process.env.MAX_EMOTES_PER_CHANNEL, 30),
+        maxPerUploaderPerChannel: int(process.env.MAX_EMOTES_PER_UPLOADER_PER_CHANNEL, 30),
+        ffzCacheTtl: int(process.env.FFZ_CACHE_TTL, 3600),
+        bttvCacheTtl: int(process.env.BTTV_CACHE_TTL, 3600),
+        sevenTvCacheTtl: int(process.env.SEVENTV_CACHE_TTL, 3600),
+    },
+
+    // OpenVibe.Media — where emote image bytes live now (Media API v2 objects, namespace `chat`).
+    // Chat's own service token (client `chat`) needs media.object.upload and media.object.delete.
+    media: {
+        baseUrl: strip(process.env.OV_MEDIA_INTERNAL_URL || 'http://127.0.0.1:4100'),
+        publicOrigin: strip(process.env.OV_MEDIA_PUBLIC_URL || 'https://openvibe.media'),
+        scope: 'media.object.upload media.object.delete',
+    },
+
     // Channel sound clips live on disk. At cutover this is Live's sounds directory: stored rows
     // hold absolute paths into it, and Live's donation alerts read the alert sounds from there.
     sounds: {

@@ -362,6 +362,7 @@ CREATE TABLE IF NOT EXISTS ctx_channels (
     id INTEGER PRIMARY KEY,
     user_id INTEGER UNIQUE,
     title TEXT,
+    emote_sources TEXT,              -- the channel's emote source switches (Live's channels.emote_sources)
     synced_at INTEGER
 );
 

@@ -9,7 +9,7 @@ chat events go to OpenVibe.Events. `openvibe.chat` is Chat's own site (global ch
 settings; the service manifest records it live since 2026-09-24).  
 **Domain:** `openvibe.chat` ([deploy/nginx/openvibe.chat.conf](deploy/nginx/openvibe.chat.conf)); Chat
 is also served on Live's origin: `https://openvibe.live/ws/chat`, `/api/chat/`, `/api/dm/`,
-`/api/tts/`, `/api/sounds` via nginx.  
+`/api/tts/`, `/api/sounds`, `/api/emotes` via nginx.  
 **Plan:** OpenVibe End-to-End Realignment & Implementation Plan, revision 3 (20 Sep 2026), §9 and §9.5.  
 **License:** AGPL-3.0 (same as every OpenVibe service).
 
@@ -59,6 +59,27 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 - **Staged tables** (`channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`,
   `chat_ai_summaries`, `chat_timeline_events`): Live writes them until each is handed to Chat, one
   table at a time (`table_authority`, register C-04). Runbook: `docs/staged-tables-cutover.md`.
+- **The features on those tables, served by Chat** (plan T3, plan step 1) — built here so Live can
+  stop touching them at the flip:
+  - `GET /api/emotes/global`, `/channel/:userId`, `/mine`, `/defaults`, `/sources` (GET/PUT),
+    `/search`, `/all/:streamId`, `/file/:filename`, `POST /api/emotes`, `PATCH/DELETE /api/emotes/:id`
+    — Live's exact paths, bodies, limits and error messages; uploaded bytes go to OpenVibe.Media with
+    Chat's own token (`media.object.upload` / `.delete`, namespace `chat`), the row stores
+    `media_url` + `media_asset_id`, responses use `media_url`. No local emote files (`/file/…` 404s).
+    `ffz`/`bttv`/`7tv` are cached provider proxies on fixed hosts.
+  - `GET /api/chat/channels/moderation/mine`, `GET/POST /api/chat/channels/:id/mods`,
+    `DELETE /api/chat/channels/:id/mods/:userId`, `GET/PUT /api/chat/channels/:id/moderation`,
+    `…/moderation/logs`, `…/moderation/chat-search`,
+    `POST …/moderation/messages/:messageId/delete` — owner/admin write, channel mods read.
+  - Live's read API for what Chat owns: `GET /internal/moderation/channels/:channelId`,
+    `GET /internal/moderation/users/:userId/channels`,
+    `GET /internal/moderation/channels/:channelId/emote-count` — loopback + service token,
+    capability `chat.moderation.read` (`chat.channel-moderation-result@1`,
+    `chat.moderated-channels-result@1`, `chat.emote-count-result@1`). Live caches each answer 30 s.
+  - Alert sounds: the bridge op `playAlertSound [streamerId, streamId, kind]` makes Chat resolve the
+    channel's own settings row, read the clip and broadcast it, so Live only names the alert.
+  - Every write keeps the `table_authority` gate: while Live still writes the table the route
+    answers `503 { ok: false, error: 'not yet' }` and never writes.
 
 ## How it fits the network
 
@@ -68,6 +89,8 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 | Accounts, roles, streams, channels, bans, IP approvals, follows, cosmetics, tags, site settings | **Live** (Network for identity) | `server/live-context.js` → `GET/POST /internal/chat-context/*` (service token, `live.chat_context.read`) |
 | Coins, AI viewers, arena, media queue, hardware, pastes, translation, PowerChat, notifications | **Live** | `server/live-context.js` → `POST /internal/chat-effects/*` (`live.chat_effects.write`) |
 | Live's own chat pushes and writes (AI viewers, relays, donations, `/api/mod`, recaps, calls) | **Live → Chat** | `POST /internal/live/calls` (`chat.live_bridge.write`), presence `GET /internal/live/presence` (`chat.presence.read`) |
+| The six staged tables (moderators, moderation settings, emotes, tags, AI summaries, timeline) | **Chat** (after the T3 flip; Live until then) | Chat's own SQLite; Live reads through `GET /internal/moderation/*` (`chat.moderation.read`), 30 s cached |
+| Emote image bytes | **OpenVibe.Media** (namespace `chat`) | `server/media/client.js` (openvibe-sdk `createObjectsClient`), Chat's service token (`media.object.upload` / `.delete`); the row keeps `media_url` + `media_asset_id` |
 | Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |
 | Events | **OpenVibe.Events** | `events_outbox` → `POST /api/v1/events` when `EVENTS_URL` is set (`events.event.publish`); Chat's subscriptions deliver to `POST /internal/events` (`server/events/consumer.js`, `events.subscription.manage`) |
 | A person's chat preferences | **OpenVibe.Network** user module `chat.preferences` (Chat owns the namespace) | `server/prefs/` → `GET/PUT/DELETE /internal/modules/chat.preferences/:subject` (`network.modules.read` / `.write`), cached per person |
@@ -363,7 +386,7 @@ problem+json `rate_limited` with `Retry-After`, one `[Limits]` log line and
 
 | Routes | Per caller |
 | --- | --- |
-| Reads of each API (`/api/chat`, `/api/dm`, `/api/tts`, `/api/sounds`, `/api/streams`) | `CHAT_LIMITS_MINUTE` / `CHAT_LIMITS_HOUR` (120 a minute, 3000 an hour) |
+| Reads of each API (`/api/chat`, `/api/dm`, `/api/tts`, `/api/sounds`, `/api/emotes`, `/api/streams`) | `CHAT_LIMITS_MINUTE` / `CHAT_LIMITS_HOUR` (120 a minute, 3000 an hour) |
 | GIF search and trending (Tenor or Giphy on the site's key) | 60 / 600 |
 | Chat search, staff and streamer logs, purge preview | 30 / 600 |
 | Log export, `GET /api/chat/me/export` | 5 / 30 |
@@ -379,7 +402,7 @@ problem+json `rate_limited` with `Retry-After`, one `[Limits]` log line and
 Never limited: `/health`, `/ready`, `/release.json`, `/metrics`, `/internal/*` (the bridge, the call
 hooks and the signed Events deliveries, which carry account deletions and merges), `/ws/chat` and
 `/ws/call`, the openvibe.chat pages, and the media files players fetch (`/api/tts/audio/…`,
-`/api/sounds/file/…`), which only the per-address limit bounds. `test/actor-limits.test.js`.
+`/api/sounds/file/…`, `/api/emotes/file/…`), which only the per-address limit bounds. `test/actor-limits.test.js`.
 
 ### Layout
 
@@ -387,7 +410,7 @@ hooks and the signed Events deliveries, which carry account deletions and merges
 server/index.js            boot: DB, first Live sync, WS server, HTTP app, relays, graceful stop
 server/app.js              Live's guards for these routes: CORS, /api rate limit, IP bans, ban cookie, WS origin + IP checks
 server/live-context.js     the only module that talks to Live (interface in its header)
-server/chat/               moved from Live: chat-server, dm, dm-routes, routes, history-store, tts-*, sounds-*, soundboard, moderation-utils, word-filter, deploy-notice
+server/chat/               moved from Live: chat-server, dm, dm-routes, routes, history-store, tts-*, sounds-*, soundboard, moderation-utils, word-filter, deploy-notice; plus the T3 APIs: emotes-routes, channel-mod-routes, internal-moderation (Live's read API), alert-sounds
 server/auth/               token resolution through Live; the chat subset of Live's permissions
 server/bridge/             Live → Chat calls + presence (live-bridge.js); Chat → Live read mirror (live-mirror.js)
 server/events/outbox.js    events.event-envelope@1 outbox and relay
@@ -396,6 +419,7 @@ server/events/subscriptions.js  creates them at boot when missing; list/disable/
 server/net/service-auth.js service tokens: client (Chat → others) and guard (others → Chat)
 server/prefs/              chat preferences in the Network user module chat.preferences (routes, cache, migration from Live)
 server/calls/              moved from Live: the call server (/ws/call), its REST routes, Live's stream hooks (/internal/calls), the calls lifecycle
+server/media/client.js     OpenVibe.Media objects (namespace chat): emote image bytes, with Chat's own service token
 server/db/                 schema.sql, database.js (Live's chat functions, same names and arguments)
 scripts/                   import-from-live, parity-check, parity, mirror-flush, table-authority, migrate-chat-preferences, subscribe-events, n-1-record
 docs/                      cutover.md, calls-cutover.md, staged-tables-cutover.md, parity.md, live-patch.diff, capabilities-proposal/

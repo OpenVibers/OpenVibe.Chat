@@ -207,7 +207,19 @@ class Swr {
 const USER_COLS = ['id', 'username', 'display_name', 'avatar_url', 'profile_color', 'role', 'is_banned', 'ban_reason', 'is_owner', 'created_at', 'subject_id'];
 const STREAM_COLS = ['id', 'user_id', 'channel_id', 'managed_stream_id', 'title', 'is_live', 'started_at', 'ended_at', 'created_at'];
 const MS_COLS = ['id', 'user_id', 'slug', 'title', 'sort_order', 'created_at'];
-const CHANNEL_COLS = ['id', 'user_id', 'title'];
+const CHANNEL_COLS = ['id', 'user_id', 'title', 'emote_sources'];
+
+// The emote source switches Live keeps on the channels row (emote_sources JSON), every key defaulting
+// to true: Live's /api/emotes/sources answers exactly this shape.
+const EMOTE_SOURCE_KEYS = ['defaults', 'custom', 'ffz', 'bttv', '7tv'];
+function emoteSources(raw) {
+    let sources = raw;
+    if (typeof raw === 'string') { try { sources = JSON.parse(raw || '{}'); } catch { sources = {}; } }
+    if (!sources || typeof sources !== 'object') sources = {};
+    const out = {};
+    for (const key of EMOTE_SOURCE_KEYS) out[key] = sources[key] === undefined ? true : sources[key] !== false;
+    return out;
+}
 
 function upsertRows(table, cols, rows) {
     if (!rows || !rows.length) return 0;
@@ -332,6 +344,14 @@ async function createChannel(userId) {
     const data = await effect('ensure-channel', { user_id: userId });
     if (data.channel) upsertRows('ctx_channels', CHANNEL_COLS, [data.channel]);
     return getChannelByUserId(userId);
+}
+
+/** Write the channel's emote source switches (Live's channels.emote_sources) and refresh the cache. */
+async function setChannelEmoteSources(userId, sources) {
+    const clean = emoteSources(sources);
+    await effect('channel-emote-sources', { user_id: userId, sources: clean });
+    db.run('UPDATE ctx_channels SET emote_sources = ? WHERE user_id = ?', [JSON.stringify(clean), Number(userId)]);
+    return clean;
 }
 
 // ── Channel policy: moderation settings, moderators, language, alert sounds ──────────────────
@@ -939,6 +959,7 @@ module.exports = {
     // streams + channels
     getStreamById, ensureStream, refreshStream, latestStreamIdForUser, getLiveStreamsByUserId, getStreamsByUserId, getManagedStreamsByUserId,
     getChannelById, getChannelByUserId, ensureChannelForUser, createChannel,
+    emoteSources, setChannelEmoteSources,
     // policy
     getChannelModerationSettings, isChannelModerator, channelLanguage, getChannelAlertSoundsByUser, ensurePolicy, invalidateChannel,
     reloadPolicy, onChannelSettings, defaultModerationSettings,

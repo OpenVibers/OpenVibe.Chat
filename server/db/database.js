@@ -118,6 +118,7 @@ const ADDED_COLUMNS = [
     ['emotes', 'media_asset_id', 'INTEGER'],
     ['ctx_users', 'subject_id', 'TEXT'],      // older Chat databases; auth/network-session.js looks users up by it
     ['channel_moderation_settings', 'sub_only', 'INTEGER DEFAULT 0'],   // sub-only chat (WS-I task 6), Live has it too
+    ['ctx_channels', 'emote_sources', 'TEXT'],   // the channel's emote source switches (T3, Live's channels row)
 ];
 
 function initDb({ captureMirror = false } = {}) {
@@ -846,6 +847,152 @@ function updateChannelSoundEmoteRefs(ownerId, oldCode, newCode) {
         [newCode || '', ownerId, oldCode]);
 }
 
+// ── The six staged tables: reads for the public APIs and Live's internal read API (T3) ──
+// Same SQL and shapes as Live's database.js helpers of the same name; usernames come from the
+// ctx_users projection instead of Live's users table.
+
+function isChannelModerator(userId, channelId) {
+    return !!get('SELECT 1 FROM channel_moderators WHERE user_id = ? AND channel_id = ?', [userId, channelId]);
+}
+
+/** The channel_moderation_settings row as it is, or null when the channel has none (defaults are Live's). */
+function getChannelModerationSettingsRow(channelId) {
+    return get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [Number(channelId)]) || null;
+}
+
+/** A channel's moderators, with names, oldest first (Live's getChannelModerators). */
+function getChannelModerators(channelId) {
+    return all(`
+        SELECT cm.id, cm.user_id, cm.added_by, cm.created_at,
+               u.username, u.display_name, u.avatar_url,
+               a.username as added_by_username
+        FROM channel_moderators cm
+        LEFT JOIN ctx_users u ON cm.user_id = u.id
+        LEFT JOIN ctx_users a ON cm.added_by = a.id
+        WHERE cm.channel_id = ?
+        ORDER BY cm.created_at ASC, cm.id ASC
+    `, [channelId]);
+}
+
+/** The channel's moderator user ids, oldest first (Live's policy answer carries the same list). */
+function getChannelModeratorIds(channelId) {
+    return all('SELECT user_id FROM channel_moderators WHERE channel_id = ? ORDER BY created_at ASC, id ASC', [channelId]).map((r) => r.user_id);
+}
+
+/**
+ * The channels a user moderates (Live's getChannelsByModerator). Channel title and owner come from
+ * the ctx_channels / ctx_users projections; the extra `id` alias is what the dashboard reads.
+ */
+function getChannelsByModerator(userId) {
+    return all(`
+        SELECT cm.channel_id, cm.channel_id AS id, c.title,
+               c.user_id AS user_id, c.user_id AS owner_user_id, u.username AS owner_username
+        FROM channel_moderators cm
+        LEFT JOIN ctx_channels c ON cm.channel_id = c.id
+        LEFT JOIN ctx_users u ON c.user_id = u.id
+        WHERE cm.user_id = ?
+        ORDER BY cm.created_at ASC, cm.id ASC
+    `, [userId]);
+}
+
+/** Custom emotes marked global (Live's getGlobalEmotes). */
+function getGlobalEmotes() {
+    return all(`SELECT e.*, u.username FROM emotes e
+        LEFT JOIN ctx_users u ON e.user_id = u.id
+        WHERE e.is_global = 1 AND e.is_approved = 1 ORDER BY code`);
+}
+
+/** A channel's emotes: ones targeted at the owner, plus the owner's own legacy uploads. */
+function getChannelEmotes(userId) {
+    return all(
+        `SELECT e.*, u.username, up.username AS uploader_username, up.display_name AS uploader_display_name
+           FROM emotes e
+           LEFT JOIN ctx_users u ON e.user_id = u.id
+           LEFT JOIN ctx_users up ON e.user_id = up.id
+          WHERE ((e.channel_owner_id = ?) OR (e.channel_owner_id IS NULL AND e.user_id = ?))
+            AND e.is_approved = 1
+          ORDER BY code`,
+        [userId, userId]
+    );
+}
+
+/** How many emotes a channel holds (Live's countChannelEmotes; ownerId is the streamer's user id). */
+function countChannelEmotes(ownerId) {
+    return get(
+        'SELECT COUNT(*) as count FROM emotes WHERE (channel_owner_id = ?) OR (channel_owner_id IS NULL AND user_id = ?)',
+        [ownerId, ownerId]
+    )?.count || 0;
+}
+
+/** The channel's emote with this code, any uploader (Live's getChannelEmoteByCode). */
+function getChannelEmoteByCode(ownerId, code) {
+    return get(
+        `SELECT * FROM emotes
+          WHERE code = ? AND ((channel_owner_id = ?) OR (channel_owner_id IS NULL AND user_id = ?))
+          LIMIT 1`,
+        [code, ownerId, ownerId]
+    );
+}
+
+/** One emote by id, with its uploader's name (Live's getEmoteById). */
+function getEmoteById(id) {
+    return get('SELECT e.*, u.username FROM emotes e LEFT JOIN ctx_users u ON e.user_id = u.id WHERE e.id = ?', [id]);
+}
+
+/** A user's own emotes (Live's getEmotesByUser). */
+function getEmotesByUser(userId) {
+    return all('SELECT * FROM emotes WHERE user_id = ? ORDER BY code', [userId]);
+}
+
+/** Moderation actions with actor/target names (Live's getModerationActions). */
+function getModerationActions({ scopeType, scope_type, scopeId, scope_id, actor_user_id, target_user_id, limit = 50, offset = 0 } = {}) {
+    const conditions = [];
+    const params = [];
+    const st = scopeType || scope_type;
+    const si = scopeId || scope_id;
+    if (st) { conditions.push('ma.scope_type = ?'); params.push(st); }
+    if (si) { conditions.push('ma.scope_id = ?'); params.push(si); }
+    if (actor_user_id) { conditions.push('ma.actor_user_id = ?'); params.push(actor_user_id); }
+    if (target_user_id) { conditions.push('ma.target_user_id = ?'); params.push(target_user_id); }
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    params.push(limit, offset);
+    return all(`
+        SELECT ma.*, actor.username AS actor_username, target.username AS target_username
+        FROM moderation_actions ma
+        LEFT JOIN ctx_users actor ON ma.actor_user_id = actor.id
+        LEFT JOIN ctx_users target ON ma.target_user_id = target.id
+        ${where}
+        ORDER BY ma.created_at DESC
+        LIMIT ? OFFSET ?
+    `, params);
+}
+
+/**
+ * A channel's chat messages matching a search (Live's searchChannelChatMessages): one of the
+ * channel's streams, or its offline room (channel_user_id), never another channel's room.
+ */
+function searchChannelChatMessages(channel, { query, userId, limit = 50, offset = 0 } = {}) {
+    const conditions = [
+        '(cm.channel_user_id = ? OR cm.stream_id IN (SELECT id FROM ctx_streams WHERE channel_id = ? OR user_id = ?))',
+        'cm.is_deleted = 0',
+        '(cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)',
+    ];
+    const params = [channel.user_id, channel.id, channel.user_id];
+    if (query) { conditions.push('cm.message LIKE ?'); params.push(`%${query}%`); }
+    if (userId) { conditions.push('cm.user_id = ?'); params.push(userId); }
+    params.push(limit, offset);
+    return {
+        messages: all(`
+            SELECT cm.*, u.username, u.display_name, u.avatar_url
+            FROM chat_messages cm
+            LEFT JOIN ctx_users u ON cm.user_id = u.id
+            WHERE ${conditions.join(' AND ')}
+            ORDER BY cm.timestamp DESC
+            LIMIT ? OFFSET ?
+        `, params),
+    };
+}
+
 // ── Staged tables (roadmap C-04) ──────────────────────────────
 // Who writes each one is table_authority (STAGED_TABLES above). The reads are cached for a second:
 // a handoff made by another process (scripts/table-authority.js) counts within that.
@@ -1053,14 +1200,15 @@ function setChannelAlertSound(channelId, kind, url, mime) {
     return out;
 }
 
-// Emotes (Live's /api/emotes; media_url/media_asset_id from its Media asset-sync).
-function createEmote({ user_id, code, url, animated = false, width = 28, height = 28, is_global = false, channel_owner_id = null, size = 100 }) {
+// Emotes (Live's /api/emotes; media_url/media_asset_id are OpenVibe.Media's copy — Live's
+// asset-sync filled them onto the shared rows, Chat uploads through its own Media token now).
+function createEmote({ user_id, code, url, animated = false, width = 28, height = 28, is_global = false, channel_owner_id = null, size = 100, media_url = null, media_asset_id = null }) {
     _assertChatWrites('emotes');
     return transaction(() => {
         const res = run(
-            `INSERT INTO emotes (user_id, code, url, animated, width, height, is_global, channel_owner_id, size)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [user_id, code, url, animated ? 1 : 0, width, height, is_global ? 1 : 0, channel_owner_id || null, Math.min(400, Math.max(25, parseInt(size, 10) || 100))]
+            `INSERT INTO emotes (user_id, code, url, animated, width, height, is_global, channel_owner_id, size, media_url, media_asset_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [user_id, code, url, animated ? 1 : 0, width, height, is_global ? 1 : 0, channel_owner_id || null, Math.min(400, Math.max(25, parseInt(size, 10) || 100)), media_url || null, media_asset_id || null]
         );
         return _staged(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [res.lastInsertRowid])]);
     });
@@ -1296,6 +1444,20 @@ module.exports = {
     deleteChannelSound,
     renameChannelSoundCommand,
     updateChannelSoundEmoteRefs,
+    // the six staged tables: reads for the public APIs and Live's internal read API (T3)
+    isChannelModerator,
+    getChannelModerationSettingsRow,
+    getChannelModerators,
+    getChannelModeratorIds,
+    getChannelsByModerator,
+    getGlobalEmotes,
+    getChannelEmotes,
+    countChannelEmotes,
+    getChannelEmoteByCode,
+    getEmoteById,
+    getEmotesByUser,
+    getModerationActions,
+    searchChannelChatMessages,
     // staged tables (C-04): authority, Live's changes, dual-read slices, and the writes once Chat owns them
     tableAuthority,
     setTableAuthority,

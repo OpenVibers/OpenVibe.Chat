@@ -98,6 +98,8 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     if (events) app.use('/internal/events', events.router);
     // Live's stream hooks for calls (CALLS_AUTHORITY=chat): stream voice channels (server/calls/internal.js).
     app.use('/internal/calls', express.json({ limit: '64kb' }), require('./calls/internal').createInternalRouter());
+    // Live's read API for the chat tables Chat owns (plan T3; capability chat.moderation.read).
+    app.use('/internal/moderation', express.json({ limit: '64kb' }), require('./chat/internal-moderation'));
     app.get('/health', (req, res) => res.json({ ok: true, service: 'chat' }));
     // Readiness in the openvibe-shared/ready shape (status ready/degraded/not_ready, named checks):
     // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
@@ -214,17 +216,22 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     app.use('/api/dm', limits.identify, limits.reads('chat.dm.read'));
     app.use('/api/tts', limits.identify, limits.reads('chat.tts.read', { skip: (req) => req.path.startsWith('/audio/') }));
     app.use('/api/sounds', limits.identify, limits.reads('chat.sounds.read', { skip: (req) => req.path.startsWith('/file/') }));
+    app.use('/api/emotes', limits.identify, limits.reads('chat.emotes.read', { skip: (req) => req.path.startsWith('/file/') }));
 
     // The person's chat settings: the Network user modules Chat owns (server/prefs/stores.js).
     for (const [mount, router] of Object.entries(require('./prefs/routes').ROUTES)) app.use(`/api/chat/${mount}`, router);
     // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
     app.use('/api/chat/rooms', require('./rooms/routes'));
+    // Channel moderators & moderation settings (/api/chat/channels/:id/…): before /api/chat too.
+    app.use('/api/chat/channels', require('./chat/channel-mod-routes'));
     // ICE servers for call rooms (STUN, and TURN with credentials when TURN_URL is set): server/net/turn.js.
     app.use('/api/chat/ice-servers', require('./net/turn').createIceRoutes());
     app.use('/api/chat', require('./chat/routes'));
     app.use('/api/dm', require('./chat/dm-routes'));
     app.use('/api/tts', require('./chat/tts-routes'));
     app.use('/api/sounds', require('./chat/sounds-routes'));
+    // Custom emotes (Live's /api/emotes paths, plan T3): bytes go to OpenVibe.Media, rows are Chat's.
+    app.use('/api/emotes', require('./chat/emotes-routes'));
     // Calls on Live's paths (server/calls/routes.js): /api/streams/voice-channels… and /api/streams/:id/call.
     // Nothing answers here until CHAT_CALLS is on (docs/calls-cutover.md).
     const callRoutes = require('./calls/routes');

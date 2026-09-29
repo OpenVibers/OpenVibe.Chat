@@ -9,7 +9,7 @@
  *       { boot, ops: [{ seq, op, args, ref? }] } → { ok, results: [{ seq, ok, result?, error? }] }
  *       op = a ChatServer method Live's modules call (broadcastToStream, forwardToGlobal, sendDm,
  *       synthesizeAndBroadcastTTS, triggerChannelSound, disconnectUser, sendUserUpdate, …), a few
- *       bridge-only ops (sendToConn, deployNotice, userChanged, invalidate, broadcastAllRaw), or `db` — one of
+ *       bridge-only ops (sendToConn, deployNotice, playAlertSound, userChanged, invalidate, broadcastAllRaw), or `db` — one of
  *       the chat-table writes Live's un-moved code still makes (AI viewers, relays, donations,
  *       /api/mod), executed on Chat's database, which is the authority.
  *
@@ -241,6 +241,13 @@ function createBridge({ chatServer, mirror = null, config = require('../config')
             }
             case 'deployNotice':
                 return require('../chat/deploy-notice').announceCommits({ db, chatServer, commits: args[0] });
+            case 'playAlertSound': {
+                // Live's donation / goal-reached alerts: Live says "play the alert for channel X"
+                // (streamerId, streamId, kind), Chat resolves the sound from its own settings row and
+                // broadcasts it to the channel room. Replaces Live reading the file + sending base64.
+                const [streamerId, streamId, kind] = args;
+                return require('../chat/alert-sounds').playAlertSound(chatServer, Number(streamerId) || 0, streamId != null ? Number(streamId) : null, kind === 'goal' ? 'goal' : 'donation');
+            }
             case 'userChanged':
                 ctx.invalidateUser(args[0]);
                 await ctx.ensureUsers([args[0]]).catch(() => {});

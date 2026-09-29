@@ -117,6 +117,7 @@ t('ratchet: every file that makes an outbound request itself is reviewed', () =>
         'server/chat/account-data.js': 'Network internal API (configured), fixed paths: export parts and deletion confirmations',
         'server/prefs/network-modules.js': 'Network user modules (configured)',
         'server/chat/routes.js': 'GIF providers (fixed hosts)',
+        'server/chat/emotes-routes.js': 'FFZ / BTTV / 7TV emote providers (fixed hosts, hardcoded URLs)',
         'server/chat/soundboard-service.js': '101soundboards (host allowlist; audio via safeLookup)',
         'server/chat/tts-engine.js': 'Google / AWS TTS (fixed hosts)',
     };
