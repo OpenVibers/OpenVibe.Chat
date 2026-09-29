@@ -22,7 +22,7 @@ const t = suite('message-deleted');
 const EVENTS_DIR = process.env.OPENVIBE_EVENTS_DIR || path.join(__dirname, '..', '..', 'OpenVibe.Events');
 const haveEvents = ['server/index.js', 'server/redaction.js', 'node_modules/better-sqlite3'].every((f) => fs.existsSync(path.join(EVENTS_DIR, f)));
 const SECRET = 'my number is 555-0199';
-let h, events, eventsPort, admin, alice, streamer, streamId;
+let h, events, eventsDb, eventsPort, admin, alice, streamer, streamId;
 
 /** Outbox chat.message.deleted envelopes after `afterSeq`. */
 function deletions(afterSeq = 0) {
@@ -64,8 +64,13 @@ t('boot (a real OpenVibe.Events on a reserved port when one is checked out next 
         const { load } = require(path.join(EVENTS_DIR, 'server', 'config'));
         const { start } = require(path.join(EVENTS_DIR, 'server', 'index'));
         const quiet = { log() {}, warn() {}, error() {} };
+        // Events is on PostgreSQL (ADR-035): its own test/db.js hands out a migrated database (PGlite, or the
+        // containers under EVENTS_TEST_STORE=pg); an older SQLite checkout ignores the handle and uses the path.
+        const dbHelper = path.join(EVENTS_DIR, 'test', 'db.js');
+        eventsDb = fs.existsSync(dbHelper) ? await require(dbHelper).testDb() : null;
         events = await start({
             config: load({ NODE_ENV: 'test', PORT: String(eventsPort), EVENTS_DB_PATH: path.join(h.tmp, 'events.db'), OV_NETWORK_PUBLIC_KEY: h.keys.publicKey, EVENTS_WORKER: 'off' }),
+            db: eventsDb ? eventsDb.db : null,
             log: quiet,
         });
     } else {
@@ -206,7 +211,7 @@ t('e2e: the relay publishes the message, then its deletion; replay serves only t
     h.db.run('UPDATE events_outbox SET sent_at = ? WHERE sent_at IS NULL', [new Date().toISOString()]);   // earlier tests' rows
     msgId = say(SECRET, { user_id: alice.id, anon_id: null, username: 'alice' });
     assert.strictEqual((await h.eventsRelay.flush()).sent, 1);
-    firstSeq = events.store.lastSeq();
+    firstSeq = await events.store.lastSeq();
     const before = await sse(`/realtime/stream?topics=chat.message.*&last_event_id=${firstSeq - 1}`);
     await before.waitFor((c) => c.events().length === 1);
     assert.ok(before.body().includes('555-0199'), 'before the deletion the text is there (the leak)');
@@ -243,7 +248,7 @@ t('e2e: only svc:chat can redact Chat’s events', async () => {
     if (!haveEvents) return;
     const id = say('not yours to delete');
     await h.eventsRelay.flush();
-    const created = events.store.scan(0, { patterns: ['chat.message.created'], limit: 1000 }).rows.find((r) => r.subject_id === String(id));
+    const created = (await events.store.scan(0, { patterns: ['chat.message.created'], limit: 1000 })).rows.find((r) => r.subject_id === String(id));
     const env = deletions(0).at(-1);   // a well-formed deletion, re-sourced by another service
     const post = (sub, body) => fetch(`http://127.0.0.1:${eventsPort}/api/v1/events`, {
         method: 'POST', body: JSON.stringify(body),
@@ -254,10 +259,10 @@ t('e2e: only svc:chat can redact Chat’s events', async () => {
     assert.strictEqual((await r.json()).code, 'events.redaction_not_allowed');
     r = await post('svc:live', { ...env, event_id: 'evt_01J9DDDDDDDDDDDDDDDDDDDDDD', payload: { redacts: { subject_type: 'chat_message', subject_ids: [String(id)] } } });
     assert.strictEqual(r.status, 403, 'svc:live cannot publish as chat');
-    assert.ok(events.store.getEvent(created.id).payload.includes('not yours to delete'), 'still intact');
+    assert.ok((await events.store.getEvent(created.id)).payload.includes('not yours to delete'), 'still intact');
     h.db.deleteChatMessage(id, admin.id);
     await h.eventsRelay.flush();
-    assert.ok(events.store.getEvent(created.id).redacted_at, 'Chat itself can');
+    assert.ok((await events.store.getEvent(created.id)).redacted_at, 'Chat itself can');
 });
 
-t.run(async () => { if (events) await events.close(); if (h) await h.close(); });
+t.run(async () => { if (events) await events.close(); if (eventsDb) await eventsDb.close(); if (h) await h.close(); });
