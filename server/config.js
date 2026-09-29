@@ -160,6 +160,19 @@ module.exports = {
         scope: 'media.object.upload media.object.delete',
     },
 
+    // OpenVibe.AI — the chat-AI summaries (decision 5, plan T3 step 2). Chat runs Live's chat-ai job
+    // itself and calls AI with its OWN service token (client `chat`, audience openvibe.ai, network
+    // grants ai.run.create/ai.run.read on namespace chat.*). `enabled` is the job's switch: off in
+    // development and the test harness, on in production through CHAT_AI_ENABLED=1 (its other jobs
+    // are gated the same way — LIVE_MIRROR, EVENTS_URL).
+    ai: {
+        enabled: bool(process.env.CHAT_AI_ENABLED, false),
+        internalUrl: strip(process.env.OV_AI_INTERNAL_URL || 'http://127.0.0.1:4700'),
+        scope: 'ai.run.create ai.run.read',
+        waitMs: Math.max(0, int(process.env.CHAT_AI_WAIT_MS, 60000)),
+        tickMs: Math.max(1000, int(process.env.CHAT_AI_TICK_MS, 45000)),
+    },
+
     // Channel sound clips live on disk. At cutover this is Live's sounds directory: stored rows
     // hold absolute paths into it, and Live's donation alerts read the alert sounds from there.
     sounds: {

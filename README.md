@@ -78,6 +78,17 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
     `chat.moderated-channels-result@1`, `chat.emote-count-result@1`). Live caches each answer 30 s.
   - Alert sounds: the bridge op `playAlertSound [streamerId, streamId, kind]` makes Chat resolve the
     channel's own settings row, read the clip and broadcast it, so Live only names the alert.
+  - **The chat-AI summaries** (plan T3 step 2, decision 5) — Live's `server/ai/chat-ai.js` job moved
+    here: a background poller (off unless `CHAT_AI_ENABLED=1`) that folds Chat's own messages into
+    rolling global/per-user/per-relay/per-anon insights and the append-only timeline, writing
+    `chat_ai_summaries`/`chat_timeline_events` through the staged writers. The model is OpenVibe.AI
+    called with Chat's own service token (`ai.run.create`/`ai.run.read`, audience `openvibe.ai`,
+    namespace `chat.*`, workflows `chat.global`/`chat.profile`); when AI does not answer the job
+    stores a deterministic extractive summary instead, so the routes always have something to serve.
+    Routes (Live's paths, parameters, shapes and public visibility, now under `/api/chat/ai/`):
+    `GET /global`, `/timeline` (`?before=&since=&q=&limit=`), `/user/:id`, `/anon/:anonId`,
+    `/relay/:platform/:username`, `/timeline/:username`. A write while Live still owns the two
+    tables is skipped with one log line, never forced.
   - Every write keeps the `table_authority` gate: while Live still writes the table the route
     answers `503 { ok: false, error: 'not yet' }` and never writes.
 
@@ -91,6 +102,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 | Live's own chat pushes and writes (AI viewers, relays, donations, `/api/mod`, recaps, calls) | **Live → Chat** | `POST /internal/live/calls` (`chat.live_bridge.write`), presence `GET /internal/live/presence` (`chat.presence.read`) |
 | The six staged tables (moderators, moderation settings, emotes, tags, AI summaries, timeline) | **Chat** (after the T3 flip; Live until then) | Chat's own SQLite; Live reads through `GET /internal/moderation/*` (`chat.moderation.read`), 30 s cached |
 | Emote image bytes | **OpenVibe.Media** (namespace `chat`) | `server/media/client.js` (openvibe-sdk `createObjectsClient`), Chat's service token (`media.object.upload` / `.delete`); the row keeps `media_url` + `media_asset_id` |
+| Chat-AI summaries (global / per-chatter insight + timeline) | **OpenVibe.AI** (namespace `chat.*`) | `server/ai/client.js` (openvibe-sdk `createAiClient`), Chat's service token (`ai.run.create` / `ai.run.read`); workflows `chat.global` / `chat.profile`; extractive fallback when AI does not answer |
 | Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |
 | Events | **OpenVibe.Events** | `events_outbox` → `POST /api/v1/events` when `EVENTS_URL` is set (`events.event.publish`); Chat's subscriptions deliver to `POST /internal/events` (`server/events/consumer.js`, `events.subscription.manage`) |
 | A person's chat preferences | **OpenVibe.Network** user module `chat.preferences` (Chat owns the namespace) | `server/prefs/` → `GET/PUT/DELETE /internal/modules/chat.preferences/:subject` (`network.modules.read` / `.write`), cached per person |
@@ -420,6 +432,7 @@ server/net/service-auth.js service tokens: client (Chat → others) and guard (o
 server/prefs/              chat preferences in the Network user module chat.preferences (routes, cache, migration from Live)
 server/calls/              moved from Live: the call server (/ws/call), its REST routes, Live's stream hooks (/internal/calls), the calls lifecycle
 server/media/client.js     OpenVibe.Media objects (namespace chat): emote image bytes, with Chat's own service token
+server/ai/                 moved from Live: chat-ai.js (the rolling insight job, off unless CHAT_AI_ENABLED), client.js (OpenVibe.AI runs, namespace chat.*), extractive.js (the fallback summary)
 server/db/                 schema.sql, database.js (Live's chat functions, same names and arguments)
 scripts/                   import-from-live, parity-check, parity, mirror-flush, table-authority, migrate-chat-preferences, subscribe-events, n-1-record
 docs/                      cutover.md, calls-cutover.md, staged-tables-cutover.md, parity.md, live-patch.diff, capabilities-proposal/

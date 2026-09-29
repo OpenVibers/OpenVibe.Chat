@@ -226,6 +226,8 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     app.use('/api/chat/channels', require('./chat/channel-mod-routes'));
     // ICE servers for call rooms (STUN, and TURN with credentials when TURN_URL is set): server/net/turn.js.
     app.use('/api/chat/ice-servers', require('./net/turn').createIceRoutes());
+    // Chat-AI insight (/api/chat/ai/…): before /api/chat, whose /:streamId routes would take /ai/….
+    app.use('/api/chat/ai', require('./chat/ai-routes'));
     app.use('/api/chat', require('./chat/routes'));
     app.use('/api/dm', require('./chat/dm-routes'));
     app.use('/api/tts', require('./chat/tts-routes'));

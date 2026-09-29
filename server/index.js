@@ -22,6 +22,7 @@ const { createMirror } = require('./bridge/live-mirror');
 const { createRelay } = require('./events/outbox');
 const { createEventsConsumer } = require('./events/consumer');
 const subscriptions = require('./events/subscriptions');
+const chatAi = require('./ai/chat-ai');
 const { createApp } = require('./app');
 
 async function start() {
@@ -46,6 +47,9 @@ async function start() {
     mirror.start();
     relay.start();
     events.start();
+    // The chat-AI job (Live's server/ai/chat-ai.js, now Chat's): off unless CHAT_AI_ENABLED=1, and
+    // its writes skip with one log line while Live is still the two summaries tables' authority.
+    chatAi.start();
 
     await new Promise((resolve) => server.listen(config.port, config.host, resolve));
     console.log(`[Chat] listening on http://${config.host}:${server.address().port} (ws /ws/chat${config.calls.enabled ? ', /ws/call' : ''})`);
@@ -67,6 +71,7 @@ async function start() {
         relay.stop();
         mirror.stop();
         events.stop();
+        chatAi.stop();
         subs.stop();
         try { await Promise.race([mirror.flush(), new Promise((r) => setTimeout(r, 3000))]); } catch { /* */ }
         try { chatServer.close(); } catch { /* */ }

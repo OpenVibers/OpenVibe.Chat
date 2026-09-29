@@ -1314,6 +1314,153 @@ function addChatTimelineEvents(scope, subjectId, events) {
     });
 }
 
+// ── Chat AI reads (the job and its routes) ────────────────────
+// Live's server/db/database.js helpers, moved: same SQL, but Live's `users`/`streams` joins read
+// the ctx_* projections here (Live's rows are not in this database).
+const _CHAT_AI_WHERE = `cm.is_deleted = 0 AND cm.message_type != 'system'
+    AND COALESCE(cm.source_platform,'') != 'ai'
+    AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)`;
+
+function getChatAiSummary(scope, subjectId, window) {
+    return get('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? AND window = ?',
+        [scope, subjectId || 0, window]) || null;
+}
+function getChatAiSummaries(scope, subjectId) {
+    return all('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? ORDER BY window',
+        [scope, subjectId || 0]);
+}
+// Paginated + searchable timeline browse. `before` = epoch ms (exclusive upper bound); `q`
+// filters label/detail; `since` = epoch ms lower bound (for period jumps). Newest first.
+function getChatTimelineEvents({ scope = 'global', subjectId = 0, before = null, since = null, q = null, limit = 25 } = {}) {
+    const conds = ['scope = ?', 'subject_id = ?'];
+    const params = [scope, subjectId || 0];
+    if (before) { conds.push("ts < datetime(?, 'unixepoch')"); params.push(Math.floor(before / 1000)); }
+    if (since) { conds.push("ts >= datetime(?, 'unixepoch')"); params.push(Math.floor(since / 1000)); }
+    if (q && String(q).trim()) { const like = '%' + String(q).trim().slice(0, 60) + '%'; conds.push('(label LIKE ? OR detail LIKE ?)'); params.push(like, like); }
+    params.push(Math.min(60, Math.max(1, limit)));
+    try {
+        return all(`SELECT id, ts, label, detail FROM chat_timeline_events WHERE ${conds.join(' AND ')} ORDER BY ts DESC, id DESC LIMIT ?`, params) || [];
+    } catch { return []; }
+}
+
+function getMaxChatMessageId() {
+    return get('SELECT MAX(id) AS m FROM chat_messages')?.m || 0;
+}
+// Count analyzable messages newer than a high-water id (optionally for one user).
+function countChatMessagesSince(afterId, userId = null) {
+    let sql = `SELECT COUNT(*) AS c FROM chat_messages cm WHERE ${_CHAT_AI_WHERE} AND cm.id > ?`;
+    const params = [afterId || 0];
+    if (userId) { sql += ' AND cm.user_id = ?'; params.push(userId); }
+    return get(sql, params)?.c || 0;
+}
+// Fetch analyzable messages for AI batching (with the channel/broadcaster label).
+function getChatMessagesForAi({ afterId = null, sinceTs = null, userId = null, limit = 400, order = 'asc' } = {}) {
+    let sql = `SELECT cm.id, cm.user_id, cm.username, cm.message, cm.message_type, cm.timestamp,
+                      cm.stream_id, cm.channel_user_id, cm.is_global,
+                      ch.username AS channel_username, ch.display_name AS channel_display
+               FROM chat_messages cm
+               LEFT JOIN ctx_users ch ON cm.channel_user_id = ch.id
+               WHERE ${_CHAT_AI_WHERE}`;
+    const params = [];
+    if (afterId != null) { sql += ' AND cm.id > ?'; params.push(afterId); }
+    if (sinceTs != null) { sql += ' AND cm.timestamp >= ?'; params.push(sinceTs); }
+    if (userId) { sql += ' AND cm.user_id = ?'; params.push(userId); }
+    sql += ` ORDER BY cm.id ${order === 'desc' ? 'DESC' : 'ASC'} LIMIT ?`;
+    params.push(Math.max(1, Math.min(2000, limit)));
+    const rows = all(sql, params);
+    return order === 'desc' ? rows.reverse() : rows;
+}
+// Timestamp of the Nth-most-recent analyzable message — drives the adaptive overview window.
+function getNthRecentChatTs(n, userId = null) {
+    let sql = `SELECT cm.timestamp AS ts FROM chat_messages cm WHERE ${_CHAT_AI_WHERE}`;
+    const params = [];
+    if (userId) { sql += ' AND cm.user_id = ?'; params.push(userId); }
+    sql += ' ORDER BY cm.id DESC LIMIT 1 OFFSET ?';
+    params.push(Math.max(0, (n | 0) - 1));
+    return get(sql, params)?.ts || null;
+}
+
+// Users with enough new chat activity (or a stale summary) to warrant an AI refresh.
+function getUsersNeedingChatAi({ threshold = 15, staleCutoffIso, sinceTs, limit = 3 } = {}) {
+    const sql = `
+        SELECT cm.user_id AS uid,
+               MAX(cm.id) AS max_id,
+               SUM(CASE WHEN cm.id > COALESCE(cs.last_message_id, 0) THEN 1 ELSE 0 END) AS new_msgs,
+               COALESCE(cs.last_message_id, 0) AS hw,
+               cs.updated_at AS last_update
+        FROM chat_messages cm
+        LEFT JOIN chat_ai_summaries cs
+          ON cs.scope = 'user' AND cs.subject_id = cm.user_id AND cs.window = 'rolling'
+        WHERE ${_CHAT_AI_WHERE} AND cm.user_id IS NOT NULL AND cm.timestamp >= ?
+        GROUP BY cm.user_id
+        HAVING new_msgs > 0
+           AND ( new_msgs >= ? OR cs.last_message_id IS NULL OR cs.updated_at IS NULL OR cs.updated_at < ? )
+        ORDER BY (cs.updated_at IS NULL) DESC, new_msgs DESC
+        LIMIT ?`;
+    return all(sql, [sinceTs, threshold, staleCutoffIso, Math.max(1, limit)]);
+}
+
+// Relay messages for AI batching (mirrors getChatMessagesForAi).
+function getRelayChatMessagesForAi({ platform, rawUsername, sinceTs = null, limit = 300, order = 'asc' } = {}) {
+    let sql = `SELECT cm.id, cm.username, cm.message, cm.message_type, cm.timestamp, cm.source_platform
+               FROM chat_messages cm
+               WHERE ${_CHAT_AI_WHERE} AND ${_RELAY_MATCH}`;
+    const params = _relayMatchParams(platform, rawUsername);
+    if (sinceTs != null) { sql += ' AND cm.timestamp >= ?'; params.push(sinceTs); }
+    sql += ` ORDER BY cm.id ${order === 'desc' ? 'DESC' : 'ASC'} LIMIT ?`;
+    params.push(Math.max(1, Math.min(2000, limit)));
+    const rows = all(sql, params);
+    return order === 'desc' ? rows.reverse() : rows;
+}
+
+// Relay users with new activity since their last AI summary (or never summarised).
+function getRelayUsersNeedingChatAi({ lookbackIso, threshold = 8, limit = 2 } = {}) {
+    return all(`
+        SELECT r.rowid AS id, r.platform, r.username, r.display_name, r.message_count, r.last_seen,
+               cs.updated_at AS last_update
+        FROM relay_users r
+        LEFT JOIN chat_ai_summaries cs
+          ON cs.scope = 'relay' AND cs.window = 'rolling' AND cs.subject_id = r.rowid
+        WHERE r.last_seen >= ?
+          AND r.message_count >= ?
+          AND (cs.updated_at IS NULL OR cs.updated_at < r.last_seen)
+        ORDER BY (cs.updated_at IS NULL) DESC, r.last_seen DESC
+        LIMIT ?`, [lookbackIso, threshold, Math.max(1, limit)]);
+}
+
+// Anon messages for AI batching (mirrors getChatMessagesForAi / getRelayChatMessagesForAi).
+function getAnonChatMessagesForAi({ anonId, sinceTs = null, limit = 300, order = 'asc' } = {}) {
+    let sql = `SELECT cm.id, cm.username, cm.message, cm.message_type, cm.timestamp
+               FROM chat_messages cm
+               WHERE ${_CHAT_AI_WHERE} AND cm.user_id IS NULL AND cm.anon_id = ?`;
+    const params = [String(anonId)];
+    if (sinceTs != null) { sql += ' AND cm.timestamp >= ?'; params.push(sinceTs); }
+    sql += ` ORDER BY cm.id ${order === 'desc' ? 'DESC' : 'ASC'} LIMIT ?`;
+    params.push(Math.max(1, Math.min(2000, limit)));
+    const rows = all(sql, params);
+    return order === 'desc' ? rows.reverse() : rows;
+}
+
+// Anons with enough new chat activity (or a stale summary) to warrant an AI refresh.
+function getAnonsNeedingChatAi({ threshold = 12, staleCutoffIso, sinceTs, limit = 2 } = {}) {
+    const sql = `
+        SELECT cm.anon_id AS anon_id,
+               MAX(cm.id) AS max_id,
+               SUM(CASE WHEN cm.id > COALESCE(cs.last_message_id, 0) THEN 1 ELSE 0 END) AS new_msgs
+        FROM chat_messages cm
+        LEFT JOIN chat_ai_summaries cs
+          ON cs.scope = 'anon' AND cs.window = 'rolling'
+         AND cs.subject_id = CAST(SUBSTR(cm.anon_id, 5) AS INTEGER)
+        WHERE ${_CHAT_AI_WHERE} AND cm.user_id IS NULL AND cm.anon_id IS NOT NULL
+          AND cm.anon_id LIKE 'anon%' AND cm.timestamp >= ?
+        GROUP BY cm.anon_id
+        HAVING new_msgs > 0
+           AND ( new_msgs >= ? OR cs.last_message_id IS NULL OR cs.updated_at IS NULL OR cs.updated_at < ? )
+        ORDER BY (cs.updated_at IS NULL) DESC, new_msgs DESC
+        LIMIT ?`;
+    return all(sql, [sinceTs, threshold, staleCutoffIso, Math.max(1, limit)]);
+}
+
 /**
  * Live's changes to a staged table it still writes (its capture, relayed over the bridge): the rows
  * as they are in Live now, or a delete. Applied only while the table is at 'live' — once Chat writes
@@ -1478,4 +1625,17 @@ module.exports = {
     revokeUserTag,
     upsertChatAiSummary,
     addChatTimelineEvents,
+    // chat AI (Live's server/ai/chat-ai.js, moved): the job's selection/read helpers and the routes' reads
+    getChatAiSummary,
+    getChatAiSummaries,
+    getChatTimelineEvents,
+    getMaxChatMessageId,
+    countChatMessagesSince,
+    getChatMessagesForAi,
+    getNthRecentChatTs,
+    getUsersNeedingChatAi,
+    getRelayChatMessagesForAi,
+    getRelayUsersNeedingChatAi,
+    getAnonChatMessagesForAi,
+    getAnonsNeedingChatAi,
 };
