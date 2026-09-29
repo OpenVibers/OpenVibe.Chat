@@ -28,7 +28,7 @@ function actorFor(subjectId) {
 }
 
 /** Add one envelope to the outbox. Call inside the transaction that makes the change. */
-function enqueue({ event_type, subject, payload, visibility = 'internal', priority = 'important', actorSubject = null }) {
+async function enqueue({ event_type, subject, payload, visibility = 'internal', priority = 'important', actorSubject = null }) {
     const db = require('../db/database');
     const ms = Date.now();
     const env = {
@@ -45,7 +45,7 @@ function enqueue({ event_type, subject, payload, visibility = 'internal', priori
     };
     const v = validate('events.event-envelope@1', env);
     if (!v.valid) throw new Error(`outbox: invalid envelope for ${event_type}: ${v.errors.map((e) => `${e.path} ${e.message}`).join('; ')}`);
-    db.run('INSERT INTO events_outbox (event_id, event_type, event, created_at) VALUES (?, ?, ?, ?)', [env.event_id, event_type, JSON.stringify(env), env.timestamp]);
+    await db.run('INSERT INTO events_outbox (event_id, event_type, event, created_at) VALUES (?, ?, ?, ?)', [env.event_id, event_type, JSON.stringify(env), env.timestamp]);
     return env;
 }
 
@@ -63,9 +63,9 @@ function createRelay({ config, fetchImpl = globalThis.fetch, tokenClient, log = 
     let timer = null;
     let busy = false;
 
-    function markFailed(rows, message) {
+    async function markFailed(rows, message) {
         const mark = db.getDb().prepare('UPDATE events_outbox SET attempts = attempts + 1, last_error = ? WHERE seq = ?');
-        db.transaction(() => { for (const r of rows) mark.run(String(message).slice(0, 500), r.seq); });
+        await db.tx(async () => { for (const r of rows) await mark.run(String(message).slice(0, 500), r.seq); });
         log.warn(`[Chat] outbox relay: ${rows.length} event(s) not published: ${message}`);
     }
 
@@ -76,7 +76,7 @@ function createRelay({ config, fetchImpl = globalThis.fetch, tokenClient, log = 
         let sent = 0;
         try {
             for (;;) {
-                const rows = db.all('SELECT seq, event_id, event FROM events_outbox WHERE sent_at IS NULL ORDER BY seq LIMIT 100');
+                const rows = await db.all('SELECT seq, event_id, event FROM events_outbox WHERE sent_at IS NULL ORDER BY seq LIMIT 100');
                 if (!rows.length) break;
                 let res;
                 try {
@@ -87,18 +87,18 @@ function createRelay({ config, fetchImpl = globalThis.fetch, tokenClient, log = 
                         signal: AbortSignal.timeout(10000),
                     });
                 } catch (e) {
-                    markFailed(rows, e.message);
+                    await markFailed(rows, e.message);
                     break;
                 }
                 if (res.status === 401) tokens.invalidate();
                 if (!res.ok) {
                     const text = await res.text().catch(() => '');
-                    markFailed(rows, `${res.status} ${text.slice(0, 300)}`);
+                    await markFailed(rows, `${res.status} ${text.slice(0, 300)}`);
                     break;
                 }
                 const at = new Date().toISOString();
                 const mark = db.getDb().prepare('UPDATE events_outbox SET sent_at = ?, attempts = attempts + 1, last_error = NULL WHERE seq = ?');
-                db.transaction(() => { for (const r of rows) mark.run(at, r.seq); });
+                await db.tx(async () => { for (const r of rows) await mark.run(at, r.seq); });
                 sent += rows.length;
             }
         } finally {

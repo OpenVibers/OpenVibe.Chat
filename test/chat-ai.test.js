@@ -12,14 +12,14 @@ const { boot, suite, sqliteNow } = require('./helpers');
 const t = suite('chat-ai');
 let h, db, ctx, chatAi, aiClient, streamer, alice, bob, channelId, streamId;
 
-function msg(o = {}) {
-    return db.run(
+async function msg(o = {}) {
+    return (await db.run(
         `INSERT INTO chat_messages (stream_id, user_id, username, message, message_type, is_global, channel_user_id, timestamp)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [o.stream_id === undefined ? streamId : o.stream_id, o.user_id === undefined ? null : o.user_id,
             o.username || null, o.message || 'a message', o.message_type || 'chat', o.is_global ? 1 : 0,
             o.channel_user_id === undefined ? streamer.id : o.channel_user_id, o.timestamp || sqliteNow()]
-    ).lastInsertRowid;
+    )).lastInsertRowid;
 }
 
 t('boot', async () => {
@@ -50,8 +50,8 @@ t('the job selects Chat messages and writes the summary', async () => {
             },
         },
     });
-    msg({ user_id: alice.id, username: 'alice', message: 'hello world' });
-    msg({ user_id: bob.id, username: 'bob', message: 'a big donation', message_type: 'donation' });
+    await msg({ user_id: alice.id, username: 'alice', message: 'hello world' });
+    await msg({ user_id: bob.id, username: 'bob', message: 'a big donation', message_type: 'donation' });
 
     await chatAi._tick();
 
@@ -60,23 +60,23 @@ t('the job selects Chat messages and writes the summary', async () => {
     assert.strictEqual(global.input.messages.length, 2);
     assert.strictEqual(global.input.messages[0].author, 'alice');
 
-    const row = db.getChatAiSummary('global', 0, 'global');
+    const row = await db.getChatAiSummary('global', 0, 'global');
     assert.ok(row, 'a global summary row was written');
     assert.strictEqual(row.overview, 'the room talked about games');
     assert.strictEqual(row.memory_json, 'memory line');
     assert.ok(JSON.parse(row.timeline_json).some((x) => x.label === 'a moment'));
-    const events = db.getChatTimelineEvents({ scope: 'global', subjectId: 0, limit: 10 });
+    const events = await db.getChatTimelineEvents({ scope: 'global', subjectId: 0, limit: 10 });
     assert.ok(events.some((e) => e.label === 'a moment'), 'the timeline event was appended');
 });
 
 t('falls back to the extractive summary when AI does not answer', async () => {
     aiClient._setClient({ runs: { create: async () => ({ run: { status: 'failed' } }) } });
-    db.run("UPDATE chat_ai_summaries SET updated_at = ? WHERE scope = 'global'", [sqliteNow(-40 * 60 * 1000)]);
-    msg({ user_id: alice.id, username: 'alice', message: 'the extractive line' });
+    await db.run("UPDATE chat_ai_summaries SET updated_at = ? WHERE scope = 'global'", [sqliteNow(-40 * 60 * 1000)]);
+    await msg({ user_id: alice.id, username: 'alice', message: 'the extractive line' });
 
     await chatAi._tick();
 
-    const row = db.getChatAiSummary('global', 0, 'global');
+    const row = await db.getChatAiSummary('global', 0, 'global');
     assert.ok(/messages from \d+ chatter/.test(row.overview), row.overview);
     assert.ok(row.overview.includes('the extractive line'), row.overview);
     aiClient._reset();
@@ -86,32 +86,32 @@ t('falls back to the extractive summary when AI does not answer', async () => {
 t('the job is off unless CHAT_AI_ENABLED is set', async () => {
     const cfg = require('../server/config');
     assert.strictEqual(cfg.ai.enabled, true, 'this boot enabled it');
-    const before = db.getChatAiSummary('global', 0, 'global').message_count;
+    const before = (await db.getChatAiSummary('global', 0, 'global')).message_count;
     cfg.ai.enabled = false;
-    msg({ user_id: bob.id, username: 'bob', message: 'while the job is off' });
+    await msg({ user_id: bob.id, username: 'bob', message: 'while the job is off' });
     await chatAi._tick();
-    assert.strictEqual(db.getChatAiSummary('global', 0, 'global').message_count, before);
+    assert.strictEqual((await db.getChatAiSummary('global', 0, 'global')).message_count, before);
     cfg.ai.enabled = true;
 });
 
 t('the six routes answer with Live\'s shapes, publicly', async () => {
-    db.upsertChatAiSummary({
+    await db.upsertChatAiSummary({
         scope: 'global', subject_id: 0, window: 'global', overview: 'everything happened', memory_json: 'mem',
         timeline_json: JSON.stringify([{ ts: '2026-01-01 00:00:00', label: 'moment', detail: 'detail' }]),
         message_count: 5, window_message_count: 4, window_label: 'past hour',
     });
-    db.upsertChatAiSummary({
+    await db.upsertChatAiSummary({
         scope: 'user', subject_id: alice.id, window: 'rolling',
         overview: JSON.stringify({ today: 'today read', alltime: 'all time read', has_24h: true }),
         timeline_json: '[]', message_count: 9,
     });
-    db.upsertChatAiSummary({
+    await db.upsertChatAiSummary({
         scope: 'anon', subject_id: 7, window: 'rolling',
         overview: JSON.stringify({ today: 'anon today', alltime: 'anon all', has_24h: false }), timeline_json: '[]', message_count: 2,
     });
-    db.recordRelayUser('twitch', 'SomeOne');
-    const ru = db.getRelayUser('twitch', 'someone');
-    db.upsertChatAiSummary({
+    await db.recordRelayUser('twitch', 'SomeOne');
+    const ru = await db.getRelayUser('twitch', 'someone');
+    await db.upsertChatAiSummary({
         scope: 'relay', subject_id: ru.id, window: 'rolling',
         overview: JSON.stringify({ today: 'relay today', alltime: 'relay all', has_24h: true }), timeline_json: '[]', message_count: 3,
     });

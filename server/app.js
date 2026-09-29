@@ -105,10 +105,10 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
     // without; `live_sync` is optional, because chat keeps flowing from warm caches while Live is
     // down (live-context.js), so a stale sync degrades the service instead of taking it out.
-    function timed(fn) {
+    async function timed(fn) {
         const t0 = process.hrtime.bigint();
         let out;
-        try { out = fn(); } catch (err) { out = { ok: false, error: String((err && err.message) || err).split('\n')[0].slice(0, 200) }; }
+        try { out = await fn(); } catch (err) { out = { ok: false, error: String((err && err.message) || err).split('\n')[0].slice(0, 200) }; }
         const { ok, error, detail } = out;
         return {
             status: ok ? 'ok' : 'fail', required: false,
@@ -132,8 +132,8 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     app.get('/ready', async (req, res) => {
         const checks = {
             // A real read of a chat table (MAX of the rowid is an index seek, not a scan).
-            db: { ...timed(() => ({ ok: true, detail: { max_message_id: db.get('SELECT MAX(id) AS id FROM chat_messages').id } })), required: true },
-            live_sync: timed(() => {
+            db: { ...await timed(async () => ({ ok: true, detail: { max_message_id: (await db.get('SELECT MAX(id) AS id FROM chat_messages')).id } })), required: true },
+            live_sync: await timed(() => {
                 const s = ctx.syncStatus(config.live.syncStaleMs);
                 const detail = { ...s, threshold_ms: config.live.syncStaleMs };
                 if (s.last_success_at === null) return { ok: false, error: 'no successful Live sync since start', detail };
@@ -152,7 +152,7 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
         const degraded = Object.keys(checks).filter((k) => !checks[k].required && checks[k].status !== 'ok');
         const ready = failed.length === 0;
         let pending = null;
-        if (mirror && checks.db.status === 'ok') { try { pending = mirror.pending(); } catch { /* reported by db */ } }
+        if (mirror && checks.db.status === 'ok') { try { pending = await mirror.pending(); } catch { /* reported by db */ } }
         res.set('Cache-Control', 'no-store');
         res.status(ready ? 200 : 503).json({
             ready,

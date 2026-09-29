@@ -120,11 +120,11 @@ function startAtBoot({ config, port, fetchImpl, log = console, retryMs = BOOT_RE
                 const next = retryMs[i + 1];
                 log.warn(`[Events] subscriptions not ensured: ${err.message}${next != null ? `; retrying in ${Math.round(next / 1000)} s` : '; giving up until the next restart (or run scripts/subscribe-events.js)'}`);
                 if (next == null || stopped) return resolve(null);
-                timer = setTimeout(() => attempt(i + 1), next);
+                timer = setTimeout(async () => await attempt(i + 1), next);
                 if (timer.unref) timer.unref();
             }
         };
-        timer = setTimeout(() => attempt(0), retryMs[0] || 0);
+        timer = setTimeout(async () => await attempt(0), retryMs[0] || 0);
         if (timer.unref) timer.unref();
     });
     return { done, stop() { stopped = true; if (timer) clearTimeout(timer); finish(null); } };

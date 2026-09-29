@@ -148,11 +148,11 @@ function serializeSound(s) {
 }
 
 // ── List a channel's sounds ──────────────────────────────────
-router.get('/channel/:userId', (req, res) => {
+router.get('/channel/:userId', async (req, res) => {
     try {
         const userId = parseInt(req.params.userId);
         if (!userId) return res.json({ sounds: [] });
-        res.json({ sounds: db.getChannelSounds(userId).map(serializeSound) });
+        res.json({ sounds: (await db.getChannelSounds(userId)).map(serializeSound) });
     } catch (err) {
         res.status(500).json({ error: 'Failed to load channel sounds' });
     }
@@ -163,7 +163,7 @@ router.get('/all/:streamId', async (req, res) => {
     try {
         const stream = await ctx.ensureStream(parseInt(req.params.streamId));
         if (!stream?.user_id) return res.json({ sounds: [] });
-        res.json({ sounds: db.getChannelSounds(stream.user_id).map(serializeSound) });
+        res.json({ sounds: (await db.getChannelSounds(stream.user_id)).map(serializeSound) });
     } catch (err) {
         res.status(500).json({ error: 'Failed to load sounds' });
     }
@@ -198,8 +198,8 @@ router.post('/', requireAuth, uploadLimit, soundUpload.single('sound'), async (r
         }
         await ctx.ensurePolicy(channel.id);
 
-        const settings = ctx.getChannelModerationSettings(channel.id);
-        const isMod = permissions.canModerateChannel(req.user, channel.id);
+        const settings = await ctx.getChannelModerationSettings(channel.id);
+        const isMod = await permissions.canModerateChannel(req.user, channel.id);
         const isOwnChannel = channelOwnerId === req.user.id;
 
         if (!isMod && !settings.custom_sounds_enabled) {
@@ -213,18 +213,18 @@ router.post('/', requireAuth, uploadLimit, soundUpload.single('sound'), async (r
 
         // Adding a NEW file to an EXISTING command is restricted to that command's
         // creator (or channel mods/owner), so viewers can't hijack someone's command.
-        const existingForCmd = db.getChannelSoundByCommand(channelOwnerId, command);
+        const existingForCmd = await db.getChannelSoundByCommand(channelOwnerId, command);
         if (existingForCmd && !isMod && !isOwnChannel && existingForCmd.created_by !== req.user.id) {
             cleanup();
             return res.status(403).json({ error: `Only the creator of !${command} (or a mod) can add more sounds to it.` });
         }
 
         // Per-channel + per-uploader caps
-        if (db.countChannelSounds(channelOwnerId) >= config.sounds.maxPerChannel) {
+        if (await db.countChannelSounds(channelOwnerId) >= config.sounds.maxPerChannel) {
             cleanup();
             return res.status(400).json({ error: `This channel has reached its sound limit (${config.sounds.maxPerChannel}).` });
         }
-        if (!isMod && db.countChannelSoundsByUploader(channelOwnerId, req.user.id) >= config.sounds.maxPerUploaderPerChannel) {
+        if (!isMod && await db.countChannelSoundsByUploader(channelOwnerId, req.user.id) >= config.sounds.maxPerUploaderPerChannel) {
             cleanup();
             return res.status(400).json({ error: `You've reached your upload limit for this channel (${config.sounds.maxPerUploaderPerChannel}).` });
         }
@@ -262,7 +262,7 @@ router.post('/', requireAuth, uploadLimit, soundUpload.single('sound'), async (r
 
         // Emote attached to the command (per-command; new files inherit the existing one).
         const emoteCode = String(req.body.emote_code || (existingForCmd && existingForCmd.emote_code) || '').trim().slice(0, 32);
-        const result = db.createChannelSound({
+        const result = await db.createChannelSound({
             channel_owner_id: channelOwnerId,
             command,
             url: finalPath,
@@ -273,12 +273,12 @@ router.post('/', requireAuth, uploadLimit, soundUpload.single('sound'), async (r
             emote_code: emoteCode,
         });
         // If an emote was (re)specified, apply it to every sound under this command.
-        if (req.body.emote_code !== undefined) { try { db.setChannelSoundEmote(channelOwnerId, command, emoteCode); } catch { /* */ } }
+        if (req.body.emote_code !== undefined) { try { await db.setChannelSoundEmote(channelOwnerId, command, emoteCode); } catch { /* */ } }
         // Live's media-proxy/asset-sync mirrors the file to OpenVibe.Media (from Live's copy of the row).
         try { ctx.effects.assetSync('syncSoon'); } catch { /* mirror is best-effort */ }
 
         // Tell everyone watching this channel to refresh their sound list live.
-        try { require('./chat-server').broadcastToOwnerStreams(channelOwnerId, { type: 'sounds-updated' }); } catch { /* */ }
+        try { await require('./chat-server').broadcastToOwnerStreams(channelOwnerId, { type: 'sounds-updated' }); } catch { /* */ }
 
         res.json({
             sound: {
@@ -314,20 +314,20 @@ router.use((err, req, res, next) => {
 // ── Delete a sound ───────────────────────────────────────────
 router.delete('/:id', requireAuth, editLimit, async (req, res) => {
     try {
-        const sound = db.getChannelSoundById(parseInt(req.params.id));
+        const sound = await db.getChannelSoundById(parseInt(req.params.id));
         if (!sound) return res.status(404).json({ error: 'Sound not found' });
         let allowed = sound.created_by === req.user.id || permissions.can(req.user, 'staff.assets.manage');
         if (!allowed) {
             const channel = await channelWithPolicy(sound.channel_owner_id);
-            if (channel && permissions.canModerateChannel(req.user, channel.id)) allowed = true;
+            if (channel && await permissions.canModerateChannel(req.user, channel.id)) allowed = true;
         }
         if (!allowed) return res.status(403).json({ error: 'Not your sound' });
 
         if (sound.url && fs.existsSync(sound.url)) { try { fs.unlinkSync(sound.url); } catch {} }
         // The Media asset id lives on Live's copy of the row: Live removes the asset first.
         try { await ctx.effects.assetSync('remove-sound', sound.id); } catch { /* */ }
-        db.deleteChannelSound(sound.id);
-        try { require('./chat-server').broadcastToOwnerStreams(sound.channel_owner_id, { type: 'sounds-updated' }); } catch { /* */ }
+        await db.deleteChannelSound(sound.id);
+        try { await require('./chat-server').broadcastToOwnerStreams(sound.channel_owner_id, { type: 'sounds-updated' }); } catch { /* */ }
         res.json({ message: 'Sound deleted' });
     } catch (err) {
         res.status(500).json({ error: 'Failed to delete sound' });
@@ -350,10 +350,10 @@ router.patch('/command', requireAuth, editLimit, async (req, res) => {
         if (!channel) return res.status(404).json({ error: 'Channel not found' });
 
         const command = String(req.body.command || '').trim().toLowerCase().replace(/^!+/, '');
-        const group = (db.getChannelSounds(channelOwnerId) || []).filter((s) => s.command === command);
+        const group = (await db.getChannelSounds(channelOwnerId) || []).filter((s) => s.command === command);
         if (!group.length) return res.status(404).json({ error: `No sound command !${command} in this channel.` });
 
-        const isMod = permissions.canModerateChannel(req.user, channel.id);
+        const isMod = await permissions.canModerateChannel(req.user, channel.id);
         const isOwnChannel = channelOwnerId === req.user.id;
         const isCreator = group.every((s) => s.created_by === req.user.id);
         if (!isMod && !isOwnChannel && !isCreator && !permissions.can(req.user, 'staff.assets.manage')) {
@@ -369,11 +369,11 @@ router.patch('/command', requireAuth, editLimit, async (req, res) => {
             if (RESERVED_COMMANDS.has(next)) {
                 return res.status(400).json({ error: `"!${next}" is a reserved command — pick another name` });
             }
-            if (next !== command && db.getChannelSoundByCommand(channelOwnerId, next)) {
+            if (next !== command && await db.getChannelSoundByCommand(channelOwnerId, next)) {
                 return res.status(409).json({ error: `!${next} already exists in this channel.` });
             }
             if (next !== command) {
-                db.renameChannelSoundCommand(channelOwnerId, command, next);
+                await db.renameChannelSoundCommand(channelOwnerId, command, next);
                 finalCommand = next;
             }
         }
@@ -382,10 +382,10 @@ router.patch('/command', requireAuth, editLimit, async (req, res) => {
             if (emoteCode && !/^[a-zA-Z0-9_]{2,32}$/.test(emoteCode)) {
                 return res.status(400).json({ error: 'Emote code can only contain letters, numbers, and underscores' });
             }
-            db.setChannelSoundEmote(channelOwnerId, finalCommand, emoteCode);
+            await db.setChannelSoundEmote(channelOwnerId, finalCommand, emoteCode);
         }
 
-        try { require('./chat-server').broadcastToOwnerStreams(channelOwnerId, { type: 'sounds-updated' }); } catch { /* */ }
+        try { await require('./chat-server').broadcastToOwnerStreams(channelOwnerId, { type: 'sounds-updated' }); } catch { /* */ }
         res.json({ message: 'Sound command updated', command: finalCommand });
     } catch (err) {
         res.status(500).json({ error: 'Failed to update sound command' });
@@ -421,7 +421,7 @@ function _alertKind(raw) { return raw === 'goal' ? 'goal' : 'donation'; }
 // GET which alert sounds are configured (+ a preview URL).
 router.get('/alert/mine', requireAuth, async (req, res) => {
     await channelWithPolicy(req.user.id);
-    const s = ctx.getChannelAlertSoundsByUser(req.user.id) || {};
+    const s = await ctx.getChannelAlertSoundsByUser(req.user.id) || {};
     const toUrl = (p) => (p ? `/api/sounds/file/${path.basename(p)}` : null);
     res.json({
         donation: { set: !!s.donation_sound_url, url: toUrl(s.donation_sound_url) },
@@ -451,7 +451,7 @@ router.post('/alert/:kind', requireAuth, uploadLimit, soundUpload.single('sound'
 
         // Remove the previous alert sound of this kind (best-effort).
         try {
-            const prev = ctx.getChannelAlertSoundsByUser(req.user.id) || {};
+            const prev = await ctx.getChannelAlertSoundsByUser(req.user.id) || {};
             const prevPath = kind === 'goal' ? prev.goal_sound_url : prev.donation_sound_url;
             if (prevPath && fs.existsSync(prevPath) && path.resolve(prevPath) !== path.resolve(finalPath)) fs.unlink(prevPath, () => {});
         } catch { /* ignore */ }
@@ -474,7 +474,7 @@ router.delete('/alert/:kind', requireAuth, editLimit, async (req, res) => {
     try {
         const channel = await channelWithPolicy(req.user.id);
         if (channel) {
-            const prev = ctx.getChannelAlertSoundsByUser(req.user.id) || {};
+            const prev = await ctx.getChannelAlertSoundsByUser(req.user.id) || {};
             const prevPath = kind === 'goal' ? prev.goal_sound_url : prev.donation_sound_url;
             if (prevPath && fs.existsSync(prevPath)) { try { fs.unlinkSync(prevPath); } catch { /* */ } }
             await ctx.effects.setChannelAlertSound(channel.id, kind, null, null, req.user.id);

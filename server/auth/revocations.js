@@ -11,26 +11,17 @@
 
 const db = require('../db/database');
 
-let ready = false;
 const cache = new Map(); // subject → valid_after ms (0 = none known)
 
-function ensureSchema() {
-    if (ready) return;
-    db.getDb().exec(`CREATE TABLE IF NOT EXISTS token_revocations (
-        subject_id     TEXT PRIMARY KEY,
-        valid_after_ms INTEGER NOT NULL,
-        reason         TEXT,
-        updated_at     INTEGER NOT NULL
-    )`);
-    ready = true;
-}
+// The table is in migrations/0001_initial.sql (PostgreSQL); nothing is created at runtime. Kept for callers.
+function ensureSchema() {}
 
 /** The cutoff for a subject in ms, 0 when none. */
-function cutoffFor(subject) {
+async function cutoffFor(subject) {
     if (!subject) return 0;
     if (cache.has(subject)) return cache.get(subject);
     ensureSchema();
-    const row = db.get('SELECT valid_after_ms FROM token_revocations WHERE subject_id = ?', [subject]);
+    const row = await db.get('SELECT valid_after_ms FROM token_revocations WHERE subject_id = ?', [subject]);
     const ms = row ? Number(row.valid_after_ms) || 0 : 0;
     if (cache.size > 50000) cache.clear();
     cache.set(subject, ms);
@@ -38,11 +29,11 @@ function cutoffFor(subject) {
 }
 
 /** Keep the later cutoff (events can arrive out of order). Returns true when it moved forward. */
-function record(subject, validAfterMs, reason = null, now = Date.now()) {
+async function record(subject, validAfterMs, reason = null, now = Date.now()) {
     ensureSchema();
-    const current = cutoffFor(subject);
+    const current = await cutoffFor(subject);
     if (!(validAfterMs > current)) return false;
-    db.run(`INSERT INTO token_revocations (subject_id, valid_after_ms, reason, updated_at) VALUES (?, ?, ?, ?)
+    await db.run(`INSERT INTO token_revocations (subject_id, valid_after_ms, reason, updated_at) VALUES (?, ?, ?, ?)
         ON CONFLICT(subject_id) DO UPDATE SET valid_after_ms = excluded.valid_after_ms, reason = excluded.reason, updated_at = excluded.updated_at
         WHERE excluded.valid_after_ms > token_revocations.valid_after_ms`, [subject, validAfterMs, reason, now]);
     cache.set(subject, validAfterMs);
@@ -50,12 +41,12 @@ function record(subject, validAfterMs, reason = null, now = Date.now()) {
 }
 
 /** Was a token with these claims issued before its subject's cutoff? */
-function isRevoked(claims) {
+async function isRevoked(claims) {
     if (!claims || typeof claims.iat !== 'number') return false;
-    return claims.iat * 1000 < cutoffFor(claims.subject_id);
+    return claims.iat * 1000 < await cutoffFor(claims.subject_id);
 }
 
 /** For tests: forget the in-memory cache (the table stays). */
-function _reset() { cache.clear(); ready = false; }
+function _reset() { cache.clear(); }
 
 module.exports = { ensureSchema, cutoffFor, record, isRevoked, _reset };

@@ -11,7 +11,6 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const Database = require('better-sqlite3');
 const { boot, suite } = require('./helpers');
 
 const t = suite('audio-queue');
@@ -49,11 +48,11 @@ async function joined(user, ip, stream = streamId) {
     await ws.next((m) => m.type === 'auth');
     return ws;
 }
-const rows = () => h.db.all('SELECT * FROM audio_requests ORDER BY id');
-const byLabel = (label) => h.db.get('SELECT * FROM audio_requests WHERE label = ?', [label]);
+const rows = async () => await h.db.all('SELECT * FROM audio_requests ORDER BY id');
+const byLabel = async (label) => await h.db.get('SELECT * FROM audio_requests WHERE label = ?', [label]);
 async function until(fn, ms = 4000) {
     const end = Date.now() + ms;
-    for (;;) { const v = fn(); if (v) return v; if (Date.now() > end) throw new Error('condition not met in time'); await h.sleep(25); }
+    for (;;) { const v = await fn(); if (v) return v; if (Date.now() > end) throw new Error('condition not met in time'); await h.sleep(25); }
 }
 
 t('boot', async () => {
@@ -68,7 +67,7 @@ t('boot', async () => {
     listenerUser = h.addUser('listener');
     chatters = ['ann', 'ben', 'cat', 'dan'].map((n) => h.addUser(n));
     channelId = h.addChannel(streamer.id, { moderators: [mod.id] });
-    h.db.addChannelModerator(channelId, mod.id, streamer.id);   // the moderator row is Chat's own (C-04)
+    await h.db.addChannelModerator(channelId, mod.id, streamer.id);   // the moderator row is Chat's own (C-04)
     streamId = h.addStream(streamer.id, channelId);
     await h.ctx.sync();
     listener = await joined(listenerUser, '198.51.100.90');
@@ -103,13 +102,15 @@ t('TTS of chat messages: queued rows, delivered one at a time, each frame carrie
     first = await listener.next((m) => m.type === 'tts-audio' && m.message === 'hello from ann');
     assert.ok(first.request_id > 0);
     assert.ok(first.audio && first.mimeType === 'audio/wav' && first.ttsKey, 'the frame clients already play');
-    assert.strictEqual(aq.getRequest(first.request_id).state, 'playing');
-    assert.strictEqual(byLabel('hello from ben').state, 'queued');
-    assert.strictEqual(byLabel('hello from cat').state, 'queued');
+    assert.strictEqual((await aq.getRequest(first.request_id)).state, 'playing');
+    // The chat line is announced before its request is stored: wait for the rows, not just the frame.
+    await until(async () => !!(await byLabel('hello from ben')) && !!(await byLabel('hello from cat')), 3000);
+    assert.strictEqual((await byLabel('hello from ben')).state, 'queued');
+    assert.strictEqual((await byLabel('hello from cat')).state, 'queued');
     assert.ok(await listener.none((m) => m.type === 'tts-audio' && m.message === 'hello from ben', 400), 'the next waits for the one playing');
     second = await listener.next((m) => m.type === 'tts-audio' && m.message === 'hello from ben', 3000);
     assert.ok(Date.now() - t0 >= 1200, 'paced by the clip length');
-    const r1 = aq.getRequest(first.request_id);
+    const r1 = await aq.getRequest(first.request_id);
     assert.strictEqual(r1.state, 'played');
     assert.strictEqual(r1.duration_ms, 1200);
     assert.strictEqual(r1.kind, 'tts');
@@ -120,7 +121,7 @@ t('only the broadcaster and moderators skip: /skiptts skips the playing clip and
     const v = await joined(viewer, '198.51.100.110');
     v.sendJson({ type: 'chat', message: '/skiptts' });
     await v.next((m) => m.type === 'system' && m.message === 'You do not have permission.');
-    assert.strictEqual(aq.getRequest(second.request_id).state, 'playing');
+    assert.strictEqual((await aq.getRequest(second.request_id)).state, 'playing');
 
     const s = await joined(streamer, '198.51.100.111');
     const at = Date.now();
@@ -129,12 +130,12 @@ t('only the broadcaster and moderators skip: /skiptts skips the playing clip and
     assert.match(reply.message, new RegExp(`#${second.request_id} from Ben`));
     const stop = await listener.next((m) => m.type === 'audio-skip');
     assert.strictEqual(stop.request_id, second.request_id);
-    const row = aq.getRequest(second.request_id);
+    const row = await aq.getRequest(second.request_id);
     assert.strictEqual(row.state, 'skipped');
     assert.strictEqual(row.actor, 'user:streamer');
     third = await listener.next((m) => m.type === 'tts-audio' && m.message === 'hello from cat');
     assert.ok(Date.now() - at < 900, 'no waiting out the skipped clip');
-    const log = h.db.get("SELECT * FROM moderation_actions WHERE action_type = 'tts_skip' ORDER BY id DESC LIMIT 1");
+    const log = await h.db.get("SELECT * FROM moderation_actions WHERE action_type = 'tts_skip' ORDER BY id DESC LIMIT 1");
     assert.strictEqual(log.actor_user_id, streamer.id);
 });
 
@@ -157,8 +158,8 @@ t('the queue over REST: list, skip by id, clear — moderators yes, others 403',
     assert.strictEqual((await h.http('POST', '/api/tts/queue/skip', { token: viewer.token, body: { stream_id: streamId, id: two } })).status, 403);
     const sk = await h.http('POST', '/api/tts/queue/skip', { token: mod.token, body: { stream_id: streamId, id: two } });
     assert.strictEqual(sk.status, 200, sk.text);
-    assert.strictEqual(aq.getRequest(two).state, 'skipped');
-    assert.strictEqual(aq.getRequest(third.request_id).state, 'playing', 'skipping a waiting request leaves the playing one');
+    assert.strictEqual((await aq.getRequest(two)).state, 'skipped');
+    assert.strictEqual((await aq.getRequest(third.request_id)).state, 'playing', 'skipping a waiting request leaves the playing one');
     assert.ok(await listener.none((m) => m.type === 'audio-skip' && m.request_id === two, 150), 'nothing to stop on clients for a request never delivered');
 
     const cl = await h.http('POST', '/api/tts/queue/clear', { token: mod.token, body: { stream_id: streamId } });
@@ -169,7 +170,7 @@ t('the queue over REST: list, skip by id, clear — moderators yes, others 403',
     assert.strictEqual(cl.body.queue.playing, null);
     assert.deepStrictEqual(cl.body.queue.queued, []);
     assert.ok(await listener.none((m) => m.type === 'tts-audio' && /^bot line/.test(m.message), 300), 'nothing cleared is read');
-    assert.ok(h.db.get("SELECT 1 FROM moderation_actions WHERE action_type = 'tts_clear' AND actor_user_id = ?", [mod.id]));
+    assert.ok(await h.db.get("SELECT 1 FROM moderation_actions WHERE action_type = 'tts_clear' AND actor_user_id = ?", [mod.id]));
     assert.strictEqual((await h.http('POST', '/api/tts/queue/skip', { token: mod.token, body: { stream_id: streamId } })).status, 409, 'nothing to skip');
 });
 
@@ -178,37 +179,38 @@ t('failures are recorded and the queue moves on', async () => {
     const BRIDGE = h.serviceToken(['chat.live_bridge.write', 'chat.message.send']);
     await h.http('POST', '/internal/live/calls', { token: BRIDGE, body: { boot: 'b', ops: ['no audio', 'throws', 'fine'].map((l, i) => ({ seq: i + 1, op: 'synthesizeAndBroadcastTTS', args: [streamId, 'ChatBot', l, null, 'ai', `ai:bot${i}`, null, `mf${i}`] })) } });
     await listener.next((m) => m.type === 'tts-audio' && m.message === 'fine');
-    assert.strictEqual(byLabel('no audio').state, 'failed');
-    assert.strictEqual(byLabel('no audio').error, 'no audio');
-    assert.strictEqual(byLabel('throws').state, 'failed');
-    assert.strictEqual(byLabel('throws').error, 'voice service down');
-    assert.strictEqual(byLabel('fine').state, 'playing');
+    assert.strictEqual((await byLabel('no audio')).state, 'failed');
+    assert.strictEqual((await byLabel('no audio')).error, 'no audio');
+    assert.strictEqual((await byLabel('throws')).state, 'failed');
+    assert.strictEqual((await byLabel('throws')).error, 'voice service down');
+    assert.strictEqual((await byLabel('fine')).state, 'playing');
 });
 
 t('the playing client reports: failed with its reason; final states stay final', async () => {
-    const fine = byLabel('fine');
+    const fine = await byLabel('fine');
     const bad = await h.http('POST', `/api/tts/queue/${fine.id}/report`, { token: streamer.token, body: { stream_id: streamId, state: 'skipped' } });
     assert.strictEqual(bad.status, 400);
     const rep = await h.http('POST', `/api/tts/queue/${fine.id}/report`, { token: streamer.token, body: { stream_id: streamId, state: 'failed', error: 'NotAllowedError' } });
     assert.strictEqual(rep.status, 200, rep.text);
-    assert.strictEqual(aq.getRequest(fine.id).state, 'failed');
-    assert.strictEqual(aq.getRequest(fine.id).error, 'NotAllowedError');
+    assert.strictEqual((await aq.getRequest(fine.id)).state, 'failed');
+    assert.strictEqual((await aq.getRequest(fine.id)).error, 'NotAllowedError');
     assert.strictEqual((await h.http('POST', `/api/tts/queue/${fine.id}/report`, { token: streamer.token, body: { stream_id: streamId, state: 'played' } })).status, 409, 'final states stay final');
 });
 
 t('a keyed request is queued once; a requester’s limit holds', async () => {
     synthPlan = [3, 3, 3, 3, 3, 3];
-    const before = rows().length;
-    const a = h.chatServer.synthesizeAndBroadcastTTS(streamId, 'Ann', 'same message', null, null, 'user:ann', null, 'm777');
-    const b = h.chatServer.synthesizeAndBroadcastTTS(streamId, 'Ann', 'same message', null, null, 'user:ann', null, 'm777');
+    const before = (await rows()).length;
+    const a = await h.chatServer.synthesizeAndBroadcastTTS(streamId, 'Ann', 'same message', null, null, 'user:ann', null, 'm777');
+    const b = await h.chatServer.synthesizeAndBroadcastTTS(streamId, 'Ann', 'same message', null, null, 'user:ann', null, 'm777');
     assert.strictEqual(a.queued, true);
     assert.deepStrictEqual(b, { queued: false, reason: 'duplicate' });
     // tts_max_queue_per_user defaults to 3 (queued or playing).
-    const more = [1, 2, 3].map((n) => h.chatServer.synthesizeAndBroadcastTTS(streamId, 'Ann', `more ${n}`, null, null, 'user:ann', null, `m78${n}`));
+    const more = [];
+    for (const n of [1, 2, 3]) more.push(await h.chatServer.synthesizeAndBroadcastTTS(streamId, 'Ann', `more ${n}`, null, null, 'user:ann', null, `m78${n}`));
     assert.deepStrictEqual(more.map((x) => x.queued), [true, true, false]);
     assert.strictEqual(more[2].reason, 'full');
-    assert.strictEqual(rows().length, before + 3);
-    assert.strictEqual(h.chatServer.synthesizeAndBroadcastTTS(streamId, 'Ann', '.not read', null, null, 'user:ann', null, 'm790'), undefined, "'.' opts a message out");
+    assert.strictEqual((await rows()).length, before + 3);
+    assert.strictEqual(await h.chatServer.synthesizeAndBroadcastTTS(streamId, 'Ann', '.not read', null, null, 'user:ann', null, 'm790'), undefined, "'.' opts a message out");
     const s = await joined(streamer, '198.51.100.112');
     s.sendJson({ type: 'chat', message: '/cleartts' });
     await s.next((m) => m.type === 'system' && /^Cleared 3 TTS\/sound requests/.test(m.message));
@@ -217,7 +219,7 @@ t('a keyed request is queued once; a requester’s limit holds', async () => {
 t('channel !sounds go through the same queue (announce at once, audio in turn)', async () => {
     const file = path.join(process.env.SOUNDS_PATH, 'honk-test.wav');
     fs.writeFileSync(file, wav(0.8));
-    h.db.createChannelSound({ channel_owner_id: streamer.id, command: 'honk', url: file, mime: 'audio/wav', duration_seconds: 0.8 });
+    await h.db.createChannelSound({ channel_owner_id: streamer.id, command: 'honk', url: file, mime: 'audio/wav', duration_seconds: 0.8 });
     const c = await joined(chatters[3], '198.51.100.113');
     c.sendJson({ type: 'chat', message: '!honk' });
     const ann = await listener.next((m) => m.type === 'chat' && m.message_type === 'channel-sound');
@@ -225,41 +227,41 @@ t('channel !sounds go through the same queue (announce at once, audio in turn)',
     const audio = await listener.next((m) => m.type === 'soundboard-audio' && m.title === '!honk');
     assert.strictEqual(audio.source, 'channel-sound');
     assert.strictEqual(Buffer.from(audio.audio, 'base64').length, fs.statSync(file).size);
-    const row = aq.getRequest(audio.request_id);
+    const row = await aq.getRequest(audio.request_id);
     assert.strictEqual(row.kind, 'channel-sound');
     assert.strictEqual(row.duration_ms, 800);
     assert.strictEqual(row.dedupe_key, `m${ann.id}`);
-    await until(() => aq.getRequest(audio.request_id).state === 'played', 3000);
+    await until(async () => (await aq.getRequest(audio.request_id)).state === 'played', 3000);
 });
 
 // ── Restart: Chat as its own process ────────────────────────────────────────────────────────────
-let chat, port, dbFile;
-const raw = (fn) => { const d = new Database(dbFile); try { return fn(d); } finally { d.close(); } };
+let chat, port;
+// This process's handle on the database the spawned Chat serves from (test/helpers/pg-preload.mjs).
+const raw = async (fn) => await fn(h.db.getDb());
 t('restart: what was playing is finished, what waited plays in order once, stale requests expire', async () => {
     tts.synthesize = realSynth.synthesize;
     tts.synthesizeUserVoice = realSynth.synthesizeUserVoice;
-    dbFile = path.join(h.tmp, 'chat.db');
     for (const w of sockets) { try { w.close(); } catch { /* */ } }
     await h.detach();
     // Long enough clips that the queue is still full when Chat stops.
     const file = path.join(process.env.SOUNDS_PATH, 'long-test.wav');
     fs.writeFileSync(file, wav(2));
-    raw((d) => {
-        d.prepare("INSERT INTO channel_sounds (channel_owner_id, command, url, mime, duration_seconds) VALUES (?, 'long', ?, 'audio/wav', 2)").run(streamer.id, file);
+    await raw(async (d) => {
+        await d.prepare("INSERT INTO channel_sounds (channel_owner_id, command, url, mime, duration_seconds) VALUES (?, 'long', ?, 'audio/wav', 2)").run(streamer.id, file);
         // Left over from an earlier life: one queued an hour ago, one that crashed Chat three times.
         const ins = d.prepare("INSERT INTO audio_requests (room, stream_id, kind, state, label, payload, created_at, attempts) VALUES (?, ?, 'channel-sound', 'queued', ?, ?, ?, ?)");
-        ins.run(`stream:${streamId}`, streamId, 'stale', JSON.stringify({ file, title: '!stale' }), Date.now() - 3600e3, 0);
-        ins.run(`stream:${streamId}`, streamId, 'crashy', JSON.stringify({ file, title: '!crashy' }), Date.now(), 3);
+        await ins.run(`stream:${streamId}`, streamId, 'stale', JSON.stringify({ file, title: '!stale' }), Date.now() - 3600e3, 0);
+        await ins.run(`stream:${streamId}`, streamId, 'crashy', JSON.stringify({ file, title: '!crashy' }), Date.now(), 3);
     });
     port = await h.freePort();
     chat = await h.spawnChat({ port });
-    assert.strictEqual(raw((d) => d.prepare("SELECT state, error FROM audio_requests WHERE label = 'stale'").get()).error, 'expired');
+    assert.strictEqual((await raw(async (d) => await d.prepare("SELECT state, error FROM audio_requests WHERE label = 'stale'").get())).error, 'expired');
     // The room's queue is held until it has listeners again (a second after the first rejoins).
     await h.sleep(300);
-    assert.strictEqual(raw((d) => d.prepare("SELECT state FROM audio_requests WHERE label = 'crashy'").get().state), 'queued', 'held for listeners');
+    assert.strictEqual(await raw(async (d) => (await d.prepare("SELECT state FROM audio_requests WHERE label = 'crashy'").get()).state), 'queued', 'held for listeners');
     const ears = await joined(listenerUser, '198.51.100.120');
-    await until(() => raw((d) => d.prepare("SELECT state FROM audio_requests WHERE label = 'crashy'").get().state) === 'failed');
-    assert.strictEqual(raw((d) => d.prepare("SELECT error FROM audio_requests WHERE label = 'crashy'").get()).error, 'gave up after repeated attempts');
+    await until(async () => await raw(async (d) => (await d.prepare("SELECT state FROM audio_requests WHERE label = 'crashy'").get()).state) === 'failed');
+    assert.strictEqual((await raw(async (d) => await d.prepare("SELECT error FROM audio_requests WHERE label = 'crashy'").get())).error, 'gave up after repeated attempts');
 
     for (const [i, c] of chatters.slice(0, 3).entries()) {
         const ws = await joined(c, `198.51.100.${121 + i}`);
@@ -269,8 +271,8 @@ t('restart: what was playing is finished, what waited plays in order once, stale
     }
     const firstClip = await ears.next((m) => m.type === 'soundboard-audio' && m.title === '!long');
     // The announce comes before the durable insert: wait for all three rows, not just the first clip.
-    await until(() => raw((d) => d.prepare("SELECT COUNT(*) AS n FROM audio_requests WHERE label = '!long'").get().n) === 3, 3000);
-    const queued = raw((d) => d.prepare("SELECT id, state FROM audio_requests WHERE label = '!long' ORDER BY id").all());
+    await until(async () => await raw(async (d) => (await d.prepare("SELECT COUNT(*) AS n FROM audio_requests WHERE label = '!long'").get()).n) === 3, 3000);
+    const queued = await raw(async (d) => await d.prepare("SELECT id, state FROM audio_requests WHERE label = '!long' ORDER BY id").all());
     assert.deepStrictEqual(queued.map((x) => x.state), ['playing', 'queued', 'queued']);
     assert.strictEqual(queued[0].id, firstClip.request_id);
 
@@ -278,14 +280,14 @@ t('restart: what was playing is finished, what waited plays in order once, stale
     assert.deepStrictEqual(exit, { code: 0, signal: null }, chat.log);
     chat = await h.spawnChat({ port });
     await h.sleep(300);
-    assert.strictEqual(raw((d) => d.prepare('SELECT state FROM audio_requests WHERE id = ?').get(queued[1].id).state), 'queued', 'nothing plays into an empty room');
+    assert.strictEqual(await raw(async (d) => (await d.prepare('SELECT state FROM audio_requests WHERE id = ?').get(queued[1].id)).state), 'queued', 'nothing plays into an empty room');
     const ears2 = await joined(listenerUser, '198.51.100.130');
     const got = [];
     got.push(await ears2.next((m) => m.type === 'soundboard-audio' && m.title === '!long', 4000));
     got.push(await ears2.next((m) => m.type === 'soundboard-audio' && m.title === '!long', 5000));
     assert.deepStrictEqual(got.map((m) => m.request_id), [queued[1].id, queued[2].id], 'the waiting clips, in order');
     assert.ok(await ears2.none((m) => m.type === 'soundboard-audio' && m.request_id === queued[0].id, 100), 'the clip delivered before the restart is not played again');
-    const after = raw((d) => d.prepare("SELECT id, state, error FROM audio_requests WHERE label = '!long' ORDER BY id").all());
+    const after = await raw(async (d) => await d.prepare("SELECT id, state, error FROM audio_requests WHERE label = '!long' ORDER BY id").all());
     assert.strictEqual(after[0].state, 'played');
     assert.strictEqual(after[0].error, 'delivered before a restart');
     assert.strictEqual(after[1].state, 'played');
@@ -295,7 +297,7 @@ t('restart: what was playing is finished, what waited plays in order once, stale
     const s = await joined(mod, '198.51.100.131');
     s.sendJson({ type: 'chat', message: '/cleartts' });
     await s.next((m) => m.type === 'system' && /^Cleared 1 TTS\/sound request\./.test(m.message));
-    assert.strictEqual(raw((d) => d.prepare('SELECT state FROM audio_requests WHERE id = ?').get(queued[2].id).state), 'skipped');
+    assert.strictEqual(await raw(async (d) => (await d.prepare('SELECT state FROM audio_requests WHERE id = ?').get(queued[2].id)).state), 'skipped');
 });
 
 t.run(async () => {

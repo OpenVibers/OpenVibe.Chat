@@ -49,7 +49,7 @@ t('upload a channel sound: converted to MP3 in the shared sounds dir, listed, se
     soundUrl = r.body.sound.url;
     assert.strictEqual(r.body.sound.command, 'honk');
     assert.match(soundUrl, /^\/api\/sounds\/file\/snd-.*\.mp3$/);
-    const row = h.db.getChannelSoundById(soundId);
+    const row = await h.db.getChannelSoundById(soundId);
     assert.ok(row.url.startsWith(path.resolve(process.env.SOUNDS_PATH)) && fs.existsSync(row.url));
     await h.sleep(150);
     assert.ok(h.live.effects.some((e) => e.name === 'asset-sync' && e.body.op === 'syncSoon'), 'Live mirrors it to Media');
@@ -74,25 +74,25 @@ t('!honk in the stream chat plays it (rich announce + audio), persisted', async 
     const audio = await ws.next((m) => m.type === 'soundboard-audio');
     assert.strictEqual(audio.title, '!honk');
     assert.ok(audio.audio.length > 100);
-    assert.strictEqual(h.db.getChatMessageById(ann.id).message_type, 'channel-sound');
+    assert.strictEqual((await h.db.getChatMessageById(ann.id)).message_type, 'channel-sound');
     ws.close();
 });
 
 t('delete: not someone else’s sound; the uploader can; Live drops the Media copy first', async () => {
     assert.strictEqual((await h.http('DELETE', `/api/sounds/${soundId}`, { token: other.token })).status, 403);
-    const row = h.db.getChannelSoundById(soundId);
+    const row = await h.db.getChannelSoundById(soundId);
     const del = await h.http('DELETE', `/api/sounds/${soundId}`, { token: viewer.token });
     assert.deepStrictEqual(del.body, { message: 'Sound deleted' });
     assert.ok(!fs.existsSync(row.url));
     assert.ok(h.live.effects.some((e) => e.name === 'asset-sync' && e.body.op === 'remove-sound' && e.body.asset_id === soundId));
-    assert.strictEqual(h.db.getChannelSoundById(soundId), undefined);
+    assert.strictEqual(await h.db.getChannelSoundById(soundId), undefined);
 });
 
 t('alert sounds: the streamer’s own channel, stored on Chat’s own settings row (C-04)', async () => {
     const r = await upload('/api/sounds/alert/donation', streamer.token, {}, wav());
     assert.strictEqual(r.status, 200, JSON.stringify(r.body));
     assert.strictEqual(r.body.kind, 'donation');
-    const row = h.db.get('SELECT donation_sound_url, donation_sound_mime FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
+    const row = await h.db.get('SELECT donation_sound_url, donation_sound_mime FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
     assert.ok(row.donation_sound_url.startsWith(path.resolve(process.env.SOUNDS_PATH)));
     assert.strictEqual(row.donation_sound_mime, 'audio/mpeg');
 });

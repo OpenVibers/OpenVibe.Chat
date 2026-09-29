@@ -48,9 +48,9 @@ const driver = {
     connect: ({ role, stream }) => h.ws({ ip: IPS[role], stream }),
     http: (method, path, { token, body } = {}) => h.http(method, path, { token, body }),
     // A network block, as the Events consumer applies network.block.changed.
-    block: (blocker, blocked, active) => {
+    block: async (blocker, blocked, active) => {
         const subject = { a: alice, b: bob, mod, streamer }[blocker].subject_id, target = { a: alice, b: bob, mod, streamer }[blocked].subject_id;
-        require('../server/chat/network-blocks').apply({ blocker: subject, blocked: target, active, revision: ++blockRev });
+        await require('../server/chat/network-blocks').apply({ blocker: subject, blocked: target, active, revision: ++blockRev });
     },
 };
 
@@ -62,7 +62,7 @@ t('boot: a channel with a moderator, a live stream, a channel sound, TTS that sy
     bob = h.addUser('bob', { subject: 'usr_01J9PAR1TY00000000000000B1' });
     dave = h.addUser('dave');
     channelId = h.addChannel(streamer.id, { moderators: [mod.id] });
-    h.db.addChannelModerator(channelId, mod.id, streamer.id);   // the moderator row is Chat's own (C-04)
+    await h.db.addChannelModerator(channelId, mod.id, streamer.id);   // the moderator row is Chat's own (C-04)
     streamId = h.addStream(streamer.id, channelId);
     h.live.subscribers.add(`${alice.id}|${streamer.id}`);   // A subscribes to the channel; B does not
     await h.ctx.sync();
@@ -104,8 +104,8 @@ t('dm: delivery keeps the participant rule (chatServer.sendDm checks dm.isPartic
     const convId = conv.body.conversation.id;
     const outsider = await p.join('mod', { stream: false });
     const bobWs = await p.join('b', { stream: false });
-    h.chatServer.sendDm(mod.id, { type: 'dm', conversation_id: convId, message: { message: 'not for you' } });
-    h.chatServer.sendDm(bob.id, { type: 'dm', conversation_id: convId, message: { message: 'for bob' } });
+    await h.chatServer.sendDm(mod.id, { type: 'dm', conversation_id: convId, message: { message: 'not for you' } });
+    await h.chatServer.sendDm(bob.id, { type: 'dm', conversation_id: convId, message: { message: 'for bob' } });
     await bobWs.next((m) => m.type === 'dm' && m.message.message === 'for bob');
     assert.ok(await outsider.none((m) => m.type === 'dm'), 'a non-participant never receives it');
     await p.closeAll();
@@ -197,7 +197,7 @@ t('sub-only fails closed: while Live cannot say whether someone subscribes they 
 t('slow mode is the channel’s saved setting: the dashboard’s value is enforced and announced, and a restart keeps it', async () => {
     const a = await p.join('a'); const b = await p.join('b');
     // The dashboard saves 3 s in Chat's own settings row, which announces the change at once.
-    h.db.upsertChannelModerationSettings(channelId, { slow_mode_seconds: 3 });
+    await h.db.upsertChannelModerationSettings(channelId, { slow_mode_seconds: 3 });
     assert.strictEqual((await a.next((m) => m.type === 'slowmode')).seconds, 3, 'the room is told');
     await p.system(b, 'Slow mode enabled: 3s between messages');
     const slowed = async (ws, label) => {
@@ -216,7 +216,7 @@ t('slow mode is the channel’s saved setting: the dashboard’s value is enforc
     assert.strictEqual(again.auth.slowmode_seconds, 3, 'read back after a restart');
     await slowed(again, 'after a restart');
     // The dashboard turns it off.
-    h.db.upsertChannelModerationSettings(channelId, { slow_mode_seconds: 0 });
+    await h.db.upsertChannelModerationSettings(channelId, { slow_mode_seconds: 0 });
     assert.strictEqual((await b.next((m) => m.type === 'slowmode' && m.seconds === 0)).seconds, 0);
     await p.system(b, 'Slow mode disabled.');
     await p.closeAll();
@@ -273,11 +273,11 @@ t('the CLI: a dry run lists every scenario and opens nothing; --apply refuses ac
     assert.strictEqual(h.chatServer.clients.size, sockets, 'no connection');
     assert.strictEqual(h.live.requests.length, requests, 'nothing reached Chat');
     // --apply: moddy and the channel owner are not named → nothing runs.
-    const before = h.db.get('SELECT COUNT(*) AS n FROM chat_messages').n;
+    const before = (await h.db.get('SELECT COUNT(*) AS n FROM chat_messages')).n;
     out.length = 0;
     assert.strictEqual(await parity.main(['--apply'], env, (l) => out.push(l)), 2);
     assert.match(out.join('\n'), /refused: moddy, streamer are not named in OV_PARITY_TEST_ACCOUNTS; nothing was run/);
-    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM chat_messages').n, before, 'no message was written');
+    assert.strictEqual((await h.db.get('SELECT COUNT(*) AS n FROM chat_messages')).n, before, 'no message was written');
     // Named: the CLI's own network client runs a scenario end to end.
     out.length = 0;
     assert.strictEqual(await parity.main(['--apply', '--only', 'join,send'], { ...env, OV_PARITY_TEST_ACCOUNTS: 'Alice, bob, moddy, streamer' }, (l) => out.push(l)), 0, out.join('\n'));

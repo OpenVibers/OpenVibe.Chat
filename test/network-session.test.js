@@ -26,7 +26,7 @@ t('boot', async () => {
     alice = h.addUser('alice', { subject: ids.newId('user') });
     carol = h.addUser('carol', { subject: ids.newId('user'), role: 'global_mod' });
     modSubject = ids.newId('user');
-    for (const u of [alice, carol]) h.ctx.upsertUser(h.live.users.get(u.id));
+    for (const u of [alice, carol]) await h.ctx.upsertUser(h.live.users.get(u.id));
 });
 
 t('a Network token for a projected subject resolves here, without Live', async () => {

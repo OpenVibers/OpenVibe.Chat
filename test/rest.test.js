@@ -113,9 +113,9 @@ t('DMs: groups, blocks, banned users, user search', async () => {
 
 t('chat history: global page and cursor delta, deleted and expired rows hidden', async () => {
     const ids = [];
-    for (let i = 0; i < 5; i++) ids.push(Number(h.db.saveChatMessage({ stream_id: null, user_id: alice.id, username: 'Alice', message: `g${i}`, message_type: 'chat', is_global: true }).lastInsertRowid));
-    h.db.deleteChatMessage(ids[1], staff.id);
-    h.db.run("UPDATE chat_messages SET auto_delete_at = '2000-01-01 00:00:00' WHERE id = ?", [ids[2]]);
+    for (let i = 0; i < 5; i++) ids.push(Number((await h.db.saveChatMessage({ stream_id: null, user_id: alice.id, username: 'Alice', message: `g${i}`, message_type: 'chat', is_global: true })).lastInsertRowid));
+    await h.db.deleteChatMessage(ids[1], staff.id);
+    await h.db.run("UPDATE chat_messages SET auto_delete_at = '2000-01-01 00:00:00' WHERE id = ?", [ids[2]]);
     const page = await h.http('GET', '/api/chat/global/history?limit=10');
     const got = page.body.messages.map((m) => m.message);
     assert.deepStrictEqual(got.filter((x) => /^g\d$/.test(x)), ['g0', 'g3', 'g4']);
@@ -131,20 +131,21 @@ t('chat history: global page and cursor delta, deleted and expired rows hidden',
     const small = await h.http('GET', `/api/chat/global/history?after_id=0&limit=1`);
     assert.strictEqual(small.body.complete, false, 'bigger gap than the limit → take a fresh page');
     // Channel filter by username (the owner of the source stream or the channel room).
-    h.db.saveChatMessage({ stream_id: streamId, user_id: bob.id, username: 'Bob', message: 'in the stream', message_type: 'chat' });
+    await h.db.saveChatMessage({ stream_id: streamId, user_id: bob.id, username: 'Bob', message: 'in the stream', message_type: 'chat' });
     const byChan = await h.http('GET', '/api/chat/global/history?username=streamer');
     assert.deepStrictEqual(byChan.body.messages.map((m) => m.message), ['in the stream']);
     assert.strictEqual(byChan.body.messages[0].stream_channel, 'streamer');
     // The stream and channel cursor reads name deletions in their room too.
-    const inRoom = [0, 1].map((i) => Number(h.db.saveChatMessage({ stream_id: streamId, channel_user_id: streamer.id, user_id: bob.id, username: 'Bob', message: `s${i}`, message_type: 'chat' }).lastInsertRowid));
-    h.db.deleteChatMessage(inRoom[0], staff.id);
+    const inRoom = [];
+    for (const i of [0, 1]) inRoom.push(Number((await h.db.saveChatMessage({ stream_id: streamId, channel_user_id: streamer.id, user_id: bob.id, username: 'Bob', message: `s${i}`, message_type: 'chat' })).lastInsertRowid));
+    await h.db.deleteChatMessage(inRoom[0], staff.id);
     for (const p of [`/api/chat/${streamId}/history`, `/api/chat/${streamId}/history?scope=stream&`, `/api/chat/channel/${streamer.id}/history`]) {
         const d = await h.http('GET', `${p}${p.endsWith('&') ? '' : '?'}after_id=${inRoom[1]}`);
         assert.strictEqual(d.status, 200, p);
         assert.deepStrictEqual(d.body.deleted_ids, [inRoom[0]], p);
     }
     assert.deepStrictEqual((await h.http('GET', `/api/chat/channel/${streamer.id + 999}/history?after_id=${inRoom[1]}`)).body.deleted_ids, [], 'another channel');
-    h.db.deleteChatMessage(inRoom[1], staff.id);   // the log counts below are about 'in the stream'
+    await h.db.deleteChatMessage(inRoom[1], staff.id);   // the log counts below are about 'in the stream'
 });
 
 t('chat logs and search are gated like Live', async () => {
@@ -171,22 +172,22 @@ t('chat logs and search are gated like Live', async () => {
 });
 
 t('staff reading other people\'s logs is audited; your own chat exports; CSV cells are never formulas', async () => {
-    const audits = () => h.db.all("SELECT action_type, actor_user_id, target_user_id FROM moderation_actions WHERE action_type LIKE 'chat_log_%' ORDER BY id");
-    const before = audits().length;
+    const audits = async () => await h.db.all("SELECT action_type, actor_user_id, target_user_id FROM moderation_actions WHERE action_type LIKE 'chat_log_%' ORDER BY id");
+    const before = (await audits()).length;
     await h.http('GET', `/api/chat/search?q=stream&user_id=${alice.id}`, { token: alice.token });
     await h.http('GET', `/api/chat/user/${alice.id}/history`, { token: alice.token });
     await h.http('GET', `/api/chat/admin/logs?streamId=${streamId}`, { token: streamer.token });
-    assert.strictEqual(audits().length, before, 'your own lines and your own stream are not audited');
+    assert.strictEqual((await audits()).length, before, 'your own lines and your own stream are not audited');
     await h.http('GET', `/api/chat/search?q=stream&user_id=${bob.id}`, { token: staff.token });
     await h.http('GET', `/api/chat/user/${bob.id}/history`, { token: staff.token });
     await h.http('GET', `/api/chat/user/${bob.id}/history?offset=50`, { token: staff.token });
-    h.db.saveChatMessage({ stream_id: streamId, user_id: bob.id, username: 'Bob', message: '=HYPERLINK("x")', message_type: 'chat' });
+    await h.db.saveChatMessage({ stream_id: streamId, user_id: bob.id, username: 'Bob', message: '=HYPERLINK("x")', message_type: 'chat' });
     const admin = h.addUser('exporter', { role: 'admin' });
     await h.ctx.sync();
     const ex = await h.http('GET', `/api/chat/admin/logs/export?streamId=${streamId}&format=csv`, { token: admin.token });
     assert.strictEqual(ex.status, 200);
     assert.ok(ex.text.includes(`"'=HYPERLINK(""x"")"`), 'a formula-looking message is text');
-    const got = audits().slice(before);
+    const got = (await audits()).slice(before);
     assert.deepStrictEqual(got.map((a) => a.action_type), ['chat_log_search', 'chat_log_view', 'chat_log_export'], 'search, first page viewed, export');
     assert.deepStrictEqual(got.map((a) => a.actor_user_id), [staff.id, staff.id, admin.id]);
     assert.deepStrictEqual(got.slice(0, 2).map((a) => a.target_user_id), [bob.id, bob.id]);
@@ -210,7 +211,7 @@ t('profile card and anon info come from Live', async () => {
     assert.ok('last_seen' in own.body);
     assert.strictEqual((await h.http('GET', '/api/chat/user/nobody/profile')).status, 404);
     h.live.anon.set('203.0.113.99', { num: 42, first_seen: '2026-01-01 00:00:00' });
-    h.db.saveChatMessage({ stream_id: null, anon_id: 'anon42', username: 'anon42', message: 'hi', message_type: 'chat', is_global: true });
+    await h.db.saveChatMessage({ stream_id: null, anon_id: 'anon42', username: 'anon42', message: 'hi', message_type: 'chat', is_global: true });
     const a = await h.http('GET', '/api/chat/anon/anon42');
     assert.deepStrictEqual({ ...a.body.anon, first_chat: !!a.body.anon.first_chat }, { anon_id: 'anon42', anon_num: 42, first_seen: '2026-01-01 00:00:00', first_chat: true, message_count: 1 });
     assert.strictEqual((await h.http('GET', '/api/chat/anon/bob')).status, 400);

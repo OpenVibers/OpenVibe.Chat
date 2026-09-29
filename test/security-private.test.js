@@ -38,7 +38,7 @@ t('boot and seed: a private room, a private call room, a DM', async () => {
     cat = h.addUser('cat', { subject: ids.newId('user') });
     dan = h.addUser('dan', { subject: ids.newId('user') });
     mod = h.addUser('staffmod', { subject: ids.newId('user'), role: 'global_mod' });
-    for (const u of [ann, bob, cat, dan, mod]) { h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); }
+    for (const u of [ann, bob, cat, dan, mod]) { await h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); }
 
     let r = await rooms('POST', '/', ann, { name: SECRET.roomName, visibility: 'private', topic: SECRET.topic });
     assert.strictEqual(r.status, 201, r.text);
@@ -122,12 +122,12 @@ t('WebSocket: a stranger cannot join the private room, and hears nothing posted 
 
 t('events outbox: nothing about a private room or a DM leaves Chat', async () => {
     // (The staff member's own log searches above are audited with the words they typed: their query, not the room's content.)
-    const rows = JSON.stringify(h.db.all('SELECT * FROM events_outbox').filter((r) => !/"action_type":"chat_log_search"/.test(r.event)));
+    const rows = JSON.stringify((await h.db.all('SELECT * FROM events_outbox')).filter((r) => !/"action_type":"chat_log_search"/.test(r.event)));
     for (const w of ['live-private-words', 'live-dm-words', SECRET.roomWords, SECRET.callWords, SECRET.dmWords, SECRET.roomName, SECRET.topic]) assert.ok(!rows.includes(w), `outbox carries "${w}"`);
 });
 
 t('ids swapped into the stranger\'s own room reach nothing of the private room', async () => {
-    const before = h.db.all('SELECT id, is_deleted FROM room_messages ORDER BY id');
+    const before = await h.db.all('SELECT id, is_deleted FROM room_messages ORDER BY id');
     let r = await rooms('DELETE', `/${seeded.open}/messages/${seeded.msg}`, cat);
     assert.strictEqual(r.status, 404, r.text);
     r = await rooms('DELETE', `/${seeded.open}/messages/${seeded.callMsg}`, cat);
@@ -137,14 +137,14 @@ t('ids swapped into the stranger\'s own room reach nothing of the private room',
     assert.ok(!r.text.includes(SECRET.roomWords) && !r.text.includes(SECRET.callWords));
     r = await dms('DELETE', `/conversations/${seeded.conv}/messages/${seeded.dmMsg}`, cat);
     assert.ok([403, 404].includes(r.status), r.text);
-    assert.deepStrictEqual(h.db.all('SELECT id, is_deleted FROM room_messages ORDER BY id'), before);
+    assert.deepStrictEqual(await h.db.all('SELECT id, is_deleted FROM room_messages ORDER BY id'), before);
     assert.ok((await dms('GET', `/conversations/${seeded.conv}/messages`, ann)).text.includes(SECRET.dmWords), 'the DM is intact');
 });
 
 t('a stranger\'s every write to the private room or the DM is refused and changes nothing', async () => {
-    const snap = () => JSON.stringify([h.db.all('SELECT * FROM rooms ORDER BY id'), h.db.all('SELECT room_id, user_id, role FROM room_members ORDER BY room_id, user_id'),
-        h.db.all('SELECT id, is_deleted FROM room_messages ORDER BY id'), h.db.all('SELECT * FROM dm_participants ORDER BY conversation_id, user_id')]);
-    const before = snap();
+    const snap = async () => JSON.stringify([await h.db.all('SELECT * FROM rooms ORDER BY id'), await h.db.all('SELECT room_id, user_id, role FROM room_members ORDER BY room_id, user_id'),
+        await h.db.all('SELECT id, is_deleted FROM room_messages ORDER BY id'), await h.db.all('SELECT * FROM dm_participants ORDER BY conversation_id, user_id')]);
+    const before = await snap();
     for (const [m, p, body] of [
         ['PATCH', `/${seeded.slug}`, { name: 'pwned', visibility: 'public' }], ['POST', `/${seeded.slug}/join`], ['POST', `/${seeded.slug}/messages`, { message: 'x' }],
         ['DELETE', `/${seeded.slug}/messages/${seeded.msg}`], ['POST', `/${seeded.slug}/members`, { username: 'cat', role: 'mod' }], ['POST', `/${seeded.slug}/read`],
@@ -167,7 +167,7 @@ t('a stranger\'s every write to the private room or the DM is refused and change
             assert.ok(!r.text.includes(SECRET.dmWords), `${m} ${p} carries the DM`);
         }
     }
-    assert.strictEqual(snap(), before);
+    assert.strictEqual(await snap(), before);
 });
 
 t.run(() => h && h.close());

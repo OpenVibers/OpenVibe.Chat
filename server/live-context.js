@@ -149,7 +149,7 @@ async function call(method, path, body, scope, retried = false) {
         stats.failures++; stats.lastError = err.message;
         throw new LiveError(0, `Live unreachable: ${err.message}`);
     }
-    if (res.status === 401 && !retried) { serviceAuth.invalidate(config.live.audience, scope); return call(method, path, body, scope, true); }
+    if (res.status === 401 && !retried) { serviceAuth.invalidate(config.live.audience, scope); return await call(method, path, body, scope, true); }
     if (res.status === 304) return { notModified: true };
     const data = await res.json().catch(() => null);
     if (!res.ok) {
@@ -158,8 +158,8 @@ async function call(method, path, body, scope, retried = false) {
     }
     return data;
 }
-const read = (path, body) => { stats.reads++; return call(body === undefined ? 'GET' : 'POST', `/internal/chat-context${path}`, body, SCOPE_READ); };
-const effect = (name, body) => { stats.effects++; return call('POST', `/internal/chat-effects/${name}`, body || {}, SCOPE_WRITE); };
+const read = async (path, body) => { stats.reads++; return await call(body === undefined ? 'GET' : 'POST', `/internal/chat-context${path}`, body, SCOPE_READ); };
+const effect = async (name, body) => { stats.effects++; return await call('POST', `/internal/chat-effects/${name}`, body || {}, SCOPE_WRITE); };
 /** Fire-and-forget effect: logged, never thrown. */
 function fire(name, body) { effect(name, body).catch((err) => console.warn(`[LiveContext] ${name}: ${err.message}`)); }
 
@@ -221,50 +221,51 @@ function emoteSources(raw) {
     return out;
 }
 
-function upsertRows(table, cols, rows) {
+async function upsertRows(table, cols, rows) {
     if (!rows || !rows.length) return 0;
     const sql = `INSERT INTO ${table} (${cols.join(', ')}, synced_at) VALUES (${cols.map(() => '?').join(', ')}, ?)
         ON CONFLICT(id) DO UPDATE SET ${cols.filter((c) => c !== 'id').map((c) => `${c} = excluded.${c}`).join(', ')}, synced_at = excluded.synced_at`;
     const st = db.getDb().prepare(sql);
     const now = Date.now();
-    db.transaction(() => {
+    await db.tx(async () => {
         for (const r of rows) {
             if (!r || r.id == null) continue;
-            st.run(...cols.map((c) => (r[c] === undefined ? null : (typeof r[c] === 'boolean' ? (r[c] ? 1 : 0) : r[c]))), now);
+            await st.run(...cols.map((c) => (r[c] === undefined ? null : (typeof r[c] === 'boolean' ? (r[c] ? 1 : 0) : r[c]))), now);
         }
     });
     return rows.length;
 }
 
 /** Store a user as Live sent it (only the projection columns are kept). */
-function upsertUser(row) {
+async function upsertUser(row) {
     if (!row || row.id == null) return;
-    upsertRows('ctx_users', USER_COLS, [row]);
+    await upsertRows('ctx_users', USER_COLS, [row]);
 }
 
 const userSelect = 'SELECT * FROM ctx_users';
-function getUserById(id) { if (!id) return null; const u = db.get(`${userSelect} WHERE id = ?`, [id]) || null; if (!u) ensureUsers([id]).catch(() => {}); return u; }
-function getUserByUsername(name) { return name ? (db.get(`${userSelect} WHERE username = ? COLLATE NOCASE`, [String(name)]) || null) : null; }
-function getUserByDisplayName(name) { return name ? (db.get(`${userSelect} WHERE display_name = ? COLLATE NOCASE`, [String(name)]) || null) : null; }
-function subjectFor(userId) { return db.subjectFor(userId); }
+async function getUserById(id) { if (!id) return null; const u = await db.get(`${userSelect} WHERE id = ?`, [id]) || null; if (!u) ensureUsers([id]).catch(() => {}); return u; }
+async function getUserByUsername(name) { return name ? (await db.get(`${userSelect} WHERE lower(username) = lower(?)`, [String(name)]) || null) : null; }
+async function getUserByDisplayName(name) { return name ? (await db.get(`${userSelect} WHERE lower(display_name) = lower(?)`, [String(name)]) || null) : null; }
+async function subjectFor(userId) { return await db.subjectFor(userId); }
 
 /** Fetch users the projection lacks. */
 async function ensureUsers(ids) {
     const want = [...new Set((ids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
-    const missing = want.filter((id) => !db.get('SELECT 1 FROM ctx_users WHERE id = ?', [id]));
+    const have = new Set((await db.all('SELECT id FROM ctx_users WHERE id = ANY(?)', [want])).map((r) => Number(r.id)));
+    const missing = want.filter((id) => !have.has(id));
     if (!missing.length) return 0;
     const data = await read('/users/lookup', { ids: missing.slice(0, 500) });
-    return upsertRows('ctx_users', USER_COLS, data.users || []);
+    return await upsertRows('ctx_users', USER_COLS, data.users || []);
 }
 /** Look a user up by login (then display name) in the projection, asking Live on a miss. */
 async function ensureUserByUsername(name) {
-    const local = getUserByUsername(name);
+    const local = await getUserByUsername(name);
     if (local) return local;
     try {
         const data = await read('/users/lookup', { usernames: [String(name)] });
-        upsertRows('ctx_users', USER_COLS, data.users || []);
+        await upsertRows('ctx_users', USER_COLS, data.users || []);
     } catch (err) { console.warn('[LiveContext] user lookup:', err.message); }
-    return getUserByUsername(name);
+    return await getUserByUsername(name);
 }
 
 const STREAM_SELECT = `SELECT s.*, u.username, u.display_name, u.avatar_url, u.profile_color,
@@ -273,20 +274,20 @@ const STREAM_SELECT = `SELECT s.*, u.username, u.display_name, u.avatar_url, u.p
     LEFT JOIN ctx_users u ON s.user_id = u.id
     LEFT JOIN ctx_managed_streams ms ON s.managed_stream_id = ms.id`;
 
-function getStreamById(id) {
+async function getStreamById(id) {
     const sid = parseInt(id, 10);
     if (!sid) return null;
-    const row = db.get(`${STREAM_SELECT} WHERE s.id = ?`, [sid]) || null;
+    const row = await db.get(`${STREAM_SELECT} WHERE s.id = ?`, [sid]) || null;
     if (!row) ensureStream(sid).catch(() => {});
     return row;
 }
 const _streamFetch = new Swr(TTL.streamRow, async (sid) => {
     const data = await read(`/streams/${sid}`);
     if (data.stream) {
-        upsertRows('ctx_streams', STREAM_COLS, [data.stream]);
-        if (data.owner) upsertUser(data.owner);
-        if (data.managed_stream) upsertRows('ctx_managed_streams', MS_COLS, [data.managed_stream]);
-        if (data.channel) upsertRows('ctx_channels', CHANNEL_COLS, [data.channel]);
+        await upsertRows('ctx_streams', STREAM_COLS, [data.stream]);
+        if (data.owner) await upsertUser(data.owner);
+        if (data.managed_stream) await upsertRows('ctx_managed_streams', MS_COLS, [data.managed_stream]);
+        if (data.channel) await upsertRows('ctx_channels', CHANNEL_COLS, [data.channel]);
     }
     return !!data.stream;
 });
@@ -294,8 +295,8 @@ const _streamFetch = new Swr(TTL.streamRow, async (sid) => {
 async function ensureStream(id) {
     const sid = parseInt(id, 10);
     if (!sid) return null;
-    if (!db.get('SELECT 1 FROM ctx_streams WHERE id = ?', [sid])) await _streamFetch.ensure(sid);
-    return db.get(`${STREAM_SELECT} WHERE s.id = ?`, [sid]) || null;
+    if (!await db.get('SELECT 1 FROM ctx_streams WHERE id = ?', [sid])) await _streamFetch.ensure(sid);
+    return await db.get(`${STREAM_SELECT} WHERE s.id = ?`, [sid]) || null;
 }
 /**
  * Read one stream from Live now, past the cache (a call hook or an ownership check wants its live
@@ -305,20 +306,20 @@ async function refreshStream(id) {
     const sid = parseInt(id, 10);
     if (!sid) return null;
     try { await _streamFetch.refresh(sid); } catch (err) { console.warn(`[LiveContext] stream ${sid}: ${err.message}`); }
-    return db.get(`${STREAM_SELECT} WHERE s.id = ?`, [sid]) || null;
+    return await db.get(`${STREAM_SELECT} WHERE s.id = ?`, [sid]) || null;
 }
-function latestStreamIdForUser(userId) {
+async function latestStreamIdForUser(userId) {
     if (!userId) return null;
-    return db.get('SELECT id FROM ctx_streams WHERE user_id = ? ORDER BY id DESC LIMIT 1', [userId])?.id || null;
+    return (await db.get('SELECT id FROM ctx_streams WHERE user_id = ? ORDER BY id DESC LIMIT 1', [userId]))?.id || null;
 }
-function getLiveStreamsByUserId(userId) {
-    return db.all(`${STREAM_SELECT} WHERE s.user_id = ? AND s.is_live = 1 ORDER BY s.started_at DESC`, [userId]);
+async function getLiveStreamsByUserId(userId) {
+    return await db.all(`${STREAM_SELECT} WHERE s.user_id = ? AND s.is_live = 1 ORDER BY s.started_at DESC`, [userId]);
 }
-function getStreamsByUserId(userId, limit = 50) {
-    return db.all(`${STREAM_SELECT} WHERE s.user_id = ? ORDER BY s.created_at DESC LIMIT ?`, [userId, limit]);
+async function getStreamsByUserId(userId, limit = 50) {
+    return await db.all(`${STREAM_SELECT} WHERE s.user_id = ? ORDER BY s.created_at DESC LIMIT ?`, [userId, limit]);
 }
-function getManagedStreamsByUserId(userId) {
-    return db.all(`
+async function getManagedStreamsByUserId(userId) {
+    return await db.all(`
         SELECT ms.*,
                (SELECT s.is_live FROM ctx_streams s WHERE s.managed_stream_id = ms.id AND s.is_live = 1 LIMIT 1) AS is_currently_live,
                (SELECT s.id FROM ctx_streams s WHERE s.managed_stream_id = ms.id AND s.is_live = 1 LIMIT 1) AS live_session_id
@@ -327,30 +328,30 @@ function getManagedStreamsByUserId(userId) {
         ORDER BY ms.sort_order ASC, ms.created_at ASC`, [userId]);
 }
 
-function getChannelById(id) { return id ? (db.get('SELECT * FROM ctx_channels WHERE id = ?', [id]) || null) : null; }
-function getChannelByUserId(userId) { return userId ? (db.get('SELECT * FROM ctx_channels WHERE user_id = ?', [userId]) || null) : null; }
+async function getChannelById(id) { return id ? (await db.get('SELECT * FROM ctx_channels WHERE id = ?', [id]) || null) : null; }
+async function getChannelByUserId(userId) { return userId ? (await db.get('SELECT * FROM ctx_channels WHERE user_id = ?', [userId]) || null) : null; }
 /** The channel row of a user, asking Live when the projection lacks it (null = the user has none). */
 async function ensureChannelForUser(userId) {
-    const local = getChannelByUserId(userId);
+    const local = await getChannelByUserId(userId);
     if (local || !userId) return local;
     try {
         const data = await read(`/channels/by-user/${parseInt(userId, 10)}`);
-        if (data.channel) upsertRows('ctx_channels', CHANNEL_COLS, [data.channel]);
+        if (data.channel) await upsertRows('ctx_channels', CHANNEL_COLS, [data.channel]);
     } catch (err) { console.warn('[LiveContext] channel lookup:', err.message); }
-    return getChannelByUserId(userId);
+    return await getChannelByUserId(userId);
 }
 /** Live's ensureChannel(userId): create the channel if the user has none (effect). */
 async function createChannel(userId) {
     const data = await effect('ensure-channel', { user_id: userId });
-    if (data.channel) upsertRows('ctx_channels', CHANNEL_COLS, [data.channel]);
-    return getChannelByUserId(userId);
+    if (data.channel) await upsertRows('ctx_channels', CHANNEL_COLS, [data.channel]);
+    return await getChannelByUserId(userId);
 }
 
 /** Write the channel's emote source switches (Live's channels.emote_sources) and refresh the cache. */
 async function setChannelEmoteSources(userId, sources) {
     const clean = emoteSources(sources);
     await effect('channel-emote-sources', { user_id: userId, sources: clean });
-    db.run('UPDATE ctx_channels SET emote_sources = ? WHERE user_id = ?', [JSON.stringify(clean), Number(userId)]);
+    await db.run('UPDATE ctx_channels SET emote_sources = ? WHERE user_id = ?', [JSON.stringify(clean), Number(userId)]);
     return clean;
 }
 
@@ -371,38 +372,38 @@ function _emitSettings(channelId, settings) {
 // moderation settings and moderator ids are Chat's own rows now, read in place.
 const _policy = new Swr(TTL.policy, async (channelId) => {
     const data = await read(`/channels/${channelId}/policy`);
-    if (data.channel) upsertRows('ctx_channels', CHANNEL_COLS, [data.channel]);
+    if (data.channel) await upsertRows('ctx_channels', CHANNEL_COLS, [data.channel]);
     // The moderation settings are Chat's own rows: a fresh channel read refreshes the listeners'
     // baseline (the chat server records what the room was last told; the first read announces nothing).
-    _emitSettings(channelId, getChannelModerationSettings(channelId));
+    _emitSettings(channelId, await getChannelModerationSettings(channelId));
     return { language: data.language || 'en' };
 });
 function _policyFor(channelId) { return channelId ? _policy.peek(Number(channelId)) : undefined; }
 // Chat is the only writer of these tables (C-04 done): an indexed local row, no network, no cache.
-function getChannelModerationSettings(channelId) {
-    return (channelId && db.get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [Number(channelId)])) || defaultModerationSettings(channelId);
+async function getChannelModerationSettings(channelId) {
+    return (channelId && await db.get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [Number(channelId)])) || defaultModerationSettings(channelId);
 }
-function isChannelModerator(userId, channelId) {
-    return !!(userId && channelId && db.get('SELECT 1 FROM channel_moderators WHERE user_id = ? AND channel_id = ?', [Number(userId), Number(channelId)]));
+async function isChannelModerator(userId, channelId) {
+    return !!(userId && channelId && await db.get('SELECT 1 FROM channel_moderators WHERE user_id = ? AND channel_id = ?', [Number(userId), Number(channelId)]));
 }
-function channelLanguage(channelUserId) {
-    const ch = getChannelByUserId(channelUserId);
+async function channelLanguage(channelUserId) {
+    const ch = await getChannelByUserId(channelUserId);
     if (!ch) return 'en';
     const p = _policyFor(ch.id);
     return (p && p.language) || 'en';
 }
-function getChannelAlertSoundsByUser(userId) {
-    const ch = getChannelByUserId(userId);
+async function getChannelAlertSoundsByUser(userId) {
+    const ch = await getChannelByUserId(userId);
     if (!ch) return {};
-    const s = getChannelModerationSettings(ch.id);
+    const s = await getChannelModerationSettings(ch.id);
     const pick = { donation_sound_url: s.donation_sound_url || null, donation_sound_mime: s.donation_sound_mime || null, goal_sound_url: s.goal_sound_url || null, goal_sound_mime: s.goal_sound_mime || null };
     return pick;
 }
 function ensurePolicy(channelId) { return channelId ? _policy.ensure(Number(channelId)) : Promise.resolve(); }
-function invalidateChannel(channelId) {
+async function invalidateChannel(channelId) {
     if (!channelId) return;
     _policy.invalidate(Number(channelId));
-    _emitSettings(channelId, getChannelModerationSettings(channelId));
+    _emitSettings(channelId, await getChannelModerationSettings(channelId));
 }
 /**
  * A fresh policy read that starts after the call (Chat just had Live write a setting): a load already
@@ -421,7 +422,7 @@ let _bans = { rows: [], version: null, at: 0, cidr: [] };
 let _bansLoading = null;
 
 // A ban ends at expires_at, read as a UTC instant: /timeout stores an ISO string ('…T…Z'), other
-// writers SQLite's 'YYYY-MM-DD HH:MM:SS'. Live compares the TEXT with CURRENT_TIMESTAMP, where
+// writers SQLite's 'YYYY-MM-DD HH:MM:SS'. Live compares the TEXT with ov_now(), where
 // 'T' sorts after ' ', so a 60-second timeout lasted until the end of that UTC day; Chat, which
 // enforces chat bans, ends it on time (parity script, roadmap WS-I task 6). A value that is not a
 // date keeps Live's TEXT comparison.
@@ -475,9 +476,9 @@ async function refreshBans() {
 function _bansFresh() { if (Date.now() - _bans.at > TTL.bans) refreshBans().catch(() => {}); return _bans; }
 // A fresh read that starts after the call: a load already in flight may have left before a ban
 // was written, so it is waited for and followed by another.
-function invalidateBans() {
-    const reload = () => { _bans.version = null; _bans.at = 0; return refreshBans(); };
-    return _bansLoading ? _bansLoading.then(reload) : reload();
+async function invalidateBans() {
+    const reload = async () => { _bans.version = null; _bans.at = 0; return await refreshBans(); };
+    return _bansLoading ? _bansLoading.then(reload) : await reload();
 }
 
 function isUserBanned(userId, streamId) {
@@ -676,9 +677,9 @@ async function authenticate(token) {
     const hit = _auth.get(key);
     if (hit && hit.until > now) return hit.user ? { ...hit.user } : null;
     if (_authPending.has(key)) return _authPending.get(key).then((u) => (u ? { ...u } : null));
-    const p = read('/auth', { token }).then((data) => {
+    const p = read('/auth', { token }).then(async (data) => {
         const user = data && data.user ? data.user : null;
-        if (user) upsertUser(user);
+        if (user) await upsertUser(user);
         const exp = data && data.expires_at ? Date.parse(data.expires_at) : null;
         const ttl = user ? TTL.auth : TTL.authNegative;
         const until = Math.min(now + ttl, exp && Number.isFinite(exp) ? exp : Infinity);
@@ -722,18 +723,18 @@ async function warm({ user, streamId, channelUserId, ip } = {}) {
         const stream = streamId ? await ensureStream(streamId) : null;
         const ownerId = (stream && stream.user_id) || channelUserId || null;
         const tasks = [ensureSettings()];
-        let channel = stream && stream.channel_id ? getChannelById(stream.channel_id) : null;
+        let channel = stream && stream.channel_id ? await getChannelById(stream.channel_id) : null;
         if (!channel && ownerId) channel = await ensureChannelForUser(ownerId);
         if (channel) tasks.push(ensurePolicy(channel.id));
         // Live's chat server asks canModerateChannel(user, channelUserId) — the channel OWNER's user
         // id where a channel id belongs — for the AI-viewer / PowerChat "is mod" flag. Kept as it
         // was; that lookup is warmed too so a message never waits on it.
         if (ownerId && (!channel || channel.id !== ownerId)) tasks.push(ensurePolicy(ownerId));
-        if (user && user.id) { tasks.push(_follows.ensure(Number(user.id))); tasks.push(ensureDecor([user.id])); if (ip) tasks.push(ensureAnonFirstSeen(ip)); }
+        if (user && user.id) { tasks.push(_follows.ensure(Number(user.id))); tasks.push(await ensureDecor([user.id])); if (ip) tasks.push(ensureAnonFirstSeen(ip)); }
         await Promise.all(tasks.map((t) => Promise.resolve(t).catch(() => {})));
-        if (channel && getChannelModerationSettings(channel.id).ip_approval_mode && ip) await _approvals.ensure(`${channel.id}|${ip}`).catch(() => {});
+        if (channel && (await getChannelModerationSettings(channel.id)).ip_approval_mode && ip) await _approvals.ensure(`${channel.id}|${ip}`).catch(() => {});
         // Sub-only room: the viewer's subscription answer, so their first line does not wait for it.
-        if (channel && user && user.id && ownerId && Number(ownerId) !== Number(user.id) && getChannelModerationSettings(channel.id).sub_only) {
+        if (channel && user && user.id && ownerId && Number(ownerId) !== Number(user.id) && (await getChannelModerationSettings(channel.id)).sub_only) {
             await ensureSubscriber(user.id, ownerId).catch(() => {});
         }
     })();
@@ -743,12 +744,12 @@ async function warm({ user, streamId, channelUserId, ip } = {}) {
 // ── Projection sync ─────────────────────────────────────────────────────────────────────────
 
 async function syncTable(kind, table, cols, { full = false } = {}) {
-    let after = full ? 0 : (db.get(`SELECT COALESCE(MAX(id), 0) AS m FROM ${table}`)?.m || 0);
+    let after = full ? 0 : ((await db.get(`SELECT COALESCE(MAX(id), 0) AS m FROM ${table}`))?.m || 0);
     let total = 0;
     for (let pages = 0; pages < 10000; pages++) {
         const data = await read(`/${kind}?after_id=${after}&limit=${PAGE}`);
         const rows = data.rows || [];
-        total += upsertRows(table, cols, rows);
+        total += await upsertRows(table, cols, rows);
         if (rows.length < PAGE) break;
         after = rows[rows.length - 1].id;
     }
@@ -756,24 +757,24 @@ async function syncTable(kind, table, cols, { full = false } = {}) {
 }
 async function syncActiveStreams() {
     const data = await read('/streams/active');
-    upsertRows('ctx_streams', STREAM_COLS, data.rows || []);
+    await upsertRows('ctx_streams', STREAM_COLS, data.rows || []);
     // Streams that were live here but are not in Live's active list any more ended between
     // polls (and were not "recently ended" either): mark them offline.
     const liveNow = new Set((data.rows || []).filter((r) => r.is_live).map((r) => Number(r.id)));
-    for (const r of db.all('SELECT id FROM ctx_streams WHERE is_live = 1')) {
-        if (!liveNow.has(Number(r.id))) db.run('UPDATE ctx_streams SET is_live = 0 WHERE id = ?', [r.id]);
+    for (const r of await db.all('SELECT id FROM ctx_streams WHERE is_live = 1')) {
+        if (!liveNow.has(Number(r.id))) await db.run('UPDATE ctx_streams SET is_live = 0 WHERE id = ?', [r.id]);
     }
 }
 
 const SCHEDULE = [
     // [name, every ms, fn]
-    ['users+', 30_000, () => syncTable('users', 'ctx_users', USER_COLS)],
-    ['users*', 15 * 60_000, () => syncTable('users', 'ctx_users', USER_COLS, { full: true })],
-    ['streams+', 10_000, () => syncTable('streams', 'ctx_streams', STREAM_COLS)],
+    ['users+', 30_000, async () => await syncTable('users', 'ctx_users', USER_COLS)],
+    ['users*', 15 * 60_000, async () => await syncTable('users', 'ctx_users', USER_COLS, { full: true })],
+    ['streams+', 10_000, async () => await syncTable('streams', 'ctx_streams', STREAM_COLS)],
     ['streams~', 10_000, syncActiveStreams],
-    ['streams*', 30 * 60_000, () => syncTable('streams', 'ctx_streams', STREAM_COLS, { full: true })],
-    ['managed*', 5 * 60_000, () => syncTable('managed-streams', 'ctx_managed_streams', MS_COLS, { full: true })],
-    ['channels*', 5 * 60_000, () => syncTable('channels', 'ctx_channels', CHANNEL_COLS, { full: true })],
+    ['streams*', 30 * 60_000, async () => await syncTable('streams', 'ctx_streams', STREAM_COLS, { full: true })],
+    ['managed*', 5 * 60_000, async () => await syncTable('managed-streams', 'ctx_managed_streams', MS_COLS, { full: true })],
+    ['channels*', 5 * 60_000, async () => await syncTable('channels', 'ctx_channels', CHANNEL_COLS, { full: true })],
     // refreshBans and ensureSettings keep the cached value on a Live error instead of throwing
     // (callers want the stale value); for the schedule a refresh that did not land is a failure.
     ['bans', TTL.bans, async () => { const t0 = Date.now(); await refreshBans(); if (_bans.at < t0) throw new Error('bans not refreshed'); }],
@@ -882,7 +883,7 @@ const effects = {
     logIp(entry) { if (entry && entry.ip && entry.ip !== 'unknown') { _ipLog.push(entry); if (_ipLog.length > 5000) _ipLog.splice(0, _ipLog.length - 5000); } },
     viewerCount(streamId, count) { if (streamId) _viewerCounts.set(String(streamId), count); },
     viewerSnapshot(streamId, count, chatActivity) { _snapshots.push({ stream_id: streamId, viewer_count: count, chat_messages_5m: chatActivity }); },
-    setUserColor: (userId, color) => effect('user-color', { user_id: userId, color }).then((r) => { db.run('UPDATE ctx_users SET profile_color = ? WHERE id = ?', [color, userId]); return r; }),
+    setUserColor: (userId, color) => effect('user-color', { user_id: userId, color }).then(async (r) => { await db.run('UPDATE ctx_users SET profile_color = ? WHERE id = ?', [color, userId]); return r; }),
     // The ban is in Chat's cache before the moderator is answered (and before their next check).
     ban: (body) => effect('ban', body).then((r) => invalidateBans().then(() => r)),
     // /slow and alert sounds: Chat writes channel_moderation_settings itself (C-04 done; the callers
@@ -892,13 +893,13 @@ const effects = {
         if (fields && fields.slow_mode_seconds !== undefined) f.slow_mode_seconds = Math.max(0, parseInt(fields.slow_mode_seconds, 10) || 0);
         if (fields && fields.sub_only !== undefined) f.sub_only = fields.sub_only ? 1 : 0;
         if (!channelId || !Object.keys(f).length) return Promise.reject(new LiveError(400, 'no chat-settable fields'));
-        return Promise.resolve().then(() => {
-            db.upsertChannelModerationSettings(Number(channelId), f);
+        return Promise.resolve().then(async () => {
+            await db.upsertChannelModerationSettings(Number(channelId), f);
             return { ok: true };
         });
     },
     setChannelAlertSound: (channelId, kind, url, mime, actorUserId) => {
-        return Promise.resolve().then(() => {
+        return Promise.resolve().then(async () => {
             const file = url ? require('path').resolve(String(url)) : null;
             if (file) {
                 // Live's rule: alert sounds are files in the shared sounds directory.
@@ -907,16 +908,16 @@ const effects = {
                 try { inside = require('path').dirname(fs.realpathSync(file)) === fs.realpathSync(require('path').resolve(config.sounds.path)); } catch { inside = false; }
                 if (!inside) throw new LiveError(400, 'alert sounds live in the sounds directory');
             }
-            db.setChannelAlertSound(Number(channelId), kind === 'goal' ? 'goal' : 'donation', file, file ? String(mime || 'audio/mpeg') : null);
+            await db.setChannelAlertSound(Number(channelId), kind === 'goal' ? 'goal' : 'donation', file, file ? String(mime || 'audio/mpeg') : null);
             return { ok: true };
         });
     },
     // One call per real chat line: coins chat bonus, AI viewers, PowerChat relay (Live decides each).
-    chatMessage: (body) => effect('chat-message', body),
+    chatMessage: async (body) => await effect('chat-message', body),
     aiModCommand: (channelUserId, streamId, args, opts) => effect('ai/mod-command', { channel_user_id: channelUserId, stream_id: streamId, args, by: opts && opts.by }).then((r) => r.reply),
     arenaCommand: (client, cmd, parts) => fire('arena-command', { client: clientHandle(client), cmd, parts }),
-    mediaQueue: (op, args) => effect('media-queue', { op, ...args }),
-    hardwareCommand: (streamerUserId, command, fromUser) => effect('hardware', { streamer_user_id: streamerUserId, command, from_user: fromUser }),
+    mediaQueue: async (op, args) => await effect('media-queue', { op, ...args }),
+    hardwareCommand: async (streamerUserId, command, fromUser) => await effect('hardware', { streamer_user_id: streamerUserId, command, from_user: fromUser }),
     createPaste: (body) => effect('paste', body).then((r) => r.paste),
     translate: (text, channelUserId) => effect('translate', { text, channel_user_id: channelUserId }).then((r) => r.translation || null),
     notifyDm: (body) => fire('notify/dm', body),
@@ -925,7 +926,7 @@ const effects = {
     notifyCallInvite: (body) => fire('notify/call-invite', body),
     // Awaitable (a sound's Media copy is removed from Live's row before the row goes), never throws.
     assetSync: (op, assetId) => effect('asset-sync', { op, asset_id: assetId || null }).catch((err) => console.warn(`[LiveContext] asset-sync: ${err.message}`)),
-    userProfile: (username, viewerId) => read(`/users/profile?username=${encodeURIComponent(username)}${viewerId ? `&viewer_id=${viewerId}` : ''}`),
+    userProfile: async (username, viewerId) => await read(`/users/profile?username=${encodeURIComponent(username)}${viewerId ? `&viewer_id=${viewerId}` : ''}`),
 };
 
 module.exports = {

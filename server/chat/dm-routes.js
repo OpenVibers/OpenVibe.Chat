@@ -26,8 +26,8 @@ const prefStores = require('../prefs/stores');
  * conversation, or being added to a group? When Network cannot answer, the defaults (yes) apply.
  */
 async function dmSettingsOf(target) {
-    const subject = (target && target.subject_id) || require('../db/database').subjectFor(target && target.id);
-    return prefStores.settingsOf(prefStores.dm, subject);
+    const subject = (target && target.subject_id) || await require('../db/database').subjectFor(target && target.id);
+    return await prefStores.settingsOf(prefStores.dm, subject);
 }
 
 // Chat-internal columns (the Network subject next to Live's ids) are not part of Live's API.
@@ -78,12 +78,12 @@ setInterval(() => {
 }, 300_000);
 
 // List conversations for current user
-router.get('/conversations', (req, res) => {
+router.get('/conversations', async (req, res) => {
     try {
-        const conversations = dm.getConversations(req.user.id);
+        const conversations = await dm.getConversations(req.user.id);
         // Attach participant info to each conversation
         for (const conv of conversations) {
-            conv.participants = dm.getParticipants(conv.id);
+            conv.participants = await dm.getParticipants(conv.id);
         }
         res.json({ conversations });
     } catch (err) {
@@ -113,7 +113,7 @@ router.post('/conversations', startLimit, async (req, res) => {
         }
 
         // New account restriction
-        const accountCheck = dm.isAccountTooNew(req.user.id, 5);
+        const accountCheck = await dm.isAccountTooNew(req.user.id, 5);
         if (accountCheck.tooNew) {
             return res.status(403).json({ error: `Your account is too new to start conversations. Please wait ${accountCheck.minutesRemaining} more minute(s).` });
         }
@@ -122,15 +122,15 @@ router.post('/conversations', startLimit, async (req, res) => {
         try { await ctx.ensureUsers(participantIds); } catch { /* the projection answers below */ }
         for (const uid of participantIds) {
             if (uid === req.user.id) continue;
-            const target = ctx.getUserById(uid);
+            const target = await ctx.getUserById(uid);
             if (!target) return res.status(400).json({ error: 'User not found' });
             if (target.is_banned) return res.status(400).json({ error: 'Cannot message banned users' });
-            if (dm.isBlockedEither(req.user.id, uid)) {
+            if (await dm.isBlockedEither(req.user.id, uid)) {
                 return res.status(403).json({ error: 'Cannot start a conversation with this user' });
             }
             // Their message settings: a new direct conversation, or a group, only if they accept one.
             const wants = await dmSettingsOf(target);
-            if (participantIds.length === 2 && wants.new_conversations === 'nobody' && !dm.findDirectConversation(req.user.id, uid)) {
+            if (participantIds.length === 2 && wants.new_conversations === 'nobody' && !await dm.findDirectConversation(req.user.id, uid)) {
                 return res.status(403).json({ error: `${target.display_name || target.username} is not accepting new conversations`, code: 'dm.not_accepting' });
             }
             if (participantIds.length > 2 && wants.group_invites === false) {
@@ -141,14 +141,14 @@ router.post('/conversations', startLimit, async (req, res) => {
         let conversationId;
         if (participantIds.length === 2) {
             const otherId = participantIds.find(id => id !== req.user.id);
-            conversationId = dm.getOrCreateDirect(req.user.id, otherId);
+            conversationId = await dm.getOrCreateDirect(req.user.id, otherId);
         } else {
             const safeName = name ? String(name).replace(/<[^>]*>/g, '').replace(/[\\`'"<>(){};:/\[\]]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100) : null;
-            conversationId = dm.createConversation(req.user.id, participantIds, safeName);
+            conversationId = await dm.createConversation(req.user.id, participantIds, safeName);
         }
 
-        const conversation = dm.getConversation(conversationId);
-        conversation.participants = dm.getParticipants(conversationId);
+        const conversation = await dm.getConversation(conversationId);
+        conversation.participants = await dm.getParticipants(conversationId);
         res.json({ conversation });
     } catch (err) {
         console.error('[DM] Create conversation error:', err.message);
@@ -157,15 +157,15 @@ router.post('/conversations', startLimit, async (req, res) => {
 });
 
 // Get conversation details
-router.get('/conversations/:id', (req, res) => {
+router.get('/conversations/:id', async (req, res) => {
     try {
         const convId = parseInt(req.params.id);
-        if (!dm.isParticipant(convId, req.user.id)) {
+        if (!await dm.isParticipant(convId, req.user.id)) {
             return res.status(403).json({ error: 'Not a participant' });
         }
-        const conversation = dm.getConversation(convId);
+        const conversation = await dm.getConversation(convId);
         if (!conversation) return res.status(404).json({ error: 'Not found' });
-        conversation.participants = dm.getParticipants(convId);
+        conversation.participants = await dm.getParticipants(convId);
         res.json({ conversation });
     } catch (err) {
         console.error('[DM] Get conversation error:', err.message);
@@ -174,16 +174,16 @@ router.get('/conversations/:id', (req, res) => {
 });
 
 // Get messages (paginated)
-router.get('/conversations/:id/messages', (req, res) => {
+router.get('/conversations/:id/messages', async (req, res) => {
     try {
         const convId = parseInt(req.params.id);
-        if (!dm.isParticipant(convId, req.user.id)) {
+        if (!await dm.isParticipant(convId, req.user.id)) {
             return res.status(403).json({ error: 'Not a participant' });
         }
         const limit = Math.min(parseInt(req.query.limit) || 50, 100);
         const before = parseInt(req.query.before) || null;
         const after = parseInt(req.query.after) || null;
-        const messages = dm.getMessages(convId, limit, before, after).map(publicMessage);
+        const messages = (await dm.getMessages(convId, limit, before, after)).map(publicMessage);
         res.json({ messages });
     } catch (err) {
         console.error('[DM] Get messages error:', err.message);
@@ -192,10 +192,10 @@ router.get('/conversations/:id/messages', (req, res) => {
 });
 
 // Send a message
-router.post('/conversations/:id/messages', sendLimit, (req, res) => {
+router.post('/conversations/:id/messages', sendLimit, async (req, res) => {
     try {
         const convId = parseInt(req.params.id);
-        if (!dm.isParticipant(convId, req.user.id)) {
+        if (!await dm.isParticipant(convId, req.user.id)) {
             return res.status(403).json({ error: 'Not a participant' });
         }
 
@@ -205,11 +205,11 @@ router.post('/conversations/:id/messages', sendLimit, (req, res) => {
         }
 
         // Block check for 1-on-1 conversations
-        const conv = dm.getConversation(convId);
+        const conv = await dm.getConversation(convId);
         if (conv && !conv.is_group) {
-            const participants = dm.getParticipants(convId);
+            const participants = await dm.getParticipants(convId);
             const other = participants.find(p => p.id !== req.user.id);
-            if (other && dm.isBlockedEither(req.user.id, other.id)) {
+            if (other && await dm.isBlockedEither(req.user.id, other.id)) {
                 return res.status(403).json({ error: 'Cannot send messages in this conversation' });
             }
         }
@@ -219,11 +219,11 @@ router.post('/conversations/:id/messages', sendLimit, (req, res) => {
             return res.status(400).json({ error: 'Message required' });
         }
 
-        const msg = publicMessage(dm.sendMessage(convId, req.user.id, message));
+        const msg = publicMessage(await dm.sendMessage(convId, req.user.id, message));
         if (!msg) return res.status(400).json({ error: 'Failed to send' });
 
         // Attach sender info
-        const sender = ctx.getUserById(req.user.id);
+        const sender = await ctx.getUserById(req.user.id);
         msg.username = sender?.username;
         msg.display_name = sender?.display_name;
         msg.avatar_url = sender?.avatar_url;
@@ -232,10 +232,10 @@ router.post('/conversations/:id/messages', sendLimit, (req, res) => {
         // Real-time delivery via chat WebSocket
         try {
             const chatServer = require('./chat-server');
-            const participants = dm.getParticipants(convId);
+            const participants = await dm.getParticipants(convId);
             for (const p of participants) {
                 if (p.id === req.user.id) continue; // skip sender
-                chatServer.sendDm(p.id, {
+                await chatServer.sendDm(p.id, {
                     type: 'dm',
                     conversation_id: convId,
                     message: msg,
@@ -246,7 +246,7 @@ router.post('/conversations/:id/messages', sendLimit, (req, res) => {
         // Push notifications to other participants (for when they're offline) — Live's
         // utils/notify pushes them to the Network; the preview stays generic there.
         try {
-            const participants = dm.getParticipants(convId);
+            const participants = await dm.getParticipants(convId);
             const otherIds = participants.filter(p => p.id !== req.user.id).map(p => p.id);
             if (otherIds.length) {
                 ctx.effects.notifyDm({ recipient_ids: otherIds, sender_id: req.user.id, conversation_id: convId });
@@ -261,13 +261,13 @@ router.post('/conversations/:id/messages', sendLimit, (req, res) => {
 });
 
 // Mark conversation read
-router.post('/conversations/:id/read', readLimit, (req, res) => {
+router.post('/conversations/:id/read', readLimit, async (req, res) => {
     try {
         const convId = parseInt(req.params.id);
-        if (!dm.isParticipant(convId, req.user.id)) {
+        if (!await dm.isParticipant(convId, req.user.id)) {
             return res.status(403).json({ error: 'Not a participant' });
         }
-        dm.markRead(convId, req.user.id);
+        await dm.markRead(convId, req.user.id);
 
         // Clear matching DM notifications on the Network (through Live's utils/notify)
         try {
@@ -285,7 +285,7 @@ router.post('/conversations/:id/read', readLimit, (req, res) => {
 router.post('/conversations/:id/participants', manageLimit, async (req, res) => {
     try {
         const convId = parseInt(req.params.id);
-        if (!dm.isParticipant(convId, req.user.id)) {
+        if (!await dm.isParticipant(convId, req.user.id)) {
             return res.status(403).json({ error: 'Not a participant' });
         }
         const { user_id } = req.body;
@@ -293,17 +293,19 @@ router.post('/conversations/:id/participants', manageLimit, async (req, res) => 
 
         // Validate target user exists, isn't banned, isn't blocked (accounts are Live's)
         try { await ctx.ensureUsers([user_id]); } catch { /* the projection answers below */ }
-        const target = ctx.getUserById(user_id);
+        const target = await ctx.getUserById(user_id);
         if (!target) return res.status(400).json({ error: 'User not found' });
         if (target.is_banned) return res.status(400).json({ error: 'Cannot add banned users' });
         // A private 1:1 stays private: adding a third person would hand them the whole history.
-        const conv = dm.getConversation(convId);
+        const conv = await dm.getConversation(convId);
         if (!conv || !conv.is_group) {
             return res.status(400).json({ error: 'Start a group conversation to add people' });
         }
         // Nobody already in the group should end up talking to someone they blocked (or who blocked them).
-        const members = dm.getParticipants(convId) || [];
-        if (members.some((p) => dm.isBlockedEither(p.user_id || p.id, user_id))) {
+        const members = await dm.getParticipants(convId) || [];
+        let blocked = false;
+        for (const p of members) if (await dm.isBlockedEither(p.user_id || p.id, user_id)) { blocked = true; break; }
+        if (blocked) {
             return res.status(403).json({ error: 'Cannot add this user' });
         }
         if ((await dmSettingsOf(target)).group_invites === false) {
@@ -311,18 +313,18 @@ router.post('/conversations/:id/participants', manageLimit, async (req, res) => 
         }
 
         // Group size limit
-        if (dm.getParticipantCount(convId) >= MAX_GROUP_SIZE) {
+        if (await dm.getParticipantCount(convId) >= MAX_GROUP_SIZE) {
             return res.status(400).json({ error: `Group is full (max ${MAX_GROUP_SIZE} members)` });
         }
 
-        dm.addParticipant(convId, user_id);
-        const participants = dm.getParticipants(convId);
+        await dm.addParticipant(convId, user_id);
+        const participants = await dm.getParticipants(convId);
 
         // Notify all participants about the new member
         try {
             const chatServer = require('./chat-server');
             for (const p of participants) {
-                chatServer.sendDm(p.id, {
+                await chatServer.sendDm(p.id, {
                     type: 'dm-participant-added',
                     conversation_id: convId,
                     user_id,
@@ -339,19 +341,19 @@ router.post('/conversations/:id/participants', manageLimit, async (req, res) => 
 });
 
 // Remove participant from group
-router.delete('/conversations/:id/participants/:userId', manageLimit, (req, res) => {
+router.delete('/conversations/:id/participants/:userId', manageLimit, async (req, res) => {
     try {
         const convId = parseInt(req.params.id);
         const targetUserId = parseInt(req.params.userId);
-        if (!dm.isParticipant(convId, req.user.id)) {
+        if (!await dm.isParticipant(convId, req.user.id)) {
             return res.status(403).json({ error: 'Not a participant' });
         }
         // Can only remove self (leave) or be the creator
-        const conv = dm.getConversation(convId);
+        const conv = await dm.getConversation(convId);
         if (targetUserId !== req.user.id && conv?.created_by !== req.user.id) {
             return res.status(403).json({ error: 'Only the creator can remove others' });
         }
-        dm.removeParticipant(convId, targetUserId);
+        await dm.removeParticipant(convId, targetUserId);
         res.json({ ok: true });
     } catch (err) {
         console.error('[DM] Remove participant error:', err.message);
@@ -360,17 +362,17 @@ router.delete('/conversations/:id/participants/:userId', manageLimit, (req, res)
 });
 
 // Rename group conversation
-router.patch('/conversations/:id', manageLimit, (req, res) => {
+router.patch('/conversations/:id', manageLimit, async (req, res) => {
     try {
         const convId = parseInt(req.params.id);
-        if (!dm.isParticipant(convId, req.user.id)) {
+        if (!await dm.isParticipant(convId, req.user.id)) {
             return res.status(403).json({ error: 'Not a participant' });
         }
         let { name } = req.body;
         if (name) {
             name = String(name).replace(/<[^>]*>/g, '').replace(/[\\`'"<>(){};:/\[\]]/g, '').replace(/\s+/g, ' ').trim().slice(0, 100);
         }
-        dm.renameConversation(convId, name || null);
+        await dm.renameConversation(convId, name || null);
         res.json({ ok: true });
     } catch (err) {
         console.error('[DM] Rename error:', err.message);
@@ -379,9 +381,9 @@ router.patch('/conversations/:id', manageLimit, (req, res) => {
 });
 
 // Total unread count
-router.get('/unread', (req, res) => {
+router.get('/unread', async (req, res) => {
     try {
-        const total = dm.getTotalUnread(req.user.id);
+        const total = await dm.getTotalUnread(req.user.id);
         res.json({ unread: total });
     } catch (err) {
         res.status(500).json({ error: 'Failed' });
@@ -389,11 +391,11 @@ router.get('/unread', (req, res) => {
 });
 
 // Search users for new-message picker
-router.get('/users/search', (req, res) => {
+router.get('/users/search', async (req, res) => {
     try {
         const q = (req.query.q || '').trim();
         if (q.length < 2) return res.json({ users: [] });
-        const users = dm.searchUsers(q, req.user.id);
+        const users = await dm.searchUsers(q, req.user.id);
         res.json({ users });
     } catch (err) {
         res.status(500).json({ error: 'Failed' });
@@ -403,13 +405,13 @@ router.get('/users/search', (req, res) => {
 // ── Block & message management ───────────────────────────────
 
 // Block a user
-router.post('/blocks/:userId', manageLimit, (req, res) => {
+router.post('/blocks/:userId', manageLimit, async (req, res) => {
     try {
         const targetId = parseInt(req.params.userId);
         if (!targetId || targetId === req.user.id) {
             return res.status(400).json({ error: 'Invalid user' });
         }
-        dm.blockUser(req.user.id, targetId);
+        await dm.blockUser(req.user.id, targetId);
         res.json({ ok: true });
     } catch (err) {
         console.error('[DM] Block error:', err.message);
@@ -418,10 +420,10 @@ router.post('/blocks/:userId', manageLimit, (req, res) => {
 });
 
 // Unblock a user
-router.delete('/blocks/:userId', manageLimit, (req, res) => {
+router.delete('/blocks/:userId', manageLimit, async (req, res) => {
     try {
         const targetId = parseInt(req.params.userId);
-        dm.unblockUser(req.user.id, targetId);
+        await dm.unblockUser(req.user.id, targetId);
         res.json({ ok: true });
     } catch (err) {
         console.error('[DM] Unblock error:', err.message);
@@ -430,9 +432,9 @@ router.delete('/blocks/:userId', manageLimit, (req, res) => {
 });
 
 // List blocked users
-router.get('/blocks', (req, res) => {
+router.get('/blocks', async (req, res) => {
     try {
-        const blocked = dm.getBlockedUsers(req.user.id);
+        const blocked = await dm.getBlockedUsers(req.user.id);
         res.json({ blocked });
     } catch (err) {
         res.status(500).json({ error: 'Failed to load blocked users' });
@@ -440,24 +442,24 @@ router.get('/blocks', (req, res) => {
 });
 
 // Check if a specific user is blocked
-router.get('/blocks/check/:userId', (req, res) => {
+router.get('/blocks/check/:userId', async (req, res) => {
     try {
         const targetId = parseInt(req.params.userId);
-        res.json({ blocked: dm.hasBlocked(req.user.id, targetId) });
+        res.json({ blocked: await dm.hasBlocked(req.user.id, targetId) });
     } catch {
         res.json({ blocked: false });
     }
 });
 
 // Delete own message
-router.delete('/conversations/:id/messages/:msgId', deleteLimit, (req, res) => {
+router.delete('/conversations/:id/messages/:msgId', deleteLimit, async (req, res) => {
     try {
         const convId = parseInt(req.params.id);
         const msgId = parseInt(req.params.msgId);
-        if (!dm.isParticipant(convId, req.user.id)) {
+        if (!await dm.isParticipant(convId, req.user.id)) {
             return res.status(403).json({ error: 'Not a participant' });
         }
-        const deleted = dm.deleteMessage(msgId, req.user.id);
+        const deleted = await dm.deleteMessage(msgId, req.user.id);
         if (!deleted) return res.status(403).json({ error: 'Cannot delete this message' });
         res.json({ ok: true });
     } catch (err) {

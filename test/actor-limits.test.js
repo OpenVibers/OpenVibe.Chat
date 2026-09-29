@@ -57,16 +57,16 @@ t('the next minute opens the window again', async () => {
 
 t('a write has its own number: 20 REST sends a minute, the 21st refused before it is stored', async () => {
     clock = Date.UTC(2026, 8, 27, 12, 5, 0);
-    const stored = () => h.db.get("SELECT COUNT(*) AS n FROM chat_messages WHERE message LIKE 'limits %'").n;
+    const stored = async () => (await h.db.get("SELECT COUNT(*) AS n FROM chat_messages WHERE message LIKE 'limits %'")).n;
     for (let i = 0; i < 20; i++) {
         const r = await h.http('POST', '/api/chat/send', { token: alice.token, body: { message: `limits ${i} from alice` } });
         assert.strictEqual(r.status, 200, `send ${i + 1}: ${r.text}`);
     }
-    const before = stored();
+    const before = await stored();
     const r = await h.http('POST', '/api/chat/send', { token: alice.token, body: { message: 'limits one more' } });
     assert.deepStrictEqual([r.status, r.body.code, r.headers.get('retry-after')], [429, 'rate_limited', '60']);
     assert.ok(r.body.detail.includes('chat.message.send'), r.body.detail);
-    assert.strictEqual(stored(), before, 'nothing stored');
+    assert.strictEqual(await stored(), before, 'nothing stored');
     assert.strictEqual((await h.http('POST', '/api/chat/send', { token: bob.token, body: { message: 'limits hi from bob' } })).status, 200, 'another person still sends');
     assert.strictEqual((await h.http('POST', '/api/chat/send', { token: 'nope', body: { message: 'x' } })).status, 401, 'a bad token: 401 from auth');
 });

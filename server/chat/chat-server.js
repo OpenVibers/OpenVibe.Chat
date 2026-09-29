@@ -91,7 +91,7 @@ class ChatServer {
         this._modeWrites = new Map();   // channelId → /slow or /subonly writes running
         /** @type {WeakMap<object, Set<string>|null>} frame → the subjects who blocked its author (_blockersOf) */
         this._blockMemo = new WeakMap();
-        ctx.onChannelSettings((channelId, settings) => this._channelSettingsSeen(channelId, settings));
+        ctx.onChannelSettings(async (channelId, settings) => await this._channelSettingsSeen(channelId, settings));
         this.heartbeatInterval = null;
         // TTS and sound requests queue in Chat's database (./audio-queue.js), one room at a time.
         /** @type {Map<string, number>} `${streamId}:${userKey}` → last soundboard trigger */
@@ -180,7 +180,7 @@ class ChatServer {
     /**
      * Attach to an existing HTTP server for WebSocket upgrade
      */
-    init(server) {
+    async init(server) {
         this.wss = new WebSocket.Server({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
 
         // Word filter
@@ -209,15 +209,15 @@ class ChatServer {
 
         // ── Viewer snapshot recording (every 60s) ────────────
         if (this._snapshotInterval) clearInterval(this._snapshotInterval);
-        this._snapshotInterval = setInterval(() => {
-            this._recordViewerSnapshots();
+        this._snapshotInterval = setInterval(async () => {
+            await this._recordViewerSnapshots();
         }, 60_000);
 
         if (this._autoDeleteSweepInterval) clearInterval(this._autoDeleteSweepInterval);
-        this._autoDeleteSweepInterval = setInterval(() => {
-            this._sweepExpiredChatMessages();
+        this._autoDeleteSweepInterval = setInterval(async () => {
+            await this._sweepExpiredChatMessages();
         }, CHAT_AUTO_DELETE_SWEEP_MS);
-        this._sweepExpiredChatMessages();
+        await this._sweepExpiredChatMessages();
 
         this.wss.on('connection', (ws, req) => {
             this.handleConnection(ws, req);
@@ -227,13 +227,13 @@ class ChatServer {
         // where its frame goes. recover() resumes what a restart interrupted.
         audioQueue.init({
             performers: {
-                tts: (row, p) => this._makeTtsAudio(p),
-                'channel-sound': (row, p) => this._makeChannelSoundAudio(p),
-                soundboard: (row, p) => this._makeSoundboardAudio(p),
+                tts: async (row, p) => await this._makeTtsAudio(p),
+                'channel-sound': async (row, p) => await this._makeChannelSoundAudio(p),
+                soundboard: async (row, p) => await this._makeSoundboardAudio(p),
             },
-            deliver: (row, frame) => this._broadcastTtsPayload(row.stream_id, row.channel_user_id, frame),
+            deliver: async (row, frame) => await this._broadcastTtsPayload(row.stream_id, row.channel_user_id, frame),
         });
-        try { audioQueue.recover(); } catch (err) { console.warn('[AudioQueue] recover failed:', err.message); }
+        try { await audioQueue.recover(); } catch (err) { console.warn('[AudioQueue] recover failed:', err.message); }
 
         console.log('[Chat] WebSocket chat server initialized');
         return this.wss;
@@ -358,7 +358,7 @@ class ChatServer {
                 console.warn('[Chat] Malformed message from', ws._clientIp || 'unknown', ':', err.message);
                 return;
             }
-            chain = chain.then(() => this.handleMessage(ws, msg)).catch((err) => {
+            chain = chain.then(async () => await this.handleMessage(ws, msg)).catch((err) => {
                 console.warn('[Chat] message handling failed:', err.message);
             });
         };
@@ -393,11 +393,11 @@ class ChatServer {
             const lastMsg = this.rateLimits.get(rateKey) || 0;
             // Slow mode of the stream that governs the room (an offline/channel-room join has no
             // stream id of its own but posts into the live room).
-            const slowStreamId = client.streamId || (client.channelUserId ? this._moderationStreamFor(client) : null);
-            const streamSlowMs = this.slowModeMs(slowStreamId);
+            const slowStreamId = client.streamId || (client.channelUserId ? await this._moderationStreamFor(client) : null);
+            const streamSlowMs = await this.slowModeMs(slowStreamId);
             // The room's moderators (broadcaster, channel mods, chat staff) are not slowed: they keep
             // the flood limit only, so they can moderate and turn slow mode off again at once.
-            const slowExempt = streamSlowMs > 0 && !!client.user && permissions.canModerateStream(client.user, slowStreamId);
+            const slowExempt = streamSlowMs > 0 && !!client.user && await permissions.canModerateStream(client.user, slowStreamId);
             const effectiveLimit = slowExempt ? this.DEFAULT_RATE_LIMIT_MS : Math.max(this.DEFAULT_RATE_LIMIT_MS, streamSlowMs);
             if (now - lastMsg < effectiveLimit) {
                 this.sendTo(ws, { type: 'system', message: 'Slow down! You are sending messages too fast.' });
@@ -409,10 +409,10 @@ class ChatServer {
         switch (msg.type) {
             case 'chat':
                 await this._warmSubOnly(client).catch(() => {});
-                this.handleChatMessage(ws, client, msg);
+                await this.handleChatMessage(ws, client, msg);
                 break;
             case 'self-delete-history':
-                this.handleSelfDeleteHistory(ws, client);
+                await this.handleSelfDeleteHistory(ws, client);
                 break;
             case 'join':
             case 'join_stream': {
@@ -422,7 +422,7 @@ class ChatServer {
                     if (user) {
                         if (!client.user || client.user.id === user.id) {
                             client.user = user;
-                            this._hiddenFromUserList(user);   // warm chat.presence_prefs before the next user list
+                            await this._hiddenFromUserList(user);   // warm chat.presence_prefs before the next user list
                             client.tokenIat = session.tokenIat(msg.token);
                             client.anonId = null; // no longer anonymous
                         } else {
@@ -438,7 +438,7 @@ class ChatServer {
                 await ctx.warm({ user: client.user, streamId: nextStreamId, channelUserId: requestedChannel, ip: client.ip }).catch(() => {});
                 if (!nextStreamId && requestedChannel) {
                     // Offline channel room: its moderation comes from the channel's latest stream.
-                    await ctx.warm({ user: null, streamId: ctx.latestStreamIdForUser(requestedChannel), channelUserId: requestedChannel }).catch(() => {});
+                    await ctx.warm({ user: null, streamId: await ctx.latestStreamIdForUser(requestedChannel), channelUserId: requestedChannel }).catch(() => {});
                 }
                 client.streamId = nextStreamId;
                 // Channel room: the streamer's stable user id. Lets a viewer stay in
@@ -451,12 +451,12 @@ class ChatServer {
                 // room, where B's bans and chat rules (checked against the stream) never applied.
                 if (client.streamId) {
                     channelUserId = null;
-                    try { const s = ctx.getStreamById(client.streamId); if (s) channelUserId = s.user_id; } catch { /* ignore */ }
+                    try { const s = await ctx.getStreamById(client.streamId); if (s) channelUserId = s.user_id; } catch { /* ignore */ }
                 }
                 client.channelUserId = channelUserId;
                 client._modStream = null;
                 // Look up this member's VIP badge for the room now, so their first message has it.
-                if (client.user && channelUserId) { try { vipBadges.warm(this._subjectOfUser(client.user), db.subjectFor(channelUserId)); } catch { /* */ } }
+                if (client.user && channelUserId) { try { vipBadges.warm(await this._subjectOfUser(client.user), await db.subjectFor(channelUserId)); } catch { /* */ } }
                 // A TTS/sound queue held since a restart plays once its room has listeners again.
                 audioQueue.roomJoined(audioQueue.roomKey({ streamId: client.streamId, channelUserId: client.streamId ? null : channelUserId }));
                 // Update viewer counts for old and new streams
@@ -468,9 +468,9 @@ class ChatServer {
                 setTimeout(() => { try { require('./deploy-notice').replayTo(ws); } catch { /* optional */ } }, 1200);
                 // Send identity confirmation so the client knows who it is
                 const displayName = client.user ? (client.user.display_name || client.user.username) : client.anonId;
-                const roomStreamId = client.streamId || this._moderationStreamFor(client);
-                const streamSlowSec = Math.round(this.slowModeMs(roomStreamId) / 1000);
-                const streamSettings = this._getChannelChatSettings(client.streamId);
+                const roomStreamId = client.streamId || await this._moderationStreamFor(client);
+                const streamSlowSec = Math.round(await this.slowModeMs(roomStreamId) / 1000);
+                const streamSettings = await this._getChannelChatSettings(client.streamId);
                 this.sendTo(ws, {
                     type: 'auth',
                     authenticated: !!client.user,
@@ -480,7 +480,7 @@ class ChatServer {
                     role: client.user ? client.user.role : 'anon',
                     user_id: client.user?.id || null,
                     slowmode_seconds: streamSlowSec,
-                    sub_only: !!(roomStreamId && this._getChannelChatSettings(roomStreamId).sub_only),
+                    sub_only: !!(roomStreamId && (await this._getChannelChatSettings(roomStreamId)).sub_only),
                     allow_auto_delete: !client.streamId || streamSettings.viewer_auto_delete_enabled !== 0,
                     allow_self_delete_all: !client.streamId || streamSettings.viewer_delete_all_enabled !== 0,
                     gifs_enabled: !client.streamId || streamSettings.gifs_enabled !== 0,
@@ -501,7 +501,7 @@ class ChatServer {
                     min_auto_delete_minutes: MIN_CHAT_AUTO_DELETE_MINUTES,
                     // Language the channel lives in — the client shows "auto-translated for the
                     // streamer" when it isn't English (see server/i18n/translate.js).
-                    channel_language: this._channelLanguage(client.channelUserId),
+                    channel_language: await this._channelLanguage(client.channelUserId),
                 });
                 break;
             }
@@ -511,8 +511,8 @@ class ChatServer {
             // Chat rooms (server/rooms/, openvibe.chat): a socket follows one room at a time.
             case 'join_room': {
                 const rooms = require('../rooms/rooms');
-                const room = rooms.bySlug(msg.room);
-                const a = room ? rooms.access(room, client.user) : null;
+                const room = await rooms.bySlug(msg.room);
+                const a = room ? await rooms.access(room, client.user) : null;
                 if (!room || !a.read) { this.sendTo(ws, { type: 'room_error', room: msg.room || null, code: 'rooms.not_found', message: 'No such room' }); break; }
                 client.roomId = room.id;
                 client.roomSlug = room.slug;
@@ -525,10 +525,10 @@ class ChatServer {
                 break;
             case 'room_message': {
                 const rooms = require('../rooms/rooms');
-                const room = client.roomId ? rooms.bySlug(client.roomSlug) : null;
+                const room = client.roomId ? await rooms.bySlug(client.roomSlug) : null;
                 if (!room || room.id !== client.roomId) { this.sendTo(ws, { type: 'room_error', code: 'rooms.not_joined', message: 'Open a room first' }); break; }
                 try {
-                    const message = rooms.post(room, client.user, msg.message);
+                    const message = await rooms.post(room, client.user, msg.message);
                     this.broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
                 } catch (err) {
                     this.sendTo(ws, { type: 'room_error', room: room.slug, code: err.code || 'rooms.error', message: err.code ? err.message : 'Your message could not be sent' });
@@ -536,7 +536,7 @@ class ChatServer {
                 break;
             }
             case 'get-users':
-                this.sendTo(ws, { type: 'users-list', users: this.getUserList(client.streamId) });
+                this.sendTo(ws, { type: 'users-list', users: await this.getUserList(client.streamId) });
                 break;
             default:
                 break;
@@ -544,21 +544,21 @@ class ChatServer {
     }
 
     /** The stream whose bans and chat settings govern an offline channel-room chatter (cached 30s). */
-    _moderationStreamFor(client) {
+    async _moderationStreamFor(client) {
         if (!client || !client.channelUserId) return null;
         const now = Date.now();
         if (client._modStream && now - client._modStream.at < 30000) return client._modStream.id;
         let id = null;
-        try { id = ctx.latestStreamIdForUser(client.channelUserId); } catch { id = null; }
+        try { id = await ctx.latestStreamIdForUser(client.channelUserId); } catch { id = null; }
         client._modStream = { id, at: now };
         return id;
     }
 
-    handleSelfDeleteHistory(ws, client) {
+    async handleSelfDeleteHistory(ws, client) {
         if (!client) return;
 
-        const canBypass = client.streamId ? permissions.canModerateStream(client.user, client.streamId) : false;
-        const chatSettings = this._getChannelChatSettings(client.streamId);
+        const canBypass = client.streamId ? await permissions.canModerateStream(client.user, client.streamId) : false;
+        const chatSettings = await this._getChannelChatSettings(client.streamId);
         if (client.streamId && !canBypass && chatSettings.viewer_delete_all_enabled === 0) {
             this.sendTo(ws, { type: 'error', message: 'This streamer has disabled viewer self-delete for this chat.' });
             return;
@@ -566,12 +566,12 @@ class ChatServer {
 
         let ids = [];
         if (client.user?.id) {
-            ids = db.deleteUserChatMessages(client.user.id, {
+            ids = await db.deleteUserChatMessages(client.user.id, {
                 streamId: client.streamId || null,
                 deletedBy: client.user.id,
             });
         } else if (client.anonId) {
-            ids = db.deleteAnonChatMessages(client.anonId, {
+            ids = await db.deleteAnonChatMessages(client.anonId, {
                 streamId: client.streamId || null,
                 deletedBy: null,
             });
@@ -580,10 +580,10 @@ class ChatServer {
             return;
         }
 
-        this._broadcastDeletedMessages(client.streamId || null, ids);
+        await this._broadcastDeletedMessages(client.streamId || null, ids);
 
         try {
-            db.logModerationAction({
+            await db.logModerationAction({
                 scope_type: client.streamId ? 'stream' : 'site',
                 scope_id: client.streamId || undefined,
                 actor_user_id: client.user?.id || undefined,
@@ -607,7 +607,7 @@ class ChatServer {
      * Build a deduplicated list of users in a given stream (or global if null).
      * Returns { logged: [{username, display_name, avatar_url, role}], anonCount: N }
      */
-    getUserList(streamId) {
+    async getUserList(streamId) {
         const seen = new Set();
         const logged = [];
         let anonCount = 0, hiddenCount = 0;
@@ -617,7 +617,7 @@ class ChatServer {
                 if (seen.has(c.user.id)) continue;
                 seen.add(c.user.id);
                 // chat.presence_prefs: someone who turned off "show my name in user lists" is counted, not named.
-                if (this._hiddenFromUserList(c.user)) { hiddenCount++; continue; }
+                if (await this._hiddenFromUserList(c.user)) { hiddenCount++; continue; }
                 logged.push({
                     username: c.user.username,
                     display_name: c.user.display_name || c.user.username,
@@ -641,8 +641,8 @@ class ChatServer {
      * chat.presence_prefs). Synchronous: the cached record, fetched at join; not cached yet → fetch it
      * in the background and name them until it arrives.
      */
-    _hiddenFromUserList(user) {
-        const subject = this._subjectOfUser(user);
+    async _hiddenFromUserList(user) {
+        const subject = await this._subjectOfUser(user);
         if (!subject) return false;
         const { presence } = require('../prefs/stores');
         const cached = presence.peek(subject);
@@ -667,7 +667,7 @@ class ChatServer {
             const user = connected.get(String(name).toLowerCase());
             let state = 'offline';
             if (user) {
-                const subject = this._subjectOfUser(user);
+                const subject = await this._subjectOfUser(user);
                 if (!subject) state = 'online';
                 else {
                     let prefs = presence.peek(subject);
@@ -687,9 +687,9 @@ class ChatServer {
     presenceChanged(subject) {
         if (!subject) return;
         const { presence } = require('../prefs/stores');
-        presence.get(subject).catch(() => {}).then(() => {
+        presence.get(subject).catch(() => {}).then(async () => {
             const streams = new Set();
-            for (const [, c] of this.clients) if (c.user && this._subjectOfUser(c.user) === subject) streams.add(c.streamId ?? null);
+            for (const [, c] of this.clients) if (c.user && await this._subjectOfUser(c.user) === subject) streams.add(c.streamId ?? null);
             for (const sid of streams) this.broadcastUsersList(sid);
         });
     }
@@ -722,7 +722,7 @@ class ChatServer {
     /**
      * Handle a chat message
      */
-    handleChatMessage(ws, client, msg) {
+    async handleChatMessage(ws, client, msg) {
         let text = (msg.message || '').trim();
         // Absolute upper bound (DoS guard) = the highest value any channel/admin can configure
         // (admins can set a channel up to 6000). The REAL per-channel limit is enforced below at
@@ -738,7 +738,7 @@ class ChatServer {
         // no input of any kind.
         // Offline channel chat has no stream of its own; bans and chat rules come from the channel's
         // most recent stream, so a ban does not stop at the end of a broadcast.
-        const modStreamId = client.streamId || this._moderationStreamFor(client);
+        const modStreamId = client.streamId || await this._moderationStreamFor(client);
         if (client.user && ctx.isUserBanned(client.user.id, modStreamId)) {
             this.sendTo(ws, { type: 'system', message: 'You are banned from this chat.' });
             return;
@@ -750,13 +750,13 @@ class ChatServer {
 
         // ── Stream utility commands (!sr, !queue, !nowplaying, !skip) ──
         if (text.startsWith('!')) {
-            this.handleBangCommand(ws, client, text);
+            await this.handleBangCommand(ws, client, text);
             return;
         }
 
         // ── Chat commands ────────────────────────────────────
         if (text.startsWith('/')) {
-            this.handleCommand(ws, client, text);
+            await this.handleCommand(ws, client, text);
             return;
         }
 
@@ -765,17 +765,17 @@ class ChatServer {
         // stream id still posts into the live room (broadcastToChannelRoom).
         if (modStreamId && client.ip) {
             try {
-                const stream = ctx.getStreamById(modStreamId);
-                const channel = stream?.channel_id ? ctx.getChannelById(stream.channel_id) : (stream ? ctx.getChannelByUserId(stream.user_id) : null);
+                const stream = await ctx.getStreamById(modStreamId);
+                const channel = stream?.channel_id ? await ctx.getChannelById(stream.channel_id) : (stream ? await ctx.getChannelByUserId(stream.user_id) : null);
                 if (channel) {
-                    const settings = ctx.getChannelModerationSettings(channel.id);
+                    const settings = await ctx.getChannelModerationSettings(channel.id);
                     if (settings?.ip_approval_mode) {
                         const isStaffBypass = permissions.can(client.user, 'staff.moderation.bypass');
                         const isOwner = client.user && stream && stream.user_id === client.user.id;
                         if (!isStaffBypass && !isOwner) {
                             if (!ctx.isIpApproved(channel.id, client.ip)) {
                                 // Auto-approve IPs that have existing non-deleted chat messages in this channel's streams
-                                const existing = db.get(
+                                const existing = await db.get(
                                     `SELECT 1 FROM chat_messages cm
                                      JOIN ctx_streams s ON cm.stream_id = s.id
                                      WHERE s.channel_id = ? AND cm.is_deleted = 0
@@ -789,7 +789,7 @@ class ChatServer {
                                 } else {
                                     // Hold the message for streamer approval
                                     const username = client.user ? client.user.display_name : client.anonId;
-                                    db.holdMessageForApproval({
+                                    await db.holdMessageForApproval({
                                         channelId: channel.id,
                                         streamId: modStreamId,
                                         ip: client.ip,
@@ -814,7 +814,7 @@ class ChatServer {
         }
 
         // ── Channel moderation settings ──────────────────────
-        if (this._chatRulesBlock(ws, client, text, modStreamId)) return;
+        if (await this._chatRulesBlock(ws, client, text, modStreamId)) return;
 
         const username = client.user ? client.user.display_name : client.anonId;
         const coreUsername = client.user ? client.user.username : null;
@@ -828,7 +828,7 @@ class ChatServer {
         let replyTo = null;
         if (replyToId) {
             try {
-                const parent = db.getChatMessageById(replyToId);
+                const parent = await db.getChatMessageById(replyToId);
                 const parentStillVisible = parent && !parent.is_deleted
                     && (!parent.auto_delete_at || new Date(parent.auto_delete_at).getTime() > Date.now());
                 if (parentStillVisible) {
@@ -844,8 +844,8 @@ class ChatServer {
 
         const requestedAutoDeleteMinutes = parseInt(msg.auto_delete_minutes, 10);
         const allowViewerAutoDelete = !client.streamId
-            || this._getChannelChatSettings(client.streamId).viewer_auto_delete_enabled !== 0
-            || permissions.canModerateStream(client.user, client.streamId);
+            || (await this._getChannelChatSettings(client.streamId)).viewer_auto_delete_enabled !== 0
+            || await permissions.canModerateStream(client.user, client.streamId);
         const autoDeleteAt = Number.isFinite(requestedAutoDeleteMinutes)
             && requestedAutoDeleteMinutes >= MIN_CHAT_AUTO_DELETE_MINUTES
             && allowViewerAutoDelete
@@ -896,7 +896,7 @@ class ChatServer {
         let vipBadgePending = null;
         if (client.user?.id && client.channelUserId) {
             try {
-                const r = vipBadges.forMessage(this._subjectOfUser(client.user), db.subjectFor(client.channelUserId));
+                const r = vipBadges.forMessage(await this._subjectOfUser(client.user), await db.subjectFor(client.channelUserId));
                 if (r.badge) chatMsg.vip_badge = r.badge;
                 else vipBadgePending = r.pending;
             } catch { /* no badge */ }
@@ -904,7 +904,7 @@ class ChatServer {
 
         // Save to database
         try {
-            const result = db.saveChatMessage({
+            const result = await db.saveChatMessage({
                 stream_id: client.streamId || null,
                 channel_user_id: client.channelUserId || null,
                 user_id: client.user?.id,
@@ -933,7 +933,7 @@ class ChatServer {
         // stream), AI chat viewers (stream chat), the PowerChat overlay relay (any channel chat) —
         // are ONE call to Live per message; the coin result comes back for this socket.
         let isChannelMod = false;
-        try { isChannelMod = !!(client.user && client.channelUserId && permissions.canModerateChannel(client.user, client.channelUserId)); } catch { /* */ }
+        try { isChannelMod = !!(client.user && client.channelUserId && await permissions.canModerateChannel(client.user, client.channelUserId)); } catch { /* */ }
         const liveReactions = {
             award: !!(client.user?.id && client.streamId),
             ai: !!client.streamId,
@@ -943,13 +943,13 @@ class ChatServer {
         // Welcome first-time chatters in this streamer's channel
         if (client.streamId) {
             try {
-                const stream = ctx.getStreamById(client.streamId);
+                const stream = await ctx.getStreamById(client.streamId);
                 if (stream?.user_id) {
                     const chatterKey = client.user ? `user:${client.user.id}` : `anon:${client.anonId}`;
-                    if (db.isFirstChatInChannel(chatterKey, stream.user_id)) {
-                        db.recordFirstChat(chatterKey, stream.user_id);
+                    if (await db.isFirstChatInChannel(chatterKey, stream.user_id)) {
+                        await db.recordFirstChat(chatterKey, stream.user_id);
                         const welcomeName = client.user?.display_name || client.user?.username || client.anonId || 'stranger';
-                        this.broadcastToStream(client.streamId, {
+                        await this.broadcastToStream(client.streamId, {
                             type: 'system',
                             message: `Welcome ${welcomeName} to the chat! 👋`,
                             timestamp: new Date().toISOString(),
@@ -965,13 +965,13 @@ class ChatServer {
             // viewers) plus the specific stream room. This subsumes cross-slot
             // forwarding so a viewer isn't interrupted when the streamer switches
             // slots or briefly drops offline.
-            this.broadcastToChannelRoom(client.channelUserId, client.streamId, chatMsg);
+            await this.broadcastToChannelRoom(client.channelUserId, client.streamId, chatMsg);
             // Surface on the homepage global feed (tagged with the channel).
-            if (client.streamId) this.forwardToGlobal(client.streamId, chatMsg);
-            else this.forwardToGlobalByChannel(client.channelUserId, chatMsg);
+            if (client.streamId) await this.forwardToGlobal(client.streamId, chatMsg);
+            else await this.forwardToGlobalByChannel(client.channelUserId, chatMsg);
             // Auto-translate (async): foreign → English for everyone, English → the channel's
             // language for a non-English streamer. Lands as a follow-up 'chat_translation'.
-            this._maybeTranslate(chatMsg, client.channelUserId, client.streamId);
+            await this._maybeTranslate(chatMsg, client.channelUserId, client.streamId);
             if (vipBadgePending) this._followVipBadge(vipBadgePending, chatMsg, client.channelUserId, client.streamId);
         }
         if (client.streamId) {
@@ -979,7 +979,7 @@ class ChatServer {
             // Trigger server-side TTS synthesis (async, non-blocking).
             // identityKey uses the immutable login handle (or anon id) so the
             // per-user voice is stable even if the display name changes.
-            this.synthesizeAndBroadcastTTS(
+            await this.synthesizeAndBroadcastTTS(
                 client.streamId,
                 username,
                 text,
@@ -991,7 +991,7 @@ class ChatServer {
             );
 
             // Check for 101soundboards links in the message (async, non-blocking)
-            this.processSoundboard(ws, client, text);
+            await this.processSoundboard(ws, client, text);
 
             // AI chat viewers react to REAL typed chat (streamer or viewers) — sent with the
             // other Live reactions below. Bots inject via broadcastToStream directly, so this
@@ -1000,13 +1000,13 @@ class ChatServer {
         } else if (!client.channelUserId) {
             // Pure global chat (homepage) — offline channel messages were already
             // delivered to the channel room above.
-            this.broadcastGlobal(chatMsg);
+            await this.broadcastGlobal(chatMsg);
         } else if (this._channelOwnerInRoom(client.channelUserId)) {
             // OFFLINE channel chat with the channel OWNER present in their own room:
             // synthesize TTS so their "TTS on my channel even when offline" option has
             // audio to play (client-side settings + the one-speaking-tab lock decide
             // whether it's actually audible). Owner absent = skip the synth cost.
-            this.synthesizeAndBroadcastTTS(
+            await this.synthesizeAndBroadcastTTS(
                 null,
                 username,
                 text,
@@ -1068,11 +1068,11 @@ class ChatServer {
      * the text of /me and /tts): length, anonymous, links, GIF hosts, followers-only, account age,
      * the anti-slur filter. Tells the sender and returns true when the line is refused.
      */
-    _chatRulesBlock(ws, client, text, modStreamId) {
+    async _chatRulesBlock(ws, client, text, modStreamId) {
         if (!modStreamId) return false;
-        const chatSettings = this._getChannelChatSettings(modStreamId);
+        const chatSettings = await this._getChannelChatSettings(modStreamId);
         const isStaff = permissions.can(client.user, 'staff.moderation.bypass');
-        const canModerateThisStream = permissions.canModerateStream(client.user, modStreamId);
+        const canModerateThisStream = await permissions.canModerateStream(client.user, modStreamId);
 
         // Max message length
         const maxLen = Math.max(50, Number(chatSettings.max_message_length || 500));
@@ -1091,7 +1091,7 @@ class ChatServer {
         // VIP does not count), the streamer, channel moderators and chat staff. Unknown (Live not
         // asked yet, or unreachable) counts as not subscribed; _warmSubOnly asked before this line.
         if (chatSettings.sub_only && !isStaff && !canModerateThisStream) {
-            const ownerId = ctx.getStreamById(modStreamId)?.user_id || null;
+            const ownerId = (await ctx.getStreamById(modStreamId))?.user_id || null;
             const allowed = !!(client.user && ownerId && (Number(ownerId) === Number(client.user.id) || ctx.isSubscriber(client.user.id, ownerId)));
             if (!allowed) {
                 this.sendTo(ws, { type: 'system', message: client.user ? SUB_ONLY_REFUSED : SUB_ONLY_ANON });
@@ -1126,7 +1126,7 @@ class ChatServer {
 
         // Followers only
         if (chatSettings.followers_only && client.user && !isStaff) {
-            const stream = ctx.getStreamById(modStreamId);
+            const stream = await ctx.getStreamById(modStreamId);
             if (stream && stream.user_id !== client.user.id && !ctx.isFollowing(client.user.id, stream.user_id)) {
                 this.sendTo(ws, { type: 'system', message: 'This chat is currently followers-only.' });
                 return true;
@@ -1165,12 +1165,12 @@ class ChatServer {
      * IP approval mode for text that is not a plain chat line (/me, /tts): refused until the
      * streamer approves the address (plain chat lines are held for review in handleChatMessage).
      */
-    _awaitingIpApproval(ws, client, modStreamId) {
+    async _awaitingIpApproval(ws, client, modStreamId) {
         if (!modStreamId || !client.ip) return false;
         try {
-            const stream = ctx.getStreamById(modStreamId);
-            const channel = stream?.channel_id ? ctx.getChannelById(stream.channel_id) : (stream ? ctx.getChannelByUserId(stream.user_id) : null);
-            if (!channel || !ctx.getChannelModerationSettings(channel.id)?.ip_approval_mode) return false;
+            const stream = await ctx.getStreamById(modStreamId);
+            const channel = stream?.channel_id ? await ctx.getChannelById(stream.channel_id) : (stream ? await ctx.getChannelByUserId(stream.user_id) : null);
+            if (!channel || !(await ctx.getChannelModerationSettings(channel.id))?.ip_approval_mode) return false;
             if (client.user && (permissions.isGlobalModOrAbove(client.user) || stream.user_id === client.user.id)) return false;
             if (ctx.isIpApproved(channel.id, client.ip)) return false;
         } catch { return false; }
@@ -1185,22 +1185,22 @@ class ChatServer {
      */
     async _warmSubOnly(client) {
         if (!client || !client.user) return;
-        const modStreamId = client.streamId || this._moderationStreamFor(client);
-        if (!modStreamId || !this._getChannelChatSettings(modStreamId).sub_only) return;
-        if (permissions.canModerateStream(client.user, modStreamId)) return;
-        const ownerId = ctx.getStreamById(modStreamId)?.user_id || null;
+        const modStreamId = client.streamId || await this._moderationStreamFor(client);
+        if (!modStreamId || !(await this._getChannelChatSettings(modStreamId)).sub_only) return;
+        if (await permissions.canModerateStream(client.user, modStreamId)) return;
+        const ownerId = (await ctx.getStreamById(modStreamId))?.user_id || null;
         if (!ownerId || Number(ownerId) === Number(client.user.id)) return;
         const state = ctx.subscriberState(client.user.id, ownerId);
         if (state !== true) await ctx.ensureSubscriber(client.user.id, ownerId, { maxAgeMs: state === false ? 5000 : 0 });
     }
 
     /** /me and /tts put text in the room: the same rules as a chat line. */
-    _commandTextBlocked(ws, client, text) {
-        const modStreamId = client.streamId || this._moderationStreamFor(client);
-        return this._awaitingIpApproval(ws, client, modStreamId) || this._chatRulesBlock(ws, client, text, modStreamId);
+    async _commandTextBlocked(ws, client, text) {
+        const modStreamId = client.streamId || await this._moderationStreamFor(client);
+        return await this._awaitingIpApproval(ws, client, modStreamId) || await this._chatRulesBlock(ws, client, text, modStreamId);
     }
 
-    handleBangCommand(ws, client, text) {
+    async handleBangCommand(ws, client, text) {
         const parts = text.trim().split(/\s+/);
         const cmd = parts[0].toLowerCase();
 
@@ -1244,10 +1244,10 @@ class ChatServer {
             }
 
             if (client.streamId) {
-                this.broadcastToStream(client.streamId, gottiMsg);
-                this.forwardToGlobal(client.streamId, gottiMsg);
+                await this.broadcastToStream(client.streamId, gottiMsg);
+                await this.forwardToGlobal(client.streamId, gottiMsg);
             } else {
-                this.broadcastGlobal(gottiMsg);
+                await this.broadcastGlobal(gottiMsg);
             }
             return;
         }
@@ -1257,7 +1257,7 @@ class ChatServer {
                 this.sendTo(ws, { type: 'system', message: 'Soundboard commands only work in a stream chat.' });
                 return;
             }
-            const chatSettings = this._getChannelChatSettings(client.streamId);
+            const chatSettings = await this._getChannelChatSettings(client.streamId);
             if (chatSettings.soundboard_enabled === 0) {
                 this.sendTo(ws, { type: 'system', message: 'This streamer has disabled 101soundboards in chat.' });
                 return;
@@ -1271,7 +1271,7 @@ class ChatServer {
                 this.sendTo(ws, { type: 'system', message: 'Usage: !sb <sound-id or 101soundboards URL> [100p|-100p] [0.5-3 speed]' });
                 return;
             }
-            this.processSoundboard(ws, client, text);
+            await this.processSoundboard(ws, client, text);
             return;
         }
 
@@ -1283,7 +1283,7 @@ class ChatServer {
         const args = text.slice(parts[0].length).trim();
 
         try {
-            const stream = ctx.getStreamById(client.streamId);
+            const stream = await ctx.getStreamById(client.streamId);
             if (!stream?.user_id) {
                 this.sendTo(ws, { type: 'system', message: 'Could not resolve the current stream owner.' });
                 return;
@@ -1310,8 +1310,8 @@ class ChatServer {
                         userId: client.user.id,
                         username: client.user.display_name || client.user.username,
                         input: args,
-                    }).then(({ request }) => {
-                        this.broadcastToStream(client.streamId, {
+                    }).then(async ({ request }) => {
+                        await this.broadcastToStream(client.streamId, {
                             type: 'system',
                             message: `${request.username} added “${request.title}”${request.duration_seconds ? ` (${Math.floor(request.duration_seconds / 60)}m${request.duration_seconds % 60}s)` : ''} to the media queue for ${request.cost} gold.`,
                             timestamp: new Date().toISOString(),
@@ -1360,14 +1360,14 @@ class ChatServer {
                 }
 
                 case '!skip': {
-                    if (!this.canModerate(client) && client.user?.id !== stream.user_id) {
+                    if (!await this.canModerate(client) && client.user?.id !== stream.user_id) {
                         this.sendTo(ws, { type: 'system', message: 'Only the streamer or a moderator can skip media.' });
                         return;
                     }
                     // Live runs finishCurrent(streamer, 'skipped') then startNext(streamer).
-                    ctx.effects.mediaQueue('skip', { streamerId: stream.user_id, actorUserId: client.user?.id || null }).then(({ ended, next }) => {
+                    ctx.effects.mediaQueue('skip', { streamerId: stream.user_id, actorUserId: client.user?.id || null }).then(async ({ ended, next }) => {
                         if (ended) {
-                            this.broadcastToStream(client.streamId, {
+                            await this.broadcastToStream(client.streamId, {
                                 type: 'system',
                                 message: `Skipped: ${ended.title}${next ? ` • Up next: ${next.title}` : ''}`,
                                 timestamp: new Date().toISOString(),
@@ -1414,7 +1414,7 @@ class ChatServer {
                 default:
                     // Unknown !command → try a per-channel viewer-uploaded sound clip.
                     // Forward trailing tokens (e.g. "500p", "0.5") as pitch/speed args.
-                    this.triggerChannelSound(ws, client, stream, cmd.slice(1), parts.slice(1));
+                    await this.triggerChannelSound(ws, client, stream, cmd.slice(1), parts.slice(1));
                     return;
             }
         } catch (err) {
@@ -1437,14 +1437,14 @@ class ChatServer {
      * Silent no-op when the command is not a registered sound so unknown
      * commands don't spam the chat.
      */
-    triggerChannelSound(ws, client, stream, command, args = [], relay = null) {
+    async triggerChannelSound(ws, client, stream, command, args = [], relay = null) {
         try {
             if (!stream?.user_id || !command) return;
             const cmd = String(command).toLowerCase();
-            const sound = db.getChannelSoundByCommand(stream.user_id, cmd);
+            const sound = await db.getChannelSoundByCommand(stream.user_id, cmd);
             if (!sound) return; // not a sound command — stay silent
 
-            const chatSettings = this._getChannelChatSettings(client.streamId);
+            const chatSettings = await this._getChannelChatSettings(client.streamId);
             if (chatSettings.custom_sounds_enabled === 0) {
                 if (ws) this.sendTo(ws, { type: 'system', message: 'This streamer has disabled chat sound commands.' });
                 return;
@@ -1528,7 +1528,7 @@ class ChatServer {
             // Persist the announce so it survives a reload — history rebuilds the
             // rich sound row from metadata (the audio itself is never replayed).
             try {
-                const saved = db.saveChatMessage({
+                const saved = await db.saveChatMessage({
                     stream_id: client.streamId || null,
                     channel_user_id: stream.user_id,
                     user_id: client.user?.id,
@@ -1542,10 +1542,10 @@ class ChatServer {
                 });
                 if (saved.lastInsertRowid) soundMsg.id = Number(saved.lastInsertRowid);
             } catch { /* non-critical */ }
-            this.broadcastToStream(client.streamId, soundMsg);
+            await this.broadcastToStream(client.streamId, soundMsg);
             // Also surface it on the global chat feed / global overlay (with stream_channel).
-            this.forwardToGlobal(client.streamId, soundMsg);
-            audioQueue.enqueue({
+            await this.forwardToGlobal(client.streamId, soundMsg);
+            await audioQueue.enqueue({
                 kind: 'channel-sound',
                 streamId: client.streamId,
                 requestedBy: username,
@@ -1562,7 +1562,7 @@ class ChatServer {
     /**
      * Handle chat commands
      */
-    handleCommand(ws, client, text) {
+    async handleCommand(ws, client, text) {
         const parts = text.slice(1).split(' ');
         const cmd = parts[0].toLowerCase();
         const args = parts.slice(1).join(' ');
@@ -1571,7 +1571,7 @@ class ChatServer {
         switch (cmd) {
             case 'ai': {
                 // /ai pause|resume|mute <bot>|unmute <bot>|status — channel mods + owner only.
-                if (!this.canModerate(client)) { this.sendTo(ws, { type: 'system', message: 'Only moderators can control the AI viewers.' }); return; }
+                if (!await this.canModerate(client)) { this.sendTo(ws, { type: 'system', message: 'Only moderators can control the AI viewers.' }); return; }
                 // Live's ai-chatbot-service.onModCommand answers (AI viewers stay in Live until OpenVibe.AI).
                 ctx.effects.aiModCommand(client.channelUserId, client.streamId, parts.slice(1), { by: client.user?.username })
                     .then((reply) => this.sendTo(ws, { type: 'system', message: reply || 'ok' }))
@@ -1583,7 +1583,7 @@ class ChatServer {
                     type: 'system',
                     message: `Commands: /help, /tts <message>, /color <#hex>, /viewers, /uptime, /me <action>, /paste <content>` +
                         `\nMedia: !sr/!yt/!youtube/!req/!request <url>, !queue, !nowplaying` +
-                        (this.canModerate(client)
+                        (await this.canModerate(client)
                             ? `\nMod: /ban <user>, /unban <user>, /timeout <user> [seconds], /clear (screens only), /slow <seconds|off>, /subonly [off], /skiptts [id], /cleartts`
                             : ''),
                 });
@@ -1594,7 +1594,7 @@ class ChatServer {
                     this.sendTo(ws, { type: 'system', message: 'Usage: /tts <message>' });
                     return;
                 }
-                if (this._commandTextBlocked(ws, client, args)) return;
+                if (await this._commandTextBlocked(ws, client, args)) return;
                 {
                     const ttsMsg = {
                         type: 'tts',
@@ -1615,10 +1615,10 @@ class ChatServer {
                             }
                         } catch { /* non-critical */ }
                     }
-                    this._broadcastToRoom(client, ttsMsg);
+                    await this._broadcastToRoom(client, ttsMsg);
 
                     // Also synthesize server-side TTS for site-wide mode
-                    this.synthesizeAndBroadcastTTS(
+                    await this.synthesizeAndBroadcastTTS(
                         client.streamId,
                         ttsMsg.username,
                         args,
@@ -1655,7 +1655,7 @@ class ChatServer {
                     break;
                 }
                 try {
-                    const stream = ctx.getStreamById(client.streamId);
+                    const stream = await ctx.getStreamById(client.streamId);
                     if (stream && stream.started_at) {
                         const start = new Date(stream.started_at.replace(' ', 'T') + 'Z').getTime();
                         const elapsed = Date.now() - start;
@@ -1688,9 +1688,9 @@ class ChatServer {
                     this.sendTo(ws, { type: 'system', message: 'Usage: /me <action>' });
                     break;
                 }
-                if (this._commandTextBlocked(ws, client, args)) break;
+                if (await this._commandTextBlocked(ws, client, args)) break;
                 const username = client.user?.display_name || client.anonId;
-                this._broadcastToRoom(client, {
+                await this._broadcastToRoom(client, {
                     type: 'chat',
                     username,
                     core_username: client.user?.username || null,
@@ -1720,19 +1720,19 @@ class ChatServer {
                 // The room's TTS and sound queue (./audio-queue.js): moderators and the broadcaster.
                 // /skiptts [request id] skips the clip playing now (or that request); /cleartts
                 // skips everything playing or waiting.
-                if (!this.canModerate(client)) { this.sendTo(ws, { type: 'system', message: 'You do not have permission.' }); return; }
+                if (!await this.canModerate(client)) { this.sendTo(ws, { type: 'system', message: 'You do not have permission.' }); return; }
                 const room = audioQueue.roomKey({ streamId: client.streamId, channelUserId: client.streamId ? null : client.channelUserId });
                 if (!room) { this.sendTo(ws, { type: 'system', message: 'No TTS or sounds here.' }); return; }
                 const actor = client.user ? `user:${client.user.username}` : null;
                 if (cmd === 'skiptts') {
                     const id = parseInt(argParts[0], 10);
-                    const skipped = audioQueue.skip(room, { id: Number.isFinite(id) && id > 0 ? id : null, actor });
+                    const skipped = await audioQueue.skip(room, { id: Number.isFinite(id) && id > 0 ? id : null, actor });
                     this.sendTo(ws, { type: 'system', message: skipped ? `Skipped ${skipped.kind === 'tts' ? 'TTS' : 'sound'} #${skipped.id}${skipped.requested_by ? ` from ${skipped.requested_by}` : ''}.` : 'Nothing to skip.' });
-                    if (skipped) this.logChatModeration(client, 'tts_skip', { request_id: skipped.id, kind: skipped.kind });
+                    if (skipped) await this.logChatModeration(client, 'tts_skip', { request_id: skipped.id, kind: skipped.kind });
                 } else {
-                    const ids = audioQueue.clear(room, { actor });
+                    const ids = await audioQueue.clear(room, { actor });
                     this.sendTo(ws, { type: 'system', message: ids.length ? `Cleared ${ids.length} TTS/sound request${ids.length === 1 ? '' : 's'}.` : 'The TTS and sound queue is empty.' });
-                    if (ids.length) this.logChatModeration(client, 'tts_clear', { request_ids: ids });
+                    if (ids.length) await this.logChatModeration(client, 'tts_clear', { request_ids: ids });
                 }
                 return;
             }
@@ -1740,17 +1740,17 @@ class ChatServer {
             case 'clear':
                 // Twitch semantics: every screen in the room is cleared, nothing is deleted. Removing
                 // lines for good is a purge (dashboard) or a delete.
-                if (this.canModerate(client)) {
-                    this._broadcastToRoom(client, { type: 'clear' });
+                if (await this.canModerate(client)) {
+                    await this._broadcastToRoom(client, { type: 'clear' });
                     this.sendTo(ws, { type: 'system', message: 'Chat cleared on screen; messages stay in history — use purge to remove them.' });
-                    this.logChatModeration(client, client.streamId ? 'clear_chat' : 'clear_global_chat');
+                    await this.logChatModeration(client, client.streamId ? 'clear_chat' : 'clear_global_chat');
                 } else {
                     this.sendTo(ws, { type: 'system', message: 'You do not have permission.' });
                 }
                 break;
 
             case 'slow': {
-                if (!this.canModerate(client)) { this.sendTo(ws, { type: 'system', message: 'You do not have permission.' }); break; }
+                if (!await this.canModerate(client)) { this.sendTo(ws, { type: 'system', message: 'You do not have permission.' }); break; }
                 let seconds;
                 if (args === 'off' || args === 'disable' || args === '0') {
                     seconds = 0;
@@ -1759,16 +1759,16 @@ class ChatServer {
                     if (!Number.isFinite(seconds) || seconds < 0) seconds = 3;
                 }
                 this._setChannelModes(ws, client, { slow_mode_seconds: seconds }, 'slow mode')
-                    .then((ok) => { if (ok) this.logChatModeration(client, 'slowmode_update', { seconds }); });
+                    .then(async (ok) => { if (ok) await this.logChatModeration(client, 'slowmode_update', { seconds }); });
                 break;
             }
 
             case 'subonly': {
                 // /subonly [on] · /subonly off — the streamer, channel mods and chat staff.
-                if (!this.canModerate(client)) { this.sendTo(ws, { type: 'system', message: 'You do not have permission.' }); break; }
+                if (!await this.canModerate(client)) { this.sendTo(ws, { type: 'system', message: 'You do not have permission.' }); break; }
                 const off = ['off', 'disable', '0', 'false', 'no'].includes(String(args || '').trim().toLowerCase());
                 this._setChannelModes(ws, client, { sub_only: off ? 0 : 1 }, 'sub-only mode')
-                    .then((ok) => { if (ok) this.logChatModeration(client, 'subonly_update', { enabled: !off }); });
+                    .then(async (ok) => { if (ok) await this.logChatModeration(client, 'subonly_update', { enabled: !off }); });
                 break;
             }
 
@@ -1789,11 +1789,11 @@ class ChatServer {
                         visibility: 'public',
                         user_id: userId || undefined,
                         stream_id: client.streamId || undefined,
-                    }).then((paste) => {
+                    }).then(async (paste) => {
                         const siteUrl = process.env.SITE_URL || '';
                         const pasteUrl = `${siteUrl}/p/${paste.slug}`;
                         // Show link to everyone in stream
-                        this._broadcastToRoom(client, {
+                        await this._broadcastToRoom(client, {
                             type: 'system',
                             message: `📋 ${client.displayName || client.username || 'Anonymous'} shared a paste: ${pasteUrl}`,
                         });
@@ -1825,7 +1825,7 @@ class ChatServer {
      * the row (re-checking the moderator) and Chat's ban cache is refreshed before the reply.
      */
     async _handleModAction(ws, client, action, args) {
-        if (!this.canModerate(client)) {
+        if (!await this.canModerate(client)) {
             this.sendTo(ws, { type: 'system', message: 'You do not have permission.' });
             return;
         }
@@ -1833,7 +1833,7 @@ class ChatServer {
         const target = args.split(' ')[0];
         if (!target) return;
         // The stream whose moderators may do this (offline channel rooms: the latest stream).
-        const moderationStreamId = client.streamId || this._moderationStreamFor(client);
+        const moderationStreamId = client.streamId || await this._moderationStreamFor(client);
         // Where the ban applies. In an offline channel room it is that channel's stream: a null
         // stream id is a SITE-WIDE ban row (and /unban with null lifts site-wide rows), which
         // only global chat — where canModerate() already requires global staff — may write.
@@ -1852,10 +1852,10 @@ class ChatServer {
                     }
                     await banEffect({ action: 'ban', user_id: targetUser.id, reason: 'Banned by moderator', banned_by: client.user.id });
                     this.sendTo(ws, { type: 'system', message: `${target} has been banned.` });
-                    this._broadcastToRoom(client, {
+                    await this._broadcastToRoom(client, {
                         type: 'system', message: `${target} has been banned.`
                     });
-                    this.logChatModeration(client, scoped ? 'channel_ban' : 'site_ban', { username: targetUser.username }, targetUser.id);
+                    await this.logChatModeration(client, scoped ? 'channel_ban' : 'site_ban', { username: targetUser.username }, targetUser.id);
                 } else {
                     // Ban by anon ID
                     const anonTarget = this.findClientByAnonId(target, client.streamId);
@@ -1863,7 +1863,7 @@ class ChatServer {
                         await banEffect({ action: 'ban', ip_address: anonTarget.ip, anon_id: target, reason: 'Banned by moderator', banned_by: client.user.id });
                         this.sendTo(ws, { type: 'system', message: `${target} has been banned.` });
                     }
-                    this.logChatModeration(client, scoped ? 'channel_anon_ban' : 'site_anon_ban', { anon_id: target });
+                    await this.logChatModeration(client, scoped ? 'channel_anon_ban' : 'site_anon_ban', { anon_id: target });
                 }
                 break;
             }
@@ -1873,7 +1873,7 @@ class ChatServer {
                 const expires = new Date(Date.now() + duration * 1000).toISOString();
                 if (targetUser) {
                     await banEffect({ action: 'ban', user_id: targetUser.id, reason: `Timeout ${duration}s`, banned_by: client.user.id, expires_at: expires });
-                    this.logChatModeration(client, scoped ? 'channel_timeout' : 'site_timeout', { username: targetUser.username, duration }, targetUser.id);
+                    await this.logChatModeration(client, scoped ? 'channel_timeout' : 'site_timeout', { username: targetUser.username, duration }, targetUser.id);
                 }
                 this.sendTo(ws, { type: 'system', message: `${target} timed out for ${duration}s.` });
                 break;
@@ -1882,7 +1882,7 @@ class ChatServer {
                 const targetUser = await ctx.ensureUserByUsername(target);
                 if (targetUser) {
                     await banEffect({ action: 'unban', user_id: targetUser.id });
-                    this.logChatModeration(client, scoped ? 'channel_unban' : 'site_unban', { username: targetUser.username }, targetUser.id);
+                    await this.logChatModeration(client, scoped ? 'channel_unban' : 'site_unban', { username: targetUser.username }, targetUser.id);
                 }
                 this.sendTo(ws, { type: 'system', message: `${target} has been unbanned.` });
                 break;
@@ -1909,9 +1909,9 @@ class ChatServer {
 
     // TTS audio delivery: to the stream room while live, to the CHANNEL room for
     // offline channel chat (streamId null).
-    _broadcastTtsPayload(streamId, channelUserId, payload) {
-        if (streamId) this.broadcastToStream(streamId, payload);
-        else if (channelUserId) this.broadcastToChannelRoom(channelUserId, null, payload);
+    async _broadcastTtsPayload(streamId, channelUserId, payload) {
+        if (streamId) await this.broadcastToStream(streamId, payload);
+        else if (channelUserId) await this.broadcastToChannelRoom(channelUserId, null, payload);
     }
 
     // streamId may be null for OFFLINE channel chat — pass channelUserId instead and
@@ -1920,7 +1920,7 @@ class ChatServer {
     // Queues the utterance (./audio-queue.js); it is synthesized and sent when its turn comes.
     // Returns the queue's answer ({ queued, id } or { queued: false, reason }) or undefined when
     // the message is not read at all.
-    synthesizeAndBroadcastTTS(streamId, username, text, voiceFX, sourcePlatform = null, identityKey = null, channelUserId = null, ttsKey = null) {
+    async synthesizeAndBroadcastTTS(streamId, username, text, voiceFX, sourcePlatform = null, identityKey = null, channelUserId = null, ttsKey = null) {
         // Queue accounting key: per-stream when live, per-channel when offline.
         const queueKey = streamId || (channelUserId ? `ch:${channelUserId}` : null);
         // Duplicate suppression by MESSAGE IDENTITY, not content: the same chat
@@ -1949,7 +1949,7 @@ class ChatServer {
             if (!settings.enabled) return;
 
             const limits = ttsEngine.getQueueLimits();
-            const r = audioQueue.enqueue({
+            const r = await audioQueue.enqueue({
                 kind: 'tts',
                 streamId: streamId || null,
                 channelUserId: streamId ? null : channelUserId,
@@ -1983,7 +1983,7 @@ class ChatServer {
         // falls back to the site default when unset. Without this the server synth always
         // truncated at the global 200 even when the channel allowed more.
         let ttsMaxOverride;
-        try { ttsMaxOverride = Number(this._getChannelChatSettings(p.streamId).tts_max_length) || undefined; } catch { /* use engine default */ }
+        try { ttsMaxOverride = Number((await this._getChannelChatSettings(p.streamId)).tts_max_length) || undefined; } catch { /* use engine default */ }
 
         let result;
         if (!voiceId && settings.perUserVoices) {
@@ -2079,7 +2079,7 @@ class ChatServer {
             const streamId = client?.streamId || null;
             if (!streamId) return;
 
-            const chatSettings = this._getChannelChatSettings(streamId);
+            const chatSettings = await this._getChannelChatSettings(streamId);
             if (chatSettings.soundboard_enabled === 0) {
                 if (String(text || '').trim().startsWith('!sb')) {
                     this.sendTo(ws, { type: 'system', message: 'This streamer has disabled 101soundboards in chat.' });
@@ -2166,7 +2166,7 @@ class ChatServer {
             };
             // Persist so the announce survives a reload (rebuilt from metadata).
             try {
-                const saved = db.saveChatMessage({
+                const saved = await db.saveChatMessage({
                     stream_id: streamId,
                     user_id: client.user?.id,
                     anon_id: client.anonId,
@@ -2178,9 +2178,9 @@ class ChatServer {
                 });
                 if (saved.lastInsertRowid) sbMsg.id = Number(saved.lastInsertRowid);
             } catch { /* non-critical */ }
-            this.broadcastToStream(streamId, sbMsg);
+            await this.broadcastToStream(streamId, sbMsg);
 
-            audioQueue.enqueue({
+            await audioQueue.enqueue({
                 kind: 'soundboard',
                 streamId,
                 requestedBy: username,
@@ -2202,16 +2202,16 @@ class ChatServer {
      * Uses the permission layer: admin, global_mod, stream owner, or channel mod.
      * Streamers do NOT get mod powers in other people's chats.
      */
-    canModerate(client) {
+    async canModerate(client) {
         if (!client.user) return false;
         // Offline channel chat: the channel's latest stream stands in (see _moderationStreamFor).
-        const sid = client.streamId || this._moderationStreamFor(client);
-        return !!sid && permissions.canModerateStream(client.user, sid) || permissions.isGlobalModOrAbove(client.user);
+        const sid = client.streamId || await this._moderationStreamFor(client);
+        return !!sid && await permissions.canModerateStream(client.user, sid) || permissions.isGlobalModOrAbove(client.user);
     }
 
     /** @deprecated Use canModerate(client) — kept temporarily for any external callers */
-    isMod(client) {
-        return this.canModerate(client);
+    async isMod(client) {
+        return await this.canModerate(client);
     }
 
     findClientByAnonId(anonId, streamId) {
@@ -2276,15 +2276,15 @@ class ChatServer {
     }
 
     /** Language a channel lives in ('en' when unknown). Live's i18n decides; cached in live-context. */
-    _channelLanguage(channelUserId) {
+    async _channelLanguage(channelUserId) {
         if (!channelUserId) return 'en';
-        try { return ctx.channelLanguage(channelUserId); } catch { return 'en'; }
+        try { return await ctx.channelLanguage(channelUserId); } catch { return 'en'; }
     }
 
     /** A signed-in user's Network subject (the projection's subject_id, else the ctx_users row). */
-    _subjectOfUser(user) {
+    async _subjectOfUser(user) {
         if (!user) return null;
-        return user.subject_id || db.subjectFor(user.id) || null;
+        return user.subject_id || await db.subjectFor(user.id) || null;
     }
 
     /**
@@ -2293,13 +2293,13 @@ class ChatServer {
      * keep it in the row's metadata so history shows it. Fire-and-forget; never throws.
      */
     _followVipBadge(pending, chatMsg, channelUserId, streamId) {
-        Promise.resolve(pending).then((badge) => {
+        Promise.resolve(pending).then(async (badge) => {
             if (!badge || !chatMsg || !chatMsg.id) return;
             const evt = { type: 'chat_vip_badge', id: chatMsg.id, vip_badge: badge, stream_id: streamId || null, channel_user_id: channelUserId || null, timestamp: new Date().toISOString() };
-            this.broadcastToChannelRoom(channelUserId, streamId, evt);
-            if (streamId) this.forwardToGlobal(streamId, evt);
-            else this.forwardToGlobalByChannel(channelUserId, evt);
-            try { db.mergeChatMessageMetadata(chatMsg.id, { vip_badge: badge }); } catch { /* */ }
+            await this.broadcastToChannelRoom(channelUserId, streamId, evt);
+            if (streamId) await this.forwardToGlobal(streamId, evt);
+            else await this.forwardToGlobalByChannel(channelUserId, evt);
+            try { await db.mergeChatMessageMetadata(chatMsg.id, { vip_badge: badge }); } catch { /* */ }
         }).catch(() => { /* no badge */ });
     }
 
@@ -2308,22 +2308,22 @@ class ChatServer {
      * 'chat_translation' event (clients attach it under the message by id). Persisted into
      * chat_messages.metadata so history shows it too. Fire-and-forget; never throws.
      */
-    _maybeTranslate(chatMsg, channelUserId, streamId) {
+    async _maybeTranslate(chatMsg, channelUserId, streamId) {
         if (!chatMsg || !chatMsg.message || chatMsg.message_type && chatMsg.message_type !== 'chat') return;
         // Live's i18n translates (and answers null when translation is unavailable).
         let chanUid = channelUserId || null;
-        if (!chanUid && streamId) { try { chanUid = ctx.getStreamById(streamId)?.user_id || null; } catch { /* */ } }
+        if (!chanUid && streamId) { try { chanUid = (await ctx.getStreamById(streamId))?.user_id || null; } catch { /* */ } }
         const text = String(chatMsg.message).replace(/^\s*\.\s?/, '');   // ".msg" = tts-off marker
-        ctx.effects.translate(text, chanUid).then((tr) => {
+        ctx.effects.translate(text, chanUid).then(async (tr) => {
             if (!tr || !tr.text) return;
             const evt = {
                 type: 'chat_translation', id: chatMsg.id || null, from: tr.from, to: tr.to, text: tr.text,
                 stream_id: streamId || null, channel_user_id: chanUid, timestamp: new Date().toISOString(),
             };
-            this.broadcastToChannelRoom(chanUid, streamId, evt);
-            if (streamId) this.forwardToGlobal(streamId, evt);
-            else this.forwardToGlobalByChannel(chanUid, evt);
-            if (chatMsg.id) { try { db.mergeChatMessageMetadata(chatMsg.id, { translation: tr }); } catch { /* */ } }
+            await this.broadcastToChannelRoom(chanUid, streamId, evt);
+            if (streamId) await this.forwardToGlobal(streamId, evt);
+            else await this.forwardToGlobalByChannel(chanUid, evt);
+            if (chatMsg.id) { try { await db.mergeChatMessageMetadata(chatMsg.id, { translation: tr }); } catch { /* */ } }
         }).catch(() => { /* best-effort */ });
     }
 
@@ -2332,17 +2332,17 @@ class ChatServer {
      * line frame (chat, /me, /tts and its audio), or null — the usual case, everyone gets it.
      * Computed once per frame object, however many rooms it goes to.
      */
-    _blockersOf(data) {
+    async _blockersOf(data) {
         if (!data || typeof data !== 'object' || !LINE_FRAMES.has(data.type)) return null;
         if (this._blockMemo.has(data)) return this._blockMemo.get(data);
         let out = null;
         try {
             let authorId = data.user_id || null;
             if (!authorId && data.type === 'tts-audio' && /^user:/.test(String(data.sender_key || ''))) {
-                authorId = ctx.getUserByUsername(String(data.sender_key).slice(5))?.id || null;
+                authorId = (await ctx.getUserByUsername(String(data.sender_key).slice(5)))?.id || null;
             }
-            const subject = authorId ? db.subjectFor(authorId) : null;
-            const list = subject ? networkBlocks.blockersOf(subject) : [];
+            const subject = authorId ? await db.subjectFor(authorId) : null;
+            const list = subject ? await networkBlocks.blockersOf(subject) : [];
             if (list.length) out = new Set(list);
         } catch { out = null; }
         this._blockMemo.set(data, out);
@@ -2350,8 +2350,8 @@ class ChatServer {
     }
 
     /** Does this socket's person not get the frame (they blocked its author)? */
-    _blockedFor(client, blockers) {
-        return !!(blockers && client.user && blockers.has(this._subjectOfUser(client.user)));
+    async _blockedFor(client, blockers) {
+        return !!(blockers && client.user && blockers.has(await this._subjectOfUser(client.user)));
     }
 
     /**
@@ -2359,17 +2359,17 @@ class ChatServer {
      * in an offline channel chat, else pure global chat. broadcastToStream(null) would reach every
      * client without a stream — global chat AND every other channel's offline room.
      */
-    _broadcastToRoom(client, data) {
-        if (client.streamId) this.broadcastToStream(client.streamId, data);
-        else if (client.channelUserId) this.broadcastToChannelRoom(client.channelUserId, null, data);
-        else this.broadcastGlobal(data);
+    async _broadcastToRoom(client, data) {
+        if (client.streamId) await this.broadcastToStream(client.streamId, data);
+        else if (client.channelUserId) await this.broadcastToChannelRoom(client.channelUserId, null, data);
+        else await this.broadcastGlobal(data);
     }
 
-    broadcastToStream(streamId, data) {
+    async broadcastToStream(streamId, data) {
         const msg = JSON.stringify(data);
-        const blockers = this._blockersOf(data);
+        const blockers = await this._blockersOf(data);
         for (const [ws, client] of this.clients) {
-            if (client.streamId === streamId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !this._blockedFor(client, blockers)) {
+            if (client.streamId === streamId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !await this._blockedFor(client, blockers)) {
                 ws.send(msg);
             }
         }
@@ -2381,12 +2381,12 @@ class ChatServer {
      * live-session stream room (`streamId`, for backward-compat with clients that
      * joined before channel rooms existed). Deduped per connection.
      */
-    broadcastToChannelRoom(channelUserId, streamId, data) {
+    async broadcastToChannelRoom(channelUserId, streamId, data) {
         const msg = JSON.stringify(data);
-        const blockers = this._blockersOf(data);
+        const blockers = await this._blockersOf(data);
         for (const [ws, client] of this.clients) {
             if (ws.readyState !== WebSocket.OPEN || ws.bufferedAmount > MAX_SEND_BACKPRESSURE) continue;
-            if (this._blockedFor(client, blockers)) continue;
+            if (await this._blockedFor(client, blockers)) continue;
             const inChannel = channelUserId && client.channelUserId === channelUserId;
             const inStream = streamId && client.streamId === streamId;
             if (inChannel || inStream) ws.send(msg);
@@ -2398,27 +2398,27 @@ class ChatServer {
      * the channel username (parallels forwardToGlobal but keyed by user id since
      * there's no live session id to resolve).
      */
-    forwardToGlobalByChannel(channelUserId, data) {
+    async forwardToGlobalByChannel(channelUserId, data) {
         if (!channelUserId) return;
         let username = null;
-        try { username = ctx.getUserById(channelUserId)?.username; } catch { /* ignore */ }
+        try { username = (await ctx.getUserById(channelUserId))?.username; } catch { /* ignore */ }
         if (!username) return;
         const globalMsg = JSON.stringify({ ...data, stream_channel: username, source_channel: username });
-        const blockers = this._blockersOf(data);
+        const blockers = await this._blockersOf(data);
         for (const [ws, client] of this.clients) {
-            if (!client.streamId && !client.channelUserId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !this._blockedFor(client, blockers)) {
+            if (!client.streamId && !client.channelUserId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !await this._blockedFor(client, blockers)) {
                 ws.send(globalMsg);
             }
         }
     }
 
-    broadcastGlobal(data) {
+    async broadcastGlobal(data) {
         const msg = JSON.stringify(data);
-        const blockers = this._blockersOf(data);
+        const blockers = await this._blockersOf(data);
         for (const [ws, client] of this.clients) {
             // Pure global clients only (see forwardToGlobal) — channel/stream viewers get
             // global activity via their dedicated cross-feed socket, not their main one.
-            if (!client.streamId && !client.channelUserId && !client.roomId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !this._blockedFor(client, blockers)) {
+            if (!client.streamId && !client.channelUserId && !client.roomId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !await this._blockedFor(client, blockers)) {
                 ws.send(msg);
             }
         }
@@ -2436,12 +2436,12 @@ class ChatServer {
      * A room's roles or visibility changed: every socket following it learns what it may do now
      * (`room_access`), and one that may no longer read it leaves (`room_left`). → sockets told
      */
-    refreshRoomAccess(room) {
+    async refreshRoomAccess(room) {
         const rooms = require('../rooms/rooms');
         let n = 0;
         for (const [ws, client] of this.clients) {
             if (!room || client.roomId !== room.id) continue;
-            const a = rooms.access(room, client.user || null);
+            const a = await rooms.access(room, client.user || null);
             n++;
             if (!a.read) { client.roomId = null; client.roomSlug = null; this.sendTo(ws, { type: 'room_left', reason: 'removed' }); continue; }
             this.sendTo(ws, { type: 'room_access', room: room.slug, kind: a.kind, role: a.role, can: { post: a.post, moderate: a.moderate, manage: a.manage, join: a.join, talk: a.talk } });
@@ -2466,9 +2466,9 @@ class ChatServer {
      * channel's emotes/sounds changed, so their chat pickers refresh live
      * (no page reload). No-op when the owner has no live streams / viewers.
      */
-    broadcastToOwnerStreams(ownerUserId, data) {
+    async broadcastToOwnerStreams(ownerUserId, data) {
         try {
-            const streams = ctx.getLiveStreamsByUserId(ownerUserId) || [];
+            const streams = await ctx.getLiveStreamsByUserId(ownerUserId) || [];
             if (!streams.length) return;
             const ids = new Set(streams.map(s => String(s.id)));
             const msg = JSON.stringify(data);
@@ -2484,13 +2484,13 @@ class ChatServer {
      * Forward a stream message to all global-connected clients
      * so the global chat feed shows activity from every stream.
      */
-    forwardToGlobal(streamId, data) {
+    async forwardToGlobal(streamId, data) {
         // Look up stream owner username + slot title/slug (cached per stream)
         if (!this._streamNameCache) this._streamNameCache = new Map();
         let info = this._streamNameCache.get(streamId);
         if (!info || typeof info !== 'object') {
             try {
-                const stream = ctx.getStreamById(streamId);
+                const stream = await ctx.getStreamById(streamId);
                 info = {
                     username: stream?.username || `stream-${streamId}`,
                     title: stream?.managed_stream_title || stream?.title || null,
@@ -2514,9 +2514,9 @@ class ChatServer {
             source_managed_id: info.managedId,
             source_is_live: 1, // this path only fires for a live send
         });
-        const blockers = this._blockersOf(data);
+        const blockers = await this._blockersOf(data);
         for (const [ws, client] of this.clients) {
-            if (this._blockedFor(client, blockers)) continue;
+            if (await this._blockedFor(client, blockers)) continue;
             // Only PURE global clients (no stream AND no channel) — otherwise an
             // offline-channel viewer's main socket (streamId null, channelUserId set)
             // would render this via addChatMessage AND get it again as a cross-feed on
@@ -2534,11 +2534,11 @@ class ChatServer {
      * client can show a stream-title badge + let viewers hop between slots. Only
      * fires when the streamer has 2+ live slots.
      */
-    forwardToStreamerRooms(streamId, data) {
+    async forwardToStreamerRooms(streamId, data) {
         try {
-            const stream = ctx.getStreamById(streamId);
+            const stream = await ctx.getStreamById(streamId);
             if (!stream || !stream.user_id) return;
-            const siblings = ctx.getLiveStreamsByUserId(stream.user_id) || [];
+            const siblings = await ctx.getLiveStreamsByUserId(stream.user_id) || [];
             if (siblings.length < 2) return;
             const siblingIds = new Set(siblings.map(s => s.id));
             const payload = JSON.stringify({
@@ -2551,34 +2551,34 @@ class ChatServer {
                 source_channel: stream.username || null,
                 source_is_live: 1,
             });
-            const blockers = this._blockersOf(data);
+            const blockers = await this._blockersOf(data);
             for (const [ws, client] of this.clients) {
                 if (client.streamId && client.streamId !== streamId && siblingIds.has(client.streamId)
-                    && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !this._blockedFor(client, blockers)) {
+                    && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !await this._blockedFor(client, blockers)) {
                     ws.send(payload);
                 }
             }
         } catch { /* non-critical */ }
     }
 
-    _broadcastDeletedMessages(streamId, ids) {
+    async _broadcastDeletedMessages(streamId, ids) {
         if (!Array.isArray(ids) || ids.length === 0) return;
         const payload = { type: 'delete-messages', ids };
         if (streamId) {
             // The stream's room, the rest of its channel room (other slots, the offline room, a
             // channel popout) and the global feed: everywhere the lines were shown.
             let ownerId = null;
-            try { ownerId = ctx.getStreamById(streamId)?.user_id || null; } catch { ownerId = null; }
-            this.broadcastToChannelRoom(ownerId, streamId, payload);
-            this.forwardToGlobal(streamId, payload);
+            try { ownerId = (await ctx.getStreamById(streamId))?.user_id || null; } catch { ownerId = null; }
+            await this.broadcastToChannelRoom(ownerId, streamId, payload);
+            await this.forwardToGlobal(streamId, payload);
             return;
         }
-        this.broadcastAll(payload);
+        await this.broadcastAll(payload);
     }
 
-    _sweepExpiredChatMessages() {
+    async _sweepExpiredChatMessages() {
         try {
-            const expired = db.deleteExpiredChatMessages(500);
+            const expired = await db.deleteExpiredChatMessages(500);
             if (!expired.length) return;
             const byScope = new Map();
             for (const row of expired) {
@@ -2588,7 +2588,7 @@ class ChatServer {
             }
             for (const [key, ids] of byScope.entries()) {
                 const streamId = key === 'global' ? null : parseInt(key.split(':')[1], 10);
-                this._broadcastDeletedMessages(streamId, ids);
+                await this._broadcastDeletedMessages(streamId, ids);
             }
         } catch (err) {
             console.warn('[Chat] Failed to sweep expired auto-delete messages:', err.message);
@@ -2613,7 +2613,7 @@ class ChatServer {
      * Record viewer snapshots for all active streams.
      * Called every 60 seconds by the snapshot interval timer.
      */
-    _recordViewerSnapshots() {
+    async _recordViewerSnapshots() {
         // Collect unique active stream IDs
         const streamIds = new Set();
         for (const [, client] of this.clients) {
@@ -2622,7 +2622,7 @@ class ChatServer {
         for (const streamId of streamIds) {
             try {
                 const count = this.getStreamViewerCount(streamId);
-                const chatActivity = db.getRecentChatActivity(streamId, 5);
+                const chatActivity = await db.getRecentChatActivity(streamId, 5);
                 ctx.effects.viewerSnapshot(streamId, count, chatActivity);
             } catch (err) {
                 // Non-critical — don't crash the chat server over analytics
@@ -2638,9 +2638,9 @@ class ChatServer {
         const key = `users-${streamId ?? 'global'}`;
         if (this._usersListTimers?.has(key)) return; // already scheduled
         if (!this._usersListTimers) this._usersListTimers = new Map();
-        this._usersListTimers.set(key, setTimeout(() => {
+        this._usersListTimers.set(key, setTimeout(async () => {
             this._usersListTimers.delete(key);
-            const users = this.getUserList(streamId);
+            const users = await this.getUserList(streamId);
             const data = JSON.stringify({ type: 'users-list', users });
             for (const [ws, client] of this.clients) {
                 if (client.streamId === streamId && ws.readyState === WebSocket.OPEN) {
@@ -2672,9 +2672,9 @@ class ChatServer {
      * Send a DM payload to all WebSocket connections belonging to a given user ID.
      * Used by the DM REST API for real-time delivery.
      */
-    sendDm(userId, data) {
+    async sendDm(userId, data) {
         const convId = data?.conversation_id;
-        if (convId && !dm.isParticipant(convId, userId)) {
+        if (convId && !await dm.isParticipant(convId, userId)) {
             if (DEBUG_DM_DELIVERY) {
                 console.warn(`[DM] blocked delivery to user ${userId} for conversation ${convId} (not a participant)`, data.type, data);
             }
@@ -2718,19 +2718,19 @@ class ChatServer {
      * Push a profile/identity update to all chat connections belonging to a user.
      * Refreshes cached client.user so subsequent messages use the new info.
      */
-    sendUserUpdate(userId, userData) {
+    async sendUserUpdate(userId, userData) {
         // Live changed the account (admin edit): refresh the projection first. A new name is
         // also rewritten into this user's stored chat lines, as Live did with its own rows.
-        const before = ctx.getUserById(userId);
+        const before = await ctx.getUserById(userId);
         if (userData && userData.id != null) {
-            ctx.upsertUser({ ...(before || {}), ...userData });
+            await ctx.upsertUser({ ...(before || {}), ...userData });
             const newChatName = userData.display_name || userData.username;
             if (before && newChatName && newChatName !== (before.display_name || before.username)) {
-                try { db.renameUserChatMessages(userId, newChatName); } catch { /* non-critical */ }
+                try { await db.renameUserChatMessages(userId, newChatName); } catch { /* non-critical */ }
             }
         }
         ctx.invalidateUser(userId);
-        const freshUser = ctx.getUserById(userId);
+        const freshUser = await ctx.getUserById(userId);
         const payload = JSON.stringify({
             type: 'user-updated',
             user: {
@@ -2757,11 +2757,11 @@ class ChatServer {
      * Broadcast a message to ALL connected chat clients (every stream + global).
      * Used for server-wide announcements (restarts, updates).
      */
-    broadcastAll(data) {
+    async broadcastAll(data) {
         const msg = JSON.stringify(data);
-        const blockers = this._blockersOf(data);
+        const blockers = await this._blockersOf(data);
         for (const [ws, client] of this.clients) {
-            if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !this._blockedFor(client, blockers)) {
+            if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !await this._blockedFor(client, blockers)) {
                 ws.send(msg);
             }
         }
@@ -2811,24 +2811,24 @@ class ChatServer {
      * A room's slow mode in ms: its channel's saved slow_mode_seconds (channel moderation settings,
      * the dashboard's value and /slow's). Read from the policy cache, so a restart keeps it.
      */
-    slowModeMs(streamId) {
+    async slowModeMs(streamId) {
         if (!streamId) return 0;
-        return Math.max(0, parseInt(this._getChannelChatSettings(streamId).slow_mode_seconds, 10) || 0) * 1000;
+        return Math.max(0, parseInt((await this._getChannelChatSettings(streamId)).slow_mode_seconds, 10) || 0) * 1000;
     }
 
     /** streamId → slow mode ms for the streams with sockets here (Live's presence read). */
-    get slowModeByStream() {
+    async slowModeByStream() {
         const out = new Map();
-        for (const [, c] of this.clients) if (c.streamId && !out.has(c.streamId)) out.set(c.streamId, this.slowModeMs(c.streamId));
+        for (const [, c] of this.clients) if (c.streamId && !out.has(c.streamId)) out.set(c.streamId, await this.slowModeMs(c.streamId));
         return out;
     }
 
     /** The channel a client's room belongs to: { channel, ownerId } or null (global chat). */
     async _channelOfRoom(client) {
-        const modStreamId = client.streamId || this._moderationStreamFor(client);
-        const stream = modStreamId ? ctx.getStreamById(modStreamId) : null;
+        const modStreamId = client.streamId || await this._moderationStreamFor(client);
+        const stream = modStreamId ? await ctx.getStreamById(modStreamId) : null;
         const ownerId = (stream && stream.user_id) || client.channelUserId || null;
-        let channel = stream && stream.channel_id ? ctx.getChannelById(stream.channel_id) : null;
+        let channel = stream && stream.channel_id ? await ctx.getChannelById(stream.channel_id) : null;
         if (!channel && ownerId) channel = await ctx.ensureChannelForUser(ownerId);
         return channel ? { channel, ownerId: channel.user_id || ownerId } : null;
     }
@@ -2860,26 +2860,26 @@ class ChatServer {
             const n = (this._modeWrites.get(id) || 1) - 1;
             if (n > 0) this._modeWrites.set(id, n); else this._modeWrites.delete(id);
         }
-        const next = this._modesOf(ctx.getChannelModerationSettings(id));
+        const next = this._modesOf(await ctx.getChannelModerationSettings(id));
         if (fields.slow_mode_seconds !== undefined) next.slow = Math.max(0, parseInt(fields.slow_mode_seconds, 10) || 0);
         if (fields.sub_only !== undefined) next.sub = fields.sub_only ? 1 : 0;
         this._announcedModes.set(id, next);
         // A command is always answered in the room, even when the value did not change.
-        this._announceModes(room.ownerId, client.streamId, { slow: fields.slow_mode_seconds !== undefined ? -1 : next.slow, sub: fields.sub_only !== undefined ? -1 : next.sub }, next);
+        await this._announceModes(room.ownerId, client.streamId, { slow: fields.slow_mode_seconds !== undefined ? -1 : next.slow, sub: fields.sub_only !== undefined ? -1 : next.sub }, next);
         return true;
     }
 
     /** Tell a channel's room what changed: the slowmode / subonly frame and a system line for each. */
-    _announceModes(ownerUserId, streamId, prev, next) {
+    async _announceModes(ownerUserId, streamId, prev, next) {
         if (!ownerUserId && !streamId) return;
-        const say = (frame) => this.broadcastToChannelRoom(ownerUserId || null, streamId || null, frame);
+        const say = async (frame) => await this.broadcastToChannelRoom(ownerUserId || null, streamId || null, frame);
         if (prev.slow !== next.slow) {
-            say({ type: 'slowmode', seconds: next.slow });
-            say({ type: 'system', message: next.slow > 0 ? `Slow mode enabled: ${next.slow}s between messages` : 'Slow mode disabled.' });
+            await say({ type: 'slowmode', seconds: next.slow });
+            await say({ type: 'system', message: next.slow > 0 ? `Slow mode enabled: ${next.slow}s between messages` : 'Slow mode disabled.' });
         }
         if (prev.sub !== next.sub) {
-            say({ type: 'subonly', enabled: !!next.sub });
-            say({ type: 'system', message: next.sub ? 'Sub-only mode enabled: only subscribers and moderators can chat.' : 'Sub-only mode disabled.' });
+            await say({ type: 'subonly', enabled: !!next.sub });
+            await say({ type: 'system', message: next.sub ? 'Sub-only mode enabled: only subscribers and moderators can chat.' : 'Sub-only mode disabled.' });
         }
     }
 
@@ -2888,22 +2888,22 @@ class ChatServer {
      * sub-only mode differs from what its room was last told (the dashboard changed it), tell the
      * room. The first read after a start only records the values.
      */
-    _channelSettingsSeen(channelId, settings) {
+    async _channelSettingsSeen(channelId, settings) {
         const id = Number(channelId);
         if (!id || this._modeWrites.has(id)) return;
         const next = this._modesOf(settings);
         const prev = this._announcedModes.get(id);
         this._announcedModes.set(id, next);
         if (!prev || (prev.slow === next.slow && prev.sub === next.sub)) return;
-        const channel = ctx.getChannelById(id);
-        if (channel && channel.user_id) this._announceModes(channel.user_id, null, prev, next);
+        const channel = await ctx.getChannelById(id);
+        if (channel && channel.user_id) await this._announceModes(channel.user_id, null, prev, next);
     }
 
     /**
      * Get channel moderation settings for a stream.
      * Caches the channel lookup to avoid repeated DB queries.
      */
-    _getChannelChatSettings(streamId) {
+    async _getChannelChatSettings(streamId) {
         const defaults = {
             slow_mode_seconds: 0, followers_only: 0, emote_only: 0,
             allow_anonymous: 1, links_allowed: 1, account_age_gate_hours: 0,
@@ -2935,11 +2935,11 @@ class ChatServer {
         });
         if (!streamId) return finalize(defaults);
         try {
-            const stream = ctx.getStreamById(streamId);
+            const stream = await ctx.getStreamById(streamId);
             if (!stream) return finalize(defaults);
-            const channel = stream.channel_id ? ctx.getChannelById(stream.channel_id) : ctx.getChannelByUserId(stream.user_id);
+            const channel = stream.channel_id ? await ctx.getChannelById(stream.channel_id) : await ctx.getChannelByUserId(stream.user_id);
             if (!channel) return finalize(defaults);
-            return finalize({ ...defaults, ...ctx.getChannelModerationSettings(channel.id) });
+            return finalize({ ...defaults, ...await ctx.getChannelModerationSettings(channel.id) });
         } catch {
             return finalize(defaults);
         }
@@ -2949,13 +2949,13 @@ class ChatServer {
      * Log a moderation action from a chat command (/ban, /timeout, /clear, /slowmode).
      * Non-critical — failures are silently ignored.
      */
-    logChatModeration(client, actionType, details = {}, targetUserId = null) {
+    async logChatModeration(client, actionType, details = {}, targetUserId = null) {
         try {
-            const stream = client.streamId ? ctx.getStreamById(client.streamId) : null;
+            const stream = client.streamId ? await ctx.getStreamById(client.streamId) : null;
             const channel = stream?.channel_id
-                ? ctx.getChannelById(stream.channel_id)
-                : stream ? ctx.getChannelByUserId(stream.user_id) : null;
-            db.logModerationAction({
+                ? await ctx.getChannelById(stream.channel_id)
+                : stream ? await ctx.getChannelByUserId(stream.user_id) : null;
+            await db.logModerationAction({
                 scope_type: channel ? 'channel' : 'site',
                 scope_id: channel?.id || undefined,
                 actor_user_id: client.user?.id || undefined,

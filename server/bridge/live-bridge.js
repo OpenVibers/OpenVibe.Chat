@@ -118,25 +118,25 @@ function createBridge({ chatServer, mirror = null, config = require('../config')
     const router = express.Router();
     const refs = new Map();   // `${boot}|${ref}` → { id, at }
 
-    function sweepRefs() {
+    async function sweepRefs() {
         const cutoff = Date.now() - REF_TTL_MS;
         for (const [k, v] of refs) if (v.at < cutoff) refs.delete(k);
-        try { db.run('DELETE FROM bridge_applied WHERE applied_at < ?', [Date.now() - 7 * 24 * 3600 * 1000]); } catch { /* */ }
-        try { db.run('DELETE FROM bridge_refs WHERE at < ?', [Date.now() - REF_KEEP_MS]); } catch { /* */ }
+        try { await db.run('DELETE FROM bridge_applied WHERE applied_at < ?', [Date.now() - 7 * 24 * 3600 * 1000]); } catch { /* */ }
+        try { await db.run('DELETE FROM bridge_refs WHERE at < ?', [Date.now() - REF_KEEP_MS]); } catch { /* */ }
     }
 
-    function rememberRef(boot, ref, id) {
+    async function rememberRef(boot, ref, id) {
         const at = Date.now();
         refs.set(`${boot}|${ref}`, { id, at });
-        db.run('INSERT INTO bridge_refs (boot, ref, id, at) VALUES (?, ?, ?, ?) ON CONFLICT(boot, ref) DO UPDATE SET id = excluded.id, at = excluded.at', [boot, ref, id, at]);
+        await db.run('INSERT INTO bridge_refs (boot, ref, id, at) VALUES (?, ?, ?, ?) ON CONFLICT(boot, ref) DO UPDATE SET id = excluded.id, at = excluded.at', [boot, ref, id, at]);
     }
 
     /** The real id for a placeholder of this Live boot: memory first, then bridge_refs (a restart). */
-    function lookupRef(boot, ref) {
+    async function lookupRef(boot, ref) {
         const hit = refs.get(`${boot}|${ref}`);
         if (hit) return hit.id;
         let row = null;
-        try { row = db.get('SELECT id FROM bridge_refs WHERE boot = ? AND ref = ?', [boot, ref]); } catch { row = null; }
+        try { row = await db.get('SELECT id FROM bridge_refs WHERE boot = ? AND ref = ?', [boot, ref]); } catch { row = null; }
         if (!row) return null;
         refs.set(`${boot}|${ref}`, { id: row.id, at: Date.now() });
         return row.id;
@@ -144,20 +144,20 @@ function createBridge({ chatServer, mirror = null, config = require('../config')
     const sweep = setInterval(sweepRefs, 60_000);
     if (sweep.unref) sweep.unref();
 
-    function mapRefs(value, boot) {
+    async function mapRefs(value, boot) {
         if (typeof value === 'number') {
-            if (value <= REF_MIN) { const id = lookupRef(boot, value); return id != null ? id : value; }
+            if (value <= REF_MIN) { const id = await lookupRef(boot, value); return id != null ? id : value; }
             return value;
         }
         if (typeof value === 'string') {
             const m = /^(m|ov-)(-\d{13,})$/.exec(value);
-            if (m) { const id = lookupRef(boot, Number(m[2])); return id != null ? `${m[1]}${id}` : value; }
+            if (m) { const id = await lookupRef(boot, Number(m[2])); return id != null ? `${m[1]}${id}` : value; }
             return value;
         }
-        if (Array.isArray(value)) return value.map((v) => mapRefs(v, boot));
+        if (Array.isArray(value)) return (await Promise.all(value.map(async (v) => await mapRefs(v, boot))));
         if (value && typeof value === 'object') {
             const out = {};
-            for (const [k, v] of Object.entries(value)) out[k] = mapRefs(v, boot);
+            for (const [k, v] of Object.entries(value)) out[k] = await mapRefs(v, boot);
             return out;
         }
         return value;
@@ -169,24 +169,24 @@ function createBridge({ chatServer, mirror = null, config = require('../config')
     };
 
     async function runOp(op, rawArgs, boot, ref, key) {
-        const args = mapRefs(Array.isArray(rawArgs) ? rawArgs : [], boot);
+        const args = await mapRefs(Array.isArray(rawArgs) ? rawArgs : [], boot);
         if (op === 'db') {
             const [fn, ...fnArgs] = args;
             if (!DB_OPS.has(fn) || typeof db[fn] !== 'function') throw new Error(`db.${fn} is not a bridge write`);
             // saveChatMessage derives the channel from the stream: have the stream first.
             if (fn === 'saveChatMessage' && fnArgs[0] && fnArgs[0].stream_id) await ctx.ensureStream(fnArgs[0].stream_id);
-            const remember = (result) => {
-                if (ref != null && result && result.lastInsertRowid != null) rememberRef(boot, ref, Number(result.lastInsertRowid));
+            const remember = async (result) => {
+                if (ref != null && result && result.lastInsertRowid != null) await rememberRef(boot, ref, Number(result.lastInsertRowid));
                 return result;
             };
-            if (!key) return plain(remember(db[fn](...fnArgs)));
+            if (!key) return plain(await remember(await db[fn](...fnArgs)));
             // Applied once per idempotency key, in the same transaction as the write.
-            return db.transaction(() => {
-                const done = db.get('SELECT result FROM bridge_applied WHERE key = ?', [key]);
-                if (done) { const prev = done.result ? JSON.parse(done.result) : null; return remember(prev); }
-                const result = plain(db[fn](...fnArgs));
-                db.run('INSERT INTO bridge_applied (key, result, applied_at) VALUES (?, ?, ?)', [key, JSON.stringify(result === undefined ? null : result), Date.now()]);
-                return remember(result);
+            return await db.tx(async () => {
+                const done = await db.get('SELECT result FROM bridge_applied WHERE key = ?', [key]);
+                if (done) { const prev = done.result ? JSON.parse(done.result) : null; return await remember(prev); }
+                const result = plain(await db[fn](...fnArgs));
+                await db.run('INSERT INTO bridge_applied (key, result, applied_at) VALUES (?, ?, ?)', [key, JSON.stringify(result === undefined ? null : result), Date.now()]);
+                return await remember(result);
             });
         }
         if (Object.prototype.hasOwnProperty.call(SERVER_OPS, op)) {
@@ -195,25 +195,25 @@ function createBridge({ chatServer, mirror = null, config = require('../config')
             if (op === 'triggerChannelSound') {
                 // (ws, client, stream, command, args, relay) — Live passes no socket.
                 const [, client, stream, command, soundArgs, relay] = args;
-                return plain(chatServer.triggerChannelSound(null, client || {}, stream, command, soundArgs || [], relay || null));
+                return plain(await chatServer.triggerChannelSound(null, client || {}, stream, command, soundArgs || [], relay || null));
             }
-            return plain(chatServer[op](...args));
+            return plain(await chatServer[op](...args));
         }
         switch (op) {
             case 'broadcastAllRaw': {
                 // Live code that iterated chatServer.clients and sent a pre-serialized payload.
                 let data;
                 try { data = JSON.parse(String(args[0])); } catch { throw new Error('broadcastAllRaw: not JSON'); }
-                return plain(chatServer.broadcastAll(data));
+                return plain(await chatServer.broadcastAll(data));
             }
             case 'deployNotice':
-                return require('../chat/deploy-notice').announceCommits({ db, chatServer, commits: args[0] });
+                return await require('../chat/deploy-notice').announceCommits({ db, chatServer, commits: args[0] });
             case 'playAlertSound': {
                 // Live's donation / goal-reached alerts: Live says "play the alert for channel X"
                 // (streamerId, streamId, kind), Chat resolves the sound from its own settings row and
                 // broadcasts it to the channel room. Replaces Live reading the file + sending base64.
                 const [streamerId, streamId, kind] = args;
-                return require('../chat/alert-sounds').playAlertSound(chatServer, Number(streamerId) || 0, streamId != null ? Number(streamId) : null, kind === 'goal' ? 'goal' : 'donation');
+                return await require('../chat/alert-sounds').playAlertSound(chatServer, Number(streamerId) || 0, streamId != null ? Number(streamId) : null, kind === 'goal' ? 'goal' : 'donation');
             }
             case 'userChanged':
                 ctx.invalidateUser(args[0]);
@@ -222,7 +222,7 @@ function createBridge({ chatServer, mirror = null, config = require('../config')
             case 'invalidate': {
                 // Live wrote data Chat caches (channel moderators/settings, IP approvals, bans, a user).
                 const [kind, id] = args;
-                if (kind === 'channel') ctx.invalidateChannel(id);
+                if (kind === 'channel') await ctx.invalidateChannel(id);
                 else if (kind === 'approvals') ctx.invalidateApprovals(id);
                 else if (kind === 'bans') await ctx.invalidateBans();
                 else if (kind === 'user') ctx.invalidateUser(id);
@@ -256,7 +256,7 @@ function createBridge({ chatServer, mirror = null, config = require('../config')
         res.json({ ok: true, results });
     });
 
-    router.get('/presence', serviceAuth.guard('chat.presence.read'), (req, res) => {
+    router.get('/presence', serviceAuth.guard('chat.presence.read'), async (req, res) => {
         const streams = {};
         const users = [];
         const anons = [];
@@ -270,7 +270,7 @@ function createBridge({ chatServer, mirror = null, config = require('../config')
             at: new Date().toISOString(),
             total: chatServer.getTotalConnections(),
             streams,
-            slow_mode: Object.fromEntries(chatServer.slowModeByStream),
+            slow_mode: Object.fromEntries(await chatServer.slowModeByStream()),
             users,
             anons,
         });

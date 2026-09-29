@@ -15,7 +15,7 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const Database = require('better-sqlite3');
+const { openSqlite } = require('../scripts/lib/sqlite');
 const { boot, suite } = require('./helpers');
 
 const t = suite('migrate-preferences');
@@ -42,22 +42,22 @@ t('a Live database with every kind of row', async () => {
     h = await boot();
     mig = require('../server/prefs/from-live');
     livePath = path.join(h.tmp, 'live.db');
-    const live = new Database(livePath);
+    const live = openSqlite(livePath, { readonly: false, create: true });
     live.exec(`CREATE TABLE users (id INTEGER PRIMARY KEY, username TEXT);
         CREATE TABLE linked_accounts (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, service TEXT, service_user_id TEXT, subject_id TEXT);
         CREATE TABLE user_preferences (user_id INTEGER PRIMARY KEY, chat_settings TEXT DEFAULT '{}', updated_at DATETIME DEFAULT CURRENT_TIMESTAMP);`);
-    const add = (id, name, settings, links) => {
-        live.prepare('INSERT INTO users (id, username) VALUES (?, ?)').run(id, name);
-        for (const [service, subject] of links) live.prepare('INSERT INTO linked_accounts (user_id, service, service_user_id, subject_id) VALUES (?, ?, ?, ?)').run(id, service, `x${id}`, subject);
-        live.prepare('INSERT INTO user_preferences (user_id, chat_settings) VALUES (?, ?)').run(id, typeof settings === 'string' ? settings : JSON.stringify(settings));
+    const add = async (id, name, settings, links) => {
+        await live.prepare('INSERT INTO users (id, username) VALUES (?, ?)').run(id, name);
+        for (const [service, subject] of links) await live.prepare('INSERT INTO linked_accounts (user_id, service, service_user_id, subject_id) VALUES (?, ?, ?, ?)').run(id, service, `x${id}`, subject);
+        await live.prepare('INSERT INTO user_preferences (user_id, chat_settings) VALUES (?, ?)').run(id, typeof settings === 'string' ? settings : JSON.stringify(settings));
     };
-    add(1, 'ann', { ...liveDefaults, showTimestamps: true, fontSize: 'large', showBadges: false }, [['network', S.ann]]);
-    add(2, 'bob', liveDefaults, [['network', S.bob]]);                                          // defaults only
-    add(3, 'cat', { ...liveDefaults, compactMode: true }, []);                                   // no subject
-    add(4, 'dan', '{not json', [['network', 'usr_01J9DAN0000000000000000AAA']]);               // unreadable
-    add(5, 'eve', { ...liveDefaults, compactMode: true, fontSize: 'small' }, [['network', S.eve]]);   // has a record already
-    add(6, 'fay', { compactMode: true }, [['network', S.fay]]);                                  // a partial old blob
-    add(7, 'gus', { ...liveDefaults, fontSize: 'small' }, [['hobostreamer', S.gusOld], ['network', S.gus]]);   // the network link wins
+    await add(1, 'ann', { ...liveDefaults, showTimestamps: true, fontSize: 'large', showBadges: false }, [['network', S.ann]]);
+    await add(2, 'bob', liveDefaults, [['network', S.bob]]);                                          // defaults only
+    await add(3, 'cat', { ...liveDefaults, compactMode: true }, []);                                   // no subject
+    await add(4, 'dan', '{not json', [['network', 'usr_01J9DAN0000000000000000AAA']]);               // unreadable
+    await add(5, 'eve', { ...liveDefaults, compactMode: true, fontSize: 'small' }, [['network', S.eve]]);   // has a record already
+    await add(6, 'fay', { compactMode: true }, [['network', S.fay]]);                                  // a partial old blob
+    await add(7, 'gus', { ...liveDefaults, fontSize: 'small' }, [['hobostreamer', S.gusOld], ['network', S.gus]]);   // the network link wins
     live.close();
     for (const s of Object.values(S)) h.netModules.subjects.add(s);
     h.netModules.set(NS, S.eve, { hide_emotes: true });
@@ -72,7 +72,7 @@ t('the mapping keeps choices only', () => {
 });
 
 t('plan: counts and targets from Live, read-only', () => {
-    const live = new Database(livePath, { readonly: true });
+    const live = openSqlite(livePath);
     const p = mig.plan(live);
     live.close();
     assert.deepStrictEqual(p.counts, { live_rows: 7, unreadable: 1, no_subject: 1, defaults_only: 1, invalid: 0, candidates: 4, fields: { timestamps: 1, font_scale: 3, show_badges: 1, compact: 2 } });
@@ -107,7 +107,7 @@ t('dry run through the real script: a report, reads only', async () => {
 
 t('--apply --backup: backup first (0600), create-only writes, revisions recorded', async () => {
     const backup = path.join(h.tmp, 'prefs-backup-1.json');
-    const live = new Database(livePath, { readonly: true });
+    const live = openSqlite(livePath);
     const planned = mig.plan(live);
     live.close();
     await assert.rejects(mig.migrate(planned, { apply: true }), /--backup/);

@@ -16,6 +16,7 @@
 
 const path = require('path');
 const { createDb, importSqlite } = require('openvibe-sdk/db');
+const { openSqlite } = require('./lib/sqlite');
 
 const MIGRATIONS = path.join(__dirname, '..', 'migrations');
 
@@ -45,12 +46,16 @@ async function main(argv) {
         ? createDb({ pglite: args.pglite, service: 'chat-import', max: 1 })
         : createDb({ url: args.url, service: 'chat-import', max: 1 });
     try {
-        if (args.pglite) await db.migrate({ dir: MIGRATIONS });
+        // The schema first (the owner applies migrations/; a no-op where the release already did).
+        await db.migrate({ dir: MIGRATIONS, log: { log() {}, info() {}, warn: console.warn, error: console.error } });
         // The import's rows came from Live: they must not queue in the read mirror (decision 1).
         await db.query(`SET ov.mirror_skip = '1'`);
 
         const started = new Date().toISOString().replace('T', ' ').slice(0, 19);
-        const report = await importSqlite({ sqlite: args.sqlite, db, truncate: args.truncate, verify: args.verify });
+        // Read with node:sqlite (scripts/lib/sqlite.js): better-sqlite3 is no longer a dependency (decision 11).
+        const source = openSqlite(args.sqlite);
+        let report;
+        try { report = await importSqlite({ sqlite: source, db, truncate: args.truncate, verify: args.verify }); } finally { source.close(); }
 
         // Statistics for the serving role (plan T3, decision 2): the importer is the owner, and the runtime
         // role is DML-only, so its ANALYZE is silently skipped and it would have no column statistics until

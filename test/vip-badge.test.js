@@ -63,7 +63,7 @@ async function startVip(keyOf) {
 const callsFor = (subject) => vip.state.calls.filter((c) => c.subject === subject).length;
 async function until(pred, ms = 3000) {
     const end = Date.now() + ms;
-    while (!pred()) { if (Date.now() > end) throw new Error('timed out'); await new Promise((r) => setTimeout(r, 10)); }
+    while (!await pred()) { if (Date.now() > end) throw new Error('timed out'); await new Promise((r) => setTimeout(r, 10)); }
 }
 async function joinRoom(user, ip) {
     const ws = await h.ws({ ip, token: user.token, stream: streamId });
@@ -112,7 +112,7 @@ t('a member\'s message carries the creator\'s badge (looked up at join, so the f
     await new Promise((r) => setTimeout(r, 50));
     const { msg } = await say(memberWs, watcher);
     assert.deepStrictEqual(msg.vip_badge, { creator: CREATOR, perk: 'subscriber-badge', name: 'Subscriber badge', badge: 'subscriber' });
-    const row = h.db.getChatMessageById(msg.id);
+    const row = await h.db.getChatMessageById(msg.id);
     assert.deepStrictEqual(JSON.parse(row.metadata).vip_badge, msg.vip_badge);
     assert.ok(h.tokenRequests.some((r) => r.audience === 'openvibe.vip' && r.scope === 'vip.entitlement.check'), 'Chat asked the Network for a VIP token');
     const before = callsFor(MEMBER);
@@ -147,7 +147,7 @@ t('sending never waits on VIP: a slow lookup sends at once, the badge follows as
     const follow = await watcher.next((m) => m.type === 'chat_vip_badge' && m.id === msg.id);
     // Creator-written binding config is cleaned: an unknown badge id becomes "member", the label is plain text.
     assert.deepStrictEqual(follow.vip_badge, { creator: CREATOR, perk: 'subscriber-badge', name: 'Subscriber badge', badge: 'member', label: 'bCrew/b' });
-    await until(() => { const r = h.db.getChatMessageById(msg.id); return r.metadata && JSON.parse(r.metadata).vip_badge; });
+    await until(async () => { const r = await h.db.getChatMessageById(msg.id); return r.metadata && JSON.parse(r.metadata).vip_badge; });
     const next = await say(ws, watcher);
     assert.strictEqual(next.msg.vip_badge.badge, 'member', 'cached from then on');
 });

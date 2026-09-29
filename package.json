@@ -22,7 +22,6 @@
   "author": "OpenVibers",
   "license": "AGPL-3.0-only",
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
@@ -37,7 +36,8 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "^0.5.8"
+    "@electric-sql/pglite": "^0.5.8",
+    "@electric-sql/pglite-socket": "0.2.11"
   },
   "engines": {
     "node": ">=22.0.0"

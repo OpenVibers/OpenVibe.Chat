@@ -8,7 +8,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const Database = require('better-sqlite3');
+const { openSqlite } = require('../scripts/lib/sqlite');
 const { createDb } = require('openvibe-sdk/db');
 const { suite } = require('./helpers');
 const { main } = require('../scripts/import-sqlite-to-pg');
@@ -18,8 +18,8 @@ const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-chat-import-'));
 const fixture = path.join(tmp, 'chat.db');
 const pgliteDir = path.join(tmp, 'pglite');
 
-function buildFixture() {
-    const d = new Database(fixture);
+async function buildFixture() {
+    const d = openSqlite(fixture, { readonly: false, create: true });
     d.exec(`
         CREATE TABLE chat_messages (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, username TEXT, message TEXT NOT NULL, timestamp TEXT DEFAULT CURRENT_TIMESTAMP);
         CREATE TABLE relay_users (platform TEXT NOT NULL, username TEXT NOT NULL, display_name TEXT, message_count INTEGER DEFAULT 0, PRIMARY KEY (platform, username));
@@ -29,18 +29,18 @@ function buildFixture() {
         CREATE TABLE emotes (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL, code TEXT NOT NULL, url TEXT NOT NULL, channel_owner_id INTEGER);
     `);
     const msg = d.prepare('INSERT INTO chat_messages (user_id, username, message, timestamp) VALUES (?, ?, ?, ?)');
-    for (let i = 1; i <= 120; i++) msg.run(1000 + i, `user${i}`, `message ${i}`, '2026-09-29 10:00:00');
-    d.prepare('INSERT INTO relay_users (platform, username, display_name, message_count) VALUES (?, ?, ?, ?)').run('twitch', 'nightbot', 'Nightbot', 42);
-    d.prepare('INSERT INTO rooms (slug, name, owner_id, message_count) VALUES (?, ?, ?, ?)').run('general', 'General', 1001, 5);
-    d.prepare('INSERT INTO room_messages (room_id, user_id, message) VALUES (?, ?, ?)').run(1, 1001, 'hi room');
-    d.prepare('INSERT INTO chat_meta (key, value) VALUES (?, ?)').run('deploy_head', 'abc123');
-    d.prepare('INSERT INTO emotes (user_id, code, url, channel_owner_id) VALUES (?, ?, ?, ?)').run(1001, 'kek', '/e/kek.png', 1001);
+    for (let i = 1; i <= 120; i++) await msg.run(1000 + i, `user${i}`, `message ${i}`, '2026-09-29 10:00:00');
+    await d.prepare('INSERT INTO relay_users (platform, username, display_name, message_count) VALUES (?, ?, ?, ?)').run('twitch', 'nightbot', 'Nightbot', 42);
+    await d.prepare('INSERT INTO rooms (slug, name, owner_id, message_count) VALUES (?, ?, ?, ?)').run('general', 'General', 1001, 5);
+    await d.prepare('INSERT INTO room_messages (room_id, user_id, message) VALUES (?, ?, ?)').run(1, 1001, 'hi room');
+    await d.prepare('INSERT INTO chat_meta (key, value) VALUES (?, ?)').run('deploy_head', 'abc123');
+    await d.prepare('INSERT INTO emotes (user_id, code, url, channel_owner_id) VALUES (?, ?, ?, ?)').run(1001, 'kek', '/e/kek.png', 1001);
     d.close();
 }
 
 let report, db;
 t('import the fixture', async () => {
-    buildFixture();
+    await buildFixture();
     await main(['--sqlite', fixture, '--pglite', pgliteDir]);
     assert.strictEqual(process.exitCode, undefined, 'the import reported ok');
     db = createDb({ pglite: pgliteDir, service: 'chat-import-test' });

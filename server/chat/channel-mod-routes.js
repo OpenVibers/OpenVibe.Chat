@@ -41,12 +41,12 @@ function canAssignMods(user, channel) {
 }
 
 /** Middleware: require channel access (owner, channel mod, or staff). */
-function requireChannelAccess(req, res, next) {
+async function requireChannelAccess(req, res, next) {
     const channelId = parseInt(req.params.channelId, 10);
     if (!channelId) return res.status(400).json({ error: 'Invalid channel ID' });
-    const channel = ctx.getChannelById(channelId);
+    const channel = await ctx.getChannelById(channelId);
     if (!channel) return res.status(404).json({ error: 'Channel not found' });
-    if (!permissions.canModerateChannel(req.user, channelId)) {
+    if (!await permissions.canModerateChannel(req.user, channelId)) {
         return res.status(403).json({ error: 'Channel moderation access required' });
     }
     req.channel = channel;
@@ -57,7 +57,7 @@ function requireChannelAccess(req, res, next) {
 router.get('/moderation/mine', requireAuth, async (req, res) => {
     try {
         const owned = await ctx.ensureChannelForUser(req.user.id);
-        const moderated = db.getChannelsByModerator(req.user.id) || [];
+        const moderated = await db.getChannelsByModerator(req.user.id) || [];
 
         const channelMap = new Map();
         if (owned) channelMap.set(owned.id, owned);
@@ -66,11 +66,11 @@ router.get('/moderation/mine', requireAuth, async (req, res) => {
             if (!channelMap.has(id)) channelMap.set(id, { id, user_id: ch.owner_user_id ?? ch.user_id, title: ch.title });
         }
 
-        const channels = [...channelMap.values()].map((channel) => ({
+        const channels = (await Promise.all([...channelMap.values()].map(async (channel) => ({
             ...channel,
-            moderation_settings: ctx.getChannelModerationSettings(channel.id),
-            moderators: db.getChannelModerators(channel.id),
-        }));
+            moderation_settings: await ctx.getChannelModerationSettings(channel.id),
+            moderators: await db.getChannelModerators(channel.id),
+        }))));
 
         res.json({ channels });
     } catch (err) {
@@ -80,12 +80,12 @@ router.get('/moderation/mine', requireAuth, async (req, res) => {
 });
 
 // ── List channel mods ────────────────────────────────────────
-router.get('/:channelId/mods', requireAuth, (req, res) => {
+router.get('/:channelId/mods', requireAuth, async (req, res) => {
     try {
         const channelId = parseInt(req.params.channelId);
-        const channel = ctx.getChannelById(channelId);
+        const channel = await ctx.getChannelById(channelId);
         if (!channel) return res.status(404).json({ error: 'Channel not found' });
-        res.json({ moderators: db.getChannelModerators(channelId), channel_id: channelId });
+        res.json({ moderators: await db.getChannelModerators(channelId), channel_id: channelId });
     } catch (err) {
         res.status(500).json({ error: 'Failed to list channel moderators' });
     }
@@ -95,7 +95,7 @@ router.get('/:channelId/mods', requireAuth, (req, res) => {
 router.post('/:channelId/mods', requireAuth, async (req, res) => {
     try {
         const channelId = parseInt(req.params.channelId);
-        const channel = ctx.getChannelById(channelId);
+        const channel = await ctx.getChannelById(channelId);
         if (!channel) return res.status(404).json({ error: 'Channel not found' });
         if (!canAssignMods(req.user, channel)) {
             return res.status(403).json({ error: 'Only the channel owner or an admin can add moderators' });
@@ -109,8 +109,8 @@ router.post('/:channelId/mods', requireAuth, async (req, res) => {
             return res.status(400).json({ error: 'Channel owner is already a moderator' });
         }
 
-        db.addChannelModerator(channelId, targetUser.id, req.user.id);
-        db.logModerationAction({
+        await db.addChannelModerator(channelId, targetUser.id, req.user.id);
+        await db.logModerationAction({
             scope_type: 'channel',
             scope_id: channelId,
             actor_user_id: req.user.id,
@@ -118,7 +118,7 @@ router.post('/:channelId/mods', requireAuth, async (req, res) => {
             action_type: 'channel_mod_add',
             details: { channel_id: channelId, username: targetUser.username },
         });
-        res.json({ message: `${targetUser.username} added as channel moderator`, moderators: db.getChannelModerators(channelId) });
+        res.json({ message: `${targetUser.username} added as channel moderator`, moderators: await db.getChannelModerators(channelId) });
     } catch (err) {
         res.status(500).json({ error: 'Failed to add channel moderator' });
     }
@@ -129,14 +129,14 @@ router.delete('/:channelId/mods/:userId', requireAuth, async (req, res) => {
     try {
         const channelId = parseInt(req.params.channelId);
         const userId = parseInt(req.params.userId);
-        const channel = ctx.getChannelById(channelId);
+        const channel = await ctx.getChannelById(channelId);
         if (!channel) return res.status(404).json({ error: 'Channel not found' });
         if (!canAssignMods(req.user, channel)) {
             return res.status(403).json({ error: 'Only the channel owner or an admin can remove moderators' });
         }
-        const target = ctx.getUserById(userId);
-        db.removeChannelModerator(channelId, userId);
-        db.logModerationAction({
+        const target = await ctx.getUserById(userId);
+        await db.removeChannelModerator(channelId, userId);
+        await db.logModerationAction({
             scope_type: 'channel',
             scope_id: channelId,
             actor_user_id: req.user.id,
@@ -144,16 +144,16 @@ router.delete('/:channelId/mods/:userId', requireAuth, async (req, res) => {
             action_type: 'channel_mod_remove',
             details: { channel_id: channelId, username: (target && target.username) || String(userId) },
         });
-        res.json({ message: 'Channel moderator removed', moderators: db.getChannelModerators(channelId) });
+        res.json({ message: 'Channel moderator removed', moderators: await db.getChannelModerators(channelId) });
     } catch (err) {
         res.status(500).json({ error: 'Failed to remove channel moderator' });
     }
 });
 
 // ── Get channel moderation settings ──────────────────────────
-router.get('/:channelId/moderation', requireAuth, requireChannelAccess, (req, res) => {
+router.get('/:channelId/moderation', requireAuth, requireChannelAccess, async (req, res) => {
     try {
-        res.json({ settings: ctx.getChannelModerationSettings(req.channel.id) });
+        res.json({ settings: await ctx.getChannelModerationSettings(req.channel.id) });
     } catch (err) {
         res.status(500).json({ error: 'Failed to get moderation settings' });
     }
@@ -165,7 +165,7 @@ router.put('/:channelId/moderation', requireAuth, requireChannelAccess, async (r
     try {
         const isOwnerOrStaff = req.channel.user_id === req.user.id || permissions.isGlobalModOrAbove(req.user);
         if (!isOwnerOrStaff) for (const k of OWNER_POLICY_KEYS) delete req.body[k];
-        const settings = db.upsertChannelModerationSettings(req.channel.id, {
+        const settings = await db.upsertChannelModerationSettings(req.channel.id, {
             slow_mode_seconds: (req.body.slow_mode_seconds ?? req.body.slowmode_seconds) !== undefined
                 ? Math.max(0, parseInt(req.body.slow_mode_seconds ?? req.body.slowmode_seconds) || 0) : undefined,
             followers_only: req.body.followers_only !== undefined ? parseBoolean(req.body.followers_only, false) : undefined,
@@ -225,7 +225,7 @@ router.put('/:channelId/moderation', requireAuth, requireChannelAccess, async (r
             sound_max_pitch_cents: req.body.sound_max_pitch_cents !== undefined ? Math.max(0, Math.min(2400, parseInt(req.body.sound_max_pitch_cents) || 1200)) : undefined,
         });
 
-        db.logModerationAction({
+        await db.logModerationAction({
             scope_type: 'channel',
             scope_id: req.channel.id,
             actor_user_id: req.user.id,
@@ -240,40 +240,40 @@ router.put('/:channelId/moderation', requireAuth, requireChannelAccess, async (r
 });
 
 // ── View moderation action log ───────────────────────────────
-router.get('/:channelId/moderation/logs', requireAuth, requireChannelAccess, (req, res) => {
+router.get('/:channelId/moderation/logs', requireAuth, requireChannelAccess, async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
         const offset = Math.max(parseInt(req.query.offset || '0', 10), 0);
-        res.json({ actions: db.getModerationActions({ scopeType: 'channel', scopeId: req.channel.id, limit, offset }) });
+        res.json({ actions: await db.getModerationActions({ scopeType: 'channel', scopeId: req.channel.id, limit, offset }) });
     } catch (err) {
         res.status(500).json({ error: 'Failed to load channel moderation log' });
     }
 });
 
 // ── Search channel chat messages ─────────────────────────────
-router.get('/:channelId/moderation/chat-search', requireAuth, requireChannelAccess, (req, res) => {
+router.get('/:channelId/moderation/chat-search', requireAuth, requireChannelAccess, async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
         const offset = Math.max(parseInt(req.query.offset || '0', 10), 0);
         const q = (req.query.q || '').trim();
         const userId = req.query.user_id ? parseInt(req.query.user_id, 10) : null;
-        res.json(db.searchChannelChatMessages(req.channel, { query: q, userId, limit, offset }));
+        res.json(await db.searchChannelChatMessages(req.channel, { query: q, userId, limit, offset }));
     } catch (err) {
         res.status(500).json({ error: 'Failed to search channel chat' });
     }
 });
 
 // ── Delete a channel chat message ────────────────────────────
-router.post('/:channelId/moderation/messages/:messageId/delete', requireAuth, requireChannelAccess, (req, res) => {
+router.post('/:channelId/moderation/messages/:messageId/delete', requireAuth, requireChannelAccess, async (req, res) => {
     try {
         const messageId = parseInt(req.params.messageId, 10);
-        const message = db.getChatMessageById(messageId);
+        const message = await db.getChatMessageById(messageId);
         if (!message) return res.status(404).json({ error: 'Message not found' });
 
         if (!permissions.isGlobalModOrAbove(req.user)) {
             let inScope = false;
             if (message.stream_id) {
-                const stream = ctx.getStreamById(message.stream_id);
+                const stream = await ctx.getStreamById(message.stream_id);
                 inScope = !!(stream && (stream.channel_id === req.channel.id || (!stream.channel_id && stream.user_id === req.channel.user_id)));
             } else if (message.channel_user_id) {
                 inScope = message.channel_user_id === req.channel.user_id;
@@ -281,19 +281,19 @@ router.post('/:channelId/moderation/messages/:messageId/delete', requireAuth, re
             if (!inScope) return res.status(403).json({ error: 'Message is outside this channel scope' });
         }
 
-        db.deleteChatMessage(messageId, req.user.id);
+        await db.deleteChatMessage(messageId, req.user.id);
 
         const delPayload = { type: 'delete-messages', ids: [messageId] };
-        const chanUid = message.channel_user_id || (message.stream_id ? (ctx.getStreamById(message.stream_id) || {}).user_id || null : null);
+        const chanUid = message.channel_user_id || (message.stream_id ? (await ctx.getStreamById(message.stream_id) || {}).user_id || null : null);
         try {
             const chatServer = require('./chat-server');
-            if (chanUid || message.stream_id) chatServer.broadcastToChannelRoom(chanUid, message.stream_id || null, delPayload);
-            if (message.stream_id) chatServer.forwardToGlobal(message.stream_id, delPayload);
-            else if (chanUid) chatServer.forwardToGlobalByChannel(chanUid, delPayload);
-            else chatServer.broadcastGlobal(delPayload);
+            if (chanUid || message.stream_id) await chatServer.broadcastToChannelRoom(chanUid, message.stream_id || null, delPayload);
+            if (message.stream_id) await chatServer.forwardToGlobal(message.stream_id, delPayload);
+            else if (chanUid) await chatServer.forwardToGlobalByChannel(chanUid, delPayload);
+            else await chatServer.broadcastGlobal(delPayload);
         } catch { /* chat server may not be initialized */ }
 
-        db.logModerationAction({
+        await db.logModerationAction({
             scope_type: 'channel',
             scope_id: req.channel.id,
             actor_user_id: req.user.id,

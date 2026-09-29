@@ -1,5 +1,5 @@
 /**
- * OpenVibe.Chat — database access (better-sqlite3).
+ * OpenVibe.Chat — database access (PostgreSQL through openvibe-sdk/db; every helper is async).
  *
  * The chat functions below are OpenVibe.Live's (server/db/database.js) moved as they were:
  * same names, same arguments, same SQL, so Live's forwarded calls (server/bridge/) and the moved
@@ -12,13 +12,16 @@
  */
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
-const Database = require('better-sqlite3');
+const fs = require('fs');
+const { createDb } = require('openvibe-sdk/db');
 const config = require('../config');
 
+const MIGRATIONS = path.join(__dirname, '..', '..', 'migrations');
+const DEV_PGLITE = path.join(__dirname, '..', '..', 'data', 'pglite');
+
 let db = null;
-let _dbPath = null;
+let _idTables = null;   // tables with an `id` column: an INSERT into one returns it (lastInsertRowid)
 const _stmts = new Map();
 
 // Tables Chat writes from the cutover on; Live keeps a read mirror of each (server/bridge/live-mirror.js).
@@ -30,116 +33,107 @@ const CHAT_TABLES = {
     dm_blocks: ['id'],
     tts_voice_overrides: ['identity_key'],
     channel_sounds: ['id'],
-    relay_users: ['platform', 'username'],
+    relay_users: ['id'],
     hidden_relay_users: ['id'],
     pending_ip_messages: ['id'],
     stream_first_chats: ['chatter_key', 'channel_user_id'],
     moderation_actions: ['id'],
 };
-function getDb() {
-    if (!db) {
-        _dbPath = path.resolve(config.dbPath);
-        fs.mkdirSync(path.dirname(_dbPath), { recursive: true });
-        db = new Database(_dbPath);
-        db.pragma('journal_mode = WAL');
-        db.pragma('foreign_keys = ON');
-        db.pragma('busy_timeout = 5000');
-        try {
-            db.pragma('synchronous = NORMAL');
-            db.pragma('cache_size = -65536');
-            db.pragma('temp_store = MEMORY');
-        } catch (e) { console.warn('[DB] pragma tuning:', e.message); }
+
+/**
+ * The serving handle (ADR-035): DATABASE_URL through PgBouncer (the runtime role, DML only); migrations run
+ * first as the owner on DATABASE_DIRECT_URL. Outside production without DATABASE_URL: an embedded PGlite
+ * database in data/pglite (CHAT_PGLITE_DIR overrides it; one process). Timestamps stay SQLite-format text
+ * (ov_now(), datetime() in migrations/0001_initial.sql).
+ */
+async function openDb(cfg = config, { log = console } = {}) {
+    if (!cfg.db.url) {
+        if (cfg.nodeEnv === 'production') throw new Error('DATABASE_URL is not set: production serves from PostgreSQL (OpenVibe.Host roles/data add-service.sh chat)');
+        const dir = process.env.CHAT_PGLITE_DIR || DEV_PGLITE;
+        if (cfg.nodeEnv !== 'test') log.warn(`[DB] DATABASE_URL unset: embedded PGlite database in ${dir} (development only, one process)`);
+        fs.mkdirSync(dir, { recursive: true });
+        const d = createDb({ pglite: dir, service: 'chat', log });
+        await d.migrate({ dir: MIGRATIONS, log: quiet(log) });
+        return d;
+    }
+    if (!cfg.db.directUrl) throw new Error('DATABASE_DIRECT_URL is not set: migrations run with the owner role on a direct connection');
+    const owner = createDb({ url: cfg.db.directUrl, service: 'chat-migrate', max: 1, log });
+    try { await owner.migrate({ dir: MIGRATIONS, log: quiet(log) }); } finally { await owner.close(); }
+    return createDb({ url: cfg.db.url, service: 'chat', max: cfg.db.max, log });
+}
+function quiet(log) { return { log() {}, info() {}, warn: (...a) => log.warn(...a), error: (...a) => log.error(...a) }; }
+
+/** Open the process-wide database once, at boot (server/index.js, scripts). */
+async function initDb(cfg = config, opts) {
+    if (!db && globalThis.__ovChatTestDb) db = globalThis.__ovChatTestDb;   // tests (test/helpers/pg-preload.mjs)
+    if (!db) db = await openDb(cfg, opts);
+    if (!_idTables) {
+        const rows = await db.many(`SELECT table_name FROM information_schema.columns
+                                    WHERE table_schema = current_schema() AND column_name = 'id'`);
+        _idTables = new Set(rows.map((r) => r.table_name));
     }
     return db;
+}
+
+/** The process-wide database (openvibe-sdk/db) initDb() opened. */
+function getDb() {
+    if (!db && globalThis.__ovChatTestDb) db = globalThis.__ovChatTestDb;
+    if (!db) throw new Error('the database is not open: await initDb() at boot');
+    return db;
+}
+
+/** Tests and tools: use this handle as the process-wide database (null forgets it). */
+function setDb(handle) { db = handle; _stmts.clear(); }
+
+// An INSERT into a table with an `id` column returns it, so run() answers { changes, lastInsertRowid } as
+// better-sqlite3 did and no caller changes shape (decision: RETURNING in place of lastInsertRowid).
+const INSERT_INTO = /^\s*INSERT\s+INTO\s+([a-z_]+)/i;
+function withReturning(sql) {
+    if (/\bRETURNING\b/i.test(sql)) return sql;
+    const m = INSERT_INTO.exec(sql);
+    return m && _idTables && _idTables.has(m[1].toLowerCase()) ? `${sql} RETURNING id` : sql;
 }
 
 function stmt(sql) {
     let s = _stmts.get(sql);
     if (!s) {
-        s = getDb().prepare(sql);
+        s = getDb().prepare(withReturning(sql));
         if (_stmts.size > 500) _stmts.clear();
         _stmts.set(sql, s);
     }
     return s;
 }
 
-function run(sql, params = []) {
+async function run(sql, params = []) {
     return stmt(sql).run(...(Array.isArray(params) ? params : [params]));
 }
 
-function get(sql, params = []) {
+async function get(sql, params = []) {
     return stmt(sql).get(...(Array.isArray(params) ? params : [params]));
 }
 
-function all(sql, params = []) {
+async function all(sql, params = []) {
     return stmt(sql).all(...(Array.isArray(params) ? params : [params]));
 }
 
-function transaction(fn) {
-    return getDb().transaction(fn)();
+/** fn runs in one transaction; db calls inside it join it (openvibe-sdk/db ambient transactions). */
+async function transaction(fn) {
+    return await getDb().tx(async () => await fn());
 }
 
-function close() {
-    if (db) { try { db.close(); } catch { /* */ } }
+async function close() {
+    const d = db;
     db = null;
     _stmts.clear();
-}
-
-/**
- * Create the schema. opts.captureMirror installs this connection's TEMP triggers that record
- * every change to Chat's tables for the Live mirror — the service does; the importer does not,
- * so imported rows (which came from Live) are never sent back.
- */
-const ADDED_COLUMNS = [
-    ['emotes', 'media_url', 'TEXT'],          // Live: emote images synced to OpenVibe.Media
-    ['emotes', 'media_asset_id', 'INTEGER'],
-    ['ctx_users', 'subject_id', 'TEXT'],      // older Chat databases; auth/network-session.js looks users up by it
-    ['channel_moderation_settings', 'sub_only', 'INTEGER DEFAULT 0'],   // sub-only chat (WS-I task 6), Live has it too
-    ['ctx_channels', 'emote_sources', 'TEXT'],   // the channel's emote source switches (T3, Live's channels row)
-];
-
-function initDb({ captureMirror = false } = {}) {
-    const d = getDb();
-    d.exec(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
-    // Columns Live added after a Chat database was created (CREATE TABLE IF NOT EXISTS does not add them).
-    for (const [table, column, type] of ADDED_COLUMNS) {
-        const have = d.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
-        if (!have) d.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
-    }
-    // auth/network-session.js resolves a verified Network token to its user by subject.
-    d.exec('CREATE INDEX IF NOT EXISTS idx_ctx_users_subject ON ctx_users(subject_id)');
-    // C-04 is done: Chat is the only writer of the six tables, so there is no authority left to
-    // record. Drop the table from databases an earlier release created (it stayed one release for N-1);
-    // a new database never gets it (schema.sql no longer has it).
-    d.exec('DROP TABLE IF EXISTS table_authority');
-    if (captureMirror) installMirrorTriggers();
-    return d;
-}
-
-function installMirrorTriggers() {
-    const d = getDb();
-    const tables = [
-        ...Object.entries(CHAT_TABLES).map(([table, pk]) => [table, pk, '']),
-    ];
-    for (const [table, pk, when] of tables) {
-        const obj = (alias) => `json_object(${pk.map((c) => `'${c}', ${alias}.${c}`).join(', ')})`;
-        d.exec(`
-            CREATE TEMP TRIGGER IF NOT EXISTS mirror_${table}_ins AFTER INSERT ON main.${table} ${when}
-            BEGIN INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('${table}', 'upsert', ${obj('NEW')}); END;
-            CREATE TEMP TRIGGER IF NOT EXISTS mirror_${table}_upd AFTER UPDATE ON main.${table} ${when}
-            BEGIN INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('${table}', 'upsert', ${obj('NEW')}); END;
-            CREATE TEMP TRIGGER IF NOT EXISTS mirror_${table}_del AFTER DELETE ON main.${table} ${when}
-            BEGIN INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('${table}', 'delete', ${obj('OLD')}); END;
-        `);
-    }
+    if (d && d !== globalThis.__ovChatTestDb) { try { await d.close(); } catch { /* */ } }
 }
 
 // ── Subjects ──────────────────────────────────────────────────
 // Live user id → Network subject (usr_…) from the ctx_users projection. New rows carry it so a
 // later wave can drop Live ids.
-function subjectFor(userId) {
+async function subjectFor(userId) {
     if (!userId) return null;
-    try { return get('SELECT subject_id FROM ctx_users WHERE id = ?', [userId])?.subject_id || null; } catch { return null; }
+    try { return (await get('SELECT subject_id FROM ctx_users WHERE id = ?', [userId]))?.subject_id || null; } catch { return null; }
 }
 
 function _outbox() { return require('../events/outbox'); }
@@ -154,11 +148,11 @@ const DELETED_EVENT_IDS = 500;
  * author or who deleted it). payload.redacts asks OpenVibe.Events to turn the stored
  * chat.message.created of each id into a tombstone, so the text stops being replayable there.
  */
-function _announceDeleted(ids) {
+async function _announceDeleted(ids) {
     const list = [...new Set((ids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
     for (let i = 0; i < list.length; i += DELETED_EVENT_IDS) {
         const part = list.slice(i, i + DELETED_EVENT_IDS);
-        _outbox().enqueue({
+        await _outbox().enqueue({
             event_type: 'chat.message.deleted',
             visibility: 'public',
             subject: { type: 'chat_message', id: String(part[0]) },
@@ -172,21 +166,21 @@ function _announceDeleted(ids) {
 
 // ── Chat messages ─────────────────────────────────────────────
 
-function saveChatMessage({ stream_id, channel_user_id, user_id, anon_id, username, message, message_type, is_global, reply_to_id, source_platform, auto_delete_at, metadata }) {
+async function saveChatMessage({ stream_id, channel_user_id, user_id, anon_id, username, message, message_type, is_global, reply_to_id, source_platform, auto_delete_at, metadata }) {
     // channel_user_id = the broadcaster's user id — set for all channel/stream
     // messages so a streamer's chat history survives across sessions AND offline
     // periods (independent of the live-session stream row's lifetime).
     let chanUid = channel_user_id || null;
-    if (!chanUid && stream_id) { try { chanUid = _ctx().getStreamById(stream_id)?.user_id || null; } catch { /* ignore */ } }
+    if (!chanUid && stream_id) { try { chanUid = (await _ctx().getStreamById(stream_id))?.user_id || null; } catch { /* ignore */ } }
     const metaStr = metadata == null ? null : (typeof metadata === 'string' ? metadata : JSON.stringify(metadata));
-    const subject = subjectFor(user_id);
-    return transaction(() => {
-        const res = run(
+    const subject = await subjectFor(user_id);
+    return await transaction(async () => {
+        const res = await run(
             `INSERT INTO chat_messages (stream_id, channel_user_id, user_id, anon_id, username, message, message_type, is_global, reply_to_id, source_platform, auto_delete_at, metadata, subject_id)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [stream_id, chanUid, user_id || null, anon_id || null, username, message, message_type || 'chat', is_global ? 1 : 0, reply_to_id || null, source_platform || null, auto_delete_at || null, metaStr, subject]
         );
-        _outbox().enqueue({
+        await _outbox().enqueue({
             event_type: 'chat.message.created',
             visibility: 'public',
             actorSubject: subject,
@@ -208,16 +202,16 @@ function saveChatMessage({ stream_id, channel_user_id, user_id, anon_id, usernam
     });
 }
 
-function searchChatMessages({ query, userId, anonId, username, streamId, limit = 50, offset = 0 }) {
+async function searchChatMessages({ query, userId, anonId, username, streamId, limit = 50, offset = 0 }) {
     let sql = `SELECT cm.*, u.display_name, u.username as u_username, u.role, u.avatar_url, u.profile_color
                FROM chat_messages cm
                LEFT JOIN ctx_users u ON cm.user_id = u.id
                WHERE cm.is_deleted = 0
-                 AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)`;
+                 AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > ov_now())`;
     const params = [];
 
     if (query) {
-        sql += ` AND cm.message LIKE ?`;
+        sql += ` AND cm.message ILIKE ?`;
         params.push(`%${query}%`);
     }
     if (userId) {
@@ -229,7 +223,7 @@ function searchChatMessages({ query, userId, anonId, username, streamId, limit =
         params.push(anonId);
     }
     if (username) {
-        sql += ` AND LOWER(u.username) LIKE ?`;
+        sql += ` AND LOWER(u.username) ILIKE ?`;
         params.push(`%${username.toLowerCase()}%`);
     }
     if (streamId) {
@@ -238,73 +232,73 @@ function searchChatMessages({ query, userId, anonId, username, streamId, limit =
     }
 
     const countSql = sql.replace(/SELECT cm\.\*.*FROM/, 'SELECT COUNT(*) as c FROM');
-    const total = get(countSql, params)?.c || 0;
+    const total = (await get(countSql, params))?.c || 0;
 
     sql += ` ORDER BY cm.timestamp DESC LIMIT ? OFFSET ?`;
     params.push(limit, offset);
 
-    return { messages: all(sql, params), total };
+    return { messages: await all(sql, params), total };
 }
 
-function getUserChatHistory(userId, limit = 50, offset = 0) {
+async function getUserChatHistory(userId, limit = 50, offset = 0) {
     const sql = `SELECT cm.*, s.title as stream_title
                  FROM chat_messages cm
                  LEFT JOIN ctx_streams s ON cm.stream_id = s.id
                  WHERE cm.user_id = ? AND cm.is_deleted = 0
-                   AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)
+                   AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > ov_now())
                  ORDER BY cm.timestamp DESC LIMIT ? OFFSET ?`;
-    const messages = all(sql, [userId, limit, offset]);
-    const total = get(
+    const messages = await all(sql, [userId, limit, offset]);
+    const total = (await get(
         `SELECT COUNT(*) as c FROM chat_messages
          WHERE user_id = ? AND is_deleted = 0
-           AND (auto_delete_at IS NULL OR datetime(auto_delete_at) > CURRENT_TIMESTAMP)`,
+           AND (auto_delete_at IS NULL OR datetime(auto_delete_at) > ov_now())`,
         [userId]
-    )?.c || 0;
+    ))?.c || 0;
     return { messages, total };
 }
 
-function getChatReplay(streamId, fromTime, toTime) {
+async function getChatReplay(streamId, fromTime, toTime) {
     let sql = `SELECT cm.*, u.avatar_url, u.profile_color, u.role, u.display_name
                FROM chat_messages cm
                LEFT JOIN ctx_users u ON cm.user_id = u.id
                WHERE cm.stream_id = ? AND cm.is_deleted = 0 AND cm.message_type = 'chat'
-                 AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)`;
+                 AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > ov_now())`;
     const params = [streamId];
     if (fromTime) { sql += ` AND cm.timestamp >= ?`; params.push(fromTime); }
     if (toTime) { sql += ` AND cm.timestamp <= ?`; params.push(toTime); }
     sql += ` ORDER BY cm.timestamp ASC`;
-    return all(sql, params);
+    return await all(sql, params);
 }
 
 /**
  * Get a single chat message by ID.
  */
-function getChatMessageById(id) {
-    return get('SELECT * FROM chat_messages WHERE id = ?', [id]);
+async function getChatMessageById(id) {
+    return chatMessageRow(await get('SELECT * FROM chat_messages WHERE id = ?', [id]));
 }
 
 /** Shallow-merge a JSON patch into chat_messages.metadata (e.g. an async translation). */
-function mergeChatMessageMetadata(id, patch) {
+async function mergeChatMessageMetadata(id, patch) {
     if (!id || !patch || typeof patch !== 'object') return;
-    const row = get('SELECT metadata FROM chat_messages WHERE id = ?', [id]);
+    const row = await get('SELECT metadata FROM chat_messages WHERE id = ?', [id]);
     if (!row) return;
     let meta = {};
     try { meta = row.metadata ? JSON.parse(row.metadata) : {}; } catch { meta = {}; }
     if (!meta || typeof meta !== 'object' || Array.isArray(meta)) meta = {};
-    return run('UPDATE chat_messages SET metadata = ? WHERE id = ?', [JSON.stringify({ ...meta, ...patch }), id]);
+    return await run('UPDATE chat_messages SET metadata = ? WHERE id = ?', [JSON.stringify({ ...meta, ...patch }), id]);
 }
 
 /**
  * Soft-delete a chat message by ID. Sets is_deleted=1 and records who deleted it. Every delete below
  * also announces chat.message.deleted in the same transaction (_announceDeleted).
  */
-function deleteChatMessage(id, deletedBy = null) {
-    return transaction(() => {
-        const res = run(
-            'UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP WHERE id = ?',
+async function deleteChatMessage(id, deletedBy = null) {
+    return await transaction(async () => {
+        const res = await run(
+            'UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = ov_now() WHERE id = ?',
             [deletedBy, id]
         );
-        if (res.changes) _announceDeleted([id]);
+        if (res.changes) await _announceDeleted([id]);
         return res;
     });
 }
@@ -313,15 +307,15 @@ function deleteChatMessage(id, deletedBy = null) {
  * Soft-delete ALL chat messages from a specific user, optionally scoped to a stream.
  * Returns the list of deleted message IDs for real-time broadcast.
  */
-function deleteUserChatMessages(userId, { streamId = null, deletedBy = null } = {}) {
+async function deleteUserChatMessages(userId, { streamId = null, deletedBy = null } = {}) {
     const condition = streamId
         ? 'user_id = ? AND stream_id = ? AND is_deleted = 0'
         : 'user_id = ? AND is_deleted = 0';
     const params = streamId ? [userId, streamId] : [userId];
-    return transaction(() => {
-        const ids = all(`SELECT id FROM chat_messages WHERE ${condition}`, params).map(m => m.id);
+    return await transaction(async () => {
+        const ids = (await all(`SELECT id FROM chat_messages WHERE ${condition} ORDER BY id`, params)).map(m => m.id);
         if (ids.length === 0) return [];
-        _softDeleteIds(ids, deletedBy);
+        await _softDeleteIds(ids, deletedBy);
         return ids;
     });
 }
@@ -329,15 +323,15 @@ function deleteUserChatMessages(userId, { streamId = null, deletedBy = null } = 
 /**
  * Soft-delete ALL chat messages from a specific anon_id, optionally scoped to stream.
  */
-function deleteAnonChatMessages(anonId, { streamId = null, deletedBy = null } = {}) {
+async function deleteAnonChatMessages(anonId, { streamId = null, deletedBy = null } = {}) {
     const condition = streamId
         ? 'anon_id = ? AND stream_id = ? AND is_deleted = 0'
         : 'anon_id = ? AND is_deleted = 0';
     const params = streamId ? [anonId, streamId] : [anonId];
-    return transaction(() => {
-        const ids = all(`SELECT id FROM chat_messages WHERE ${condition}`, params).map(m => m.id);
+    return await transaction(async () => {
+        const ids = (await all(`SELECT id FROM chat_messages WHERE ${condition} ORDER BY id`, params)).map(m => m.id);
         if (ids.length === 0) return [];
-        _softDeleteIds(ids, deletedBy);
+        await _softDeleteIds(ids, deletedBy);
         return ids;
     });
 }
@@ -345,33 +339,33 @@ function deleteAnonChatMessages(anonId, { streamId = null, deletedBy = null } = 
 /**
  * Soft-delete ALL messages from a relayed external username (e.g. "[Twitch] foobar")
  */
-function deleteRelayUserMessages(username, { streamId = null, deletedBy = null } = {}) {
+async function deleteRelayUserMessages(username, { streamId = null, deletedBy = null } = {}) {
     const condition = streamId
         ? 'username = ? AND stream_id = ? AND is_deleted = 0'
         : 'username = ? AND is_deleted = 0';
     const params = streamId ? [username, streamId] : [username];
-    return transaction(() => {
-        const ids = all(`SELECT id FROM chat_messages WHERE ${condition}`, params).map(m => m.id);
+    return await transaction(async () => {
+        const ids = (await all(`SELECT id FROM chat_messages WHERE ${condition} ORDER BY id`, params)).map(m => m.id);
         if (ids.length === 0) return [];
-        _softDeleteIds(ids, deletedBy);
+        await _softDeleteIds(ids, deletedBy);
         return ids;
     });
 }
 
 /** Mark `ids` deleted (in chunks, under SQLite's variable limit) and announce them. In a transaction. */
-function _softDeleteIds(ids, deletedBy) {
+async function _softDeleteIds(ids, deletedBy) {
     for (let i = 0; i < ids.length; i += DELETED_EVENT_IDS) {
         const part = ids.slice(i, i + DELETED_EVENT_IDS);
-        run(
-            `UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP WHERE id IN (${part.map(() => '?').join(',')})`,
+        await run(
+            `UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = ov_now() WHERE id IN (${part.map(() => '?').join(',')})`,
             [deletedBy, ...part]
         );
     }
-    _announceDeleted(ids);
+    await _announceDeleted(ids);
 }
 
-function deleteExpiredChatMessages(limit = 500) {
-    const rows = all(
+async function deleteExpiredChatMessages(limit = 500) {
+    const rows = await all(
         `SELECT id, stream_id
          FROM chat_messages
          WHERE is_deleted = 0
@@ -379,8 +373,8 @@ function deleteExpiredChatMessages(limit = 500) {
            -- Compared raw, not through datetime(): wrapping the column in a function makes the
            -- index on auto_delete_at unusable, and this sweep runs every 30 seconds against the
            -- biggest table on the site. Values are stored in the same 'YYYY-MM-DD HH:MM:SS' shape
-           -- CURRENT_TIMESTAMP produces, so a string comparison sorts identically.
-           AND auto_delete_at <= CURRENT_TIMESTAMP
+           -- ov_now() produces, so a string comparison sorts identically.
+           AND auto_delete_at <= ov_now()
          ORDER BY auto_delete_at ASC
          LIMIT ?`,
         [Math.max(1, Number(limit) || 500)]
@@ -389,14 +383,14 @@ function deleteExpiredChatMessages(limit = 500) {
 
     const ids = rows.map(row => row.id);
     const placeholders = ids.map(() => '?').join(',');
-    transaction(() => {
-        run(
+    await transaction(async () => {
+        await run(
             `UPDATE chat_messages
-             SET is_deleted = 1, deleted_at = CURRENT_TIMESTAMP
+             SET is_deleted = 1, deleted_at = ov_now()
              WHERE id IN (${placeholders})`,
             ids
         );
-        _announceDeleted(ids);
+        await _announceDeleted(ids);
     });
     return rows;
 }
@@ -404,34 +398,34 @@ function deleteExpiredChatMessages(limit = 500) {
 // Time ranges (purge, its preview, the log filter): the dashboard sends ISO instants ('…T…Z') and
 // rows keep SQLite's 'YYYY-MM-DD HH:MM:SS'. Compared as TEXT, 'T' sorts after ' ', so a range
 // matched nothing on its first day and all of its last; datetime(?) reads both forms as UTC.
-function deleteChatMessagesByTimeRange(streamId, fromTime, toTime, deletedBy) {
+async function deleteChatMessagesByTimeRange(streamId, fromTime, toTime, deletedBy) {
     // Global chat is is_global = 1. The ids are read first, in the same transaction, to announce them.
     const where = streamId
         ? 'stream_id = ? AND timestamp >= datetime(?) AND timestamp <= datetime(?) AND is_deleted = 0'
         : 'is_global = 1 AND timestamp >= datetime(?) AND timestamp <= datetime(?) AND is_deleted = 0';
     const params = streamId ? [streamId, fromTime, toTime] : [fromTime, toTime];
-    return transaction(() => {
-        const ids = all(`SELECT id FROM chat_messages WHERE ${where}`, params).map(m => m.id);
-        const res = run(
-            `UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = CURRENT_TIMESTAMP WHERE ${where}`,
+    return await transaction(async () => {
+        const ids = (await all(`SELECT id FROM chat_messages WHERE ${where} ORDER BY id`, params)).map(m => m.id);
+        const res = await run(
+            `UPDATE chat_messages SET is_deleted = 1, deleted_by = ?, deleted_at = ov_now() WHERE ${where}`,
             [deletedBy, ...params]
         );
-        _announceDeleted(ids);
+        await _announceDeleted(ids);
         // The ids too, so the purge reaches every surface that showed them (not only the stream's sockets).
         return Object.assign(res, { ids });
     });
 }
 
-function countChatMessagesByTimeRange(streamId, fromTime, toTime) {
+async function countChatMessagesByTimeRange(streamId, fromTime, toTime) {
     let row;
     if (streamId) {
-        row = get(
+        row = await get(
             `SELECT COUNT(*) as cnt FROM chat_messages
              WHERE stream_id = ? AND timestamp >= datetime(?) AND timestamp <= datetime(?) AND is_deleted = 0`,
             [streamId, fromTime, toTime]
         );
     } else {
-        row = get(
+        row = await get(
             `SELECT COUNT(*) as cnt FROM chat_messages
              WHERE is_global = 1 AND timestamp >= datetime(?) AND timestamp <= datetime(?) AND is_deleted = 0`,
             [fromTime, toTime]
@@ -440,13 +434,13 @@ function countChatMessagesByTimeRange(streamId, fromTime, toTime) {
     return row?.cnt || 0;
 }
 
-function getChatLogs({ streamId, username, search, from, to, messageType, page = 1, limit = 50, includeDeleted = false } = {}) {
+async function getChatLogs({ streamId, username, search, from, to, messageType, page = 1, limit = 50, includeDeleted = false } = {}) {
     const conditions = [];
     const params = [];
 
     if (streamId) { conditions.push('stream_id = ?'); params.push(streamId); }
-    if (username) { conditions.push('username LIKE ?'); params.push(`%${username}%`); }
-    if (search) { conditions.push('message LIKE ?'); params.push(`%${search}%`); }
+    if (username) { conditions.push('username ILIKE ?'); params.push(`%${username}%`); }
+    if (search) { conditions.push('message ILIKE ?'); params.push(`%${search}%`); }
     if (from) { conditions.push('timestamp >= datetime(?)'); params.push(from); }
     if (to) { conditions.push('timestamp <= datetime(?)'); params.push(to); }
     if (messageType) { conditions.push('message_type = ?'); params.push(messageType); }
@@ -455,19 +449,19 @@ function getChatLogs({ streamId, username, search, from, to, messageType, page =
     const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
     const offset = (page - 1) * limit;
 
-    const countRow = get(`SELECT COUNT(*) as total FROM chat_messages ${where}`, params);
+    const countRow = await get(`SELECT COUNT(*) as total FROM chat_messages ${where}`, params);
     const total = countRow?.total || 0;
-    const rows = all(
+    const rows = (await all(
         `SELECT * FROM chat_messages ${where} ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
         [...params, limit, offset]
-    );
+    )).map(chatMessageRow);
 
     return { rows, total, page, limit, totalPages: Math.ceil(total / limit) };
 }
 
-function getRecentChatActivity(streamId, minutes) {
+async function getRecentChatActivity(streamId, minutes) {
     const cutoff = new Date(Date.now() - minutes * 60 * 1000).toISOString();
-    const row = get(
+    const row = await get(
         `SELECT COUNT(*) as cnt FROM chat_messages
          WHERE stream_id = ? AND timestamp >= ? AND is_deleted = 0 AND is_global = 0 AND message_type = 'chat'`,
         [streamId, cutoff]
@@ -479,32 +473,32 @@ function getRecentChatActivity(streamId, minutes) {
  * A user was renamed in Live (admin edit): chat_messages.username stores the display name at
  * creation time, so Live rewrote its rows in the same request. Chat does the same for its own.
  */
-function renameUserChatMessages(userId, newChatName) {
-    return run('UPDATE chat_messages SET username = ? WHERE user_id = ?', [newChatName, userId]);
+async function renameUserChatMessages(userId, newChatName) {
+    return await run('UPDATE chat_messages SET username = ? WHERE user_id = ?', [newChatName, userId]);
 }
 
 // ── Relay (external platform) chatters ───────────────────────
 
 // Record a chat-relay (external platform) user's activity; keeps the earliest
 // first_seen as their "join date". Keyed case-insensitively by platform+username.
-function recordRelayUser(platform, username) {
+async function recordRelayUser(platform, username) {
     if (!platform || !username) return;
     const key = String(username).toLowerCase();
     try {
-        run(`INSERT INTO relay_users (platform, username, display_name, first_seen, last_seen, message_count)
-             VALUES (?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 1)
+        await run(`INSERT INTO relay_users (platform, username, display_name, first_seen, last_seen, message_count)
+             VALUES (?, ?, ?, ov_now(), ov_now(), 1)
              ON CONFLICT(platform, username) DO UPDATE SET
-                last_seen = CURRENT_TIMESTAMP,
-                message_count = message_count + 1,
+                last_seen = ov_now(),
+                message_count = relay_users.message_count + 1,
                 display_name = excluded.display_name`,
             [String(platform).toLowerCase(), key, String(username)]);
     } catch { /* non-critical */ }
 }
-function getRelayUser(platform, username) {
+async function getRelayUser(platform, username) {
     if (!platform || !username) return null;
     // rowid is a stable integer id for a relay user (no dedicated id column); used to key
     // their chat-AI insight in chat_ai_summaries.
-    return get('SELECT rowid AS id, * FROM relay_users WHERE platform = ? AND username = ?',
+    return await get('SELECT * FROM relay_users WHERE platform = ? AND username = ?',
         [String(platform).toLowerCase(), String(username).toLowerCase()]) || null;
 }
 
@@ -512,18 +506,18 @@ function getRelayUser(platform, username) {
 // NULL user_id. Match a specific relay user by the trailing "] name" (LIKE is
 // case-insensitive for ASCII in SQLite), scoped to their platform.
 function _likeEscape(s) { return String(s).replace(/[\\%_]/g, '\\$&'); }
-const _RELAY_MATCH = `cm.user_id IS NULL AND cm.source_platform = ? AND cm.username LIKE ? ESCAPE '\\'`;
+const _RELAY_MATCH = `cm.user_id IS NULL AND cm.source_platform = ? AND cm.username ILIKE ? ESCAPE '\\'`;
 function _relayMatchParams(platform, rawUsername) {
     return [String(platform).toLowerCase(), '%] ' + _likeEscape(String(rawUsername))];
 }
 
 // A relay user's message history (for the "Chat Logs" viewer).
-function getRelayUserChatHistory(platform, rawUsername, { limit = 50, offset = 0, query = '' } = {}) {
+async function getRelayUserChatHistory(platform, rawUsername, { limit = 50, offset = 0, query = '' } = {}) {
     let where = `${_RELAY_MATCH} AND cm.is_deleted = 0`;
     const params = _relayMatchParams(platform, rawUsername);
-    if (query) { where += ' AND cm.message LIKE ?'; params.push('%' + query + '%'); }
-    const total = get(`SELECT COUNT(*) AS c FROM chat_messages cm WHERE ${where}`, params)?.c || 0;
-    const rows = all(
+    if (query) { where += ' AND cm.message ILIKE ?'; params.push('%' + query + '%'); }
+    const total = (await get(`SELECT COUNT(*) AS c FROM chat_messages cm WHERE ${where}`, params))?.c || 0;
+    const rows = await all(
         `SELECT cm.id, cm.username, cm.message, cm.message_type, cm.timestamp, cm.stream_id,
                 cm.source_platform, s.title AS stream_title
          FROM chat_messages cm LEFT JOIN ctx_streams s ON cm.stream_id = s.id
@@ -536,9 +530,9 @@ function getRelayUserChatHistory(platform, rawUsername, { limit = 50, offset = 0
 /**
  * Hide or ban a relayed external user.
  */
-function hideRelayUser({ channelId, platform, externalUsername, action = 'hide', reason, createdBy }) {
-    return run(
-        `INSERT OR REPLACE INTO hidden_relay_users (channel_id, platform, external_username, action, reason, created_by)
+async function hideRelayUser({ channelId, platform, externalUsername, action = 'hide', reason, createdBy }) {
+    return await run(
+        `INSERT INTO hidden_relay_users (channel_id, platform, external_username, action, reason, created_by)
          VALUES (?, ?, ?, ?, ?, ?)`,
         [channelId || null, platform, externalUsername, action, reason || null, createdBy]
     );
@@ -548,8 +542,8 @@ function hideRelayUser({ channelId, platform, externalUsername, action = 'hide',
  * Check if a relayed user is hidden/banned.
  * Checks both channel-scoped and site-wide entries (channel_id IS NULL).
  */
-function isRelayUserHidden(channelId, platform, externalUsername) {
-    return !!get(
+async function isRelayUserHidden(channelId, platform, externalUsername) {
+    return !!await get(
         `SELECT 1 FROM hidden_relay_users
          WHERE platform = ? AND external_username = ? AND (channel_id = ? OR channel_id IS NULL)`,
         [platform, externalUsername, channelId]
@@ -559,8 +553,8 @@ function isRelayUserHidden(channelId, platform, externalUsername) {
 /**
  * Unhide/unban a relayed external user.
  */
-function unhideRelayUser(id) {
-    return run('DELETE FROM hidden_relay_users WHERE id = ?', [id]);
+async function unhideRelayUser(id) {
+    return await run('DELETE FROM hidden_relay_users WHERE id = ?', [id]);
 }
 
 /**
@@ -568,9 +562,9 @@ function unhideRelayUser(id) {
  * channel). Scoped to a single relay identity — never touches a registered
  * openvibelive account of the same name. `channel_id IS ?` matches NULL safely.
  */
-function unhideRelayUserByIdentity(channelId, platform, externalUsername) {
-    return run(
-        'DELETE FROM hidden_relay_users WHERE platform = ? AND external_username = ? AND channel_id IS ?',
+async function unhideRelayUserByIdentity(channelId, platform, externalUsername) {
+    return await run(
+        'DELETE FROM hidden_relay_users WHERE platform = ? AND external_username = ? AND channel_id IS NOT DISTINCT FROM ?',
         [platform, externalUsername, channelId || null]
     );
 }
@@ -586,17 +580,17 @@ function anonSubjectId(anonId) {
 // Anon meta for the context menu: first-seen (when their anon number was assigned — Live's
 // anon_ip_mappings, passed in by the caller) and first-chat (their earliest chat message), plus
 // total message count.
-function getAnonMeta(anonId, firstSeenAt = null) {
+async function getAnonMeta(anonId, firstSeenAt = null) {
     const num = anonSubjectId(anonId);
-    const firstChat = get(
+    const firstChat = (await get(
         `SELECT MIN(timestamp) AS t FROM chat_messages
          WHERE anon_id = ? AND user_id IS NULL AND is_deleted = 0`, [String(anonId)]
-    )?.t || null;
-    const count = get(
+    ))?.t || null;
+    const count = (await get(
         `SELECT COUNT(*) AS c FROM chat_messages
          WHERE anon_id = ? AND user_id IS NULL AND is_deleted = 0
-           AND (auto_delete_at IS NULL OR datetime(auto_delete_at) > CURRENT_TIMESTAMP)`, [String(anonId)]
-    )?.c || 0;
+           AND (auto_delete_at IS NULL OR datetime(auto_delete_at) > ov_now())`, [String(anonId)]
+    ))?.c || 0;
     return {
         anon_id: anonId,
         anon_num: num || null,
@@ -607,13 +601,13 @@ function getAnonMeta(anonId, firstSeenAt = null) {
 }
 
 // An anon's message history (for the "Chat Logs" viewer).
-function getAnonChatHistory(anonId, { limit = 50, offset = 0, query = '' } = {}) {
+async function getAnonChatHistory(anonId, { limit = 50, offset = 0, query = '' } = {}) {
     let where = `cm.anon_id = ? AND cm.user_id IS NULL AND cm.is_deleted = 0
-                 AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)`;
+                 AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > ov_now())`;
     const params = [String(anonId)];
-    if (query) { where += ' AND cm.message LIKE ?'; params.push('%' + query + '%'); }
-    const total = get(`SELECT COUNT(*) AS c FROM chat_messages cm WHERE ${where}`, params)?.c || 0;
-    const rows = all(
+    if (query) { where += ' AND cm.message ILIKE ?'; params.push('%' + query + '%'); }
+    const total = (await get(`SELECT COUNT(*) AS c FROM chat_messages cm WHERE ${where}`, params))?.c || 0;
+    const rows = await all(
         `SELECT cm.id, cm.username, cm.anon_id, cm.message, cm.message_type, cm.timestamp, cm.stream_id,
                 s.title AS stream_title
          FROM chat_messages cm LEFT JOIN ctx_streams s ON cm.stream_id = s.id
@@ -631,8 +625,8 @@ function getAnonChatHistory(anonId, { limit = 50, offset = 0, query = '' } = {})
  * @param {number} channelUserId - the streamer's user ID
  * @returns {boolean} true if this is their first time
  */
-function isFirstChatInChannel(chatterKey, channelUserId) {
-    const row = get(
+async function isFirstChatInChannel(chatterKey, channelUserId) {
+    const row = await get(
         'SELECT 1 FROM stream_first_chats WHERE chatter_key = ? AND channel_user_id = ?',
         [chatterKey, channelUserId]
     );
@@ -642,9 +636,9 @@ function isFirstChatInChannel(chatterKey, channelUserId) {
 /**
  * Record that a chatter has chatted in a streamer's channel.
  */
-function recordFirstChat(chatterKey, channelUserId) {
-    run(
-        'INSERT OR IGNORE INTO stream_first_chats (chatter_key, channel_user_id) VALUES (?, ?)',
+async function recordFirstChat(chatterKey, channelUserId) {
+    await run(
+        'INSERT INTO stream_first_chats (chatter_key, channel_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING',
         [chatterKey, channelUserId]
     );
 }
@@ -655,14 +649,14 @@ function recordFirstChat(chatterKey, channelUserId) {
  * Log a moderation action for auditing.
  * Used by canvas, chat moderation, bans, etc.
  */
-function logModerationAction({ scope_type, scope_id, actor_user_id, target_user_id, action_type, details }) {
-    const actorSubject = subjectFor(actor_user_id);
-    return transaction(() => {
-        const res = run(`
+async function logModerationAction({ scope_type, scope_id, actor_user_id, target_user_id, action_type, details }) {
+    const actorSubject = await subjectFor(actor_user_id);
+    return await transaction(async () => {
+        const res = await run(`
             INSERT INTO moderation_actions (scope_type, scope_id, actor_user_id, target_user_id, action_type, details, actor_subject_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         `, [scope_type || 'site', scope_id || null, actor_user_id || null, target_user_id || null, action_type, JSON.stringify(details || {}), actorSubject]);
-        _outbox().enqueue({
+        await _outbox().enqueue({
             event_type: 'chat.moderation.action',
             visibility: 'internal',
             actorSubject,
@@ -675,7 +669,7 @@ function logModerationAction({ scope_type, scope_id, actor_user_id, target_user_
                 actor_user_id: actor_user_id || null,
                 actor_subject: actorSubject,
                 target_user_id: target_user_id || null,
-                target_subject: subjectFor(target_user_id),
+                target_subject: await subjectFor(target_user_id),
                 details: details || {},
             },
         });
@@ -688,8 +682,8 @@ function logModerationAction({ scope_type, scope_id, actor_user_id, target_user_
 /**
  * Hold a message for IP approval.
  */
-function holdMessageForApproval({ channelId, streamId, ip, userId, anonId, username, message }) {
-    return run(
+async function holdMessageForApproval({ channelId, streamId, ip, userId, anonId, username, message }) {
+    return await run(
         `INSERT INTO pending_ip_messages (channel_id, stream_id, ip_address, user_id, anon_id, username, message)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
         [channelId, streamId, ip, userId || null, anonId || null, username, message]
@@ -700,16 +694,16 @@ function holdMessageForApproval({ channelId, streamId, ip, userId, anonId, usern
  * Approve or deny a pending IP message. If approved, auto-approve the IP too (approved_ips is
  * Live's table: the approval goes through live-context).
  */
-function reviewPendingIpMessage(id, { status, reviewedBy, channelId }) {
+async function reviewPendingIpMessage(id, { status, reviewedBy, channelId }) {
     // Scoped to the channel the caller was authorised for, so a message id from another channel's
     // queue matches nothing.
     const scoped = channelId != null;
     const res = scoped
-        ? run('UPDATE pending_ip_messages SET status = ?, reviewed_by = ? WHERE id = ? AND channel_id = ?', [status, reviewedBy, id, channelId])
-        : run('UPDATE pending_ip_messages SET status = ?, reviewed_by = ? WHERE id = ?', [status, reviewedBy, id]);
+        ? await run('UPDATE pending_ip_messages SET status = ?, reviewed_by = ? WHERE id = ? AND channel_id = ?', [status, reviewedBy, id, channelId])
+        : await run('UPDATE pending_ip_messages SET status = ?, reviewed_by = ? WHERE id = ?', [status, reviewedBy, id]);
     if (!res.changes) return;
     if (status === 'approved') {
-        const msg = get('SELECT * FROM pending_ip_messages WHERE id = ?', [id]);
+        const msg = await get('SELECT * FROM pending_ip_messages WHERE id = ?', [id]);
         if (msg) _ctx().approveIp(channelId || msg.channel_id, msg.ip_address, reviewedBy, 'manual');
     }
 }
@@ -717,9 +711,9 @@ function reviewPendingIpMessage(id, { status, reviewedBy, channelId }) {
 /**
  * Bulk-approve all pending messages from a specific IP in a channel.
  */
-function approveAllFromIp(channelId, ip, reviewedBy) {
+async function approveAllFromIp(channelId, ip, reviewedBy) {
     _ctx().approveIp(channelId, ip, reviewedBy, 'manual');
-    return run(
+    return await run(
         "UPDATE pending_ip_messages SET status = 'approved', reviewed_by = ? WHERE channel_id = ? AND ip_address = ? AND status = 'pending'",
         [reviewedBy, channelId, ip]
     );
@@ -728,94 +722,94 @@ function approveAllFromIp(channelId, ip, reviewedBy) {
 /**
  * Deny all pending messages from a specific IP in a channel.
  */
-function denyAllFromIp(channelId, ip, reviewedBy) {
-    return run(
+async function denyAllFromIp(channelId, ip, reviewedBy) {
+    return await run(
         "UPDATE pending_ip_messages SET status = 'denied', reviewed_by = ? WHERE channel_id = ? AND ip_address = ? AND status = 'pending'",
         [reviewedBy, channelId, ip]
     );
 }
 
 // ── Per-user TTS voice overrides (admin-set) ─────────────────
-function getTtsVoiceOverride(identityKey) {
+async function getTtsVoiceOverride(identityKey) {
     try {
         const k = String(identityKey || '').trim().toLowerCase();
         if (!k) return null;
-        const r = get('SELECT voice, pitch, speed, gap FROM tts_voice_overrides WHERE identity_key = ?', [k]);
+        const r = await get('SELECT voice, pitch, speed, gap FROM tts_voice_overrides WHERE identity_key = ?', [k]);
         if (!r) return null;
         return { voice: r.voice, pitch: r.pitch, speed: r.speed, gap: r.gap || 0 };
     } catch { return null; }
 }
-function setTtsVoiceOverride(identityKey, params, setBy) {
+async function setTtsVoiceOverride(identityKey, params, setBy) {
     const k = String(identityKey || '').trim().toLowerCase();
     if (!k) return false;
-    run(`INSERT INTO tts_voice_overrides (identity_key, voice, pitch, speed, gap, set_by, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    await run(`INSERT INTO tts_voice_overrides (identity_key, voice, pitch, speed, gap, set_by, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ov_now())
          ON CONFLICT(identity_key) DO UPDATE SET voice=excluded.voice, pitch=excluded.pitch,
-             speed=excluded.speed, gap=excluded.gap, set_by=excluded.set_by, updated_at=CURRENT_TIMESTAMP`,
+             speed=excluded.speed, gap=excluded.gap, set_by=excluded.set_by, updated_at=ov_now()`,
         [k, params.voice, params.pitch, params.speed, params.gap || 0, setBy || null]);
     return true;
 }
-function deleteTtsVoiceOverride(identityKey) {
-    try { run('DELETE FROM tts_voice_overrides WHERE identity_key = ?', [String(identityKey || '').trim().toLowerCase()]); return true; } catch { return false; }
+async function deleteTtsVoiceOverride(identityKey) {
+    try { await run('DELETE FROM tts_voice_overrides WHERE identity_key = ?', [String(identityKey || '').trim().toLowerCase()]); return true; } catch { return false; }
 }
 
 // ── Channel sound commands (viewer-uploadable) ───────────────
-function createChannelSound({ channel_owner_id, command, url, mime = 'audio/mpeg', duration_seconds = 0, created_by = null, created_by_name = '', emote_code = '' }) {
-    return run(
+async function createChannelSound({ channel_owner_id, command, url, mime = 'audio/mpeg', duration_seconds = 0, created_by = null, created_by_name = '', emote_code = '' }) {
+    return await run(
         `INSERT INTO channel_sounds (channel_owner_id, command, url, mime, duration_seconds, created_by, created_by_name, emote_code, created_by_subject_id)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        [channel_owner_id, command, url, mime, duration_seconds, created_by, created_by_name, emote_code || '', subjectFor(created_by)]
+        [channel_owner_id, command, url, mime, duration_seconds, created_by, created_by_name, emote_code || '', await subjectFor(created_by)]
     );
 }
 // Update the shared emote_code for all sounds under a command (an emote is per-command).
-function setChannelSoundEmote(ownerId, command, emoteCode) {
-    return run('UPDATE channel_sounds SET emote_code = ? WHERE channel_owner_id = ? AND command = ?',
+async function setChannelSoundEmote(ownerId, command, emoteCode) {
+    return await run('UPDATE channel_sounds SET emote_code = ? WHERE channel_owner_id = ? AND command = ?',
         [emoteCode || '', ownerId, String(command || '').toLowerCase()]);
 }
 
-function getChannelSounds(ownerId) {
-    return all(
+async function getChannelSounds(ownerId) {
+    return await all(
         'SELECT * FROM channel_sounds WHERE channel_owner_id = ? AND is_approved = 1 ORDER BY command',
         [ownerId]
     );
 }
 
-function getChannelSoundByCommand(ownerId, command) {
+async function getChannelSoundByCommand(ownerId, command) {
     // A command may have multiple uploaded sounds — pick one at random each play.
-    return get(
+    return await get(
         'SELECT * FROM channel_sounds WHERE channel_owner_id = ? AND command = ? AND is_approved = 1 ORDER BY RANDOM() LIMIT 1',
         [ownerId, String(command || '').toLowerCase()]
     );
 }
 
-function getChannelSoundById(id) {
-    return get('SELECT * FROM channel_sounds WHERE id = ?', [id]);
+async function getChannelSoundById(id) {
+    return await get('SELECT * FROM channel_sounds WHERE id = ?', [id]);
 }
 
-function countChannelSounds(ownerId) {
-    const row = get('SELECT COUNT(*) as count FROM channel_sounds WHERE channel_owner_id = ?', [ownerId]);
+async function countChannelSounds(ownerId) {
+    const row = await get('SELECT COUNT(*) as count FROM channel_sounds WHERE channel_owner_id = ?', [ownerId]);
     return row ? row.count : 0;
 }
 
-function countChannelSoundsByUploader(ownerId, uploaderId) {
-    const row = get('SELECT COUNT(*) as count FROM channel_sounds WHERE channel_owner_id = ? AND created_by = ?', [ownerId, uploaderId]);
+async function countChannelSoundsByUploader(ownerId, uploaderId) {
+    const row = await get('SELECT COUNT(*) as count FROM channel_sounds WHERE channel_owner_id = ? AND created_by = ?', [ownerId, uploaderId]);
     return row ? row.count : 0;
 }
 
-function deleteChannelSound(id) {
-    return run('DELETE FROM channel_sounds WHERE id = ?', [id]);
+async function deleteChannelSound(id) {
+    return await run('DELETE FROM channel_sounds WHERE id = ?', [id]);
 }
 
 // Rename a whole !command group (a command may hold several sounds).
-function renameChannelSoundCommand(ownerId, oldCommand, newCommand) {
-    return run('UPDATE channel_sounds SET command = ? WHERE channel_owner_id = ? AND command = ?',
+async function renameChannelSoundCommand(ownerId, oldCommand, newCommand) {
+    return await run('UPDATE channel_sounds SET command = ? WHERE channel_owner_id = ? AND command = ?',
         [String(newCommand || '').toLowerCase(), ownerId, String(oldCommand || '').toLowerCase()]);
 }
 
 // Sounds attach emotes BY CODE — keep those references alive when an emote
 // is renamed so the streamer's emote+sound combos don't silently break.
-function updateChannelSoundEmoteRefs(ownerId, oldCode, newCode) {
-    return run('UPDATE channel_sounds SET emote_code = ? WHERE channel_owner_id = ? AND emote_code = ?',
+async function updateChannelSoundEmoteRefs(ownerId, oldCode, newCode) {
+    return await run('UPDATE channel_sounds SET emote_code = ? WHERE channel_owner_id = ? AND emote_code = ?',
         [newCode || '', ownerId, oldCode]);
 }
 
@@ -823,18 +817,18 @@ function updateChannelSoundEmoteRefs(ownerId, oldCode, newCode) {
 // Same SQL and shapes as Live's database.js helpers of the same name; usernames come from the
 // ctx_users projection instead of Live's users table.
 
-function isChannelModerator(userId, channelId) {
-    return !!get('SELECT 1 FROM channel_moderators WHERE user_id = ? AND channel_id = ?', [userId, channelId]);
+async function isChannelModerator(userId, channelId) {
+    return !!await get('SELECT 1 FROM channel_moderators WHERE user_id = ? AND channel_id = ?', [userId, channelId]);
 }
 
 /** The channel_moderation_settings row as it is, or null when the channel has none (defaults are Live's). */
-function getChannelModerationSettingsRow(channelId) {
-    return get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [Number(channelId)]) || null;
+async function getChannelModerationSettingsRow(channelId) {
+    return await get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [Number(channelId)]) || null;
 }
 
 /** A channel's moderators, with names, oldest first (Live's getChannelModerators). */
-function getChannelModerators(channelId) {
-    return all(`
+async function getChannelModerators(channelId) {
+    return await all(`
         SELECT cm.id, cm.user_id, cm.added_by, cm.created_at,
                u.username, u.display_name, u.avatar_url,
                a.username as added_by_username
@@ -847,16 +841,16 @@ function getChannelModerators(channelId) {
 }
 
 /** The channel's moderator user ids, oldest first (Live's policy answer carries the same list). */
-function getChannelModeratorIds(channelId) {
-    return all('SELECT user_id FROM channel_moderators WHERE channel_id = ? ORDER BY created_at ASC, id ASC', [channelId]).map((r) => r.user_id);
+async function getChannelModeratorIds(channelId) {
+    return (await all('SELECT user_id FROM channel_moderators WHERE channel_id = ? ORDER BY created_at ASC, id ASC', [channelId])).map((r) => r.user_id);
 }
 
 /**
  * The channels a user moderates (Live's getChannelsByModerator). Channel title and owner come from
  * the ctx_channels / ctx_users projections; the extra `id` alias is what the dashboard reads.
  */
-function getChannelsByModerator(userId) {
-    return all(`
+async function getChannelsByModerator(userId) {
+    return await all(`
         SELECT cm.channel_id, cm.channel_id AS id, c.title,
                c.user_id AS user_id, c.user_id AS owner_user_id, u.username AS owner_username
         FROM channel_moderators cm
@@ -868,15 +862,15 @@ function getChannelsByModerator(userId) {
 }
 
 /** Custom emotes marked global (Live's getGlobalEmotes). */
-function getGlobalEmotes() {
-    return all(`SELECT e.*, u.username FROM emotes e
+async function getGlobalEmotes() {
+    return await all(`SELECT e.*, u.username FROM emotes e
         LEFT JOIN ctx_users u ON e.user_id = u.id
         WHERE e.is_global = 1 AND e.is_approved = 1 ORDER BY code`);
 }
 
 /** A channel's emotes: ones targeted at the owner, plus the owner's own legacy uploads. */
-function getChannelEmotes(userId) {
-    return all(
+async function getChannelEmotes(userId) {
+    return await all(
         `SELECT e.*, u.username, up.username AS uploader_username, up.display_name AS uploader_display_name
            FROM emotes e
            LEFT JOIN ctx_users u ON e.user_id = u.id
@@ -889,16 +883,16 @@ function getChannelEmotes(userId) {
 }
 
 /** How many emotes a channel holds (Live's countChannelEmotes; ownerId is the streamer's user id). */
-function countChannelEmotes(ownerId) {
-    return get(
+async function countChannelEmotes(ownerId) {
+    return (await get(
         'SELECT COUNT(*) as count FROM emotes WHERE (channel_owner_id = ?) OR (channel_owner_id IS NULL AND user_id = ?)',
         [ownerId, ownerId]
-    )?.count || 0;
+    ))?.count || 0;
 }
 
 /** The channel's emote with this code, any uploader (Live's getChannelEmoteByCode). */
-function getChannelEmoteByCode(ownerId, code) {
-    return get(
+async function getChannelEmoteByCode(ownerId, code) {
+    return await get(
         `SELECT * FROM emotes
           WHERE code = ? AND ((channel_owner_id = ?) OR (channel_owner_id IS NULL AND user_id = ?))
           LIMIT 1`,
@@ -907,17 +901,26 @@ function getChannelEmoteByCode(ownerId, code) {
 }
 
 /** One emote by id, with its uploader's name (Live's getEmoteById). */
-function getEmoteById(id) {
-    return get('SELECT e.*, u.username FROM emotes e LEFT JOIN ctx_users u ON e.user_id = u.id WHERE e.id = ?', [id]);
+async function getEmoteById(id) {
+    return await get('SELECT e.*, u.username FROM emotes e LEFT JOIN ctx_users u ON e.user_id = u.id WHERE e.id = ?', [id]);
 }
 
 /** A user's own emotes (Live's getEmotesByUser). */
-function getEmotesByUser(userId) {
-    return all('SELECT * FROM emotes WHERE user_id = ? ORDER BY code', [userId]);
+async function getEmotesByUser(userId) {
+    return await all('SELECT * FROM emotes WHERE user_id = ? ORDER BY code', [userId]);
 }
 
 /** Moderation actions with actor/target names (Live's getModerationActions). */
-function getModerationActions({ scopeType, scope_type, scopeId, scope_id, actor_user_id, target_user_id, limit = 50, offset = 0 } = {}) {
+// Two columns SQLite declared INTEGER hold ids or names (its type affinity took both): moderation_actions.scope_id
+// (a channel/stream id or a room slug) and chat_messages.deleted_by (a user id, or the name a purge records). The
+// PostgreSQL columns are text; an id reads back as a number wherever a row leaves Chat, as it did.
+function _idBack(r, col) {
+    return r && typeof r[col] === 'string' && /^-?\d{1,15}$/.test(r[col]) ? { ...r, [col]: Number(r[col]) } : r;
+}
+function moderationRow(r) { return _idBack(r, 'scope_id'); }
+function chatMessageRow(r) { return _idBack(r, 'deleted_by'); }
+
+async function getModerationActions({ scopeType, scope_type, scopeId, scope_id, actor_user_id, target_user_id, limit = 50, offset = 0 } = {}) {
     const conditions = [];
     const params = [];
     const st = scopeType || scope_type;
@@ -928,7 +931,7 @@ function getModerationActions({ scopeType, scope_type, scopeId, scope_id, actor_
     if (target_user_id) { conditions.push('ma.target_user_id = ?'); params.push(target_user_id); }
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     params.push(limit, offset);
-    return all(`
+    return (await all(`
         SELECT ma.*, actor.username AS actor_username, target.username AS target_username
         FROM moderation_actions ma
         LEFT JOIN ctx_users actor ON ma.actor_user_id = actor.id
@@ -936,25 +939,25 @@ function getModerationActions({ scopeType, scope_type, scopeId, scope_id, actor_
         ${where}
         ORDER BY ma.created_at DESC
         LIMIT ? OFFSET ?
-    `, params);
+    `, params)).map(moderationRow);
 }
 
 /**
  * A channel's chat messages matching a search (Live's searchChannelChatMessages): one of the
  * channel's streams, or its offline room (channel_user_id), never another channel's room.
  */
-function searchChannelChatMessages(channel, { query, userId, limit = 50, offset = 0 } = {}) {
+async function searchChannelChatMessages(channel, { query, userId, limit = 50, offset = 0 } = {}) {
     const conditions = [
         '(cm.channel_user_id = ? OR cm.stream_id IN (SELECT id FROM ctx_streams WHERE channel_id = ? OR user_id = ?))',
         'cm.is_deleted = 0',
-        '(cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)',
+        '(cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > ov_now())',
     ];
     const params = [channel.user_id, channel.id, channel.user_id];
-    if (query) { conditions.push('cm.message LIKE ?'); params.push(`%${query}%`); }
+    if (query) { conditions.push('cm.message ILIKE ?'); params.push(`%${query}%`); }
     if (userId) { conditions.push('cm.user_id = ?'); params.push(userId); }
     params.push(limit, offset);
     return {
-        messages: all(`
+        messages: await all(`
             SELECT cm.*, u.username, u.display_name, u.avatar_url
             FROM chat_messages cm
             LEFT JOIN ctx_users u ON cm.user_id = u.id
@@ -985,29 +988,29 @@ function _writeResult(value, table, rows = [], deletedPks = []) {
 }
 
 // Channel moderators, settings and alert sounds (Live's /api/channels, the dashboard, /slow).
-function addChannelModerator(channelId, userId, addedBy) {
-    const out = transaction(() => {
-        const res = run('INSERT OR IGNORE INTO channel_moderators (channel_id, user_id, added_by) VALUES (?, ?, ?)', [channelId, userId, addedBy]);
-        return _writeResult(res, 'channel_moderators', all('SELECT * FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]));
+async function addChannelModerator(channelId, userId, addedBy) {
+    const out = await transaction(async () => {
+        const res = await run('INSERT INTO channel_moderators (channel_id, user_id, added_by) VALUES (?, ?, ?) ON CONFLICT DO NOTHING', [channelId, userId, addedBy]);
+        return _writeResult(res, 'channel_moderators', await all('SELECT * FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]));
     });
-    _ctx().invalidateChannel(channelId);
+    await _ctx().invalidateChannel(channelId);
     return out;
 }
 
-function removeChannelModerator(channelId, userId) {
-    const out = transaction(() => {
-        const gone = all('SELECT id FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]);
-        const res = run('DELETE FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]);
+async function removeChannelModerator(channelId, userId) {
+    const out = await transaction(async () => {
+        const gone = await all('SELECT id FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]);
+        const res = await run('DELETE FROM channel_moderators WHERE channel_id = ? AND user_id = ?', [channelId, userId]);
         return _writeResult(res, 'channel_moderators', [], gone.map((r) => ({ id: r.id })));
     });
-    _ctx().invalidateChannel(channelId);
+    await _ctx().invalidateChannel(channelId);
     return out;
 }
 
 // Live's upsertChannelModerationSettings, clamps and all.
-function upsertChannelModerationSettings(channelId, fields) {
-    const out = transaction(() => {
-        const existing = get('SELECT 1 FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
+async function upsertChannelModerationSettings(channelId, fields) {
+    const out = await transaction(async () => {
+        const existing = await get('SELECT 1 FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
         if (existing) {
             const updates = [];
             const params = [];
@@ -1049,13 +1052,13 @@ function upsertChannelModerationSettings(channelId, fields) {
             if (fields.sound_min_pitch_cents !== undefined) set('sound_min_pitch_cents', Math.min(0, Math.max(-2400, Math.round(Number(fields.sound_min_pitch_cents) || -1200))));
             if (fields.sound_max_pitch_cents !== undefined) set('sound_max_pitch_cents', Math.max(0, Math.min(2400, Math.round(Number(fields.sound_max_pitch_cents) || 1200))));
             if (updates.length > 0) {
-                updates.push('updated_at = CURRENT_TIMESTAMP');
+                updates.push('updated_at = ov_now()');
                 params.push(channelId);
-                run(`UPDATE channel_moderation_settings SET ${updates.join(', ')} WHERE channel_id = ?`, params);
+                await run(`UPDATE channel_moderation_settings SET ${updates.join(', ')} WHERE channel_id = ?`, params);
             }
         } else {
             const b = (v, dflt) => (v !== undefined ? (v ? 1 : 0) : dflt);
-            run(
+            await run(
                 `INSERT INTO channel_moderation_settings (
                     channel_id, slow_mode_seconds, followers_only, emote_only,
                     allow_anonymous, links_allowed, gifs_enabled, account_age_gate_hours,
@@ -1105,101 +1108,101 @@ function upsertChannelModerationSettings(channelId, fields) {
         }
         // tts_max_length and sub_only, as Live: after the UPDATE or the fresh INSERT.
         if (fields.tts_max_length !== undefined) {
-            run('UPDATE channel_moderation_settings SET tts_max_length = ? WHERE channel_id = ?', [Math.min(1000, Math.max(10, Number(fields.tts_max_length) || 200)), channelId]);
+            await run('UPDATE channel_moderation_settings SET tts_max_length = ? WHERE channel_id = ?', [Math.min(1000, Math.max(10, Number(fields.tts_max_length) || 200)), channelId]);
         }
-        if (fields.sub_only !== undefined) run('UPDATE channel_moderation_settings SET sub_only = ? WHERE channel_id = ?', [fields.sub_only ? 1 : 0, channelId]);
-        const row = get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
+        if (fields.sub_only !== undefined) await run('UPDATE channel_moderation_settings SET sub_only = ? WHERE channel_id = ?', [fields.sub_only ? 1 : 0, channelId]);
+        const row = await get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [channelId]);
         return _writeResult(row, 'channel_moderation_settings', [row]);
     });
-    _ctx().invalidateChannel(channelId);
+    await _ctx().invalidateChannel(channelId);
     return out;
 }
 
 // Donation / goal alert sounds live on the settings row (url = the file's path in the sounds dir).
-function setChannelAlertSound(channelId, kind, url, mime) {
-    const out = transaction(() => {
-        if (!get('SELECT 1 FROM channel_moderation_settings WHERE channel_id = ?', [channelId])) {
-            run('INSERT INTO channel_moderation_settings (channel_id) VALUES (?)', [channelId]);
+async function setChannelAlertSound(channelId, kind, url, mime) {
+    const out = await transaction(async () => {
+        if (!await get('SELECT 1 FROM channel_moderation_settings WHERE channel_id = ?', [channelId])) {
+            await run('INSERT INTO channel_moderation_settings (channel_id) VALUES (?)', [channelId]);
         }
         const col = kind === 'goal' ? 'goal_sound' : 'donation_sound';
-        const res = run(`UPDATE channel_moderation_settings SET ${col}_url = ?, ${col}_mime = ? WHERE channel_id = ?`, [url || null, mime || null, channelId]);
-        return _writeResult(res, 'channel_moderation_settings', [get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [channelId])]);
+        const res = await run(`UPDATE channel_moderation_settings SET ${col}_url = ?, ${col}_mime = ? WHERE channel_id = ?`, [url || null, mime || null, channelId]);
+        return _writeResult(res, 'channel_moderation_settings', [await get('SELECT * FROM channel_moderation_settings WHERE channel_id = ?', [channelId])]);
     });
-    _ctx().invalidateChannel(channelId);
+    await _ctx().invalidateChannel(channelId);
     return out;
 }
 
 // Emotes (Live's /api/emotes; media_url/media_asset_id are OpenVibe.Media's copy — Live's
 // asset-sync filled them onto the shared rows, Chat uploads through its own Media token now).
-function createEmote({ user_id, code, url, animated = false, width = 28, height = 28, is_global = false, channel_owner_id = null, size = 100, media_url = null, media_asset_id = null }) {
-    return transaction(() => {
-        const res = run(
+async function createEmote({ user_id, code, url, animated = false, width = 28, height = 28, is_global = false, channel_owner_id = null, size = 100, media_url = null, media_asset_id = null }) {
+    return await transaction(async () => {
+        const res = await run(
             `INSERT INTO emotes (user_id, code, url, animated, width, height, is_global, channel_owner_id, size, media_url, media_asset_id)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [user_id, code, url, animated ? 1 : 0, width, height, is_global ? 1 : 0, channel_owner_id || null, Math.min(400, Math.max(25, parseInt(size, 10) || 100)), media_url || null, media_asset_id || null]
         );
-        return _writeResult(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [res.lastInsertRowid])]);
+        return _writeResult(res, 'emotes', [await get('SELECT * FROM emotes WHERE id = ?', [res.lastInsertRowid])]);
     });
 }
 
-function updateEmote(id, { code, size } = {}) {
+async function updateEmote(id, { code, size } = {}) {
     const sets = [];
     const params = [];
     if (code !== undefined) { sets.push('code = ?'); params.push(code); }
     if (size !== undefined) { sets.push('size = ?'); params.push(Math.min(400, Math.max(25, parseInt(size, 10) || 100))); }
     if (!sets.length) return _writeResult({ changes: 0 }, 'emotes');
-    return transaction(() => {
-        const res = run(`UPDATE emotes SET ${sets.join(', ')} WHERE id = ?`, [...params, id]);
-        return _writeResult(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [id])]);
+    return await transaction(async () => {
+        const res = await run(`UPDATE emotes SET ${sets.join(', ')} WHERE id = ?`, [...params, id]);
+        return _writeResult(res, 'emotes', [await get('SELECT * FROM emotes WHERE id = ?', [id])]);
     });
 }
 
-function deleteEmote(id) {
-    return transaction(() => {
-        const had = get('SELECT id FROM emotes WHERE id = ?', [id]);
-        const res = run('DELETE FROM emotes WHERE id = ?', [id]);
+async function deleteEmote(id) {
+    return await transaction(async () => {
+        const had = await get('SELECT id FROM emotes WHERE id = ?', [id]);
+        const res = await run('DELETE FROM emotes WHERE id = ?', [id]);
         return _writeResult(res, 'emotes', [], had ? [{ id: had.id }] : []);
     });
 }
 
 /** The emote's copy on OpenVibe.Media (Live's asset-sync). */
-function setEmoteMedia(id, mediaUrl, mediaAssetId) {
-    return transaction(() => {
-        const res = run('UPDATE emotes SET media_url = ?, media_asset_id = ? WHERE id = ?', [mediaUrl || null, mediaAssetId || null, id]);
-        return _writeResult(res, 'emotes', [get('SELECT * FROM emotes WHERE id = ?', [id])]);
+async function setEmoteMedia(id, mediaUrl, mediaAssetId) {
+    return await transaction(async () => {
+        const res = await run('UPDATE emotes SET media_url = ?, media_asset_id = ? WHERE id = ?', [mediaUrl || null, mediaAssetId || null, id]);
+        return _writeResult(res, 'emotes', [await get('SELECT * FROM emotes WHERE id = ?', [id])]);
     });
 }
 
 // User tags (owned chat tags; Live has had no writer since its game tags went read-only).
-function grantUserTag(userId, tagId, source = 'shop') {
-    return transaction(() => {
-        const res = run('INSERT OR IGNORE INTO user_tags (user_id, tag_id, source) VALUES (?, ?, ?)', [userId, String(tagId), source || 'shop']);
-        return _writeResult(res, 'user_tags', [get('SELECT * FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)])]);
+async function grantUserTag(userId, tagId, source = 'shop') {
+    return await transaction(async () => {
+        const res = await run('INSERT INTO user_tags (user_id, tag_id, source) VALUES (?, ?, ?) ON CONFLICT DO NOTHING', [userId, String(tagId), source || 'shop']);
+        return _writeResult(res, 'user_tags', [await get('SELECT * FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)])]);
     });
 }
 
-function revokeUserTag(userId, tagId) {
-    return transaction(() => {
-        const gone = all('SELECT id FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)]);
-        const res = run('DELETE FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)]);
+async function revokeUserTag(userId, tagId) {
+    return await transaction(async () => {
+        const gone = await all('SELECT id FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)]);
+        const res = await run('DELETE FROM user_tags WHERE user_id = ? AND tag_id = ?', [userId, String(tagId)]);
         return _writeResult(res, 'user_tags', [], gone.map((r) => ({ id: r.id })));
     });
 }
 
 // Chat AI (Live's server/ai/chat-ai.js): rolling summaries and the append-only timeline.
-function upsertChatAiSummary(sfx) {
+async function upsertChatAiSummary(sfx) {
     const {
         scope, subject_id = 0, window, overview = '', memory_json = '', timeline_json = '[]',
         message_count = 0, window_message_count = 0, last_message_id = 0,
         window_label = '', window_start = null, window_end = null,
     } = sfx || {};
-    return transaction(() => {
-        const res = run(
+    return await transaction(async () => {
+        const res = await run(
             `INSERT INTO chat_ai_summaries
-                (scope, subject_id, window, overview, memory_json, timeline_json, message_count,
+                (scope, subject_id, "window", overview, memory_json, timeline_json, message_count,
                  window_message_count, last_message_id, window_label, window_start, window_end, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-             ON CONFLICT(scope, subject_id, window) DO UPDATE SET
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ov_now())
+             ON CONFLICT(scope, subject_id, "window") DO UPDATE SET
                 overview = excluded.overview,
                 memory_json = excluded.memory_json,
                 timeline_json = excluded.timeline_json,
@@ -1209,29 +1212,29 @@ function upsertChatAiSummary(sfx) {
                 window_label = excluded.window_label,
                 window_start = excluded.window_start,
                 window_end = excluded.window_end,
-                updated_at = CURRENT_TIMESTAMP`,
+                updated_at = ov_now()`,
             [scope, subject_id || 0, window, overview, memory_json, timeline_json, message_count,
                 window_message_count, last_message_id, window_label, window_start, window_end]
         );
-        return _writeResult(res, 'chat_ai_summaries', [get('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? AND window = ?', [scope, subject_id || 0, window])]);
+        return _writeResult(res, 'chat_ai_summaries', [await get('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? AND "window" = ?', [scope, subject_id || 0, window])]);
     });
 }
 
-function addChatTimelineEvents(scope, subjectId, events) {
+async function addChatTimelineEvents(scope, subjectId, events) {
     if (!Array.isArray(events) || !events.length) return _writeResult(0, 'chat_timeline_events');
-    return transaction(() => {
+    return await transaction(async () => {
         let n = 0;
         const ids = [];
         for (const e of events) {
             if (!e || !e.label || !e.ts) continue;
             try {
-                const res = run('INSERT OR IGNORE INTO chat_timeline_events (scope, subject_id, ts, label, detail) VALUES (?, ?, ?, ?, ?)',
+                const res = await run('INSERT INTO chat_timeline_events (scope, subject_id, ts, label, detail) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
                     [scope || 'global', subjectId || 0, e.ts, String(e.label).slice(0, 120), String(e.detail || '').slice(0, 400)]);
                 if (res.changes) ids.push(Number(res.lastInsertRowid));
                 n++;   // Live counts every event it tried, the duplicates included
             } catch { /* */ }
         }
-        return _writeResult(n, 'chat_timeline_events', ids.map((id) => get('SELECT * FROM chat_timeline_events WHERE id = ?', [id])));
+        return _writeResult(n, 'chat_timeline_events', (await Promise.all(ids.map(async (id) => await get('SELECT * FROM chat_timeline_events WHERE id = ?', [id])))));
     });
 }
 
@@ -1240,42 +1243,42 @@ function addChatTimelineEvents(scope, subjectId, events) {
 // the ctx_* projections here (Live's rows are not in this database).
 const _CHAT_AI_WHERE = `cm.is_deleted = 0 AND cm.message_type != 'system'
     AND COALESCE(cm.source_platform,'') != 'ai'
-    AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)`;
+    AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > ov_now())`;
 
-function getChatAiSummary(scope, subjectId, window) {
-    return get('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? AND window = ?',
+async function getChatAiSummary(scope, subjectId, window) {
+    return await get('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? AND "window" = ?',
         [scope, subjectId || 0, window]) || null;
 }
-function getChatAiSummaries(scope, subjectId) {
-    return all('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? ORDER BY window',
+async function getChatAiSummaries(scope, subjectId) {
+    return await all('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? ORDER BY "window"',
         [scope, subjectId || 0]);
 }
 // Paginated + searchable timeline browse. `before` = epoch ms (exclusive upper bound); `q`
 // filters label/detail; `since` = epoch ms lower bound (for period jumps). Newest first.
-function getChatTimelineEvents({ scope = 'global', subjectId = 0, before = null, since = null, q = null, limit = 25 } = {}) {
+async function getChatTimelineEvents({ scope = 'global', subjectId = 0, before = null, since = null, q = null, limit = 25 } = {}) {
     const conds = ['scope = ?', 'subject_id = ?'];
     const params = [scope, subjectId || 0];
-    if (before) { conds.push("ts < datetime(?, 'unixepoch')"); params.push(Math.floor(before / 1000)); }
-    if (since) { conds.push("ts >= datetime(?, 'unixepoch')"); params.push(Math.floor(since / 1000)); }
-    if (q && String(q).trim()) { const like = '%' + String(q).trim().slice(0, 60) + '%'; conds.push('(label LIKE ? OR detail LIKE ?)'); params.push(like, like); }
+    if (before) { conds.push("ts < to_char(to_timestamp(?) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')"); params.push(Math.floor(before / 1000)); }
+    if (since) { conds.push("ts >= to_char(to_timestamp(?) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')"); params.push(Math.floor(since / 1000)); }
+    if (q && String(q).trim()) { const like = '%' + String(q).trim().slice(0, 60) + '%'; conds.push('(label ILIKE ? OR detail ILIKE ?)'); params.push(like, like); }
     params.push(Math.min(60, Math.max(1, limit)));
     try {
-        return all(`SELECT id, ts, label, detail FROM chat_timeline_events WHERE ${conds.join(' AND ')} ORDER BY ts DESC, id DESC LIMIT ?`, params) || [];
+        return await all(`SELECT id, ts, label, detail FROM chat_timeline_events WHERE ${conds.join(' AND ')} ORDER BY ts DESC, id DESC LIMIT ?`, params) || [];
     } catch { return []; }
 }
 
-function getMaxChatMessageId() {
-    return get('SELECT MAX(id) AS m FROM chat_messages')?.m || 0;
+async function getMaxChatMessageId() {
+    return (await get('SELECT MAX(id) AS m FROM chat_messages'))?.m || 0;
 }
 // Count analyzable messages newer than a high-water id (optionally for one user).
-function countChatMessagesSince(afterId, userId = null) {
+async function countChatMessagesSince(afterId, userId = null) {
     let sql = `SELECT COUNT(*) AS c FROM chat_messages cm WHERE ${_CHAT_AI_WHERE} AND cm.id > ?`;
     const params = [afterId || 0];
     if (userId) { sql += ' AND cm.user_id = ?'; params.push(userId); }
-    return get(sql, params)?.c || 0;
+    return (await get(sql, params))?.c || 0;
 }
 // Fetch analyzable messages for AI batching (with the channel/broadcaster label).
-function getChatMessagesForAi({ afterId = null, sinceTs = null, userId = null, limit = 400, order = 'asc' } = {}) {
+async function getChatMessagesForAi({ afterId = null, sinceTs = null, userId = null, limit = 400, order = 'asc' } = {}) {
     let sql = `SELECT cm.id, cm.user_id, cm.username, cm.message, cm.message_type, cm.timestamp,
                       cm.stream_id, cm.channel_user_id, cm.is_global,
                       ch.username AS channel_username, ch.display_name AS channel_display
@@ -1288,41 +1291,41 @@ function getChatMessagesForAi({ afterId = null, sinceTs = null, userId = null, l
     if (userId) { sql += ' AND cm.user_id = ?'; params.push(userId); }
     sql += ` ORDER BY cm.id ${order === 'desc' ? 'DESC' : 'ASC'} LIMIT ?`;
     params.push(Math.max(1, Math.min(2000, limit)));
-    const rows = all(sql, params);
+    const rows = await all(sql, params);
     return order === 'desc' ? rows.reverse() : rows;
 }
 // Timestamp of the Nth-most-recent analyzable message — drives the adaptive overview window.
-function getNthRecentChatTs(n, userId = null) {
+async function getNthRecentChatTs(n, userId = null) {
     let sql = `SELECT cm.timestamp AS ts FROM chat_messages cm WHERE ${_CHAT_AI_WHERE}`;
     const params = [];
     if (userId) { sql += ' AND cm.user_id = ?'; params.push(userId); }
     sql += ' ORDER BY cm.id DESC LIMIT 1 OFFSET ?';
     params.push(Math.max(0, (n | 0) - 1));
-    return get(sql, params)?.ts || null;
+    return (await get(sql, params))?.ts || null;
 }
 
 // Users with enough new chat activity (or a stale summary) to warrant an AI refresh.
-function getUsersNeedingChatAi({ threshold = 15, staleCutoffIso, sinceTs, limit = 3 } = {}) {
+async function getUsersNeedingChatAi({ threshold = 15, staleCutoffIso, sinceTs, limit = 3 } = {}) {
     const sql = `
         SELECT cm.user_id AS uid,
                MAX(cm.id) AS max_id,
-               SUM(CASE WHEN cm.id > COALESCE(cs.last_message_id, 0) THEN 1 ELSE 0 END) AS new_msgs,
+               CAST(SUM(CASE WHEN cm.id > COALESCE(cs.last_message_id, 0) THEN 1 ELSE 0 END) AS BIGINT) AS new_msgs,
                COALESCE(cs.last_message_id, 0) AS hw,
                cs.updated_at AS last_update
         FROM chat_messages cm
         LEFT JOIN chat_ai_summaries cs
-          ON cs.scope = 'user' AND cs.subject_id = cm.user_id AND cs.window = 'rolling'
+          ON cs.scope = 'user' AND cs.subject_id = cm.user_id AND cs."window" = 'rolling'
         WHERE ${_CHAT_AI_WHERE} AND cm.user_id IS NOT NULL AND cm.timestamp >= ?
-        GROUP BY cm.user_id
-        HAVING new_msgs > 0
-           AND ( new_msgs >= ? OR cs.last_message_id IS NULL OR cs.updated_at IS NULL OR cs.updated_at < ? )
+        GROUP BY cm.user_id, cs.last_message_id, cs.updated_at
+        HAVING SUM(CASE WHEN cm.id > COALESCE(cs.last_message_id, 0) THEN 1 ELSE 0 END) > 0
+           AND ( SUM(CASE WHEN cm.id > COALESCE(cs.last_message_id, 0) THEN 1 ELSE 0 END) >= ? OR cs.last_message_id IS NULL OR cs.updated_at IS NULL OR cs.updated_at < ? )
         ORDER BY (cs.updated_at IS NULL) DESC, new_msgs DESC
         LIMIT ?`;
-    return all(sql, [sinceTs, threshold, staleCutoffIso, Math.max(1, limit)]);
+    return await all(sql, [sinceTs, threshold, staleCutoffIso, Math.max(1, limit)]);
 }
 
 // Relay messages for AI batching (mirrors getChatMessagesForAi).
-function getRelayChatMessagesForAi({ platform, rawUsername, sinceTs = null, limit = 300, order = 'asc' } = {}) {
+async function getRelayChatMessagesForAi({ platform, rawUsername, sinceTs = null, limit = 300, order = 'asc' } = {}) {
     let sql = `SELECT cm.id, cm.username, cm.message, cm.message_type, cm.timestamp, cm.source_platform
                FROM chat_messages cm
                WHERE ${_CHAT_AI_WHERE} AND ${_RELAY_MATCH}`;
@@ -1330,18 +1333,18 @@ function getRelayChatMessagesForAi({ platform, rawUsername, sinceTs = null, limi
     if (sinceTs != null) { sql += ' AND cm.timestamp >= ?'; params.push(sinceTs); }
     sql += ` ORDER BY cm.id ${order === 'desc' ? 'DESC' : 'ASC'} LIMIT ?`;
     params.push(Math.max(1, Math.min(2000, limit)));
-    const rows = all(sql, params);
+    const rows = await all(sql, params);
     return order === 'desc' ? rows.reverse() : rows;
 }
 
 // Relay users with new activity since their last AI summary (or never summarised).
-function getRelayUsersNeedingChatAi({ lookbackIso, threshold = 8, limit = 2 } = {}) {
-    return all(`
-        SELECT r.rowid AS id, r.platform, r.username, r.display_name, r.message_count, r.last_seen,
+async function getRelayUsersNeedingChatAi({ lookbackIso, threshold = 8, limit = 2 } = {}) {
+    return await all(`
+        SELECT r.id, r.platform, r.username, r.display_name, r.message_count, r.last_seen,
                cs.updated_at AS last_update
         FROM relay_users r
         LEFT JOIN chat_ai_summaries cs
-          ON cs.scope = 'relay' AND cs.window = 'rolling' AND cs.subject_id = r.rowid
+          ON cs.scope = 'relay' AND cs."window" = 'rolling' AND cs.subject_id = r.id
         WHERE r.last_seen >= ?
           AND r.message_count >= ?
           AND (cs.updated_at IS NULL OR cs.updated_at < r.last_seen)
@@ -1350,7 +1353,7 @@ function getRelayUsersNeedingChatAi({ lookbackIso, threshold = 8, limit = 2 } = 
 }
 
 // Anon messages for AI batching (mirrors getChatMessagesForAi / getRelayChatMessagesForAi).
-function getAnonChatMessagesForAi({ anonId, sinceTs = null, limit = 300, order = 'asc' } = {}) {
+async function getAnonChatMessagesForAi({ anonId, sinceTs = null, limit = 300, order = 'asc' } = {}) {
     let sql = `SELECT cm.id, cm.username, cm.message, cm.message_type, cm.timestamp
                FROM chat_messages cm
                WHERE ${_CHAT_AI_WHERE} AND cm.user_id IS NULL AND cm.anon_id = ?`;
@@ -1358,44 +1361,48 @@ function getAnonChatMessagesForAi({ anonId, sinceTs = null, limit = 300, order =
     if (sinceTs != null) { sql += ' AND cm.timestamp >= ?'; params.push(sinceTs); }
     sql += ` ORDER BY cm.id ${order === 'desc' ? 'DESC' : 'ASC'} LIMIT ?`;
     params.push(Math.max(1, Math.min(2000, limit)));
-    const rows = all(sql, params);
+    const rows = await all(sql, params);
     return order === 'desc' ? rows.reverse() : rows;
 }
 
 // Anons with enough new chat activity (or a stale summary) to warrant an AI refresh.
-function getAnonsNeedingChatAi({ threshold = 12, staleCutoffIso, sinceTs, limit = 2 } = {}) {
+async function getAnonsNeedingChatAi({ threshold = 12, staleCutoffIso, sinceTs, limit = 2 } = {}) {
     const sql = `
         SELECT cm.anon_id AS anon_id,
                MAX(cm.id) AS max_id,
-               SUM(CASE WHEN cm.id > COALESCE(cs.last_message_id, 0) THEN 1 ELSE 0 END) AS new_msgs
+               CAST(SUM(CASE WHEN cm.id > COALESCE(cs.last_message_id, 0) THEN 1 ELSE 0 END) AS BIGINT) AS new_msgs
         FROM chat_messages cm
         LEFT JOIN chat_ai_summaries cs
-          ON cs.scope = 'anon' AND cs.window = 'rolling'
-         AND cs.subject_id = CAST(SUBSTR(cm.anon_id, 5) AS INTEGER)
+          ON cs.scope = 'anon' AND cs."window" = 'rolling'
+         AND cs.subject_id = CASE WHEN cm.anon_id ~ '^anon[0-9]{1,15}$' THEN CAST(SUBSTR(cm.anon_id, 5) AS BIGINT) END
         WHERE ${_CHAT_AI_WHERE} AND cm.user_id IS NULL AND cm.anon_id IS NOT NULL
-          AND cm.anon_id LIKE 'anon%' AND cm.timestamp >= ?
-        GROUP BY cm.anon_id
-        HAVING new_msgs > 0
-           AND ( new_msgs >= ? OR cs.last_message_id IS NULL OR cs.updated_at IS NULL OR cs.updated_at < ? )
+          AND cm.anon_id ILIKE 'anon%' AND cm.timestamp >= ?
+        GROUP BY cm.anon_id, cs.last_message_id, cs.updated_at
+        HAVING SUM(CASE WHEN cm.id > COALESCE(cs.last_message_id, 0) THEN 1 ELSE 0 END) > 0
+           AND ( SUM(CASE WHEN cm.id > COALESCE(cs.last_message_id, 0) THEN 1 ELSE 0 END) >= ? OR cs.last_message_id IS NULL OR cs.updated_at IS NULL OR cs.updated_at < ? )
         ORDER BY (cs.updated_at IS NULL) DESC, new_msgs DESC
         LIMIT ?`;
-    return all(sql, [sinceTs, threshold, staleCutoffIso, Math.max(1, limit)]);
+    return await all(sql, [sinceTs, threshold, staleCutoffIso, Math.max(1, limit)]);
 }
 
 // ── Meta ─────────────────────────────────────────────────────
-function getMeta(key) { return get('SELECT value FROM chat_meta WHERE key = ?', [key])?.value ?? null; }
-function setMeta(key, value) { return run('INSERT INTO chat_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value == null ? null : String(value)]); }
+async function getMeta(key) { return (await get('SELECT value FROM chat_meta WHERE key = ?', [key]))?.value ?? null; }
+async function setMeta(key, value) { return await run('INSERT INTO chat_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', [key, value == null ? null : String(value)]); }
 
 module.exports = {
     CHAT_TABLES,
+    moderationRow,
+    chatMessageRow,
+    openDb,
     getDb,
     initDb,
-    installMirrorTriggers,
+    setDb,
     close,
     run,
     get,
     all,
     transaction,
+    tx: transaction,
     subjectFor,
     getMeta,
     setMeta,

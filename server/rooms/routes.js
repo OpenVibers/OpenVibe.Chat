@@ -54,10 +54,10 @@ const chatServer = () => require('../chat/chat-server');
  * After a role or room change: sockets following the room learn what they may do now, and a running
  * call in it follows the room's roles (no-op when calls are off or nobody is in).
  */
-function applyRoomChange(room) {
-    const fresh = rooms.bySlug(room.slug) || room;
-    try { chatServer().refreshRoomAccess(fresh); } catch (err) { console.warn('[Rooms] socket update:', err.message); }
-    try { require('../calls/call-server').applyRoomAccess(fresh); } catch (err) { console.warn('[Rooms] call update:', err.message); }
+async function applyRoomChange(room) {
+    const fresh = await rooms.bySlug(room.slug) || room;
+    try { await chatServer().refreshRoomAccess(fresh); } catch (err) { console.warn('[Rooms] socket update:', err.message); }
+    try { await require('../calls/call-server').applyRoomAccess(fresh); } catch (err) { console.warn('[Rooms] call update:', err.message); }
 }
 /** The room's call as the room page shows it: on or off, and who is in. */
 function callOf(room) {
@@ -71,120 +71,120 @@ function callOf(room) {
 const personOnly = (req, res, next) => (req.authSource === 'api_token' ? res.status(403).json({ error: 'Attach rooms with your own sign-in, not an API token', code: 'rooms.person_only' }) : next());
 
 /** The room behind :slug when the caller may read it (else a 404 that says nothing about private rooms). */
-function readable(req, res) {
-    const room = rooms.bySlug(req.params.slug);
-    if (!room || !rooms.access(room, req.user || null).read) { res.status(404).json({ error: 'No such room', code: 'rooms.not_found' }); return null; }
+async function readable(req, res) {
+    const room = await rooms.bySlug(req.params.slug);
+    if (!room || !(await rooms.access(room, req.user || null)).read) { res.status(404).json({ error: 'No such room', code: 'rooms.not_found' }); return null; }
     return room;
 }
 
-router.get('/', optionalAuth, (req, res) => {
-    try { res.set('Cache-Control', 'private, no-store').json(rooms.list(req.user || null, { limit: req.query.limit })); } catch (err) { send(res, err); }
+router.get('/', optionalAuth, async (req, res) => {
+    try { res.set('Cache-Control', 'private, no-store').json(await rooms.list(req.user || null, { limit: req.query.limit })); } catch (err) { send(res, err); }
 });
 
-router.post('/', requireAuth, createLimit, (req, res) => {
-    try { res.status(201).json({ room: rooms.create(req.user, req.body || {}) }); } catch (err) { send(res, err); }
+router.post('/', requireAuth, createLimit, async (req, res) => {
+    try { res.status(201).json({ room: await rooms.create(req.user, req.body || {}) }); } catch (err) { send(res, err); }
 });
 
-router.get('/:slug', optionalAuth, (req, res) => {
-    const room = readable(req, res); if (!room) return;
-    const a = rooms.access(room, req.user || null);
+router.get('/:slug', optionalAuth, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    const a = await rooms.access(room, req.user || null);
     res.set('Cache-Control', 'private, no-store').json({
-        room: rooms.publicRoom(room, { role: a.role }),
+        room: await rooms.publicRoom(room, { role: a.role }),
         can: { read: a.read, post: a.post, join: a.join, talk: a.talk, moderate: a.moderate, manage: a.manage },
         ...(room.kind === 'call' ? { call: callOf(room) } : {}),
     });
 });
 
-router.patch('/:slug', requireAuth, manageLimit, (req, res) => {
-    const room = readable(req, res); if (!room) return;
-    try { const out = rooms.update(room, req.user, req.body || {}); applyRoomChange(room); res.json({ room: out }); } catch (err) { send(res, err); }
+router.patch('/:slug', requireAuth, manageLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try { const out = await rooms.update(room, req.user, req.body || {}); await applyRoomChange(room); res.json({ room: out }); } catch (err) { send(res, err); }
 });
 
-router.get('/:slug/messages', optionalAuth, (req, res) => {
-    const room = readable(req, res); if (!room) return;
+router.get('/:slug/messages', optionalAuth, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
     try {
-        const messages = rooms.history(room, { before: req.query.before ?? null, after: req.query.after ?? null, limit: req.query.limit });
+        const messages = await rooms.history(room, { before: req.query.before ?? null, after: req.query.after ?? null, limit: req.query.limit });
         res.set('Cache-Control', 'private, no-store').json({ messages, latest_id: messages.length ? messages[messages.length - 1].id : null });
     } catch (err) { send(res, err); }
 });
 
-router.post('/:slug/messages', requireAuth, postLimit, (req, res) => {
-    const room = readable(req, res); if (!room) return;
+router.post('/:slug/messages', requireAuth, postLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
     try {
-        const message = rooms.post(room, req.user, req.body && req.body.message);
+        const message = await rooms.post(room, req.user, req.body && req.body.message);
         chatServer().broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
         res.status(201).json({ message });
     } catch (err) { send(res, err); }
 });
 
-router.delete('/:slug/messages/:id', requireAuth, deleteLimit, (req, res) => {
-    const room = readable(req, res); if (!room) return;
+router.delete('/:slug/messages/:id', requireAuth, deleteLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
     try {
-        const id = rooms.deleteMessage(room, req.user, parseInt(req.params.id, 10));
+        const id = await rooms.deleteMessage(room, req.user, parseInt(req.params.id, 10));
         chatServer().broadcastToRoom(room.id, { type: 'room_message_deleted', room: room.slug, id });
         res.json({ ok: true, id });
     } catch (err) { send(res, err); }
 });
 
-router.post('/:slug/join', requireAuth, manageLimit, (req, res) => {
-    const room = rooms.bySlug(req.params.slug);
+router.post('/:slug/join', requireAuth, manageLimit, async (req, res) => {
+    const room = await rooms.bySlug(req.params.slug);
     if (!room) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
-    try { const role = rooms.join(room, req.user); applyRoomChange(room); res.json({ ok: true, role }); } catch (err) { send(res, err); }
+    try { const role = await rooms.join(room, req.user); await applyRoomChange(room); res.json({ ok: true, role }); } catch (err) { send(res, err); }
 });
 
-router.post('/:slug/leave', requireAuth, manageLimit, (req, res) => {
-    const room = readable(req, res); if (!room) return;
+router.post('/:slug/leave', requireAuth, manageLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
     try {
-        rooms.leave(room, req.user);
+        await rooms.leave(room, req.user);
         chatServer().removeFromRoom(room.id, req.user.id);
-        applyRoomChange(room);
+        await applyRoomChange(room);
         res.json({ ok: true });
     } catch (err) { send(res, err); }
 });
 
-router.post('/:slug/read', requireAuth, readLimit, (req, res) => {
-    const room = readable(req, res); if (!room) return;
-    try { rooms.markRead(room, req.user, req.body && req.body.last_id); res.json({ ok: true }); } catch (err) { send(res, err); }
+router.post('/:slug/read', requireAuth, readLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try { await rooms.markRead(room, req.user, req.body && req.body.last_id); res.json({ ok: true }); } catch (err) { send(res, err); }
 });
 
-router.get('/:slug/members', optionalAuth, (req, res) => {
-    const room = readable(req, res); if (!room) return;
-    const moderate = rooms.access(room, req.user || null).moderate;
-    res.set('Cache-Control', 'private, no-store').json({ members: rooms.members(room, { seen: moderate }).filter((m) => m.role !== 'blocked' || moderate) });
+router.get('/:slug/members', optionalAuth, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    const moderate = (await rooms.access(room, req.user || null)).moderate;
+    res.set('Cache-Control', 'private, no-store').json({ members: (await rooms.members(room, { seen: moderate })).filter((m) => m.role !== 'blocked' || moderate) });
 });
 
 router.post('/:slug/members', requireAuth, manageLimit, async (req, res) => {
-    const room = readable(req, res); if (!room) return;
+    const room = await readable(req, res); if (!room) return;
     try {
         const name = String((req.body && req.body.username) || '').trim();
-        let target = /^[A-Za-z0-9_]{3,24}$/.test(name) ? ctx.getUserByUsername(name) : null;
+        let target = /^[A-Za-z0-9_]{3,24}$/.test(name) ? await ctx.getUserByUsername(name) : null;
         if (!target && /^[A-Za-z0-9_]{3,24}$/.test(name)) target = await ctx.ensureUserByUsername(name).catch(() => null);
         if (!target) return res.status(404).json({ error: `Nobody called ${name.slice(0, 24)} on OpenVibe`, code: 'rooms.no_user' });
-        const role = rooms.setRole(room, req.user, target.id, String((req.body && req.body.role) || 'member'));
+        const role = await rooms.setRole(room, req.user, target.id, String((req.body && req.body.role) || 'member'));
         if (role === 'blocked' || (room.visibility === 'private' && role === 'none')) chatServer().removeFromRoom(room.id, target.id);
-        applyRoomChange(room);
+        await applyRoomChange(room);
         res.json({ ok: true, user_id: target.id, username: target.username, role });
     } catch (err) { send(res, err); }
 });
 
-router.get('/:slug/attachments', requireAuth, (req, res) => {
-    const room = readable(req, res); if (!room) return;
-    if (!rooms.access(room, req.user).manage) return res.status(403).json({ error: 'Only the room\'s owner sees where it is attached', code: 'rooms.not_owner' });
-    res.set('Cache-Control', 'private, no-store').json({ attachments: rooms.attachments(room) });
+router.get('/:slug/attachments', requireAuth, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    if (!(await rooms.access(room, req.user)).manage) return res.status(403).json({ error: 'Only the room\'s owner sees where it is attached', code: 'rooms.not_owner' });
+    res.set('Cache-Control', 'private, no-store').json({ attachments: await rooms.attachments(room) });
 });
 
-router.post('/:slug/attachments', requireAuth, personOnly, attachLimit, (req, res) => {
-    const room = readable(req, res); if (!room) return;
+router.post('/:slug/attachments', requireAuth, personOnly, attachLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
     try {
         const b = req.body || {};
-        const out = rooms.attach(room, req.user, { service: b.service, resource: b.resource, title: b.title });
-        res.status(out.created ? 201 : 200).json({ ...out, room: rooms.publicRoom(room) });
+        const out = await rooms.attach(room, req.user, { service: b.service, resource: b.resource, title: b.title });
+        res.status(out.created ? 201 : 200).json({ ...out, room: await rooms.publicRoom(room) });
     } catch (err) { send(res, err); }
 });
 
-router.delete('/:slug/attachments/:service/:resource', requireAuth, personOnly, attachLimit, (req, res) => {
-    const room = readable(req, res); if (!room) return;
-    try { res.json({ ok: true, ...rooms.detach(room, req.user, req.params.service, req.params.resource) }); } catch (err) { send(res, err); }
+router.delete('/:slug/attachments/:service/:resource', requireAuth, personOnly, attachLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try { res.json({ ok: true, ...await rooms.detach(room, req.user, req.params.service, req.params.resource) }); } catch (err) { send(res, err); }
 });
 
 module.exports = router;

@@ -58,35 +58,35 @@ function isStreamer(user) {
 /**
  * Is this user a channel moderator for the given channel?
  */
-function isChannelMod(user, channelId) {
+async function isChannelMod(user, channelId) {
     if (!user?.id || !channelId) return false;
-    return !!ctx.isChannelModerator(user.id, channelId);
+    return !!await ctx.isChannelModerator(user.id, channelId);
 }
 
 /**
  * Is this user the owner of the given channel?
  */
-function isChannelOwner(user, channelId) {
+async function isChannelOwner(user, channelId) {
     if (!user?.id || !channelId) return false;
-    const channel = ctx.getChannelById(channelId);
+    const channel = await ctx.getChannelById(channelId);
     return channel?.user_id === user.id;
 }
 
 /**
  * Does a stream belong to this user?
  */
-function isStreamOwner(user, streamId) {
+async function isStreamOwner(user, streamId) {
     if (!user?.id || !streamId) return false;
-    const stream = ctx.getStreamById(streamId);
+    const stream = await ctx.getStreamById(streamId);
     return stream?.user_id === user.id;
 }
 
 /**
  * Get the channel_id for a given stream.
  */
-function getChannelIdForStream(streamId) {
+async function getChannelIdForStream(streamId) {
     if (!streamId) return null;
-    const stream = ctx.getStreamById(streamId);
+    const stream = await ctx.getStreamById(streamId);
     return stream?.channel_id || null;
 }
 
@@ -97,11 +97,11 @@ function getChannelIdForStream(streamId) {
  *
  * True for: admin, global_mod, channel owner, channel mod
  */
-function canModerateChannel(user, channelId) {
+async function canModerateChannel(user, channelId) {
     if (!user) return false;
     if (can(user, 'staff.moderation.chat')) return true;
-    if (isChannelOwner(user, channelId)) return true;
-    return isChannelMod(user, channelId);
+    if (await isChannelOwner(user, channelId)) return true;
+    return await isChannelMod(user, channelId);
 }
 
 /**
@@ -109,12 +109,12 @@ function canModerateChannel(user, channelId) {
  *
  * Resolves stream → channel, then checks channel moderation.
  */
-function canModerateStream(user, streamId) {
+async function canModerateStream(user, streamId) {
     if (!user) return false;
     if (can(user, 'staff.moderation.chat')) return true;
-    if (isStreamOwner(user, streamId)) return true;
-    const channelId = getChannelIdForStream(streamId);
-    if (channelId && isChannelMod(user, channelId)) return true;
+    if (await isStreamOwner(user, streamId)) return true;
+    const channelId = await getChannelIdForStream(streamId);
+    if (channelId && await isChannelMod(user, channelId)) return true;
     return false;
 }
 
@@ -122,8 +122,8 @@ function canModerateStream(user, streamId) {
  * Can this user moderate a call on a specific stream?
  * Same rules as chat moderation.
  */
-function canModerateCall(user, streamId) {
-    return canModerateStream(user, streamId);
+async function canModerateCall(user, streamId) {
+    return await canModerateStream(user, streamId);
 }
 
 /**

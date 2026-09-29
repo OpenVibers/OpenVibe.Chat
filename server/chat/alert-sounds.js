@@ -49,7 +49,7 @@ async function playAlertSound(chatServer, streamerId, streamId, kind) {
     try {
         if (!chatServer || !chatServer.broadcastToChannelRoom) return { played: false, source };
         const channel = await ctx.ensureChannelForUser(streamerId);
-        const row = channel ? db.getChannelModerationSettingsRow(channel.id) : null;
+        const row = channel ? await db.getChannelModerationSettingsRow(channel.id) : null;
         if (!row) return { played: false, source };
         let disk, mime;
         if (kind === 'goal') {
@@ -61,7 +61,7 @@ async function playAlertSound(chatServer, streamerId, streamId, kind) {
         }
         const snd = readSound(disk, mime);
         if (!snd) return { played: false, source };
-        chatServer.broadcastToChannelRoom(streamerId, streamId || null, { type: 'soundboard-audio', audio: snd.audio, mimeType: snd.mimeType, source });
+        await chatServer.broadcastToChannelRoom(streamerId, streamId || null, { type: 'soundboard-audio', audio: snd.audio, mimeType: snd.mimeType, source });
         return { played: true, source };
     } catch (err) {
         console.warn(`[Alerts] play ${kind} for ${streamerId}: ${err.message}`);

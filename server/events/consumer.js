@@ -35,7 +35,7 @@
 
 const express = require('express');
 const { http } = require('openvibe-contracts');
-const { parseDelivery, createInbox } = require('openvibe-sdk/events');
+const { parseDelivery, createPgInbox } = require('openvibe-sdk/events');
 const db = require('../db/database');
 const { viaProxy } = require('../net/service-auth');
 const deployNotice = require('../chat/deploy-notice');
@@ -59,8 +59,7 @@ const INBOX_KEEP_MS = 35 * 24 * 3600 * 1000;       // Events keeps events 30 day
  */
 function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now(), releaseMaxAgeMs = deployNotice.RELEASE_MAX_AGE_MS, log = console } = {}) {
     const keys = (secrets || []).filter((s) => typeof s === 'string' && s.length >= 32);
-    const inbox = createInbox(db.getDb(), { table: INBOX_TABLE, now });
-    inbox.ensureSchema();
+    const inbox = createPgInbox(db.getDb(), { table: INBOX_TABLE, now });   // the table is in migrations/0001_initial.sql
     const stats = { received: 0, applied: 0, duplicates: 0, ignored: 0, refused: 0, failed: 0, last_at: null, last_type: null, last_outcome: null, last_error: null };
 
     /**
@@ -71,7 +70,7 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
         if (event.event_type === 'live.release.deployed') {
             const rel = deployNotice.releaseFrom(event, { now: now(), maxAgeMs: releaseMaxAgeMs });
             if (typeof rel === 'string') return rel;
-            return () => deployNotice.applyReleaseEvent({ db, chatServer, event, now: now(), maxAgeMs: releaseMaxAgeMs, log });
+            return async () => await deployNotice.applyReleaseEvent({ db, chatServer, event, now: now(), maxAgeMs: releaseMaxAgeMs, log });
         }
         if (event.event_type === 'network.module.updated') {
             if (event.source !== 'network') return 'ignored:source';
@@ -93,13 +92,13 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
             const subject = p.subject && p.subject.id;
             const ms = Date.parse(p.valid_after);
             if (!SUBJECT_RE.test(String(subject || '')) || !Number.isFinite(ms)) return 'ignored:payload';
-            return () => {
-                const moved = revocations.record(subject, ms, typeof p.reason === 'string' ? p.reason.slice(0, 40) : null, now());
+            return async () => {
+                const moved = await revocations.record(subject, ms, typeof p.reason === 'string' ? p.reason.slice(0, 40) : null, now());
                 if (!moved) return 'unchanged';
                 return {
                     outcome: 'revoked',
-                    after: () => {
-                        for (const r of db.all('SELECT id FROM ctx_users WHERE subject_id = ?', [subject])) ctx.invalidateUser(r.id);
+                    after: async () => {
+                        for (const r of await db.all('SELECT id FROM ctx_users WHERE subject_id = ?', [subject])) ctx.invalidateUser(r.id);
                         const closed = chatServer ? chatServer.revokeSubject(subject, ms) : 0;
                         if (closed) log.log && log.log(`[Events consumer] ${p.reason || 'revoked'}: closed ${closed} socket(s)`);
                     },
@@ -111,7 +110,7 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
             if (event.source !== 'network') return 'ignored:source';
             const p = networkBlocks.payloadOf(event);
             if (!p) return 'ignored:payload';
-            return () => (networkBlocks.apply(p, now()) ? (p.active ? 'blocked' : 'unblocked') : 'unchanged');
+            return async () => (await networkBlocks.apply(p, now()) ? (p.active ? 'blocked' : 'unblocked') : 'unchanged');
         }
         if (event.event_type === 'network.subject.merged') {
             // Two accounts became one (ADR-029): the folded-in account's messages, DMs, rooms and blocks are the survivor's.
@@ -119,7 +118,7 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
             const merge = require('../chat/subject-merge');
             const p = merge.payloadOf(event);
             if (!p) return 'ignored:payload';
-            return () => merge.apply(p);
+            return async () => await merge.apply(p);
         }
         if (event.event_type === 'vip.membership.changed') {
             // A membership started, lapsed or was revoked: drop that member's cached badge answers for
@@ -131,24 +130,24 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
     }
 
     /** Apply one envelope. Returns { duplicate, outcome, detail? }. Throws only on a storage failure. */
-    function apply(event) {
+    async function apply(event) {
         const work = plan(event);
         if (typeof work === 'string') return { duplicate: false, outcome: work };
         let after = null;
-        const r = inbox.once(CONSUMER, event.event_id, () => {
-            const out = work();
+        const r = await inbox.once(CONSUMER, event.event_id, async () => {
+            const out = await work();
             if (typeof out === 'string') return { outcome: out };
             after = out.after || null;
             return { outcome: out.outcome, detail: out.detail };
         });
         if (r.duplicate) return { duplicate: true, outcome: null };
         // Side effects outside the database run only after the commit, once per event.
-        if (after) { try { after(); } catch (err) { log.warn('[Events consumer] after-commit step failed:', err.message); } }
+        if (after) { try { await after(); } catch (err) { log.warn('[Events consumer] after-commit step failed:', err.message); } }
         return { duplicate: false, outcome: r.result.outcome, ...(r.result.detail ? { detail: r.result.detail } : {}) };
     }
 
     const router = express.Router();
-    router.post('/', express.raw({ type: () => true, limit: '256kb' }), (req, res) => {
+    router.post('/', express.raw({ type: () => true, limit: '256kb' }), async (req, res) => {
         const ctx = http.requestContext(req.headers);
         const problem = (status, code, detail) => http.sendProblem(res, status, code, { detail, ctx });
         if (viaProxy(req)) return problem(403, 'chat.internal_only', 'internal route');
@@ -183,7 +182,7 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
         }
         let out;
         try {
-            out = apply(event);
+            out = await apply(event);
         } catch (err) {
             // Not acknowledged: the inbox claim rolled back with the change, and Events retries.
             stats.failed++;
@@ -202,13 +201,13 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
     });
 
     /** Drop inbox receipts older than Events' retention (nothing older can be redelivered). */
-    function prune() {
-        return db.run(`DELETE FROM ${INBOX_TABLE} WHERE processed_at < ?`, [now() - INBOX_KEEP_MS]).changes;
+    async function prune() {
+        return (await db.run(`DELETE FROM ${INBOX_TABLE} WHERE processed_at < ?`, [now() - INBOX_KEEP_MS])).changes;
     }
     let timer = null;
     function start() {
         if (timer) return;
-        timer = setInterval(() => { try { prune(); } catch (err) { log.warn('[Events consumer] inbox prune:', err.message); } }, 6 * 3600 * 1000);
+        timer = setInterval(async () => { try { await prune(); } catch (err) { log.warn('[Events consumer] inbox prune:', err.message); } }, 6 * 3600 * 1000);
         if (timer.unref) timer.unref();
     }
     function stop() { if (timer) clearInterval(timer); timer = null; }

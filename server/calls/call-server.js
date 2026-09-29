@@ -83,7 +83,7 @@ class CallServer {
         });
     }
 
-    init(server) {
+    async init(server) {
         this.wss = new WebSocket.Server({ noServer: true, maxPayload: 256 * 1024, perMessageDeflate: false });
         if (this._heartbeatInterval) clearInterval(this._heartbeatInterval);
         this._heartbeatInterval = setInterval(() => {
@@ -95,21 +95,21 @@ class CallServer {
             });
         }, WS_HEARTBEAT_MS);
         if (this._heartbeatInterval.unref) this._heartbeatInterval.unref();
-        this.wss.on('connection', (ws, req) => this._handleConnection(ws, req));
+        this.wss.on('connection', async (ws, req) => await this._handleConnection(ws, req));
 
         // Cleanup user-created channels that have been empty for over an hour
         if (this._inactivityTimer) clearInterval(this._inactivityTimer);
-        this._inactivityTimer = setInterval(() => this._cleanupInactiveChannels(), 5 * 60 * 1000);
+        this._inactivityTimer = setInterval(async () => await this._cleanupInactiveChannels(), 5 * 60 * 1000);
         if (this._inactivityTimer.unref) this._inactivityTimer.unref();
 
         // Rooms are memory: calls the previous process left open are over.
-        try { lifecycle.recover(); } catch (err) { console.warn('[Calls] recover failed:', err.message); }
+        try { await lifecycle.recover(); } catch (err) { console.warn('[Calls] recover failed:', err.message); }
 
         console.log(`[CallServer] Voice channels initialized (${config.calls.enabled ? 'serving' : 'off: CHAT_CALLS is not set'})`);
         return this.wss;
     }
 
-    _cleanupInactiveChannels() {
+    async _cleanupInactiveChannels() {
         const ONE_HOUR = 60 * 60 * 1000;
         const now = Date.now();
         for (const [k, until] of this.kickCooldown) if (until <= now) this.kickCooldown.delete(k);
@@ -121,7 +121,7 @@ class CallServer {
                 console.log(`[CallServer] Auto-deleting inactive channel "${ch.name}" (${channelId}) — empty for ${Math.round((now - ch.lastEmptiedAt) / 60000)}m`);
                 this.channels.delete(channelId);
                 this.callBans.delete(channelId);
-                lifecycle.channelClosed(channelId, 'inactive');
+                await lifecycle.channelClosed(channelId, 'inactive');
             }
         }
     }
@@ -135,11 +135,11 @@ class CallServer {
     /* ── Channel management ──────────────────────────────────── */
 
     /** Channels a viewer may see: a private call only for its creator, its invitees and staff. */
-    listChannels(viewer = null) {
+    async listChannels(viewer = null) {
         const result = [];
         for (const [id, ch] of this.channels) {
             if (ch.roomSlug) continue;   // call rooms are listed as rooms (openvibe.chat), not in the voice sidebar
-            if (ch.private && !this._canSeePrivate(ch, viewer)) continue;
+            if (ch.private && !await this._canSeePrivate(ch, viewer)) continue;
             const room = this.rooms.get(id);
             const participants = [];
             if (room) { for (const [pid, info] of room) participants.push(this._buildParticipantInfo(pid, info)); }
@@ -148,8 +148,8 @@ class CallServer {
         return result;
     }
     _publicChannel(ch) { const { invited, ...rest } = ch; return rest; }
-    _canSeePrivate(ch, viewer) {
-        if (ch.roomSlug) { const room = this._roomOf(ch.id); return !!room && rooms.access(room, viewer).read; }
+    async _canSeePrivate(ch, viewer) {
+        if (ch.roomSlug) { const room = await this._roomOf(ch.id); return !!room && (await rooms.access(room, viewer)).read; }
         if (!ch.private) return true;
         if (!viewer) return false;
         if (permissions.can(viewer, 'staff.moderation.calls')) return true;
@@ -170,24 +170,24 @@ class CallServer {
     /** Debounced "the list changed" for every chat socket (the sidebar used to poll every 4 s). */
     _notifyChannelsChanged() {
         if (this._notifyTimer) return;
-        this._notifyTimer = setTimeout(() => {
+        this._notifyTimer = setTimeout(async () => {
             this._notifyTimer = null;
-            try { chatServer.broadcastAll({ type: 'voice-channels', channels: this.listChannels(null) }); } catch { /* */ }
+            try { await chatServer.broadcastAll({ type: 'voice-channels', channels: await this.listChannels(null) }); } catch { /* */ }
         }, 400);
         if (this._notifyTimer.unref) this._notifyTimer.unref();
     }
 
     /** The call room behind a `room-<slug>` channel id, or null. */
-    _roomOf(channelId) {
+    async _roomOf(channelId) {
         const m = ROOM_CHANNEL.exec(String(channelId || ''));
         if (!m) return null;
-        const room = rooms.bySlug(m[1]);
+        const room = await rooms.bySlug(m[1]);
         return room && room.kind === 'call' ? room : null;
     }
 
     /** The channel of a call room, made on first use and named after the room. → channel | null */
-    ensureRoomChannel(channelId) {
-        const room = this._roomOf(channelId);
+    async ensureRoomChannel(channelId) {
+        const room = await this._roomOf(channelId);
         if (!room) return null;
         let ch = this.channels.get(channelId);
         if (!ch) {
@@ -200,9 +200,9 @@ class CallServer {
         return ch;
     }
 
-    getChannel(channelId, viewer = null) {
+    async getChannel(channelId, viewer = null) {
         const ch = this.channels.get(channelId);
-        if (!ch || !this._canSeePrivate(ch, viewer)) return null;
+        if (!ch || !await this._canSeePrivate(ch, viewer)) return null;
         const room = this.rooms.get(channelId);
         const participants = [];
         if (room) { for (const [pid, info] of room) participants.push(this._buildParticipantInfo(pid, info)); }
@@ -231,11 +231,11 @@ class CallServer {
     }
 
     /** Live's go-live / call-mode hook. `stream` is the stream row when the caller has it (its title). */
-    createStreamChannel(streamId, mode, streamerId, stream = null) {
+    async createStreamChannel(streamId, mode, streamerId, stream = null) {
         const id = `stream-${streamId}`;
         const existing = this.channels.get(id);
-        if (existing) { const old = existing.mode; existing.mode = mode; if (old !== mode) this.endCall(id); return existing; }
-        if (!stream) stream = ctx.getStreamById(streamId);
+        if (existing) { const old = existing.mode; existing.mode = mode; if (old !== mode) await this.endCall(id); return existing; }
+        if (!stream) stream = await ctx.getStreamById(streamId);
         const ch = {
             id, name: stream ? (stream.title || `Stream ${streamId}`) : `Stream ${streamId}`,
             mode: MODES.includes(mode) ? mode : 'mic',
@@ -245,27 +245,27 @@ class CallServer {
         return ch;
     }
 
-    removeStreamChannel(streamId) {
+    async removeStreamChannel(streamId) {
         const id = `stream-${streamId}`;
         const had = this.channels.has(id);
-        this.endCall(id, 'stream_ended');
+        await this.endCall(id, 'stream_ended');
         this.channels.delete(id);
         this.callBans.delete(id);
-        lifecycle.channelClosed(id, 'stream_ended');
+        await lifecycle.channelClosed(id, 'stream_ended');
         return had;
     }
 
     /** `user` is the requester (Live passed an id and looked the account up; Chat's routes have it). */
-    deleteChannel(channelId, user) {
+    async deleteChannel(channelId, user) {
         const ch = this.channels.get(channelId);
         if (!ch || ch.permanent || !user) return false;
         if (ch.createdBy !== user.id) {
             if (!permissions.can(user, 'staff.moderation.calls')) return false;
         }
-        this.endCall(channelId, 'closed');
+        await this.endCall(channelId, 'closed');
         this.channels.delete(channelId);
         this.callBans.delete(channelId);
-        lifecycle.channelClosed(channelId, 'closed');
+        await lifecycle.channelClosed(channelId, 'closed');
         this._notifyChannelsChanged();
         return true;
     }
@@ -295,7 +295,7 @@ class CallServer {
         };
     }
 
-    _handleConnection(ws, req) {
+    async _handleConnection(ws, req) {
         const url = new URL(req.url, 'http://localhost');
         const channelId = url.searchParams.get('channelId') || url.searchParams.get('streamId');
         const token = extractWsToken(req);
@@ -311,7 +311,7 @@ class CallServer {
         // Legacy: bare number → stream-<N>
         const resolvedId = /^\d+$/.test(channelId) ? `stream-${channelId}` : channelId;
 
-        if (!this.channels.get(resolvedId)) this.ensureRoomChannel(resolvedId);
+        if (!this.channels.get(resolvedId)) await this.ensureRoomChannel(resolvedId);
         if (!this.channels.get(resolvedId)) { ws.send(JSON.stringify({ type: 'error', message: 'Voice channel not found' })); ws.close(); return; }
 
         // Sign-in, the anon number and the stream are (cached) calls to Live now. Messages that arrive
@@ -326,7 +326,7 @@ class CallServer {
         (async () => {
             const first = this.channels.get(resolvedId);
             let stream = null;
-            if (first && first.streamId) stream = ctx.getStreamById(first.streamId) || await ctx.ensureStream(first.streamId).catch(() => null);
+            if (first && first.streamId) stream = await ctx.getStreamById(first.streamId) || await ctx.ensureStream(first.streamId).catch(() => null);
             const user = await authenticateWs(token).catch(() => null);
             if (!user) await chatServer._resolveUnifiedAnonNum(chatServer.normalizeIp(ip)).catch(() => {});
             await ctx.warm({ user, streamId: first && first.streamId ? first.streamId : null, ip }).catch(() => {});
@@ -334,7 +334,7 @@ class CallServer {
             ws.off('close', onEarlyClose);
             ws.off('error', onEarlyClose);
             if (closedEarly || ws.readyState !== WebSocket.OPEN) return;
-            this._admit(ws, { resolvedId, ip, user, stream, early });
+            await this._admit(ws, { resolvedId, ip, user, stream, early });
         })().catch((err) => {
             console.warn('[Call] connection setup failed:', err.message);
             try { ws.close(1011, 'setup failed'); } catch {}
@@ -342,24 +342,24 @@ class CallServer {
     }
 
     /** The rest of Live's _handleConnection, once the socket's identity is known. */
-    _admit(ws, { resolvedId, ip, user, stream, early }) {
+    async _admit(ws, { resolvedId, ip, user, stream, early }) {
         // The channel may have gone while the socket signed in.
         const channel = this.channels.get(resolvedId);
         if (!channel) { ws.send(JSON.stringify({ type: 'error', message: 'Voice channel not found' })); ws.close(); return; }
 
         // If stream-linked, verify stream is live
         if (channel.streamId) {
-            if (!stream || Number(stream.id) !== Number(channel.streamId)) stream = ctx.getStreamById(channel.streamId);
+            if (!stream || Number(stream.id) !== Number(channel.streamId)) stream = await ctx.getStreamById(channel.streamId);
             if (!stream || !stream.is_live) { ws.send(JSON.stringify({ type: 'error', message: 'Stream not live' })); ws.close(); return; }
         }
 
-        if (channel.private && !this._canSeePrivate(channel, user)) { ws.send(JSON.stringify({ type: 'error', message: 'This is a private call' })); ws.close(); return; }
+        if (channel.private && !await this._canSeePrivate(channel, user)) { ws.send(JSON.stringify({ type: 'error', message: 'This is a private call' })); ws.close(); return; }
 
         // A call room: the room's roles decide who is in and who talks.
         let roomAccess = null;
         if (channel.roomSlug) {
-            const room = this._roomOf(resolvedId);
-            roomAccess = room ? rooms.access(room, user) : null;
+            const room = await this._roomOf(resolvedId);
+            roomAccess = room ? await rooms.access(room, user) : null;
             if (!roomAccess || !roomAccess.read) { ws.send(JSON.stringify({ type: 'error', message: 'Voice channel not found' })); ws.close(); return; }
             if (!roomAccess.join) { ws.send(JSON.stringify({ type: 'error', message: 'You cannot join this call' })); ws.close(); return; }
         }
@@ -371,8 +371,8 @@ class CallServer {
         const cooled = this.kickCooldown.get(`${resolvedId}:${identity}`);
         if (cooled && cooled > Date.now()) { ws.send(JSON.stringify({ type: 'error', message: 'You were removed from this channel; try again in a minute' })); ws.close(); return; }
         const isChannelCreator = user && channel.createdBy === user.id;
-        const isStreamer = channel.streamId ? (user && ctx.getStreamById(channel.streamId)?.user_id === user.id) : false;
-        const canModerate = this._canModerate(user, resolvedId);
+        const isStreamer = channel.streamId ? (user && (await ctx.getStreamById(channel.streamId))?.user_id === user.id) : false;
+        const canModerate = await this._canModerate(user, resolvedId);
 
         const bans = this.callBans.get(resolvedId);
         if (bans) {
@@ -392,7 +392,7 @@ class CallServer {
             for (const [pid, info] of room) {
                 if (info.user && info.user.id === user.id) {
                     try { info.ws.send(JSON.stringify({ type: 'replaced' })); } catch { /* */ }
-                    this._handleDisconnect(info.ws, resolvedId, pid);
+                    await this._handleDisconnect(info.ws, resolvedId, pid);
                     try { info.ws.close(); } catch { /* */ }
                 }
             }
@@ -419,8 +419,8 @@ class CallServer {
         }
         // The lifecycle: the channel's session is active; an invitee joining answers the ring.
         try {
-            if (room.size === 1) lifecycle.sessionStarted({ channelId: resolvedId, streamId: channel.streamId || null, createdBy: channel.createdBy || null });
-            if (user) lifecycle.answeredByJoin(resolvedId, user.id);
+            if (room.size === 1) await lifecycle.sessionStarted({ channelId: resolvedId, streamId: channel.streamId || null, createdBy: channel.createdBy || null });
+            if (user) await lifecycle.answeredByJoin(resolvedId, user.id);
         } catch (err) { console.warn('[Calls] lifecycle:', err.message); }
 
         const participants = [];
@@ -455,22 +455,22 @@ class CallServer {
             const now = Date.now();
             if (now - clientInfo._msgResetTime > 1000) { clientInfo._msgCount = 0; clientInfo._msgResetTime = now; }
             if (++clientInfo._msgCount > 200) return;
-            queue = queue.then(() => this._handleMessage(ws, JSON.parse(data), resolvedId, peerId))
+            queue = queue.then(async () => await this._handleMessage(ws, JSON.parse(data), resolvedId, peerId))
                 .catch((err) => { console.warn('[Call] Message error for peer', peerId, ':', err.message); });
         };
         ws.on('message', onMessage);
-        ws.on('close', () => this._handleDisconnect(ws, resolvedId, peerId));
-        ws.on('error', () => this._handleDisconnect(ws, resolvedId, peerId));
+        ws.on('close', async () => await this._handleDisconnect(ws, resolvedId, peerId));
+        ws.on('error', async () => await this._handleDisconnect(ws, resolvedId, peerId));
         for (const data of early) onMessage(data);
     }
 
-    _canModerate(user, channelId) {
+    async _canModerate(user, channelId) {
         if (!user) return false;
         if (permissions.can(user, 'staff.moderation.calls')) return true;
         const ch = this.channels.get(channelId);
-        if (ch?.roomSlug) { const room = this._roomOf(channelId); return !!room && rooms.access(room, user).moderate; }
+        if (ch?.roomSlug) { const room = await this._roomOf(channelId); return !!room && (await rooms.access(room, user)).moderate; }
         if (ch?.createdBy === user.id) return true;
-        if (ch?.streamId) return permissions.canModerateCall(user, ch.streamId);
+        if (ch?.streamId) return await permissions.canModerateCall(user, ch.streamId);
         return false;
     }
 
@@ -532,20 +532,20 @@ class CallServer {
                 }
                 const ch = this.channels.get(channelId);
                 if (ch?.roomSlug) {
-                    const callRoom = this._roomOf(channelId);
-                    const a = callRoom ? rooms.access(callRoom, user) : null;
+                    const callRoom = await this._roomOf(channelId);
+                    const a = callRoom ? await rooms.access(callRoom, user) : null;
                     if (!a || !a.read || !a.join) { if (c.ws.readyState === WebSocket.OPEN) { c.ws.send(JSON.stringify({ type: 'error', message: 'You cannot join this call' })); c.ws.close(); } break; }
                 }
                 c.user = user; c.anonId = user ? null : chatServer.getAnonIdForConnection(c.ip, channelId);
                 c.isChannelCreator = !!(user && ch?.createdBy === user.id);
-                c.isStreamer = ch?.streamId ? !!(user && ctx.getStreamById(ch.streamId)?.user_id === user.id) : false;
-                if (user) { try { lifecycle.answeredByJoin(channelId, user.id); } catch { /* */ } }
-                if (ch?.roomSlug) { this._applyRoomAccessTo(channelId, peerId, c); if (room.get(peerId) !== c) break; }
+                c.isStreamer = ch?.streamId ? !!(user && (await ctx.getStreamById(ch.streamId))?.user_id === user.id) : false;
+                if (user) { try { await lifecycle.answeredByJoin(channelId, user.id); } catch { /* */ } }
+                if (ch?.roomSlug) { await this._applyRoomAccessTo(channelId, peerId, c); if (room.get(peerId) !== c) break; }
                 const pInfo = this._buildParticipantInfo(peerId, c);
                 if (c.ws.readyState === WebSocket.OPEN) c.ws.send(JSON.stringify({
                     type: 'self-updated',
                     isStreamer: c.isStreamer || c.isChannelCreator,
-                    canModerate: this._canModerate(user, channelId),
+                    canModerate: await this._canModerate(user, channelId),
                     participant: pInfo,
                 }));
                 const u = JSON.stringify({ type: 'peer-updated', ...pInfo });
@@ -553,7 +553,7 @@ class CallServer {
                 break;
             }
             case 'force-mute': {
-                const sender = room.get(peerId); if (!sender || !this._canModerate(sender.user, channelId)) break;
+                const sender = room.get(peerId); if (!sender || !await this._canModerate(sender.user, channelId)) break;
                 const target = room.get(msg.targetPeerId); if (!target || target.isChannelCreator || target.isStreamer) break;
                 if (target.listenOnly && !msg.forceMuted) break;   // make them a speaker in the room instead
                 target.forceMuted = !!msg.forceMuted;
@@ -563,7 +563,7 @@ class CallServer {
                 break;
             }
             case 'force-camera-off': {
-                const sender = room.get(peerId); if (!sender || !this._canModerate(sender.user, channelId)) break;
+                const sender = room.get(peerId); if (!sender || !await this._canModerate(sender.user, channelId)) break;
                 const target = room.get(msg.targetPeerId); if (!target || target.isChannelCreator || target.isStreamer) break;
                 if (target.listenOnly && !msg.forceCameraOff) break;
                 target.forceCameraOff = !!msg.forceCameraOff;
@@ -573,7 +573,7 @@ class CallServer {
                 break;
             }
             case 'kick': {
-                const sender = room.get(peerId); if (!sender || !this._canModerate(sender.user, channelId)) break;
+                const sender = room.get(peerId); if (!sender || !await this._canModerate(sender.user, channelId)) break;
                 const target = room.get(msg.targetPeerId); if (!target || target.isChannelCreator || target.isStreamer) break;
                 if (target.identity) this.kickCooldown.set(`${channelId}:${target.identity}`, Date.now() + KICK_COOLDOWN_MS);
                 if (target.ws.readyState === WebSocket.OPEN) { target.ws.send(JSON.stringify({ type: 'kicked' })); target.ws.close(); }
@@ -584,7 +584,7 @@ class CallServer {
                 break;
             }
             case 'ban': {
-                const sender = room.get(peerId); if (!sender || !this._canModerate(sender.user, channelId)) break;
+                const sender = room.get(peerId); if (!sender || !await this._canModerate(sender.user, channelId)) break;
                 const target = room.get(msg.targetPeerId); if (!target || target.isChannelCreator || target.isStreamer) break;
                 if (!this.callBans.has(channelId)) this.callBans.set(channelId, new Set());
                 const banSet = this.callBans.get(channelId);
@@ -592,9 +592,9 @@ class CallServer {
                     banSet.add(target.user.id);      // backward compatibility with existing entries
                     banSet.add(`u:${target.user.id}`);
                     // In a call room the ban is the room's block, so it outlives this process.
-                    const callRoom = this._roomOf(channelId);
+                    const callRoom = await this._roomOf(channelId);
                     if (callRoom && sender.user) {
-                        try { rooms.setRole(callRoom, sender.user, target.user.id, 'blocked'); chatServer.refreshRoomAccess(callRoom); } catch (err) { console.warn('[Call] room block:', err.message); }
+                        try { await rooms.setRole(callRoom, sender.user, target.user.id, 'blocked'); await chatServer.refreshRoomAccess(callRoom); } catch (err) { console.warn('[Call] room block:', err.message); }
                     }
                 } else {
                     if (target.anonId) banSet.add(`a:${target.anonId}`);
@@ -608,7 +608,7 @@ class CallServer {
                 break;
             }
             case 'unban': {
-                const sender = room.get(peerId); if (!sender || !this._canModerate(sender.user, channelId)) break;
+                const sender = room.get(peerId); if (!sender || !await this._canModerate(sender.user, channelId)) break;
                 const uid = parseInt(msg.userId);
                 if (uid && this.callBans.has(channelId)) {
                     this.callBans.get(channelId).delete(uid);
@@ -621,15 +621,18 @@ class CallServer {
                 const ch = this.channels.get(channelId);
                 const canEnd = (ch?.createdBy && c.user?.id === ch.createdBy) || c.isStreamer || permissions.can(c.user, 'staff.moderation.calls');
                 if (canEnd) {
-                    this.endCall(channelId, 'ended');
-                    if (ch && !ch.permanent) { this.channels.delete(channelId); lifecycle.channelClosed(channelId, 'ended'); }
+                    // The channel leaves memory before the database is written, as when the write was synchronous.
+                    const closing = ch && !ch.permanent;
+                    if (closing) this.channels.delete(channelId);
+                    await this.endCall(channelId, 'ended');
+                    if (closing) await lifecycle.channelClosed(channelId, 'ended');
                 }
                 break;
             }
         }
     }
 
-    _handleDisconnect(ws, channelId, peerId) {
+    async _handleDisconnect(ws, channelId, peerId) {
         if (!this.clients.has(ws)) return; // already handled (error+close fire back-to-back)
         this.clients.delete(ws);
         const room = this.rooms.get(channelId);
@@ -649,7 +652,7 @@ class CallServer {
             if (ch && !ch.permanent && !ch.streamId) {
                 ch.lastEmptiedAt = Date.now();
             }
-            try { lifecycle.channelEmptied(channelId, 'empty'); } catch (err) { console.warn('[Calls] lifecycle:', err.message); }
+            try { await lifecycle.channelEmptied(channelId, 'empty'); } catch (err) { console.warn('[Calls] lifecycle:', err.message); }
         }
     }
 
@@ -676,7 +679,7 @@ class CallServer {
      * what they may do now. A new speaker may talk, a demoted one is muted, someone who may no longer
      * read the room (blocked, removed from a private room) is dropped. → peers changed
      */
-    applyRoomAccess(room) {
+    async applyRoomAccess(room) {
         if (!room || room.kind !== 'call') return 0;
         const channelId = `room-${room.slug}`;
         const ch = this.channels.get(channelId);
@@ -684,18 +687,18 @@ class CallServer {
         const r = this.rooms.get(channelId);
         if (!r) return 0;
         let changed = 0;
-        for (const [pid, info] of [...r]) if (this._applyRoomAccessTo(channelId, pid, info, room)) changed++;
+        for (const [pid, info] of [...r]) if (await this._applyRoomAccessTo(channelId, pid, info, room)) changed++;
         return changed;
     }
 
     /** One peer of a call room against the room's current roles. → whether anything changed */
-    _applyRoomAccessTo(channelId, peerId, info, room = null) {
-        const callRoom = room || this._roomOf(channelId);
-        const a = callRoom ? rooms.access(callRoom, info.user || null) : null;
+    async _applyRoomAccessTo(channelId, peerId, info, room = null) {
+        const callRoom = room || await this._roomOf(channelId);
+        const a = callRoom ? await rooms.access(callRoom, info.user || null) : null;
         const send = (o) => { if (info.ws.readyState === WebSocket.OPEN) info.ws.send(JSON.stringify(o)); };
         if (!a || !a.read || !a.join) {
             send({ type: 'error', message: 'You can no longer join this call' });
-            this._handleDisconnect(info.ws, channelId, peerId);
+            await this._handleDisconnect(info.ws, channelId, peerId);
             try { info.ws.close(); } catch { /* */ }
             return true;
         }
@@ -707,7 +710,7 @@ class CallServer {
         info.forceMuted = listenOnly;
         info.forceCameraOff = listenOnly;
         if (listenOnly) { info.muted = true; info.cameraOff = true; info.speaking = false; }
-        send({ type: 'room-role', room: callRoom.slug, role: a.role, canTalk: a.talk, canModerate: this._canModerate(info.user, channelId) });
+        send({ type: 'room-role', room: callRoom.slug, role: a.role, canTalk: a.talk, canModerate: await this._canModerate(info.user, channelId) });
         send({ type: 'force-muted', forceMuted: info.forceMuted });
         send({ type: 'force-camera-off', forceCameraOff: info.forceCameraOff });
         const r = this.rooms.get(channelId);
@@ -725,23 +728,24 @@ class CallServer {
         return true;
     }
 
-    endCall(channelId, reason = 'ended') {
+    async endCall(channelId, reason = 'ended') {
         const r = this.rooms.get(channelId); if (!r) return;
         const entries = [...r.values()];
         this.rooms.delete(channelId);
+        for (const info of entries) this.clients.delete(info.ws);
+        // The session row ends before anyone hears call-ended (the order it had when the write was synchronous).
+        try { await lifecycle.channelEmptied(channelId, reason); } catch (err) { console.warn('[Calls] lifecycle:', err.message); }
         const m = JSON.stringify({ type: 'call-ended' });
         for (const info of entries) {
-            this.clients.delete(info.ws);
             if (info.ws.readyState === WebSocket.OPEN) { info.ws.send(m); info.ws.close(); }
         }
-        try { lifecycle.channelEmptied(channelId, reason); } catch (err) { console.warn('[Calls] lifecycle:', err.message); }
     }
 
     /** Legacy compat: end call by stream ID */
-    endStreamCall(streamId) { this.endCall(`stream-${streamId}`); }
+    async endStreamCall(streamId) { await this.endCall(`stream-${streamId}`); }
 
-    close() {
-        for (const [cid] of this.rooms) this.endCall(cid, 'restart');
+    async close() {
+        for (const [cid] of this.rooms) await this.endCall(cid, 'restart');
         if (this._heartbeatInterval) { clearInterval(this._heartbeatInterval); this._heartbeatInterval = null; }
         if (this._inactivityTimer) { clearInterval(this._inactivityTimer); this._inactivityTimer = null; }
         if (this._notifyTimer) { clearTimeout(this._notifyTimer); this._notifyTimer = null; }

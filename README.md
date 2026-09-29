@@ -44,23 +44,28 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   channel moderation settings and moderators, bans and IP rules, follows, cosmetics and tags, site
   settings and anon numbers are read through it; coins, AI viewers, arena, media queue, hardware,
   pastes, translation, PowerChat, notifications, viewer counts and the IP log are effects it asks
-  Live for. Reads are cached projections (SQLite `ctx_*` tables kept complete by paged syncs; TTL
+  Live for. Reads are cached projections (`ctx_*` tables kept complete by paged syncs; TTL
   caches that serve stale while refreshing) warmed when a socket joins, so a chat message never
   waits on a network read. Live pushes invalidations when it changes cached data.
 - **Live's side** is `docs/live-patch.diff` (applies to Live `main` with `git apply`):
   `/internal/chat-context/*` and `/internal/chat-effects/*`, and `CHAT_AUTHORITY=chat`, which stops
   Live's chat server and routes and turns `require('./chat/chat-server')` into a proxy that forwards
   Live's own chat calls here (`POST /internal/live/calls`).
-- **Own database** (`CHAT_DB_PATH` today, systemd `StateDirectory=openvibe-chat`) with Live's tables and
-  ids, the Network subject on new rows, a transactional events outbox and a read mirror back into Live.
-  The move to PostgreSQL (ADR-035, plan T3) is prepared here: `migrations/0001_initial.sql` is the whole
-  schema on PostgreSQL (with the twelve Live read-mirror triggers, gated on `ov.mirror_skip`), and
-  `scripts/import-sqlite-to-pg.js` moves the SQLite data over with a per-table report. In production that
-  needs `DATABASE_URL` (runtime, through PgBouncer) and `DATABASE_DIRECT_URL` (the owner, for migrations);
-  `VALKEY_URL`/`VALKEY_PREFIX` put the per-actor rate-limit counters on Valkey instead of this process.
+- **Own database on PostgreSQL** (ADR-035, plan T3) with Live's tables and ids, the Network subject on new
+  rows, a transactional events outbox and a read mirror back into Live. `server/db/database.js` serves
+  through `openvibe-sdk/db`: production needs `DATABASE_URL` (the runtime role, DML only, through
+  PgBouncer) and `DATABASE_DIRECT_URL` (the owner, which applies `migrations/` at boot); without
+  `DATABASE_URL` outside production it runs on an embedded PGlite in `data/pglite` (`CHAT_PGLITE_DIR`).
+  `migrations/0001_initial.sql` is the whole schema (timestamps stay SQLite-format text through
+  `ov_now()`/`datetime()`); its triggers on the twelve Chat tables queue Live's read mirror
+  (`live_mirror_outbox`), skipped where a transaction sets `ov.mirror_skip = '1'` (the importers).
+  `scripts/import-sqlite-to-pg.js` moves the SQLite data over once, with a per-table count and checksum
+  report (`docs/cutover.md`). `VALKEY_URL`/`VALKEY_PREFIX` put the per-actor rate-limit counters on
+  Valkey instead of this process. No part of the service reads SQLite; the one-time tools that read a
+  SQLite file (Live's snapshot, the import) use `node:sqlite` through `scripts/lib/sqlite.js`.
 - **Import:** `scripts/import-from-live.js --live-db <snapshot> [--apply]` — a dry run unless
-  `--apply` (which backs Chat's database up first), idempotent, never drops a row of Chat's tables
-  (`import_hold`), reports counts per table.
+  `--apply` (which first copies the rows of the tables it writes to a JSON file), idempotent, never drops
+  a row of Chat's tables (`import_hold`), reports counts per table.
 - **The six chat tables** (`channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`,
   `chat_ai_summaries`, `chat_timeline_events`): Chat's own since the C-04 cutover — Chat is their only
   writer, there is no authority switch any more. Live's current release's writers still call Chat over
@@ -160,7 +165,7 @@ Chat subscribes (consumer `chat`) to these topics (and `network.user.token_valid
   crash are the same card. A redeploy of a head already announced (a rollback to it) says nothing.
   A release event older than 6 hours (an operator replay) is `ignored:stale`.
 - **Exactly once.** The openvibe-sdk inbox (`chat_event_inbox`, pruned after 35 days) claims
-  `(chat, event_id)` in the same SQLite transaction as the change, and broadcasts run only after it
+  `(chat, event_id)` in the same transaction as the change, and broadcasts run only after it
   commits. A failure answers 500 and rolls both back; Events retries.
 - **Signature v2 only** (`parseDelivery` with `requireV2`): HMAC over `"<t>.<raw body>"` under
   `CHAT_EVENTS_SECRET`, `t` within ±300 s. A bad, stale, v1-only or unsigned delivery is 401; no secret
@@ -357,6 +362,8 @@ npm install
 cp .env.example .env          # OV_LIVE_INTERNAL_URL, Network URLs, OV_OAUTH_CLIENT_SECRET, SOUNDS_PATH
 npm start                     # 127.0.0.1:4400 — /ws/chat, /api/{chat,dm,tts,sounds}, /health, /ready (CHAT_CALLS=1: /ws/call, /api/streams/…)
 npm test                      # Node 22; stub Live and Network in-process
+npm run test:pg               # the same on PostgreSQL + PgBouncer + Valkey (OV_TEST_PG_URL, OV_TEST_PG_DIRECT_URL,
+                              # OV_TEST_VALKEY_URL: openvibe-sdk scripts/test-services.sh up)
 node scripts/import-from-live.js --live-db /tmp/live-snapshot.db            # dry run; --apply writes
 node scripts/parity-check.js --live https://openvibe.live --chat http://127.0.0.1:4401 --before "…"
 node scripts/mirror-flush.js  # rollback helper: push queued mirror rows to Live
@@ -433,7 +440,7 @@ server/prefs/              chat preferences in the Network user module chat.pref
 server/calls/              moved from Live: the call server (/ws/call), its REST routes, Live's stream hooks (/internal/calls), the calls lifecycle
 server/media/client.js     OpenVibe.Media objects (namespace chat): emote image bytes, with Chat's own service token
 server/ai/                 moved from Live: chat-ai.js (the rolling insight job, off unless CHAT_AI_ENABLED), client.js (OpenVibe.AI runs, namespace chat.*), extractive.js (the fallback summary)
-server/db/                 schema.sql, database.js (Live's chat functions, same names and arguments)
+server/db/                 database.js (Live's chat functions, same names and arguments; PostgreSQL, migrations/)
 scripts/                   import-from-live, parity-check, parity, mirror-flush, migrate-chat-preferences, subscribe-events, n-1-record
 docs/                      cutover.md, calls-cutover.md, parity.md, live-patch.diff, capabilities-proposal/
 ```

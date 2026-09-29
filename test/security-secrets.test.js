@@ -40,10 +40,10 @@ t('boot with a sentinel in every secret', async () => {
     h = await boot({ env: { ...ENV, CHAT_WEB_URL: 'https://openvibe.chat' } });
     Object.assign(h.live.settings, SETTINGS, { tts_enabled: true, tts_provider: 'google' });
     await h.ctx.ensureSettings(true);
-    const mk = (name, opts = {}) => { const u = h.addUser(name, { subject: ids.newId('user'), ...opts }); h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); return u; };
+    const mk = async (name, opts = {}) => { const u = h.addUser(name, { subject: ids.newId('user'), ...opts }); await h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); return u; };
     people = {
-        anonymous: null, viewer: mk('viewer'), streamer: mk('streamer', { role: 'streamer' }), 'global mod': mk('staffmod', { role: 'global_mod' }),
-        admin: mk('admin', { role: 'admin' }), 'site owner': mk('owner', { role: 'admin', is_owner: 1 }),
+        anonymous: null, viewer: await mk('viewer'), streamer: await mk('streamer', { role: 'streamer' }), 'global mod': await mk('staffmod', { role: 'global_mod' }),
+        admin: await mk('admin', { role: 'admin' }), 'site owner': await mk('owner', { role: 'admin', is_owner: 1 }),
     };
     people.stream = h.addStream(people.streamer.id, h.addChannel(people.streamer.id), { title: 'Live now', is_live: 1 });
 });
@@ -113,7 +113,7 @@ t('internal routes with a wrong, missing or other-audience service token, and th
 });
 
 t('the events outbox and the log lines carry no secret', async () => {
-    const rows = JSON.stringify(h.db.all('SELECT * FROM events_outbox'));
+    const rows = JSON.stringify(await h.db.all('SELECT * FROM events_outbox'));
     for (const [k, v] of Object.entries({ ...ENV, ...SETTINGS })) {
         assert.ok(!rows.includes(v), `outbox carries ${k}`);
         const line = logs.find((l) => l.includes(v));

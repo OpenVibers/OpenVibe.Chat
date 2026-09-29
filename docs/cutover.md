@@ -179,7 +179,7 @@ Live becomes the chat authority again on its own tables, which the mirror kept c
    to Live, which answers 503 until step 3 — clients retry).
 2. Make sure everything Chat wrote is in Live: `curl -s 127.0.0.1:4400/ready | jq .mirror.pending`
    → 0. If the service cannot run: `cd /opt/openvibe.chat && sudo -u ubuntu env $(sudo cat
-   /etc/openvibe/chat.env | xargs) CHAT_DB_PATH=/var/lib/openvibe-chat/chat.db node scripts/mirror-flush.js`
+   /etc/openvibe/chat.env | xargs) node scripts/mirror-flush.js` (the env names Chat's database: `DATABASE_URL`)
    (exit 0 = drained). Live accepts mirror writes only while it still has the flag, so do this
    before step 3.
 3. Remove `CHAT_AUTHORITY` from `/etc/openvibe/live.env`, restart Live. At boot Live applies any
@@ -248,23 +248,39 @@ creates, so `npm run test:pg` rehearses the same shape.
     sqlite3 /var/lib/openvibe-chat/chat.db ".backup /tmp/chat-pg-source.db"
     node scripts/import-sqlite-to-pg.js --sqlite /tmp/chat-pg-source.db --pglite ./data/pglite
 
-The import prints one line per table (rows + checksum) and records the whole report in `import_runs`. It
-runs with `ov.mirror_skip = '1'`, so the imported rows (which came from Live) are never queued back into
-Live's read mirror. A problem (a source column with no target, a verification mismatch) makes it exit 1.
+The import (`openvibe-sdk/db` `importSqlite`, reading the file with `node:sqlite`) copies every table the
+migration has, parents first, ids kept; identity sequences are `setval`'d past the imported maximum; each
+table is verified (row count + a checksum walked in primary-key order) and printed as one line
+(`[import] <table> <rows> rows checksum <16 hex> (<ms> ms)`), then the tail
+(`[import] <n> tables, <rows> rows, ok|FAILED`); the whole report is recorded in `import_runs`. It runs with
+`ov.mirror_skip = '1'`, so the imported rows are never queued into Live's read mirror, and ends with
+`ANALYZE` as the owner (the runtime role's ANALYZE is a no-op; without statistics the history page plans a
+Sort). A problem (a source column with no target, a verification mismatch) makes it exit 1.
 
-**Switch.** Drain Chat (stop the unit), take a final copy, and import it as the owner:
+**Switch.**
+1. On the old release: `curl -s 127.0.0.1:4400/ready | jq .mirror.pending` → 0 (Live has every change), then
+   stop the unit (drained: nothing writes the file any more).
+2. Keep the file as it is (`cp -a /var/lib/openvibe-chat/chat.db /var/lib/openvibe-chat/chat.db.pre-pg`) and
+   import it as the owner (the script applies `migrations/` first, then copies):
 
-    node scripts/import-sqlite-to-pg.js --sqlite /var/lib/openvibe-chat/chat.db --url "$DATABASE_DIRECT_URL"
+       node scripts/import-sqlite-to-pg.js --sqlite /var/lib/openvibe-chat/chat.db --url "$DATABASE_DIRECT_URL"
 
-Set `DATABASE_URL` and `DATABASE_DIRECT_URL` in `/etc/openvibe/chat.env`, start the new release, and check
-`GET /ready`: `db` ok (its `max_message_id` is the pre-cutover `SELECT MAX(id) FROM chat_messages`), the
-optional `valkey` check ok when `VALKEY_URL` is set (skipped otherwise), and `mirror.pending` 0 once the
-relay has flushed. Compare a few counts against the source with `scripts/parity-check.js` (repointed at
-PostgreSQL) before retiring the SQLite file.
+3. Check the counts: the report's rows per table against `sqlite3 /var/lib/openvibe-chat/chat.db "select
+   count(*) from <table>"` for `chat_messages`, `dm_messages`, `rooms`, `room_messages`, `audio_requests`;
+   `ok` on the tail line.
+4. Set `DATABASE_URL` and `DATABASE_DIRECT_URL` (and `VALKEY_URL`, `VALKEY_PREFIX`) in
+   `/etc/openvibe/chat.env`; deploy and start the new release (it applies `migrations/` as the owner at boot:
+   nothing to do, the import's schema is current). `GET /ready`: `db` ok with `max_message_id` equal to the
+   file's `select max(id) from chat_messages`, `valkey` ok (skipped without `VALKEY_URL`), `mirror.pending`
+   back to 0 once the relay has flushed the first writes.
+5. From the deployed commit, `npm run n-1:record` and commit `test/fixtures/n-1`: the N-1 test then replays
+   this release's PostgreSQL statements again (it reports itself skipped until then).
 
-**Rollback** is the previous release plus the retained SQLite file: stop Chat, restore `DATABASE_URL` to
-unset (the old release reads `CHAT_DB_PATH`), restore the copy taken before the switch, and start the old
-release. The Live read mirror keeps Live's copy current throughout, so a rollback loses nothing Live has
-already seen. Keep the SQLite file read-only for the rollback window; do not delete it until the
-PostgreSQL deploy has served a full release.
+**Rollback** is the previous release plus the retained SQLite file: stop Chat, unset `DATABASE_URL` /
+`DATABASE_DIRECT_URL` (the old release reads `CHAT_DB_PATH`, which the unit still sets), and start the old
+release on `chat.db.pre-pg`. The twelve chat tables Live mirrors lose nothing Live has already seen; rows
+written on PostgreSQL after the switch to Chat's own tables (rooms, calls, the audio queue, DMs' read
+state) are not in the file — export them from PostgreSQL first if the rollback comes after real traffic.
+Keep the SQLite file read-only for the rollback window; do not delete it until the PostgreSQL deploy has
+served a full release.
 

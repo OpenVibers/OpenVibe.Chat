@@ -59,7 +59,7 @@ async function join(opts) {
 }
 const bye = async (...sockets) => { for (const ws of sockets) { if (ws && ws.readyState === WebSocket.OPEN) { ws.close(); await ws.closed; } } await h.sleep(30); };
 const api = (method, path, u, body) => h.http(method, `/api/streams${path}`, { token: u && u.token, body });
-const rows = (where = {}) => lifecycle.list(where);
+const rows = async (where = {}) => await lifecycle.list(where);
 async function until(fn, ms = 2000) {
     const end = Date.now() + ms;
     for (;;) {
@@ -86,7 +86,7 @@ t('boot (CHAT_CALLS=1, a short ring timeout)', async () => {
     const ch = h.addChannel(streamer.id);
     liveStream = h.addStream(streamer.id, ch, { title: 'Late show' });
     offStream = h.addStream(streamer.id, ch, { title: 'Yesterday', is_live: 0 });
-    for (const u of [ann, bob, cat, dan, eve, kay, staff, streamer]) h.ctx.upsertUser(h.live.users.get(u.id));
+    for (const u of [ann, bob, cat, dan, eve, kay, staff, streamer]) await h.ctx.upsertUser(h.live.users.get(u.id));
     await h.ctx.sync();
     assert.strictEqual(config.calls.enabled, true);
 });
@@ -136,13 +136,13 @@ t('public lobby: join, peer-joined, participant info, the list pushed to chat so
     const me = anon.welcome.participants.find((x) => x.peerId === anon.welcome.peerId);
     assert.ok(/^anon\d+$/.test(me.anonId) && me.userId === null && me.displayName === me.anonId, 'signed out = anonymous, as on Live');
 
-    let session = rows({ channelId: 'public' })[0];
+    let session = (await rows({ channelId: 'public' }))[0];
     assert.deepStrictEqual([session.kind, session.state, session.end_reason], ['channel', 'active', null]);
     await bye(b);
     const left = await a.next((m) => m.type === 'peer-left');
     assert.deepStrictEqual([left.peerId, left.reason, left.username], [b.welcome.peerId, 'disconnect', 'bob']);
     await bye(a, anon, chat);
-    session = lifecycle.get(session.id);
+    session = await lifecycle.get(session.id);
     assert.deepStrictEqual([session.state, session.end_reason], ['ended', 'empty'], 'the session ends when the channel empties');
     assert.ok(session.started_at && session.ended_at >= session.started_at);
     assert.strictEqual(callServer.getParticipantCount('public'), 0);
@@ -269,7 +269,7 @@ t('ban and unban', async () => {
     await back.next((m) => m.type === 'call-ended');
     await k.next((m) => m.type === 'call-ended');
     assert.ok(!callServer.channels.has(kayChannel));
-    const session = rows({ channelId: kayChannel })[0];
+    const session = (await rows({ channelId: kayChannel }))[0];
     assert.deepStrictEqual([session.kind, session.state, session.end_reason], ['channel', 'ended', 'ended']);
     await bye(back, k);
 });
@@ -307,7 +307,7 @@ t('call-user: ringing → accepted → active → ended; private call; Live aske
     annCall = r.body.channel.id;
     const invite = await catChat.next((m) => m.type === 'vc-call-invite');
     assert.deepStrictEqual([invite.channelId, invite.channelName, invite.fromUserId, invite.fromUsername, invite.fromDisplayName], [annCall, 'Ann\'s call', ann.id, 'ann', 'Ann']);
-    let ring = rows({ kind: 'direct' })[0];
+    let ring = (await rows({ kind: 'direct' }))[0];
     assert.deepStrictEqual([ring.state, ring.created_by, ring.target_user_id, ring.channel_id, ring.created_by_subject, ring.target_subject], ['ringing', ann.id, cat.id, annCall, ann.subject_id, cat.subject_id]);
     const note = await until(() => h.live.effects.find((e) => e.name === 'notify/call-invite'));
     assert.deepStrictEqual(note.body, { caller_id: ann.id, target_id: cat.id, channel_id: annCall, channel_name: 'Ann\'s call' });
@@ -330,15 +330,15 @@ t('call-user: ringing → accepted → active → ended; private call; Live aske
     assert.deepStrictEqual(r.body, { ok: true });
     const answer = await annChat.next((m) => m.type === 'vc-call-response');
     assert.deepStrictEqual([answer.status, answer.channelId, answer.fromUserId, answer.fromUsername], ['accepted', annCall, cat.id, 'cat']);
-    ring = lifecycle.get(ring.id);
+    ring = await lifecycle.get(ring.id);
     assert.deepStrictEqual([ring.state, ring.end_reason], ['active', null]);
     assert.ok(ring.answered_at >= ring.started_at);
     const c = await join({ channelId: annCall, token: cat.token, ip: '198.51.100.43' });
     assert.ok(c.welcome, c.error);
     await h.sleep(1400);
-    assert.strictEqual(lifecycle.get(ring.id).state, 'active', 'an answered call is not missed');
+    assert.strictEqual((await lifecycle.get(ring.id)).state, 'active', 'an answered call is not missed');
     await bye(a, c, annChat, catChat, anon, outsider);
-    ring = lifecycle.get(ring.id);
+    ring = await lifecycle.get(ring.id);
     assert.deepStrictEqual([ring.state, ring.end_reason], ['ended', 'empty']);
 });
 
@@ -350,27 +350,27 @@ t('call-user: declined, busy, missed after the ring timeout (the caller hears "n
     assert.deepStrictEqual([r.status, r.body.reusedChannel, r.body.channel.id], [200, true, annCall], 'the caller\'s channel is reused');
     await api('POST', '/voice-channels/call-user/respond', dan, { caller_user_id: ann.id, channel_id: annCall, status: 'declined' });
     assert.strictEqual((await annChat.next((m) => m.type === 'vc-call-response')).status, 'declined');
-    const declined = rows({ kind: 'direct' })[0];
+    const declined = (await rows({ kind: 'direct' }))[0];
     assert.deepStrictEqual([declined.target_user_id, declined.state, declined.end_reason], [dan.id, 'declined', 'declined']);
     assert.ok(declined.ended_at);
     // busy
     await api('POST', '/voice-channels/call-user', ann, { username: 'eve' });
     await api('POST', '/voice-channels/call-user/respond', eve, { caller_user_id: ann.id, channel_id: annCall, status: 'busy' });
-    assert.deepStrictEqual([rows({ kind: 'direct' })[0].state, rows({ kind: 'direct' })[0].end_reason], ['declined', 'busy']);
+    assert.deepStrictEqual([(await rows({ kind: 'direct' }))[0].state, (await rows({ kind: 'direct' }))[0].end_reason], ['declined', 'busy']);
     // missed: bob never answers
     r = await api('POST', '/voice-channels/call-user', ann, { username: 'bob' });
-    const ringing = rows({ kind: 'direct' })[0];
+    const ringing = (await rows({ kind: 'direct' }))[0];
     assert.strictEqual(ringing.state, 'ringing');
     // Ringing again re-rings the same call.
     await api('POST', '/voice-channels/call-user', ann, { username: 'bob' });
-    assert.strictEqual(rows({ kind: 'direct' })[0].id, ringing.id);
+    assert.strictEqual((await rows({ kind: 'direct' }))[0].id, ringing.id);
     const noAnswer = await annChat.next((m) => m.type === 'vc-call-response' && m.status === 'no-answer', 4000);
     assert.deepStrictEqual([noAnswer.fromUserId, noAnswer.fromUsername, noAnswer.channelId], [bob.id, 'bob', annCall]);
-    const missed = lifecycle.get(ringing.id);
+    const missed = await lifecycle.get(ringing.id);
     assert.deepStrictEqual([missed.state, missed.end_reason], ['missed', 'timeout']);
     // bob's late "accepted" finds no ring to answer (the relay still goes, as on Live)
     assert.strictEqual((await api('POST', '/voice-channels/call-user/respond', bob, { caller_user_id: ann.id, channel_id: annCall, status: 'accepted' })).status, 200);
-    assert.strictEqual(lifecycle.get(ringing.id).state, 'missed');
+    assert.strictEqual((await lifecycle.get(ringing.id)).state, 'missed');
     // Six rings a minute (ann has used five).
     await api('POST', '/voice-channels/call-user', ann, { username: 'kay' });
     r = await api('POST', '/voice-channels/call-user', ann, { username: 'kay' });
@@ -387,13 +387,13 @@ t('call-user: an invite that cannot be delivered is failed, with the reason', as
     let r;
     try { r = await api('POST', '/voice-channels/call-user', eve, { username: 'dan' }); } finally { h.chatServer.sendDm = orig; }
     assert.deepStrictEqual([r.status, r.body.error], [500, 'Failed to call user']);
-    const row = rows({ kind: 'direct' })[0];
+    const row = (await rows({ kind: 'direct' }))[0];
     assert.deepStrictEqual([row.created_by, row.state, row.end_reason], [eve.id, 'failed', 'invite_failed: socket layer down']);
     // Deleting a channel ends the rings still waiting on it (canceled).
     r = await api('POST', '/voice-channels/call-user', eve, { username: 'dan' });
-    assert.strictEqual(rows({ kind: 'direct' })[0].state, 'ringing');
+    assert.strictEqual((await rows({ kind: 'direct' }))[0].state, 'ringing');
     await api('DELETE', `/voice-channels/${r.body.channel.id}`, eve);
-    assert.deepStrictEqual([rows({ kind: 'direct' })[0].state, rows({ kind: 'direct' })[0].end_reason], ['ended', 'canceled']);
+    assert.deepStrictEqual([(await rows({ kind: 'direct' }))[0].state, (await rows({ kind: 'direct' }))[0].end_reason], ['ended', 'canceled']);
 });
 
 t('stream channel through /internal/calls: guard, create, join (legacy id), mode change, removal', async () => {
@@ -420,7 +420,7 @@ t('stream channel through /internal/calls: guard, create, join (legacy id), mode
     assert.strictEqual(host.welcome.participants.find((p) => p.username === 'streamy').isStreamer, true);
     r = await api('GET', `/${liveStream}/call`, null);
     assert.strictEqual(r.body.participant_count, 2);
-    let session = rows({ channelId: `stream-${liveStream}` })[0];
+    let session = (await rows({ channelId: `stream-${liveStream}` }))[0];
     assert.deepStrictEqual([session.kind, session.state, session.stream_id, session.created_by], ['stream', 'active', liveStream, streamer.id]);
 
     // A new mode ends the call in progress (Live's createStreamChannel).
@@ -428,16 +428,16 @@ t('stream channel through /internal/calls: guard, create, join (legacy id), mode
     assert.strictEqual(r.body.channel.mode, 'cam+mic');
     await viewer.next((m) => m.type === 'call-ended');
     await host.next((m) => m.type === 'call-ended');
-    assert.deepStrictEqual([lifecycle.get(session.id).state, lifecycle.get(session.id).end_reason], ['ended', 'ended']);
+    assert.deepStrictEqual([(await lifecycle.get(session.id)).state, (await lifecycle.get(session.id)).end_reason], ['ended', 'ended']);
     await bye(viewer, host);
 
     const v2 = await join({ channelId: `stream-${liveStream}`, token: bob.token, ip: '198.51.100.50' });
     assert.strictEqual(v2.welcome.callMode, 'cam+mic');
-    session = rows({ channelId: `stream-${liveStream}` })[0];
+    session = (await rows({ channelId: `stream-${liveStream}` }))[0];
     r = await h.http('DELETE', `/internal/calls/stream-channel/${liveStream}`, { token });
     assert.deepStrictEqual(r.body, { ok: true, removed: true });
     await v2.next((m) => m.type === 'call-ended');
-    assert.deepStrictEqual([lifecycle.get(session.id).state, lifecycle.get(session.id).end_reason], ['ended', 'stream_ended']);
+    assert.deepStrictEqual([(await lifecycle.get(session.id)).state, (await lifecycle.get(session.id)).end_reason], ['ended', 'stream_ended']);
     assert.deepStrictEqual((await api('GET', `/${liveStream}/call`, null)).body, { call_mode: null, channelId: null, participants: [], participant_count: 0 });
     assert.deepStrictEqual((await h.http('DELETE', `/internal/calls/stream-channel/${liveStream}`, { token })).body, { ok: true, removed: false });
     const gone = await join({ channelId: `stream-${liveStream}`, token: bob.token, ip: '198.51.100.50' });
@@ -467,29 +467,29 @@ t('PUT /api/streams/:id/call: the streamer only, a live stream only, a known mod
 });
 
 t('lifecycle: transitions are one-way; a restart closes what was left open', async () => {
-    const d = lifecycle.openDirect({ callerId: ann.id, targetId: kay.id, channelId: 'user-x' });
+    const d = await lifecycle.openDirect({ callerId: ann.id, targetId: kay.id, channelId: 'user-x' });
     assert.strictEqual(d.state, 'pending');
-    assert.strictEqual(lifecycle.transition(d.id, 'active'), null, 'pending cannot become active without ringing');
-    assert.strictEqual(lifecycle.transition(d.id, 'declined'), null);
-    lifecycle.ring(d.id, { timeoutMs: 60000 });
-    const declined = lifecycle.respond({ callerId: ann.id, targetId: kay.id, channelId: 'user-x', status: 'declined' });
+    assert.strictEqual(await lifecycle.transition(d.id, 'active'), null, 'pending cannot become active without ringing');
+    assert.strictEqual(await lifecycle.transition(d.id, 'declined'), null);
+    await lifecycle.ring(d.id, { timeoutMs: 60000 });
+    const declined = await lifecycle.respond({ callerId: ann.id, targetId: kay.id, channelId: 'user-x', status: 'declined' });
     assert.strictEqual(declined.state, 'declined');
-    assert.strictEqual(lifecycle.transition(d.id, 'active'), null, 'a final state stays final');
-    assert.strictEqual(lifecycle.respond({ callerId: ann.id, targetId: kay.id, channelId: 'user-x', status: 'accepted' }), null);
+    assert.strictEqual(await lifecycle.transition(d.id, 'active'), null, 'a final state stays final');
+    assert.strictEqual(await lifecycle.respond({ callerId: ann.id, targetId: kay.id, channelId: 'user-x', status: 'accepted' }), null);
 
-    const pending = lifecycle.openDirect({ callerId: bob.id, targetId: kay.id, channelId: 'user-y' });
-    const ringing = lifecycle.ring(lifecycle.openDirect({ callerId: cat.id, targetId: kay.id, channelId: 'user-z' }).id, { timeoutMs: 60000 });
-    const active = lifecycle.sessionStarted({ channelId: 'user-z' });
-    assert.strictEqual(lifecycle.sessionStarted({ channelId: 'user-z' }).id, active.id, 'one session per channel');
-    const out = lifecycle.recover();
+    const pending = await lifecycle.openDirect({ callerId: bob.id, targetId: kay.id, channelId: 'user-y' });
+    const ringing = await lifecycle.ring((await lifecycle.openDirect({ callerId: cat.id, targetId: kay.id, channelId: 'user-z' })).id, { timeoutMs: 60000 });
+    const active = await lifecycle.sessionStarted({ channelId: 'user-z' });
+    assert.strictEqual((await lifecycle.sessionStarted({ channelId: 'user-z' })).id, active.id, 'one session per channel');
+    const out = await lifecycle.recover();
     assert.ok(out.failed >= 1 && out.missed >= 1 && out.ended >= 1, JSON.stringify(out));
-    assert.deepStrictEqual([lifecycle.get(pending.id).state, lifecycle.get(pending.id).end_reason], ['failed', 'restart']);
-    assert.deepStrictEqual([lifecycle.get(ringing.id).state, lifecycle.get(ringing.id).end_reason], ['missed', 'restart']);
-    assert.deepStrictEqual([lifecycle.get(active.id).state, lifecycle.get(active.id).end_reason], ['ended', 'restart']);
-    assert.strictEqual(h.db.get("SELECT COUNT(*) AS n FROM calls WHERE state IN ('pending', 'ringing', 'active')").n, 0);
+    assert.deepStrictEqual([(await lifecycle.get(pending.id)).state, (await lifecycle.get(pending.id)).end_reason], ['failed', 'restart']);
+    assert.deepStrictEqual([(await lifecycle.get(ringing.id)).state, (await lifecycle.get(ringing.id)).end_reason], ['missed', 'restart']);
+    assert.deepStrictEqual([(await lifecycle.get(active.id)).state, (await lifecycle.get(active.id)).end_reason], ['ended', 'restart']);
+    assert.strictEqual((await h.db.get("SELECT COUNT(*) AS n FROM calls WHERE state IN ('pending', 'ringing', 'active')")).n, 0);
 });
 
 t.run(async () => {
-    try { if (callServer) callServer.close(); } catch { /* */ }
+    try { if (callServer) await callServer.close(); } catch { /* */ }
     if (h && h.close) await h.close();
 });

@@ -113,22 +113,22 @@ function createWebRoutes({ config }) {
     const site = config.web.baseUrl;
     const siteOrigin = (() => { try { return new URL(site).origin; } catch { return null; } })();
     const webConfig = { ...config, baseUrl: site };
-    const viewers = { resolve: async (req) => viewerOf(req) };
+    const viewers = { resolve: async (req) => await viewerOf(req) };
     const formLimit = rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false });
     const sameSite = (req, res, next) => {
         const o = req.get('origin');
         if (o && o !== siteOrigin && o !== 'null') return res.status(403).type('text').send('Forms are only accepted from this site.');
         next();
     };
-    const countsOf = (actor) => {
+    const countsOf = async (actor) => {
         if (actor.kind !== 'user') return {};
-        const n = (fn) => { try { return Number(fn()) || 0; } catch { return 0; } };
-        return { messages: n(() => dm.getTotalUnread(actor.user.id)), rooms: n(() => require('../rooms/rooms').unreadTotal(actor.user)) };
+        const n = async (fn) => { try { return Number(await fn()) || 0; } catch { return 0; } };
+        return { messages: await n(async () => await dm.getTotalUnread(actor.user.id)), rooms: await n(async () => await require('../rooms/rooms').unreadTotal(actor.user)) };
     };
     const page = async (req, res, status, o) => {
         const actor = o.actor || await viewerOf(req);
         res.status(status).set('Cache-Control', o.cache || 'private, no-store').type('html')
-            .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: countsOf(actor), ...o }));
+            .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: await countsOf(actor), ...o }));
     };
     const needUser = async (req, res) => {
         const actor = await viewerOf(req);
@@ -144,9 +144,9 @@ function createWebRoutes({ config }) {
     // ── Global chat ──
     router.get('/', async (req, res) => {
         const actor = await viewerOf(req);
-        const { messages, latest_id } = historyStore.page('global', { limit: 60 });
+        const { messages, latest_id } = await historyStore.page('global', { limit: 60 });
         // Not the lines of people this reader blocked on the network (chat/network-blocks.js).
-        const hidden = actor.kind === 'user' ? require('../chat/network-blocks').blockedUserIds(actor.user) : new Set();
+        const hidden = actor.kind === 'user' ? await require('../chat/network-blocks').blockedUserIds(actor.user) : new Set();
         const shown = messages.filter((m) => !m.is_deleted && (m.message_type || 'chat') === 'chat' && !(m.user_id && hidden.has(Number(m.user_id))));
         const composer = actor.kind === 'user'
             ? (actor.user.is_banned ? notice('error', 'Your account is banned from chat.') : `<form class="oc-compose" method="post" action="/send" id="oc-compose">
@@ -187,16 +187,16 @@ ${composer}
     router.get('/messages', async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         const me = actor.user;
-        const convs = dm.getConversations(me.id);
-        const rows = convs.map((c) => {
-            const others = dm.getParticipants(c.id).filter((p) => p.id !== me.id);
+        const convs = await dm.getConversations(me.id);
+        const rows = (await Promise.all(convs.map(async (c) => {
+            const others = (await dm.getParticipants(c.id)).filter((p) => p.id !== me.id);
             const title = c.name || others.map((p) => p.display_name || p.username).join(', ') || 'Just you';
             const t = hhmm(c.last_message_at);
             return `<li class="oc-conv${c.unread_count ? ' oc-unread' : ''}"><a href="/messages/${c.id}"><strong>${esc(title)}</strong>${c.unread_count ? ` <span class="oc-badge">${c.unread_count} new</span>` : ''}<span class="oc-muted oc-last">${c.last_message ? esc(String(c.last_message).slice(0, 120)) : 'No messages yet'}</span></a>${t.text ? `<time class="oc-time" datetime="${t.iso}">${t.iso.slice(0, 10)}</time>` : ''}</li>`;
-        });
+        })));
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const done = req.query.unblocked ? notice('ok', 'Unblocked. They can message you again, and you them.') : '';
-        const blocked = dm.getBlockedUsers(me.id);
+        const blocked = await dm.getBlockedUsers(me.id);
         const blockedList = blocked.length ? `<details class="oc-blocked"><summary>People you blocked (${blocked.length})</summary><ul class="oc-members">${blocked.map((b) => `<li><strong>${esc(b.display_name || b.username)}</strong> <span class="oc-muted">@${esc(b.username || '')}</span><form class="oc-inline" method="post" action="/messages/unblock/${Number(b.id)}"><button type="submit" class="oc-link">Unblock</button></form></li>`).join('')}</ul></details>` : '';
         const unread = convs.reduce((n, c) => n + (Number(c.unread_count) || 0), 0);
         await page(req, res, 200, {
@@ -213,7 +213,7 @@ ${blockedList}`,
     router.post('/messages/unblock/:userId', formLimit, sameSite, async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         const id = parseInt(req.params.userId, 10);
-        if (Number.isInteger(id) && id > 0) dm.unblockUser(actor.user.id, id);
+        if (Number.isInteger(id) && id > 0) await dm.unblockUser(actor.user.id, id);
         const back = /^\/messages\/\d+$/.test(String(req.body && req.body.back)) ? req.body.back : '/messages?unblocked=1';
         res.redirect(303, back);
     });
@@ -221,7 +221,7 @@ ${blockedList}`,
     router.post('/messages/new', formLimit, sameSite, async (req, res, next) => {
         const actor = await needUser(req, res); if (!actor) return;
         const name = String((req.body && req.body.username) || '').trim();
-        let target = /^[A-Za-z0-9_]{3,24}$/.test(name) ? ctx.getUserByUsername(name) : null;
+        let target = /^[A-Za-z0-9_]{3,24}$/.test(name) ? await ctx.getUserByUsername(name) : null;
         if (!target && /^[A-Za-z0-9_]{3,24}$/.test(name)) target = await ctx.ensureUserByUsername(name).catch(() => null);
         if (!target) return res.redirect(303, `/messages?error=${encodeURIComponent(`Nobody called ${name.slice(0, 24)} on OpenVibe`)}`);
         req.headers.authorization = `Bearer ${req.cookies.ov_token}`;
@@ -236,17 +236,17 @@ ${blockedList}`,
         const actor = await needUser(req, res); if (!actor) return;
         const me = actor.user;
         const id = parseInt(req.params.id, 10);
-        if (!Number.isInteger(id) || !dm.isParticipant(id, me.id)) return page(req, res, 404, { actor, title: 'Not found', path: req.path, robots: 'noindex', body: '<h1>No such conversation</h1><p><a href="/messages">Back to your messages</a></p>' });
-        const others = dm.getParticipants(id).filter((p) => p.id !== me.id);
-        const conv = dm.getConversation(id);
+        if (!Number.isInteger(id) || !await dm.isParticipant(id, me.id)) return await page(req, res, 404, { actor, title: 'Not found', path: req.path, robots: 'noindex', body: '<h1>No such conversation</h1><p><a href="/messages">Back to your messages</a></p>' });
+        const others = (await dm.getParticipants(id)).filter((p) => p.id !== me.id);
+        const conv = await dm.getConversation(id);
         const title = (conv && conv.name) || others.map((p) => p.display_name || p.username).join(', ') || 'Conversation';
-        const msgs = dm.getMessages(id, 60).slice().sort((a, b) => a.id - b.id);
-        try { dm.markRead(id, me.id); } catch { /* best effort */ }
+        const msgs = (await dm.getMessages(id, 60)).slice().sort((a, b) => a.id - b.id);
+        try { await dm.markRead(id, me.id); } catch { /* best effort */ }
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         // A 1:1 conversation: block or unblock the other person here; a block (either way) closes the composer.
         const other = conv && !conv.is_group && others.length === 1 ? others[0] : null;
-        const iBlocked = other ? dm.hasBlocked(me.id, other.id) : false;
-        const closed = other ? dm.isBlockedEither(me.id, other.id) : false;
+        const iBlocked = other ? await dm.hasBlocked(me.id, other.id) : false;
+        const closed = other ? await dm.isBlockedEither(me.id, other.id) : false;
         const otherName = other ? esc(other.display_name || other.username) : '';
         let composer = `<form class="oc-compose" method="post" action="/messages/${id}" id="oc-compose"><label for="oc-input" class="oc-sr">Reply</label><textarea id="oc-input" name="message" maxlength="2000" rows="2" required placeholder="Write a message"></textarea><button type="submit">Send</button></form>`;
         if (iBlocked) composer = `${notice('error', `You blocked ${other.display_name || other.username}. Neither of you can message the other.`)}<form class="oc-inline" method="post" action="/messages/unblock/${Number(other.id)}"><input type="hidden" name="back" value="/messages/${id}"><button type="submit">Unblock ${otherName}</button></form>`;
@@ -265,11 +265,11 @@ ${composer}${tools}`,
         const actor = await needUser(req, res); if (!actor) return;
         const me = actor.user;
         const id = parseInt(req.params.id, 10);
-        if (!Number.isInteger(id) || !dm.isParticipant(id, me.id)) return res.redirect(303, '/messages');
-        const conv = dm.getConversation(id);
-        const others = dm.getParticipants(id).filter((p) => p.id !== me.id);
+        if (!Number.isInteger(id) || !await dm.isParticipant(id, me.id)) return res.redirect(303, '/messages');
+        const conv = await dm.getConversation(id);
+        const others = (await dm.getParticipants(id)).filter((p) => p.id !== me.id);
         if (!conv || conv.is_group || others.length !== 1) return res.redirect(303, `/messages/${id}?error=${encodeURIComponent('Only a one-to-one conversation has someone to block')}`);
-        dm.blockUser(me.id, others[0].id);
+        await dm.blockUser(me.id, others[0].id);
         res.redirect(303, `/messages/${id}`);
     });
 
@@ -372,12 +372,12 @@ ${volume('tts_sound_volume', 'Chat sound volume', tts.sound_volume)}
         const del = (can.moderate || (me && m.user_id === me.id)) ? `<form class="oc-del" method="post" action="/r/${esc(slug)}/delete/${Number(m.id)}"><button type="submit" title="Delete this message" aria-label="Delete this message">×</button></form>` : '';
         return `<li class="oc-msg" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)} <span class="oc-text">${linkify(m.message)}</span>${del}</li>`;
     };
-    const applyRoomChange = (room) => roomRoutes.applyRoomChange(room);
+    const applyRoomChange = async (room) => await roomRoutes.applyRoomChange(room);
 
     router.get('/rooms', async (req, res) => {
         const actor = await viewerOf(req);
         const me = actor.kind === 'user' ? actor.user : null;
-        const { public: pub, mine } = rooms.list(me);
+        const { public: pub, mine } = await rooms.list(me);
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const staff = !!me && permissions.can(me, 'staff.moderation.chat');
         const create = me ? `<form class="oc-form oc-create" method="post" action="/rooms/new">
@@ -407,15 +407,15 @@ ${create}`,
         const actor = await needUser(req, res); if (!actor) return;
         const b = req.body || {};
         const kind = rooms.KINDS.includes(b.kind) ? b.kind : 'community';
-        const room = rooms.create(actor.user, { name: b.name, topic: b.topic, visibility: b.private === '1' ? 'private' : 'public', kind, join_role: kind === 'call' ? b.join_role || null : null });
+        const room = await rooms.create(actor.user, { name: b.name, topic: b.topic, visibility: b.private === '1' ? 'private' : 'public', kind, join_role: kind === 'call' ? b.join_role || null : null });
         res.redirect(303, `/r/${room.slug}`);
     }));
 
     const loadRoom = async (req, res) => {
         const actor = await viewerOf(req);
         const me = actor.kind === 'user' ? actor.user : null;
-        const room = rooms.bySlug(req.params.slug);
-        const can = room ? rooms.access(room, me) : null;
+        const room = await rooms.bySlug(req.params.slug);
+        const can = room ? await rooms.access(room, me) : null;
         if (!room || !can.read) { await page(req, res, 404, { actor, title: 'No such room', path: req.path, robots: 'noindex', body: '<h1>No such room</h1><p><a href="/rooms">All rooms</a></p>' }); return null; }
         req.roomBack = `/r/${room.slug}`;
         return { actor, me, room, can };
@@ -442,8 +442,8 @@ ${people}
     router.get('/r/:slug', async (req, res) => {
         const x = await loadRoom(req, res); if (!x) return;
         const { actor, me, room, can } = x;
-        const msgs = rooms.history(room, { limit: 60 });
-        if (me && can.role) rooms.markRead(room, me);
+        const msgs = await rooms.history(room, { limit: 60 });
+        if (me && can.role) await rooms.markRead(room, me);
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const joinLabel = room.kind === 'system' ? 'Follow these announcements' : 'Join this room';
         let composer;
@@ -466,7 +466,7 @@ ${people}
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: can.join, talk: can.talk } } : {}) },
             body: `<p><a href="/rooms">← Rooms</a></p>
 <h1>${esc(room.name)}${kindBadge(room)}${room.visibility === 'private' ? ' <span class="oc-badge">private</span>' : ''}</h1>
-<p class="oc-muted">${room.topic ? `${esc(room.topic)} · ` : ''}${rooms.publicRoom(room).members} members${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole}${manage} <span class="oc-live" id="oc-live" hidden>● live</span></p>
+<p class="oc-muted">${room.topic ? `${esc(room.topic)} · ` : ''}${(await rooms.publicRoom(room)).members} members${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole}${manage} <span class="oc-live" id="oc-live" hidden>● live</span></p>
 ${error}
 ${isCall ? callPanel(room, can, me) : ''}
 <ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
@@ -476,41 +476,41 @@ ${composer}${tools}`,
 
     router.post('/r/:slug', formLimit, sameSite, roomsOrError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
-        const room = rooms.bySlug(req.params.slug);
-        if (!room || !rooms.access(room, actor.user).read) return res.redirect(303, '/rooms');
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
         req.roomBack = `/r/${room.slug}`;
-        const message = rooms.post(room, actor.user, req.body && req.body.message);
+        const message = await rooms.post(room, actor.user, req.body && req.body.message);
         require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
         res.redirect(303, `/r/${room.slug}#oc-compose`);
     }));
 
     router.post('/r/:slug/join', formLimit, sameSite, roomsOrError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
-        const room = rooms.bySlug(req.params.slug);
-        if (!room || !rooms.access(room, actor.user).read) return res.redirect(303, '/rooms');
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
         req.roomBack = `/r/${room.slug}`;
-        rooms.join(room, actor.user);
-        applyRoomChange(room);
+        await rooms.join(room, actor.user);
+        await applyRoomChange(room);
         res.redirect(303, `/r/${room.slug}`);
     }));
 
     router.post('/r/:slug/leave', formLimit, sameSite, roomsOrError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
-        const room = rooms.bySlug(req.params.slug);
+        const room = await rooms.bySlug(req.params.slug);
         if (!room) return res.redirect(303, '/rooms');
         req.roomBack = `/r/${room.slug}`;
-        rooms.leave(room, actor.user);
+        await rooms.leave(room, actor.user);
         require('../chat/chat-server').removeFromRoom(room.id, actor.user.id);
-        applyRoomChange(room);
+        await applyRoomChange(room);
         res.redirect(303, '/rooms');
     }));
 
     router.post('/r/:slug/delete/:id', formLimit, sameSite, roomsOrError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
-        const room = rooms.bySlug(req.params.slug);
-        if (!room || !rooms.access(room, actor.user).read) return res.redirect(303, '/rooms');
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
         req.roomBack = `/r/${room.slug}`;
-        const id = rooms.deleteMessage(room, actor.user, parseInt(req.params.id, 10));
+        const id = await rooms.deleteMessage(room, actor.user, parseInt(req.params.id, 10));
         require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message_deleted', room: room.slug, id });
         res.redirect(303, `/r/${room.slug}`);
     }));
@@ -521,7 +521,7 @@ ${composer}${tools}`,
         if (!can.moderate) return res.redirect(303, `/r/${room.slug}`);
         const saved = req.query.saved ? notice('ok', 'Saved.') : '';
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
-        const members = rooms.members(room, { seen: true });
+        const members = await rooms.members(room, { seen: true });
         const kindRoles = rooms.KIND_ROLES[room.kind] || rooms.KIND_ROLES.community;
         const choices = [...kindRoles.filter((r) => r !== 'owner' && (r !== 'mod' || can.manage)), 'none'];
         const roleOption = (r, current) => `<option value="${r}"${r === current ? ' selected' : ''}>${r === 'none' ? 'remove' : ROLE_LABEL[r] || r}</option>`;
@@ -530,7 +530,7 @@ ${composer}${tools}`,
             : (m.role === 'mod' && !can.manage) ? '<span class="oc-muted">moderator</span>'
                 : `<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/members"><input type="hidden" name="username" value="${esc(m.username || '')}"><select name="role" aria-label="Role for ${esc(m.username || '')}">${choices.map((r) => roleOption(r, m.role)).join('')}</select> <button type="submit">Set</button></form>`;
         const addRole = rooms.joinRoleOf(room);
-        const attachments = can.manage ? rooms.attachments(room) : [];
+        const attachments = can.manage ? await rooms.attachments(room) : [];
         const communityUrl = config.web.communityUrl;
         const attachList = can.manage ? `<h2>Attached to</h2>${attachments.length ? `<ul class="oc-members">${attachments.map((a) => `<li><a href="${esc(a.service === 'community' ? `${communityUrl}/s/${encodeURIComponent(a.resource)}` : '#')}">${esc(a.title || a.resource)}</a> <span class="oc-muted">${esc(a.service === 'community' ? 'OpenVibe.Community space' : a.service)}</span><form class="oc-inline" method="post" action="/r/${esc(room.slug)}/attachments/${encodeURIComponent(a.service)}/${encodeURIComponent(a.resource)}/detach"><button type="submit" class="oc-link">Detach</button></form></li>`).join('')}</ul>` : '<p class="oc-muted">Not attached anywhere. A Community space you own can attach this room from the space\'s page.</p>'}` : '';
         await page(req, res, 200, {
@@ -559,41 +559,41 @@ ${attachList}`,
 
     router.post('/r/:slug/settings', formLimit, sameSite, roomsOrError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
-        const room = rooms.bySlug(req.params.slug);
-        if (!room || !rooms.access(room, actor.user).read) return res.redirect(303, '/rooms');
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
         req.roomBack = `/r/${room.slug}/settings`;
         const b = req.body || {};
-        rooms.update(room, actor.user, { name: b.name, topic: b.topic, visibility: b.visibility, slow_seconds: b.slow_seconds === undefined ? undefined : Number(b.slow_seconds), join_role: room.kind === 'call' ? b.join_role : undefined });
-        applyRoomChange(room);
+        await rooms.update(room, actor.user, { name: b.name, topic: b.topic, visibility: b.visibility, slow_seconds: b.slow_seconds === undefined ? undefined : Number(b.slow_seconds), join_role: room.kind === 'call' ? b.join_role : undefined });
+        await applyRoomChange(room);
         res.redirect(303, `/r/${room.slug}/settings?saved=1`);
     }));
 
     router.post('/r/:slug/members', formLimit, sameSite, roomsOrError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
-        const room = rooms.bySlug(req.params.slug);
-        if (!room || !rooms.access(room, actor.user).read) return res.redirect(303, '/rooms');
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
         req.roomBack = `/r/${room.slug}/settings`;
         const name = String((req.body && req.body.username) || '').trim();
-        let target = /^[A-Za-z0-9_]{3,24}$/.test(name) ? ctx.getUserByUsername(name) : null;
+        let target = /^[A-Za-z0-9_]{3,24}$/.test(name) ? await ctx.getUserByUsername(name) : null;
         if (!target && /^[A-Za-z0-9_]{3,24}$/.test(name)) target = await ctx.ensureUserByUsername(name).catch(() => null);
         if (!target) return res.redirect(303, `/r/${room.slug}/settings?error=${encodeURIComponent(`Nobody called ${name.slice(0, 24)} on OpenVibe`)}`);
-        const role = rooms.setRole(room, actor.user, target.id, String((req.body && req.body.role) || rooms.joinRoleOf(room)));
+        const role = await rooms.setRole(room, actor.user, target.id, String((req.body && req.body.role) || rooms.joinRoleOf(room)));
         if (role === 'blocked' || (room.visibility === 'private' && role === 'none')) require('../chat/chat-server').removeFromRoom(room.id, target.id);
-        applyRoomChange(room);
+        await applyRoomChange(room);
         res.redirect(303, `/r/${room.slug}/settings?saved=1`);
     }));
 
     router.post('/r/:slug/attachments/:service/:resource/detach', formLimit, sameSite, roomsOrError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
-        const room = rooms.bySlug(req.params.slug);
-        if (!room || !rooms.access(room, actor.user).read) return res.redirect(303, '/rooms');
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
         req.roomBack = `/r/${room.slug}/settings`;
-        rooms.detach(room, actor.user, req.params.service, req.params.resource);
+        await rooms.detach(room, actor.user, req.params.service, req.params.resource);
         res.redirect(303, `/r/${room.slug}/settings?saved=1`);
     }));
 
     // ── What shipped, robots, sitemap ──
-    router.get('/updates', (req, res) => page(req, res, 200, {
+    router.get('/updates', async (req, res) => await page(req, res, 200, {
         title: `What shipped on ${SITE_NAME}`, path: '/updates', robots: 'index, follow', cache: 'public, max-age=300',
         body: frame.updatesBody({ service: 'chat', siteName: SITE_NAME }) + `<script src="${ovServe.url('shipped.js')}" defer></script>`,
     }));

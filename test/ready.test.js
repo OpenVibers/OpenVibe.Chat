@@ -82,7 +82,8 @@ t('a step that misses its own schedule is late on its own (not masked by the fas
 });
 
 t('database failing: 503 not_ready naming the db check', async () => {
-    h.db.run('ALTER TABLE chat_messages RENAME TO chat_messages_away');
+    const owner = globalThis.__ovChatTestOwnerDb();   // the runtime role cannot change the schema
+    await owner.query('ALTER TABLE chat_messages RENAME TO chat_messages_away');
     try {
         const { status, body } = await ready();
         assert.strictEqual(status, 503);
@@ -90,9 +91,9 @@ t('database failing: 503 not_ready naming the db check', async () => {
         assert.strictEqual(body.status, 'not_ready');
         assert.deepStrictEqual(body.failed, ['db']);
         assert.strictEqual(body.checks.db.status, 'fail');
-        assert.match(body.checks.db.error, /no such table/);
+        assert.match(body.checks.db.error, /does not exist/);
     } finally {
-        h.db.run('ALTER TABLE chat_messages_away RENAME TO chat_messages');
+        await owner.query('ALTER TABLE chat_messages_away RENAME TO chat_messages');
     }
     const { status } = await ready();
     assert.strictEqual(status, 200);

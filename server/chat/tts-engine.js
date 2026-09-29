@@ -209,10 +209,10 @@ function autoUserVoiceParams(identityKey) {
     const gap = h[3] % 4;             // 0..3    (subtle cadence variation)
     return { voice, pitch, speed, gap };
 }
-function deriveUserVoiceParams(identityKey) {
+async function deriveUserVoiceParams(identityKey) {
     const key = String(identityKey || 'anon').trim().toLowerCase() || 'anon';
     // An admin-set override wins over the auto-assigned voice.
-    try { const ov = db.getTtsVoiceOverride(key); if (ov && ov.voice) return _clampVoiceParams(ov); } catch { /* fall through to auto */ }
+    try { const ov = await db.getTtsVoiceOverride(key); if (ov && ov.voice) return _clampVoiceParams(ov); } catch { /* fall through to auto */ }
     return autoUserVoiceParams(key);
 }
 
@@ -227,10 +227,10 @@ async function synthesizeUserVoice(text, identityKey, username, maxLengthOverrid
     const effMax = Math.min(1200, Math.max(1, Number(maxLengthOverride) || settings.maxLength));
     const cleanText = sanitize(text, effMax, username);
     if (!cleanText) return null;
-    const params = deriveUserVoiceParams(identityKey);
+    const params = await deriveUserVoiceParams(identityKey);
     const voiceDef = { engine: 'espeak-ng', params, name: `Voice-${params.voice}` };
     // Use a synthetic voiceId so the client can distinguish auto voices if needed.
-    return _synthesizeWithDef(cleanText, voiceDef, `auto:${params.voice}`);
+    return await _synthesizeWithDef(cleanText, voiceDef, `auto:${params.voice}`);
 }
 
 /** Invalidate settings cache (call after admin updates) */
@@ -542,10 +542,10 @@ async function synthesize(text, voiceId, username, maxLengthOverride) {
     if (!voiceDef) {
         // Fallback to default
         const fallback = VOICE_CATALOG[settings.defaultVoice] || VOICE_CATALOG.gary;
-        return _synthesizeWithDef(cleanText, fallback, settings.defaultVoice);
+        return await _synthesizeWithDef(cleanText, fallback, settings.defaultVoice);
     }
 
-    return _synthesizeWithDef(cleanText, voiceDef, vid);
+    return await _synthesizeWithDef(cleanText, voiceDef, vid);
 }
 
 async function _synthesizeWithDef(text, voiceDef, voiceId) {
@@ -646,7 +646,7 @@ function getAvailableVoices() {
 async function synthesizeWithParams(text, params) {
     const p = _clampVoiceParams(params || {});
     const voiceDef = { engine: 'espeak-ng', params: p, name: `Voice-${p.voice}` };
-    return _synthesizeWithDef(sanitize(text, getTTSSettings().maxLength, null), voiceDef, `preview:${p.voice}`);
+    return await _synthesizeWithDef(sanitize(text, getTTSSettings().maxLength, null), voiceDef, `preview:${p.voice}`);
 }
 
 module.exports = {

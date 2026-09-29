@@ -614,7 +614,7 @@ function openSocket(url, headers) {
         };
         ws.none = async (pred, ms = QUIET_MS) => { await new Promise((r) => setTimeout(r, ms)); return !all.some(pred); };
         ws.sendJson = (o) => ws.send(JSON.stringify(o));
-        ws.once('open', () => resolve(ws));
+        ws.once('open', async () => await resolve(ws));
         ws.once('error', reject);
         ws.once('unexpected-response', (req, res) => reject(new Error(`upgrade refused ${res.statusCode}`)));
     });

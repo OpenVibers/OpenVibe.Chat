@@ -25,13 +25,13 @@ const SECRET = 'my number is 555-0199';
 let h, events, eventsDb, eventsPort, admin, alice, streamer, streamId;
 
 /** Outbox chat.message.deleted envelopes after `afterSeq`. */
-function deletions(afterSeq = 0) {
-    return h.db.all("SELECT seq, event FROM events_outbox WHERE event_type = 'chat.message.deleted' AND seq > ? ORDER BY seq", [afterSeq])
+async function deletions(afterSeq = 0) {
+    return (await h.db.all("SELECT seq, event FROM events_outbox WHERE event_type = 'chat.message.deleted' AND seq > ? ORDER BY seq", [afterSeq]))
         .map((r) => JSON.parse(r.event));
 }
-const outboxSeq = () => h.db.get('SELECT COALESCE(MAX(seq), 0) AS s FROM events_outbox').s;
-function say(message, over = {}) {
-    return Number(h.db.saveChatMessage({ stream_id: null, user_id: null, anon_id: 'anon7', username: 'anon7', message, message_type: 'chat', is_global: 1, ...over }).lastInsertRowid);
+const outboxSeq = async () => (await h.db.get('SELECT COALESCE(MAX(seq), 0) AS s FROM events_outbox')).s;
+async function say(message, over = {}) {
+    return Number((await h.db.saveChatMessage({ stream_id: null, user_id: null, anon_id: 'anon7', username: 'anon7', message, message_type: 'chat', is_global: 1, ...over })).lastInsertRowid);
 }
 function assertDeletion(env, ids) {
     const v = validate('events.event-envelope@1', env);
@@ -79,100 +79,100 @@ t('boot (a real OpenVibe.Events on a reserved port when one is checked out next 
 });
 
 t('one message deleted (a moderator, or Live’s bridge): one deletion event, ids only', async () => {
-    const id = say(SECRET);
-    const from = outboxSeq();
-    h.db.deleteChatMessage(id, admin.id);
-    const [d] = deletions(from);
+    const id = await say(SECRET);
+    const from = await outboxSeq();
+    await h.db.deleteChatMessage(id, admin.id);
+    const [d] = await deletions(from);
     assertDeletion(d, [id]);
     assert.ok(!JSON.stringify(d).includes('555-0199') && !JSON.stringify(d).includes('anon7'));
     // Through the bridge, the way Live's /api/mod forwards it.
-    const id2 = say('via the bridge');
+    const id2 = await say('via the bridge');
     const r = await h.http('POST', '/internal/live/calls', { token: h.serviceToken(['chat.live_bridge.write']), body: { boot: 'b1', ops: [{ seq: 1, op: 'db', args: ['deleteChatMessage', id2, admin.id] }] } });
     assert.strictEqual(r.status, 200, r.text);
-    assertDeletion(deletions(from).at(-1), [id2]);
-    const before = outboxSeq();
-    h.db.deleteChatMessage(999999, admin.id);
-    assert.strictEqual(outboxSeq(), before, 'nothing announced for a message that does not exist');
+    assertDeletion((await deletions(from)).at(-1), [id2]);
+    const before = await outboxSeq();
+    await h.db.deleteChatMessage(999999, admin.id);
+    assert.strictEqual(await outboxSeq(), before, 'nothing announced for a message that does not exist');
 });
 
 t('a user’s, an anon’s and a relay user’s history (self-delete, /api/mod purge)', async () => {
-    const mine = [say('a1', { user_id: alice.id, anon_id: null, username: 'alice' }), say('a2', { user_id: alice.id, anon_id: null, username: 'alice' })];
-    const anon = [say('n1', { anon_id: 'anon99', username: 'anon99' })];
-    const relay = [say('r1', { username: '[Twitch] zed', anon_id: null })];
-    let from = outboxSeq();
-    assert.deepStrictEqual(h.db.deleteUserChatMessages(alice.id, { deletedBy: alice.id }), mine, 'return value unchanged');
-    assertDeletion(deletions(from)[0], mine);
-    from = outboxSeq();
-    assert.deepStrictEqual(h.db.deleteAnonChatMessages('anon99', { deletedBy: null }), anon);
-    assertDeletion(deletions(from)[0], anon);
-    from = outboxSeq();
-    assert.deepStrictEqual(h.db.deleteRelayUserMessages('[Twitch] zed', { deletedBy: admin.id }), relay);
-    assertDeletion(deletions(from)[0], relay);
-    from = outboxSeq();
-    assert.deepStrictEqual(h.db.deleteUserChatMessages(alice.id, { deletedBy: alice.id }), [], 'nothing left');
-    assert.deepStrictEqual(deletions(from), [], 'no empty deletion events');
+    const mine = [await say('a1', { user_id: alice.id, anon_id: null, username: 'alice' }), await say('a2', { user_id: alice.id, anon_id: null, username: 'alice' })];
+    const anon = [await say('n1', { anon_id: 'anon99', username: 'anon99' })];
+    const relay = [await say('r1', { username: '[Twitch] zed', anon_id: null })];
+    let from = await outboxSeq();
+    assert.deepStrictEqual(await h.db.deleteUserChatMessages(alice.id, { deletedBy: alice.id }), mine, 'return value unchanged');
+    assertDeletion((await deletions(from))[0], mine);
+    from = await outboxSeq();
+    assert.deepStrictEqual(await h.db.deleteAnonChatMessages('anon99', { deletedBy: null }), anon);
+    assertDeletion((await deletions(from))[0], anon);
+    from = await outboxSeq();
+    assert.deepStrictEqual(await h.db.deleteRelayUserMessages('[Twitch] zed', { deletedBy: admin.id }), relay);
+    assertDeletion((await deletions(from))[0], relay);
+    from = await outboxSeq();
+    assert.deepStrictEqual(await h.db.deleteUserChatMessages(alice.id, { deletedBy: alice.id }), [], 'nothing left');
+    assert.deepStrictEqual(await deletions(from), [], 'no empty deletion events');
 });
 
 t('self-delete over the socket announces what it deleted', async () => {
     const ws = await h.ws({ ip: '198.51.100.77', token: alice.token });
     ws.sendJson({ type: 'join', token: alice.token });
     await ws.next((m) => m.type === 'auth');
-    const id = say('from alice', { user_id: alice.id, anon_id: null, username: 'alice' });
-    const from = outboxSeq();
+    const id = await say('from alice', { user_id: alice.id, anon_id: null, username: 'alice' });
+    const from = await outboxSeq();
     ws.sendJson({ type: 'self-delete-history' });
     const res = await ws.next((m) => m.type === 'self-delete-result');
     assert.strictEqual(res.count, 1);
-    assertDeletion(deletions(from)[0], [id]);
+    assertDeletion((await deletions(from))[0], [id]);
     ws.close();
 });
 
 t('a time-range purge (REST) and the auto-delete sweep', async () => {
-    const inRoom = [say('s1', { stream_id: streamId, is_global: 0 }), say('s2', { stream_id: streamId, is_global: 0 })];
-    const global = say('g1');
-    let from = outboxSeq();
+    const inRoom = [await say('s1', { stream_id: streamId, is_global: 0 }), await say('s2', { stream_id: streamId, is_global: 0 })];
+    const global = await say('g1');
+    let from = await outboxSeq();
     const r = await h.http('DELETE', '/api/chat/admin/purge', { token: admin.token, body: { streamId, from: h.sqliteNow(-60000), to: h.sqliteNow(60000) } });
     assert.strictEqual(r.status, 200, r.text);
     assert.strictEqual(r.body.deleted, 2);
-    assertDeletion(deletions(from)[0], inRoom);
-    assert.ok(!h.db.getChatMessageById(global).is_deleted, 'the other room is untouched');
+    assertDeletion((await deletions(from))[0], inRoom);
+    assert.ok(!(await h.db.getChatMessageById(global)).is_deleted, 'the other room is untouched');
     // The dashboard sends ISO instants ('…T…Z'); rows keep 'YYYY-MM-DD HH:MM:SS'. Read as TEXT,
     // a same-day range matched nothing. Preview, purge and the log filter read both forms.
-    const older = say('s-older', { stream_id: streamId, is_global: 0 });
-    h.db.run('UPDATE chat_messages SET timestamp = ? WHERE id = ?', [h.sqliteNow(-10 * 60e3), older]);
-    const recent = [say('s3', { stream_id: streamId, is_global: 0 }), say('s4', { stream_id: streamId, is_global: 0 })];
+    const older = await say('s-older', { stream_id: streamId, is_global: 0 });
+    await h.db.run('UPDATE chat_messages SET timestamp = ? WHERE id = ?', [h.sqliteNow(-10 * 60e3), older]);
+    const recent = [await say('s3', { stream_id: streamId, is_global: 0 }), await say('s4', { stream_id: streamId, is_global: 0 })];
     const range = { streamId, from: new Date(Date.now() - 60e3).toISOString(), to: new Date(Date.now() + 60e3).toISOString() };
     assert.strictEqual((await h.http('POST', '/api/chat/admin/purge/preview', { token: admin.token, body: range })).body.count, 2);
     const logs = await h.http('GET', `/api/chat/admin/logs?streamId=${streamId}&from=${encodeURIComponent(range.from)}&to=${encodeURIComponent(range.to)}`, { token: admin.token });
     assert.deepStrictEqual(logs.body.rows.map((m) => m.id).sort(), [...recent].sort(), 'the log filter reads ISO too');
-    from = outboxSeq();
+    from = await outboxSeq();
     const iso = await h.http('DELETE', '/api/chat/admin/purge', { token: admin.token, body: range });
     assert.strictEqual(iso.body.deleted, 2, iso.text);
-    assertDeletion(deletions(from)[0], recent);
-    assert.ok(!h.db.getChatMessageById(older).is_deleted, 'ten minutes ago is outside the range');
-    const expiring = say('ephemeral', { auto_delete_at: h.sqliteNow(-1000) });
-    from = outboxSeq();
-    const swept = h.db.deleteExpiredChatMessages(500);
+    assertDeletion((await deletions(from))[0], recent);
+    assert.ok(!(await h.db.getChatMessageById(older)).is_deleted, 'ten minutes ago is outside the range');
+    const expiring = await say('ephemeral', { auto_delete_at: h.sqliteNow(-1000) });
+    from = await outboxSeq();
+    const swept = await h.db.deleteExpiredChatMessages(500);
     assert.deepStrictEqual(swept.map((x) => x.id), [expiring]);
-    assertDeletion(deletions(from)[0], [expiring]);
+    assertDeletion((await deletions(from))[0], [expiring]);
 });
 
 t('more than 500 ids: one event per 500, in order', async () => {
     const ids = [];
-    h.db.transaction(() => { for (let i = 0; i < 1203; i++) ids.push(say(`bulk ${i}`, { anon_id: 'anon500', username: 'anon500' })); });
-    const from = outboxSeq();
-    h.db.deleteAnonChatMessages('anon500', { deletedBy: admin.id });
-    const d = deletions(from);
+    await h.db.tx(async () => { for (let i = 0; i < 1203; i++) ids.push(await say(`bulk ${i}`, { anon_id: 'anon500', username: 'anon500' })); });
+    const from = await outboxSeq();
+    await h.db.deleteAnonChatMessages('anon500', { deletedBy: admin.id });
+    const d = await deletions(from);
     assert.deepStrictEqual(d.map((e) => e.payload.message_ids.length), [500, 500, 203]);
     assert.deepStrictEqual(d.flatMap((e) => e.payload.message_ids), ids);
     for (const e of d) assert.ok(Buffer.byteLength(JSON.stringify(e.payload)) < 64 * 1024, 'fits Events’ payload limit');
 });
 
 t('a failed delete leaves no event (same transaction)', async () => {
-    const id = say('stays');
-    const from = outboxSeq();
-    assert.throws(() => h.db.transaction(() => { h.db.deleteChatMessage(id, admin.id); throw new Error('boom'); }), /boom/);
-    assert.deepStrictEqual(deletions(from), []);
-    assert.ok(!h.db.getChatMessageById(id).is_deleted);
+    const id = await say('stays');
+    const from = await outboxSeq();
+    await assert.rejects(async () => await h.db.tx(async () => { await h.db.deleteChatMessage(id, admin.id); throw new Error('boom'); }), /boom/);
+    assert.deepStrictEqual(await deletions(from), []);
+    assert.ok(!(await h.db.getChatMessageById(id)).is_deleted);
 });
 
 // ── End to end with OpenVibe.Events ──────────────────────────────
@@ -208,8 +208,8 @@ const userJwt = (subjectId) => serviceAuth.signServiceToken({
 let firstSeq, msgId;
 t('e2e: the relay publishes the message, then its deletion; replay serves only the tombstone', async () => {
     if (!haveEvents) return;
-    h.db.run('UPDATE events_outbox SET sent_at = ? WHERE sent_at IS NULL', [new Date().toISOString()]);   // earlier tests' rows
-    msgId = say(SECRET, { user_id: alice.id, anon_id: null, username: 'alice' });
+    await h.db.run('UPDATE events_outbox SET sent_at = ? WHERE sent_at IS NULL', [new Date().toISOString()]);   // earlier tests' rows
+    msgId = await say(SECRET, { user_id: alice.id, anon_id: null, username: 'alice' });
     assert.strictEqual((await h.eventsRelay.flush()).sent, 1);
     firstSeq = await events.store.lastSeq();
     const before = await sse(`/realtime/stream?topics=chat.message.*&last_event_id=${firstSeq - 1}`);
@@ -217,7 +217,7 @@ t('e2e: the relay publishes the message, then its deletion; replay serves only t
     assert.ok(before.body().includes('555-0199'), 'before the deletion the text is there (the leak)');
     before.close();
 
-    h.db.deleteChatMessage(msgId, admin.id);
+    await h.db.deleteChatMessage(msgId, admin.id);
     assert.strictEqual((await h.eventsRelay.flush()).sent, 1);
     const views = [
         ['anonymous', {}],
@@ -246,10 +246,10 @@ t('e2e: the relay publishes the message, then its deletion; replay serves only t
 
 t('e2e: only svc:chat can redact Chat’s events', async () => {
     if (!haveEvents) return;
-    const id = say('not yours to delete');
+    const id = await say('not yours to delete');
     await h.eventsRelay.flush();
     const created = (await events.store.scan(0, { patterns: ['chat.message.created'], limit: 1000 })).rows.find((r) => r.subject_id === String(id));
-    const env = deletions(0).at(-1);   // a well-formed deletion, re-sourced by another service
+    const env = (await deletions(0)).at(-1);   // a well-formed deletion, re-sourced by another service
     const post = (sub, body) => fetch(`http://127.0.0.1:${eventsPort}/api/v1/events`, {
         method: 'POST', body: JSON.stringify(body),
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${h.serviceToken(['events.event.publish'], { aud: 'openvibe.events', sub })}` },
@@ -260,7 +260,7 @@ t('e2e: only svc:chat can redact Chat’s events', async () => {
     r = await post('svc:live', { ...env, event_id: 'evt_01J9DDDDDDDDDDDDDDDDDDDDDD', payload: { redacts: { subject_type: 'chat_message', subject_ids: [String(id)] } } });
     assert.strictEqual(r.status, 403, 'svc:live cannot publish as chat');
     assert.ok((await events.store.getEvent(created.id)).payload.includes('not yours to delete'), 'still intact');
-    h.db.deleteChatMessage(id, admin.id);
+    await h.db.deleteChatMessage(id, admin.id);
     await h.eventsRelay.flush();
     assert.ok((await events.store.getEvent(created.id)).redacted_at, 'Chat itself can');
 });
