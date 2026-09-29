@@ -66,7 +66,7 @@ function renderPage(o) {
     const title = o.title ? `${o.title} · ${SITE_NAME}` : SITE_NAME;
     const head = sharedSeo.headTags({
         title, description: o.description || DEFAULT_DESCRIPTION, canonical: `${config.web.baseUrl}${o.path || '/'}`,
-        robots: o.robots, siteName: SITE_NAME, type: 'website',
+        robots: o.robots, siteName: SITE_NAME, type: 'website', jsonLd: o.jsonLd,
     });
     const actor = o.actor || { kind: 'anonymous' };
     const who = actor.kind === 'user'

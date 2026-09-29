@@ -267,6 +267,8 @@ t('restart: what was playing is finished, what waited plays in order once, stale
         ws.close();
     }
     const firstClip = await ears.next((m) => m.type === 'soundboard-audio' && m.title === '!long');
+    // The announce comes before the durable insert: wait for all three rows, not just the first clip.
+    await until(() => raw((d) => d.prepare("SELECT COUNT(*) AS n FROM audio_requests WHERE label = '!long'").get().n) === 3, 3000);
     const queued = raw((d) => d.prepare("SELECT id, state FROM audio_requests WHERE label = '!long' ORDER BY id").all());
     assert.deepStrictEqual(queued.map((x) => x.state), ['playing', 'queued', 'queued']);
     assert.strictEqual(queued[0].id, firstClip.request_id);

@@ -33,6 +33,7 @@ const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
 const { renderPage, esc, SITE_NAME } = require('./layout');
 const { createSessionRoutes } = require('./session');
+const { createDiscoveryRoutes, homeJsonLd } = require('./discovery');
 const session = require('../auth/network-session');
 const historyStore = require('../chat/history-store');
 const dm = require('../chat/dm');
@@ -158,6 +159,7 @@ function createWebRoutes({ config }) {
         await page(req, res, 200, {
             actor, title: 'Global chat', path: '/', active: 'global', robots: 'index, follow', script: true,
             description: 'The network-wide chat room of OpenVibe: everyone on every OpenVibe site, in one conversation.',
+            jsonLd: homeJsonLd(config),
             page: { view: 'global', latest: latest_id, signedIn: actor.kind === 'user', me: actor.kind === 'user' ? actor.user.username : null },
             body: `<section class="oc-room" aria-labelledby="oc-h">
 <h1 id="oc-h">Global chat</h1>
@@ -595,10 +597,8 @@ ${attachList}`,
         title: `What shipped on ${SITE_NAME}`, path: '/updates', robots: 'index, follow', cache: 'public, max-age=300',
         body: frame.updatesBody({ service: 'chat', siteName: SITE_NAME }) + `<script src="${ovServe.url('shipped.js')}" defer></script>`,
     }));
-    router.get('/robots.txt', (req, res) => res.type('text/plain').set('Cache-Control', 'public, max-age=3600')
-        .send(`User-agent: *\nAllow: /$\nAllow: /updates\nAllow: /rooms\nAllow: /r/\nDisallow: /r/*/settings\nDisallow: /messages\nDisallow: /settings\nDisallow: /auth/\nDisallow: /api/\nSitemap: ${site}/sitemap.xml\n`));
-    router.get('/sitemap.xml', (req, res) => res.type('application/xml').set('Cache-Control', 'public, max-age=3600')
-        .send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${['/', '/rooms', '/updates', ...rooms.list(null, { limit: 100 }).public.map((r) => `/r/${r.slug}`)].map((p) => `<url><loc>${site}${p}</loc></url>`).join('')}</urlset>\n`));
+    // ── robots.txt, llms.txt, sitemap.xml: server/web/discovery.js, the shared SEO kit ──
+    router.use(createDiscoveryRoutes({ config }));
 
     // ── Nothing here: a browser asking for a page gets the site's 404 page (the browser check found
     // JSON). The API, /internal/, /ws/ and any client not asking for HTML keep the JSON 404 that
