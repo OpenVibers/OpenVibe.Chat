@@ -23,12 +23,20 @@ const { createRelay } = require('./events/outbox');
 const { createEventsConsumer } = require('./events/consumer');
 const subscriptions = require('./events/subscriptions');
 const chatAi = require('./ai/chat-ai');
+const { limits } = require('./net/actor-limits');
+const { createValkey } = require('openvibe-sdk/valkey');
 const { createApp } = require('./app');
 
 async function start() {
     console.log(`[Chat] OpenVibe.Chat starting (db ${config.dbPath}, Live ${config.live.internalUrl}, mirror ${config.live.mirror ? 'on' : 'off'}, events ${config.events.url || 'off'}, consumer ${config.events.secrets.length ? 'on' : 'off'})`);
     // Mirror capture only when the mirror is on: before the cutover (rehearsals) nothing queues.
     db.initDb({ captureMirror: config.live.mirror });
+
+    // Shared per-actor rate-limit counters on Valkey (ADR-035); without VALKEY_URL they count in this
+    // process, as before. openvibe-sdk/valkey's createValkey returns null when the URL is unset.
+    const valkey = createValkey({ url: config.valkey.url, prefix: config.valkey.prefix });
+    limits.useValkey(valkey);
+    if (valkey) console.log(`[Chat] per-actor limits on Valkey (${config.valkey.prefix})`);
 
     const firstSync = ctx.sync().catch((err) => console.warn('[Chat] first Live sync:', err.message));
     await Promise.race([firstSync, new Promise((r) => setTimeout(r, 15000))]);
@@ -73,6 +81,7 @@ async function start() {
         events.stop();
         chatAi.stop();
         subs.stop();
+        try { if (valkey) await valkey.close(); } catch { /* */ }
         try { await Promise.race([mirror.flush(), new Promise((r) => setTimeout(r, 3000))]); } catch { /* */ }
         try { chatServer.close(); } catch { /* */ }
         try { callServer.close(); } catch { /* */ }

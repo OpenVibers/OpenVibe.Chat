@@ -4,7 +4,7 @@
   "code": true,
   "wave": "W6",
   "plan": "OpenVibe End-to-End Realignment & Implementation Plan, revision 3 (20 Sep 2026)",
-  "runtime": "node 22, express, ws, better-sqlite3",
+  "runtime": "node 22, express, ws, better-sqlite3 (moving to PostgreSQL + Valkey, plan T3: migrations/0001_initial.sql is the whole schema on PostgreSQL, scripts/import-sqlite-to-pg.js moves the data, openvibe-sdk/db + /valkey; needs DATABASE_URL/DATABASE_DIRECT_URL/VALKEY_URL)",
   "port": 4400,
   "domain": "openvibe.chat (Chat's own site: global chat, messages, rooms, settings; the service manifest records it live since 2026-09-24) and openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via an nginx include in openvibe.live's vhost)",
   "contracts": "openvibe-contracts v0.71.0",
@@ -30,7 +30,7 @@
   "calls": "Live's call server, call routes and stream hooks ported to server/calls/ with a calls lifecycle table (WS-I task 1). Off unless CHAT_CALLS=1; the switch is CHAT_CALLS=1, Live CALLS_AUTHORITY=chat and the nginx include deploy/nginx/calls/openvibe.live-calls.locations.conf (docs/calls-cutover.md)",
   "deployed": true,
   "deployment": "Deployed with `sudo ovhost deploy chat`: /opt/openvibe.chat, unit openvibe-chat, 127.0.0.1:4400 (loopback); public through the openvibe.chat vhost and openvibe.live's nginx include for the chat paths; EVENTS_URL set (chat.message.created reaches OpenVibe.Events); restore drill passed 2026-09-23",
-  "updated": "2026-09-28",
+  "updated": "2026-09-29",
   "features": [
     "Live's global, stream and channel chat (authority since 2026-09-23, Live keeps a read mirror)",
     "DMs and group DMs, participants only",

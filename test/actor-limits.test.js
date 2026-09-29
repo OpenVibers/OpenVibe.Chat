@@ -98,4 +98,21 @@ t('who is counted', () => {
     assert.strictEqual(actor({ ip: '203.0.113.1' }), 'ip:203.0.113.1');
 });
 
+t('shared counters: two handles count one budget on Valkey (skipped without VALKEY_URL)', async () => {
+    const { createTestValkey } = require('openvibe-sdk/testing');
+    const { createActorLimiter, createValkeyLimitStore } = require('openvibe-sdk/limits');
+    const v = createTestValkey({ prefix: 'chat-limits' });
+    if (!v) { console.log('  ○ valkey shared counters: skipped (VALKEY_URL unset: counters are per process)'); return; }
+    try {
+        const store = createValkeyLimitStore(v);
+        // Two limiter instances, one shared store: each builds the route's middleware (name, then windows).
+        const build = () => createActorLimiter({ limits: { minute: 2 }, actor: (r) => r.actor, now: () => 0, store, onLimited: null })('shared');
+        const a = build(); const b = build();
+        const send = (mw) => new Promise((resolve) => mw({ actor: 'user:usr_shared' }, { statusCode: 200, headers: {}, setHeader(k, x) { this.headers[k] = x; }, end(body) { this.body = body; resolve(this.statusCode); } }, () => resolve(200)));
+        assert.strictEqual(await send(a), 200, 'first handle counts 1');
+        assert.strictEqual(await send(b), 200, 'second handle sees the shared count (2)');
+        assert.strictEqual(await send(a), 429, 'third is over the shared budget, whichever handle');
+    } finally { await v.close(); }
+});
+
 t.run(async () => { if (h) await h.close(); });

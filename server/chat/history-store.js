@@ -38,7 +38,7 @@ const GLOBAL_SELECT = `SELECT cm.*, u.avatar_url, u.profile_color, u.role, u.dis
        LEFT JOIN ctx_users cu ON cm.channel_user_id = cu.id
        LEFT JOIN ctx_managed_streams ms ON s.managed_stream_id = ms.id
        WHERE cm.is_deleted = 0 AND cm.message_type IN ${GLOBAL_TYPES}
-         AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)`;
+         AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > datetime('now'))`;
 
 const CHANNEL_SELECT = `SELECT cm.*, u.avatar_url, u.profile_color, u.role, u.display_name,
               u.username AS core_username,
@@ -52,7 +52,7 @@ const CHANNEL_SELECT = `SELECT cm.*, u.avatar_url, u.profile_color, u.role, u.di
        LEFT JOIN ctx_users bu ON s.user_id = bu.id
        LEFT JOIN ctx_users cu ON cm.channel_user_id = cu.id
        WHERE cm.channel_user_id = ? AND cm.is_deleted = 0
-         AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)`;
+         AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > datetime('now'))`;
 
 function clampLimit(v, dflt = 500) {
     const n = parseInt(v, 10);
@@ -98,7 +98,9 @@ function readPage(r, { limit, before, channelUsername }) {
     const { sql, params } = baseSql(r, { channelUsername });
     let q = sql;
     if (before) { q += ' AND cm.timestamp < ?'; params.push(before); }
-    q += ' ORDER BY cm.timestamp DESC, cm.id DESC LIMIT ?'; params.push(limit);
+    // The page order is the primary key alone (plan T3 decision 2): ids are monotonic in insert order,
+    // so this is the same order as before, and idx_chat_page_live serves it without a sort on PostgreSQL.
+    q += ' ORDER BY cm.id DESC LIMIT ?'; params.push(limit);
     return db.all(q, params).reverse();
 }
 
@@ -165,7 +167,7 @@ function deletedIds(room, afterId) {
     return db.all(`SELECT id FROM (
             SELECT id, is_deleted, auto_delete_at FROM chat_messages
             WHERE ${scope.where} AND id <= ? ORDER BY timestamp DESC, id DESC LIMIT ?)
-        WHERE NOT (is_deleted = 0 AND (auto_delete_at IS NULL OR COALESCE(datetime(auto_delete_at) > CURRENT_TIMESTAMP, 0)))
+        WHERE NOT (is_deleted = 0 AND (auto_delete_at IS NULL OR COALESCE(datetime(auto_delete_at) > datetime('now'), 0)))
         ORDER BY id`, [...scope.params, after, DELETED_WINDOW]).map((x) => x.id);
 }
 

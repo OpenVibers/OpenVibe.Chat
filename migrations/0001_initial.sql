@@ -1,0 +1,738 @@
+-- phase: expand
+-- OpenVibe.Chat on PostgreSQL (ADR-035, plan T3): the tables as they were on SQLite, converted by openvibe-sdk
+-- tools/asyncify/sqlite-schema-to-pg (text COLLATE "C" compares like SQLite, integers are bigint, identities keep
+-- their ids). Generated once; never edited after it runs. Timestamps stay SQLite-format text (ov_now(), datetime()).
+-- SQLite's text timestamps and date functions (openvibe-sdk tools/asyncify SQLITE_DATE_FUNCTIONS).
+CREATE FUNCTION ov_ts(t text) RETURNS timestamp LANGUAGE plpgsql STABLE AS $$
+BEGIN
+    IF t IS NULL THEN RETURN NULL; END IF;
+    IF t = 'now' THEN RETURN statement_timestamp() AT TIME ZONE 'UTC'; END IF;
+    IF t ~ '\d\d:\d\d(:\d\d(\.\d+)?)?\s*(Z|[+-]\d\d(:?\d\d)?)$' THEN RETURN t::timestamptz AT TIME ZONE 'UTC'; END IF;
+    RETURN t::timestamp;
+EXCEPTION WHEN others THEN RETURN NULL;
+END $$;
+CREATE FUNCTION ov_now() RETURNS text LANGUAGE sql STABLE AS $$ SELECT to_char(statement_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') $$;
+CREATE FUNCTION ov_now_iso() RETURNS text LANGUAGE sql STABLE AS $$ SELECT to_char(statement_timestamp() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') $$;
+CREATE FUNCTION ov_now_iso(modifier text) RETURNS text LANGUAGE sql STABLE AS $$ SELECT to_char((statement_timestamp() AT TIME ZONE 'UTC') + modifier::interval, 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') $$;
+CREATE FUNCTION datetime(t text, modifier text DEFAULT NULL) RETURNS text LANGUAGE plpgsql STABLE AS $$
+DECLARE ts timestamp := ov_ts(t);
+BEGIN
+    IF ts IS NULL THEN RETURN NULL; END IF;
+    IF modifier IS NOT NULL THEN ts := ts + modifier::interval; END IF;
+    RETURN to_char(ts, 'YYYY-MM-DD HH24:MI:SS');
+EXCEPTION WHEN others THEN RETURN NULL;
+END $$;
+CREATE FUNCTION julianday(t text) RETURNS double precision LANGUAGE sql STABLE AS $$ SELECT extract(epoch FROM ov_ts(t))::double precision / 86400.0 + 2440587.5 $$;
+-- SQLite's JSON1 as the code uses it: json_valid(t), and json_extract(t, '$.a.b') as text (CAST it for a number).
+CREATE FUNCTION json_valid(t text) RETURNS boolean LANGUAGE sql IMMUTABLE AS $$ SELECT t IS JSON $$;
+CREATE FUNCTION json_extract(t text, path text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT jsonb_extract_path_text(t::jsonb, VARIADIC string_to_array(substr(path, 3), '.')) $$;
+CREATE FUNCTION json_type(t text) RETURNS text LANGUAGE sql IMMUTABLE AS $$ SELECT jsonb_typeof(t::jsonb) $$;
+CREATE FUNCTION instr(t text, sub text) RETURNS integer LANGUAGE sql IMMUTABLE AS $$ SELECT strpos(t, sub) $$;
+
+
+-- ── 1. Chat-owned ──────────────────────────────────────────────
+
+CREATE TABLE chat_messages (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    stream_id bigint,                     -- Live stream (session) id
+    user_id bigint,                       -- Live user id; NULL for anon
+    anon_id text COLLATE "C",                          -- 'anon12345' format
+    username text COLLATE "C",
+    message text COLLATE "C" NOT NULL,
+    message_type text COLLATE "C" DEFAULT 'chat' CHECK(message_type IN ('chat', 'system', 'donation', 'command', 'tts', 'channel-sound', 'soundboard', 'clip')),
+    metadata text COLLATE "C",                         -- JSON sidecar for rich events (donation/goal-reached)
+    is_global bigint DEFAULT 0,
+    is_deleted bigint DEFAULT 0,
+    is_filtered bigint DEFAULT 0,
+    reply_to_id bigint REFERENCES chat_messages(id) ON DELETE SET NULL,
+    source_platform text COLLATE "C",
+    deleted_by bigint,
+    deleted_at text COLLATE "C",
+    auto_delete_at text COLLATE "C",
+    timestamp text COLLATE "C" DEFAULT ov_now(),
+    channel_user_id bigint,               -- the broadcaster whose channel room this is
+    subject_id text COLLATE "C"                        -- Network subject of the author (usr_…), when known
+);
+CREATE INDEX idx_chat_stream_id ON chat_messages(stream_id);
+CREATE INDEX idx_chat_timestamp ON chat_messages(timestamp);
+CREATE INDEX idx_chat_user_id ON chat_messages(user_id);
+CREATE INDEX idx_chat_channel_user_ts ON chat_messages(channel_user_id, timestamp);
+CREATE INDEX idx_chat_stream_ts ON chat_messages(stream_id, timestamp);
+CREATE INDEX idx_chat_autodelete ON chat_messages(auto_delete_at);
+CREATE INDEX idx_chat_ts_deleted ON chat_messages(timestamp, is_deleted);
+-- The page order is id DESC alone (plan T3 decision 2): page() and delta() read live rows only, and
+-- this partial index serves that order straight from the index tree — no sort, no seq scan. With the
+-- base plan PostgreSQL chose a bitmap scan + Sort (p95 ≈ 1.5 s at 200k rows); this index makes it an
+-- Index Scan (p95 ≈ 12 ms on PGlite). Verified in test/history-latency.test.js.
+CREATE INDEX idx_chat_page_live ON chat_messages (id DESC) WHERE is_deleted = 0;
+CREATE INDEX idx_chat_anon ON chat_messages(anon_id);
+
+CREATE TABLE dm_conversations (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    name text COLLATE "C",
+    is_group bigint DEFAULT 0,
+    created_by bigint NOT NULL,
+    created_at text COLLATE "C" DEFAULT ov_now(),
+    updated_at text COLLATE "C" DEFAULT ov_now()
+);
+
+CREATE TABLE dm_participants (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    conversation_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    last_read_at text COLLATE "C" DEFAULT '1970-01-01 00:00:00',
+    joined_at text COLLATE "C" DEFAULT ov_now(),
+    subject_id text COLLATE "C",
+    UNIQUE(conversation_id, user_id),
+    FOREIGN KEY (conversation_id) REFERENCES dm_conversations(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_dm_participants_conv ON dm_participants(conversation_id);
+CREATE INDEX idx_dm_participants_user ON dm_participants(user_id);
+
+CREATE TABLE dm_messages (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    conversation_id bigint NOT NULL,
+    sender_id bigint NOT NULL,
+    message text COLLATE "C" NOT NULL,
+    created_at text COLLATE "C" DEFAULT ov_now(),
+    sender_subject_id text COLLATE "C",
+    FOREIGN KEY (conversation_id) REFERENCES dm_conversations(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_dm_messages_conv ON dm_messages(conversation_id, created_at);
+CREATE INDEX idx_dm_messages_sender ON dm_messages(sender_id);
+
+CREATE TABLE dm_blocks (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    blocker_id bigint NOT NULL,
+    blocked_id bigint NOT NULL,
+    created_at text COLLATE "C" DEFAULT ov_now(),
+    blocker_subject_id text COLLATE "C",
+    UNIQUE(blocker_id, blocked_id)
+);
+CREATE INDEX idx_dm_blocks_blocker ON dm_blocks(blocker_id);
+CREATE INDEX idx_dm_blocks_blocked ON dm_blocks(blocked_id);
+
+CREATE TABLE tts_voice_overrides (
+    identity_key text COLLATE "C" PRIMARY KEY,
+    voice text COLLATE "C",
+    pitch bigint,
+    speed bigint,
+    gap bigint DEFAULT 0,
+    set_by bigint,
+    updated_at text COLLATE "C" DEFAULT ov_now()
+);
+
+CREATE TABLE channel_sounds (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_owner_id bigint NOT NULL,      -- streamer whose channel this sound belongs to
+    command text COLLATE "C" NOT NULL,                   -- trigger word (without leading '!'), lowercased
+    url text COLLATE "C" NOT NULL,                       -- on-disk path of the audio file
+    mime text COLLATE "C" DEFAULT 'audio/mpeg',
+    duration_seconds double precision DEFAULT 0,
+    created_by bigint,                      -- uploader user id (NULL if removed user)
+    created_by_name text COLLATE "C" DEFAULT '',
+    is_approved bigint DEFAULT 1,
+    created_at text COLLATE "C" DEFAULT ov_now(),
+    emote_code text COLLATE "C" DEFAULT '',
+    created_by_subject_id text COLLATE "C"
+    -- Multiple sounds may share a command; playback picks one at random.
+    -- media_url / media_asset_id stay on Live's copy (its asset-sync mirrors files to Media).
+);
+CREATE INDEX idx_channel_sounds_owner ON channel_sounds(channel_owner_id);
+CREATE INDEX idx_channel_sounds_cmd ON channel_sounds(channel_owner_id, command);
+
+CREATE TABLE relay_users (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    platform text COLLATE "C" NOT NULL,
+    username text COLLATE "C" NOT NULL,
+    display_name text COLLATE "C",
+    first_seen text COLLATE "C" DEFAULT ov_now(),
+    last_seen text COLLATE "C" DEFAULT ov_now(),
+    message_count bigint DEFAULT 0,
+    UNIQUE(platform, username)
+);
+
+CREATE TABLE hidden_relay_users (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_id bigint,
+    platform text COLLATE "C" NOT NULL,
+    external_username text COLLATE "C" NOT NULL,
+    action text COLLATE "C" DEFAULT 'hide' CHECK(action IN ('hide','ban')),
+    reason text COLLATE "C",
+    created_by bigint,
+    created_at text COLLATE "C" DEFAULT ov_now()
+);
+CREATE INDEX idx_hidden_relay_channel ON hidden_relay_users(channel_id, platform);
+
+CREATE TABLE pending_ip_messages (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_id bigint NOT NULL,
+    stream_id bigint,
+    ip_address text COLLATE "C" NOT NULL,
+    user_id bigint,
+    anon_id text COLLATE "C",
+    username text COLLATE "C",
+    message text COLLATE "C" NOT NULL,
+    status text COLLATE "C" DEFAULT 'pending' CHECK(status IN ('pending','approved','denied')),
+    reviewed_by bigint,
+    created_at text COLLATE "C" DEFAULT ov_now()
+);
+CREATE INDEX idx_pending_ip_channel ON pending_ip_messages(channel_id, status);
+
+CREATE TABLE stream_first_chats (
+    chatter_key text COLLATE "C" NOT NULL,
+    channel_user_id bigint NOT NULL,
+    first_chat_at text COLLATE "C" DEFAULT ov_now(),
+    PRIMARY KEY (chatter_key, channel_user_id)
+);
+CREATE INDEX idx_sfc_channel ON stream_first_chats(channel_user_id);
+
+CREATE TABLE moderation_actions (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    scope_type text COLLATE "C" NOT NULL DEFAULT 'site',
+    scope_id bigint,
+    actor_user_id bigint,
+    target_user_id bigint,
+    action_type text COLLATE "C" NOT NULL,
+    details text COLLATE "C" DEFAULT '{}',
+    created_at text COLLATE "C" DEFAULT ov_now(),
+    actor_subject_id text COLLATE "C"
+);
+CREATE INDEX idx_mod_actions_created ON moderation_actions(created_at DESC);
+CREATE INDEX idx_mod_actions_actor ON moderation_actions(actor_user_id);
+CREATE INDEX idx_mod_actions_scope ON moderation_actions(scope_type, scope_id);
+
+-- ── 2. The six chat-target tables (Chat is their only writer since C-04) ──
+
+CREATE TABLE channel_moderators (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    channel_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    added_by bigint NOT NULL,
+    created_at text COLLATE "C" DEFAULT ov_now(),
+    UNIQUE(channel_id, user_id)
+);
+CREATE INDEX idx_channel_mods_channel ON channel_moderators(channel_id);
+CREATE INDEX idx_channel_mods_user ON channel_moderators(user_id);
+
+CREATE TABLE channel_moderation_settings (
+    channel_id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    slow_mode_seconds bigint DEFAULT 0,
+    followers_only bigint DEFAULT 0,
+    emote_only bigint DEFAULT 0,
+    allow_anonymous bigint DEFAULT 1,
+    links_allowed bigint DEFAULT 1,
+    gifs_enabled bigint DEFAULT 1,
+    account_age_gate_hours bigint DEFAULT 0,
+    caps_percentage_limit bigint DEFAULT 0,
+    aggressive_filter bigint DEFAULT 0,
+    max_message_length bigint DEFAULT 500,
+    slur_filter_enabled bigint DEFAULT 0,
+    slur_filter_use_builtin bigint DEFAULT 1,
+    slur_filter_terms text COLLATE "C" DEFAULT '',
+    slur_filter_regexes text COLLATE "C" DEFAULT '',
+    slur_filter_nudge_message text COLLATE "C" DEFAULT '',
+    slur_filter_disabled_categories text COLLATE "C" DEFAULT '[]',
+    ip_approval_mode bigint DEFAULT 0,
+    soundboard_enabled bigint DEFAULT 1,
+    soundboard_allow_pitch bigint DEFAULT 1,
+    soundboard_allow_speed bigint DEFAULT 1,
+    soundboard_banned_ids text COLLATE "C" DEFAULT '',
+    viewer_auto_delete_enabled bigint DEFAULT 1,
+    viewer_delete_all_enabled bigint DEFAULT 1,
+    custom_emotes_enabled bigint DEFAULT 1,
+    custom_sounds_enabled bigint DEFAULT 1,
+    max_sound_seconds bigint DEFAULT 10,
+    uploads_mods_only bigint DEFAULT 0,
+    mods_can_edit_about bigint DEFAULT 0,
+    donation_sound_url text COLLATE "C",
+    donation_sound_mime text COLLATE "C",
+    goal_sound_url text COLLATE "C",
+    goal_sound_mime text COLLATE "C",
+    emote_scale bigint DEFAULT 100,
+    updated_at text COLLATE "C" DEFAULT ov_now(),
+    tts_max_length bigint DEFAULT 200,
+    sound_min_speed double precision DEFAULT 0.5,
+    sound_max_speed double precision DEFAULT 3.0,
+    sound_min_pitch_cents bigint DEFAULT -1200,
+    sound_max_pitch_cents bigint DEFAULT 1200,
+    emote_size_min bigint DEFAULT 50,
+    emote_size_max bigint DEFAULT 200,
+    sounds_mods_only bigint DEFAULT 0,
+    sub_only bigint DEFAULT 0              -- sub-only chat: active subscribers and the room's moderators
+);
+
+CREATE TABLE emotes (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id bigint NOT NULL,
+    code text COLLATE "C" NOT NULL,
+    url text COLLATE "C" NOT NULL,
+    animated bigint DEFAULT 0,
+    width bigint DEFAULT 28,
+    height bigint DEFAULT 28,
+    is_global bigint DEFAULT 0,
+    is_approved bigint DEFAULT 1,
+    created_at text COLLATE "C" DEFAULT ov_now(),
+    channel_owner_id bigint,
+    size bigint DEFAULT 100,
+    media_url text COLLATE "C",
+    media_asset_id bigint
+);
+CREATE INDEX idx_emotes_user ON emotes(user_id);
+CREATE INDEX idx_emotes_channel_owner ON emotes(channel_owner_id);
+CREATE UNIQUE INDEX idx_emotes_channel_code ON emotes(COALESCE(channel_owner_id, user_id), code);
+
+CREATE TABLE user_tags (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id bigint NOT NULL,
+    tag_id text COLLATE "C" NOT NULL,
+    source text COLLATE "C" DEFAULT 'shop',
+    granted_at text COLLATE "C" DEFAULT ov_now(),
+    UNIQUE(user_id, tag_id)
+);
+CREATE INDEX idx_user_tags_user ON user_tags(user_id);
+
+CREATE TABLE chat_ai_summaries (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    scope text COLLATE "C" NOT NULL,
+    subject_id bigint NOT NULL DEFAULT 0,
+    "window" text COLLATE "C" NOT NULL,
+    overview text COLLATE "C" DEFAULT '',
+    memory_json text COLLATE "C" DEFAULT '',
+    timeline_json text COLLATE "C" DEFAULT '[]',
+    message_count bigint DEFAULT 0,
+    window_message_count bigint DEFAULT 0,
+    last_message_id bigint DEFAULT 0,
+    window_label text COLLATE "C" DEFAULT '',
+    window_start text COLLATE "C",
+    window_end text COLLATE "C",
+    updated_at text COLLATE "C" DEFAULT ov_now(),
+    UNIQUE(scope, subject_id, "window")
+);
+
+CREATE TABLE chat_timeline_events (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    scope text COLLATE "C" NOT NULL DEFAULT 'global',
+    subject_id bigint NOT NULL DEFAULT 0,
+    ts text COLLATE "C" NOT NULL,
+    label text COLLATE "C" NOT NULL,
+    detail text COLLATE "C" DEFAULT '',
+    created_at text COLLATE "C" DEFAULT ov_now()
+);
+CREATE UNIQUE INDEX idx_chat_tl_dedup ON chat_timeline_events(scope, subject_id, ts, label);
+
+-- ── 3. Bookkeeping ──────────────────────────────────────────────
+
+-- Projections of Live data, maintained by server/live-context.js only. Never authority.
+CREATE TABLE ctx_users (
+    id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    username text COLLATE "C",
+    display_name text COLLATE "C",
+    avatar_url text COLLATE "C",
+    profile_color text COLLATE "C",
+    role text COLLATE "C" DEFAULT 'user',
+    is_banned bigint DEFAULT 0,
+    ban_reason text COLLATE "C",
+    is_owner bigint DEFAULT 0,
+    created_at text COLLATE "C",
+    subject_id text COLLATE "C",
+    synced_at bigint
+);
+CREATE INDEX idx_ctx_users_username ON ctx_users(lower(username));
+CREATE INDEX idx_ctx_users_display ON ctx_users(lower(display_name));
+CREATE INDEX idx_ctx_users_subject ON ctx_users(subject_id);
+
+CREATE TABLE ctx_streams (
+    id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    user_id bigint,
+    channel_id bigint,
+    managed_stream_id bigint,
+    title text COLLATE "C",
+    is_live bigint DEFAULT 0,
+    started_at text COLLATE "C",
+    ended_at text COLLATE "C",
+    created_at text COLLATE "C",
+    synced_at bigint
+);
+CREATE INDEX idx_ctx_streams_user ON ctx_streams(user_id, id);
+CREATE INDEX idx_ctx_streams_channel ON ctx_streams(channel_id);
+CREATE INDEX idx_ctx_streams_managed ON ctx_streams(managed_stream_id);
+
+CREATE TABLE ctx_managed_streams (
+    id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    user_id bigint,
+    slug text COLLATE "C",
+    title text COLLATE "C",
+    sort_order bigint DEFAULT 0,
+    created_at text COLLATE "C",
+    synced_at bigint
+);
+CREATE INDEX idx_ctx_ms_user ON ctx_managed_streams(user_id);
+
+CREATE TABLE ctx_channels (
+    id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+    user_id bigint UNIQUE,
+    title text COLLATE "C",
+    emote_sources text COLLATE "C",              -- the channel's emote source switches (Live's channels.emote_sources)
+    synced_at bigint
+);
+
+CREATE TABLE ctx_sync (
+    key text COLLATE "C" PRIMARY KEY,
+    value text COLLATE "C",
+    updated_at bigint
+);
+
+-- Transactional outbox (events.event-envelope@1), written in the same transaction as the change.
+CREATE TABLE events_outbox (
+    seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    event_id text COLLATE "C" NOT NULL UNIQUE,
+    event_type text COLLATE "C" NOT NULL,
+    event text COLLATE "C" NOT NULL,
+    created_at text COLLATE "C" NOT NULL,
+    sent_at text COLLATE "C",
+    attempts bigint DEFAULT 0,
+    last_error text COLLATE "C"
+);
+CREATE INDEX idx_events_outbox_unsent ON events_outbox(sent_at, seq);
+
+-- Row changes to mirror into Live's copy of Chat's tables (filled by per-connection TEMP
+-- triggers, so only writes made by this service are captured — never the importer's).
+CREATE TABLE live_mirror_outbox (
+    seq bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tbl text COLLATE "C" NOT NULL,
+    op text COLLATE "C" NOT NULL CHECK(op IN ('upsert', 'delete')),
+    pk text COLLATE "C" NOT NULL,
+    created_at bigint NOT NULL DEFAULT (EXTRACT(EPOCH FROM statement_timestamp())::bigint)
+);
+
+-- Writes Live forwarded over the bridge, by idempotency key (Live's outbox id): a retried
+-- delivery returns the first result instead of writing twice.
+CREATE TABLE bridge_applied (
+    key text COLLATE "C" PRIMARY KEY,
+    result text COLLATE "C",
+    applied_at bigint NOT NULL
+);
+
+-- The TTS and sound queue (server/chat/audio-queue.js): one row per TTS utterance, channel !sound
+-- or 101soundboards clip, played one at a time per room ('stream:<id>' | 'channel:<userId>').
+-- queued → playing → played, or skipped (moderators, the broadcaster) / failed. payload holds what
+-- is needed to make the audio when its turn comes, so the queue survives a restart. Times are ms.
+CREATE TABLE audio_requests (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    room text COLLATE "C" NOT NULL,
+    stream_id bigint,
+    channel_user_id bigint,
+    kind text COLLATE "C" NOT NULL CHECK(kind IN ('tts', 'channel-sound', 'soundboard')),
+    state text COLLATE "C" NOT NULL DEFAULT 'queued' CHECK(state IN ('queued', 'playing', 'played', 'skipped', 'failed')),
+    requested_by text COLLATE "C",
+    identity_key text COLLATE "C",
+    label text COLLATE "C",
+    payload text COLLATE "C" NOT NULL DEFAULT '{}',
+    dedupe_key text COLLATE "C",
+    attempts bigint NOT NULL DEFAULT 0,
+    duration_ms bigint,
+    error text COLLATE "C",
+    actor text COLLATE "C",
+    created_at bigint NOT NULL,
+    started_at bigint,
+    finished_at bigint,
+    UNIQUE(room, dedupe_key)
+);
+CREATE INDEX idx_audio_requests_room_state ON audio_requests(room, state, id);
+
+-- Live's placeholder ids (a large negative number per Live boot) → the real chat_messages id, so a
+-- later op of the same Live boot that carries the placeholder is rewritten even after a Chat
+-- restart (the batch that acknowledged the insert and the one carrying its broadcast can straddle
+-- one). Kept a day.
+CREATE TABLE bridge_refs (
+    boot text COLLATE "C" NOT NULL,
+    ref bigint NOT NULL,
+    id bigint NOT NULL,
+    at bigint NOT NULL,
+    PRIMARY KEY (boot, ref)
+);
+
+-- Rows the importer could not represent. Never dropped; reviewed by hand.
+CREATE TABLE import_hold (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    source_table text COLLATE "C" NOT NULL,
+    source_pk text COLLATE "C" NOT NULL,
+    reason text COLLATE "C" NOT NULL,
+    row_json text COLLATE "C" NOT NULL,
+    held_at text COLLATE "C" DEFAULT ov_now(),
+    UNIQUE(source_table, source_pk)
+);
+
+CREATE TABLE import_runs (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    live_db text COLLATE "C",
+    dry_run bigint DEFAULT 0,
+    counts text COLLATE "C",
+    started_at text COLLATE "C" DEFAULT ov_now(),
+    finished_at text COLLATE "C"
+);
+
+CREATE TABLE chat_meta (
+    key text COLLATE "C" PRIMARY KEY,
+    value text COLLATE "C"
+);
+
+-- Deploys announced in chat, one row per release: Live's head commit (live.release.deployed
+-- subject.id; the first commit of the bridge's deployNotice). The bridge and the Events consumer
+-- both claim the head here in the transaction that stores or folds the card
+-- (server/chat/deploy-notice.js), so a head never makes two cards whichever path comes first.
+-- bridge_at / event_at: when each path delivered it (ms), to see that both carry every deploy.
+CREATE TABLE deploy_releases (
+    head text COLLATE "C" PRIMARY KEY,
+    message_id bigint,
+    first_via text COLLATE "C" NOT NULL CHECK(first_via IN ('bridge', 'events')),
+    bridge_at bigint,
+    event_at bigint,
+    event_id text COLLATE "C",
+    commit_count bigint NOT NULL DEFAULT 0,
+    created_at bigint NOT NULL
+);
+
+-- OpenVibe.Events deliveries already applied (openvibe-sdk inbox: consumer + event id), claimed in
+-- the transaction that applies the event (server/events/consumer.js). Pruned after 35 days
+-- (Events keeps events 30).
+CREATE TABLE chat_event_inbox (
+    consumer text COLLATE "C" NOT NULL,
+    event_id text COLLATE "C" NOT NULL,
+    processed_at bigint NOT NULL,
+    PRIMARY KEY (consumer, event_id)
+);
+
+-- Calls (server/calls/lifecycle.js): one row per call. kind 'direct' is a ring from one person to
+-- another (POST /api/streams/voice-channels/call-user): pending → ringing → active → ended, or
+-- missed (no answer within the ring timeout, or the callee's no-answer), declined (declined or busy)
+-- or failed (the invite could not be delivered; `end_reason` says why). kind 'channel' / 'stream' is
+-- a session of a voice channel (a stream-linked one for 'stream'): active from the first person in
+-- until the channel empties or is closed → ended. Times are ms.
+CREATE TABLE calls (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    kind text COLLATE "C" NOT NULL CHECK(kind IN ('channel', 'direct', 'stream')),
+    state text COLLATE "C" NOT NULL DEFAULT 'pending' CHECK(state IN ('pending', 'ringing', 'active', 'ended', 'missed', 'declined', 'failed')),
+    channel_id text COLLATE "C" NOT NULL,
+    stream_id bigint,
+    created_by bigint,
+    created_by_subject text COLLATE "C",
+    target_user_id bigint,
+    target_subject text COLLATE "C",
+    end_reason text COLLATE "C",
+    created_at bigint NOT NULL,
+    started_at bigint,
+    answered_at bigint,
+    ended_at bigint
+);
+CREATE INDEX idx_calls_channel_state ON calls(channel_id, state);
+CREATE INDEX idx_calls_open ON calls(state) WHERE state IN ('pending', 'ringing', 'active');
+
+
+CREATE TABLE rooms (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    slug text COLLATE "C" UNIQUE NOT NULL,
+    name text COLLATE "C" NOT NULL,
+    topic text COLLATE "C",
+    kind text COLLATE "C" NOT NULL DEFAULT 'community',
+    visibility text COLLATE "C" NOT NULL DEFAULT 'public',
+    owner_id bigint NOT NULL,
+    owner_subject text COLLATE "C",
+    slow_seconds bigint NOT NULL DEFAULT 0,
+    message_count bigint NOT NULL DEFAULT 0,
+    last_message_at text COLLATE "C",
+    created_at text COLLATE "C" DEFAULT ov_now(),
+    archived_at text COLLATE "C",
+    join_role text COLLATE "C"
+);
+CREATE TABLE room_members (
+    room_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    role text COLLATE "C" NOT NULL DEFAULT 'member',
+    last_read_id bigint NOT NULL DEFAULT 0,
+    joined_at text COLLATE "C" DEFAULT ov_now(),
+    last_seen_at text COLLATE "C",
+    PRIMARY KEY (room_id, user_id)
+);
+CREATE INDEX idx_room_members_user ON room_members(user_id);
+CREATE TABLE room_messages (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    room_id bigint NOT NULL,
+    user_id bigint NOT NULL,
+    subject_id text COLLATE "C",
+    message text COLLATE "C" NOT NULL,
+    created_at text COLLATE "C" DEFAULT ov_now(),
+    is_deleted bigint NOT NULL DEFAULT 0,
+    deleted_by bigint
+);
+CREATE INDEX idx_room_messages_room ON room_messages(room_id, id);
+CREATE TABLE room_attachments (
+    room_id bigint NOT NULL,
+    service text COLLATE "C" NOT NULL,
+    resource text COLLATE "C" NOT NULL,
+    title text COLLATE "C",
+    attached_by bigint NOT NULL,
+    attached_by_subject text COLLATE "C",
+    created_at text COLLATE "C" DEFAULT ov_now(),
+    PRIMARY KEY (room_id, service, resource)
+);
+CREATE TABLE token_revocations (
+    subject_id     text COLLATE "C" PRIMARY KEY,
+    valid_after_ms bigint NOT NULL,
+    reason         text COLLATE "C",
+    updated_at     text COLLATE "C" DEFAULT ov_now()
+);
+CREATE TABLE network_blocks (
+    blocker_subject text COLLATE "C" NOT NULL,
+    blocked_subject text COLLATE "C" NOT NULL,
+    active          bigint NOT NULL,
+    revision        bigint NOT NULL,
+    updated_at      bigint NOT NULL,
+    PRIMARY KEY (blocker_subject, blocked_subject)
+);
+CREATE INDEX idx_network_blocks_blocked ON network_blocks(blocked_subject, active);
+CREATE TABLE account_data_events (
+    id         text COLLATE "C" PRIMARY KEY,
+    kind       text COLLATE "C" NOT NULL,
+    subject    text COLLATE "C" NOT NULL,
+    outcome    text COLLATE "C",
+    sent_at    text COLLATE "C",
+    applied_at text COLLATE "C" NOT NULL DEFAULT ov_now_iso()
+);
+
+-- ── Live read-mirror capture (C-02/C-03): a row change on any of the twelve tables Chat owns queues a
+-- (table, op, pk) row for server/bridge/live-mirror.js. Skipped when ov.mirror_skip = '1' is set for the
+-- transaction (the bridge applying Live's own writes, and the importer's inserts). ──
+CREATE FUNCTION mirror_chat_messages() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('chat_messages', 'delete', jsonb_build_object('id', OLD.id)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('chat_messages', 'upsert', jsonb_build_object('id', NEW.id)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_chat_messages AFTER INSERT OR UPDATE OR DELETE ON chat_messages FOR EACH ROW EXECUTE FUNCTION mirror_chat_messages();
+CREATE FUNCTION mirror_dm_conversations() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('dm_conversations', 'delete', jsonb_build_object('id', OLD.id)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('dm_conversations', 'upsert', jsonb_build_object('id', NEW.id)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_dm_conversations AFTER INSERT OR UPDATE OR DELETE ON dm_conversations FOR EACH ROW EXECUTE FUNCTION mirror_dm_conversations();
+CREATE FUNCTION mirror_dm_participants() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('dm_participants', 'delete', jsonb_build_object('id', OLD.id)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('dm_participants', 'upsert', jsonb_build_object('id', NEW.id)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_dm_participants AFTER INSERT OR UPDATE OR DELETE ON dm_participants FOR EACH ROW EXECUTE FUNCTION mirror_dm_participants();
+CREATE FUNCTION mirror_dm_messages() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('dm_messages', 'delete', jsonb_build_object('id', OLD.id)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('dm_messages', 'upsert', jsonb_build_object('id', NEW.id)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_dm_messages AFTER INSERT OR UPDATE OR DELETE ON dm_messages FOR EACH ROW EXECUTE FUNCTION mirror_dm_messages();
+CREATE FUNCTION mirror_dm_blocks() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('dm_blocks', 'delete', jsonb_build_object('id', OLD.id)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('dm_blocks', 'upsert', jsonb_build_object('id', NEW.id)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_dm_blocks AFTER INSERT OR UPDATE OR DELETE ON dm_blocks FOR EACH ROW EXECUTE FUNCTION mirror_dm_blocks();
+CREATE FUNCTION mirror_tts_voice_overrides() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('tts_voice_overrides', 'delete', jsonb_build_object('identity_key', OLD.identity_key)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('tts_voice_overrides', 'upsert', jsonb_build_object('identity_key', NEW.identity_key)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_tts_voice_overrides AFTER INSERT OR UPDATE OR DELETE ON tts_voice_overrides FOR EACH ROW EXECUTE FUNCTION mirror_tts_voice_overrides();
+CREATE FUNCTION mirror_channel_sounds() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('channel_sounds', 'delete', jsonb_build_object('id', OLD.id)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('channel_sounds', 'upsert', jsonb_build_object('id', NEW.id)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_channel_sounds AFTER INSERT OR UPDATE OR DELETE ON channel_sounds FOR EACH ROW EXECUTE FUNCTION mirror_channel_sounds();
+CREATE FUNCTION mirror_relay_users() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('relay_users', 'delete', jsonb_build_object('id', OLD.id)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('relay_users', 'upsert', jsonb_build_object('id', NEW.id)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_relay_users AFTER INSERT OR UPDATE OR DELETE ON relay_users FOR EACH ROW EXECUTE FUNCTION mirror_relay_users();
+CREATE FUNCTION mirror_hidden_relay_users() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('hidden_relay_users', 'delete', jsonb_build_object('id', OLD.id)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('hidden_relay_users', 'upsert', jsonb_build_object('id', NEW.id)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_hidden_relay_users AFTER INSERT OR UPDATE OR DELETE ON hidden_relay_users FOR EACH ROW EXECUTE FUNCTION mirror_hidden_relay_users();
+CREATE FUNCTION mirror_pending_ip_messages() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('pending_ip_messages', 'delete', jsonb_build_object('id', OLD.id)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('pending_ip_messages', 'upsert', jsonb_build_object('id', NEW.id)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_pending_ip_messages AFTER INSERT OR UPDATE OR DELETE ON pending_ip_messages FOR EACH ROW EXECUTE FUNCTION mirror_pending_ip_messages();
+CREATE FUNCTION mirror_stream_first_chats() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('stream_first_chats', 'delete', jsonb_build_object('chatter_key', OLD.chatter_key, 'channel_user_id', OLD.channel_user_id)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('stream_first_chats', 'upsert', jsonb_build_object('chatter_key', NEW.chatter_key, 'channel_user_id', NEW.channel_user_id)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_stream_first_chats AFTER INSERT OR UPDATE OR DELETE ON stream_first_chats FOR EACH ROW EXECUTE FUNCTION mirror_stream_first_chats();
+CREATE FUNCTION mirror_moderation_actions() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF current_setting('ov.mirror_skip', true) = '1' THEN RETURN NULL; END IF;
+    IF TG_OP = 'DELETE' THEN
+        INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('moderation_actions', 'delete', jsonb_build_object('id', OLD.id)::text);
+        RETURN OLD;
+    END IF;
+    INSERT INTO live_mirror_outbox (tbl, op, pk) VALUES ('moderation_actions', 'upsert', jsonb_build_object('id', NEW.id)::text);
+    RETURN NEW;
+END $$;
+CREATE TRIGGER mirror_moderation_actions AFTER INSERT OR UPDATE OR DELETE ON moderation_actions FOR EACH ROW EXECUTE FUNCTION mirror_moderation_actions();

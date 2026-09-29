@@ -117,7 +117,19 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
             checked_at: new Date().toISOString(),
         };
     }
-    app.get('/ready', (req, res) => {
+    async function timedAsync(fn) {
+        const t0 = process.hrtime.bigint();
+        let out;
+        try { out = await fn(); } catch (err) { out = { ok: false, error: String((err && err.message) || err).split('\n')[0].slice(0, 200) }; }
+        const { ok, error, detail, skipped } = out;
+        return {
+            status: ok ? 'ok' : 'fail', required: false,
+            ...(error ? { error } : {}), ...(detail !== undefined ? { detail } : {}), ...(skipped ? { skipped } : {}),
+            latency_ms: Math.round(Number(process.hrtime.bigint() - t0) / 1e5) / 10,
+            checked_at: new Date().toISOString(),
+        };
+    }
+    app.get('/ready', async (req, res) => {
         const checks = {
             // A real read of a chat table (MAX of the rowid is an index seek, not a scan).
             db: { ...timed(() => ({ ok: true, detail: { max_message_id: db.get('SELECT MAX(id) AS id FROM chat_messages').id } })), required: true },
@@ -129,6 +141,12 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
                 if (s.late_steps.length) return { ok: false, error: `Live sync late: ${s.late_steps.join(', ')}`, detail };
                 return { ok: true, detail };
             }),
+            // Optional: without VALKEY_URL the per-actor limits count in this process only.
+            valkey: { ...(await timedAsync(async () => {
+                const v = require('./net/actor-limits').limits.valkey();
+                if (!v) return { ok: true, skipped: 'VALKEY_URL not set: per-actor limits count in this process only' };
+                return await v.ready();
+            })), required: false },
         };
         const failed = Object.keys(checks).filter((k) => checks[k].required && checks[k].status !== 'ok');
         const degraded = Object.keys(checks).filter((k) => !checks[k].required && checks[k].status !== 'ok');

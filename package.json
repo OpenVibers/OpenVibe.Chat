@@ -8,6 +8,7 @@
     "start": "node server/index.js",
     "dev": "NODE_ENV=development node server/index.js",
     "test": "node test/run.js",
+    "test:pg": "OV_TEST_STORE=pg node test/run.js",
     "import-from-live": "node scripts/import-from-live.js",
     "n-1:record": "node scripts/n-1-record.js"
   },
@@ -30,7 +31,7 @@
     "iovalkey": "^0.4.0",
     "multer": "^2.0.2",
     "openvibe-contracts": "https://codeload.github.com/OpenVibers/OpenVibe.Contracts/tar.gz/refs/tags/v0.80.0",
-    "openvibe-sdk": "https://codeload.github.com/OpenVibers/OpenVibe.SDK/tar.gz/refs/tags/v0.23.1",
+    "openvibe-sdk": "https://codeload.github.com/OpenVibers/OpenVibe.SDK/tar.gz/refs/tags/v0.25.2",
     "openvibe-shared": "https://codeload.github.com/OpenVibers/OpenVibe.Shared/tar.gz/refs/tags/v2.0.0",
     "pg": "^8.23.0",
     "ws": "^8.18.0"

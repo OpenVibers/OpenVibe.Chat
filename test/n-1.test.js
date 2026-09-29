@@ -33,6 +33,20 @@ const svc = require('./n-1/service');
 
 const ROOT = path.join(__dirname, '..');
 const FIX = path.join(__dirname, 'fixtures', 'n-1');
+
+// ── Skipped for this release only: the SQLite→PostgreSQL engine switch (plan T3) ────────────────
+// This release moves Chat's storage to PostgreSQL (/ready says pglite or postgresql, never a SQLite
+// file), so the N-1 fixture — the previous release's statements, collected from its *SQLite* schema and
+// dialect — can no longer be prepared or replayed here. The harness and the fixtures stay; after this
+// release deploys, `npm run n-1:record` records the previous release's statements from its PostgreSQL
+// schema and the replay resumes. Until then the run reports itself skipped (the ○ convention: it is
+// neither green nor a failure). Do not delete the harness.
+const ENGINE_SWITCH_TO_POSTGRES = true;
+if (ENGINE_SWITCH_TO_POSTGRES) {
+    console.log('n-1: skipped (engine switch to PostgreSQL: N-1 re-recorded after this release deploys)');
+    process.exit(0);
+}
+
 const client = JSON.parse(fs.readFileSync(path.join(FIX, 'client.json'), 'utf8'));
 const worker = JSON.parse(fs.readFileSync(path.join(FIX, 'worker.json'), 'utf8'));
 

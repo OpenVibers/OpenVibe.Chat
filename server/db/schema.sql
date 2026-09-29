@@ -48,6 +48,9 @@ CREATE INDEX IF NOT EXISTS idx_chat_channel_user_ts ON chat_messages(channel_use
 CREATE INDEX IF NOT EXISTS idx_chat_stream_ts ON chat_messages(stream_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_chat_autodelete ON chat_messages(auto_delete_at);
 CREATE INDEX IF NOT EXISTS idx_chat_ts_deleted ON chat_messages(timestamp, is_deleted);
+-- The page order is id DESC alone (plan T3 decision 2): this partial index serves page() and delta()
+-- straight from the ordering, without a sort. Only live rows are ever read, so it is partial.
+CREATE INDEX IF NOT EXISTS idx_chat_page_live ON chat_messages(id DESC) WHERE is_deleted = 0;
 CREATE INDEX IF NOT EXISTS idx_chat_anon ON chat_messages(anon_id);
 
 CREATE TABLE IF NOT EXISTS dm_conversations (

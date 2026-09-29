@@ -51,8 +51,13 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   `/internal/chat-context/*` and `/internal/chat-effects/*`, and `CHAT_AUTHORITY=chat`, which stops
   Live's chat server and routes and turns `require('./chat/chat-server')` into a proxy that forwards
   Live's own chat calls here (`POST /internal/live/calls`).
-- **Own database** (`CHAT_DB_PATH`, systemd `StateDirectory=openvibe-chat`) with Live's tables and
+- **Own database** (`CHAT_DB_PATH` today, systemd `StateDirectory=openvibe-chat`) with Live's tables and
   ids, the Network subject on new rows, a transactional events outbox and a read mirror back into Live.
+  The move to PostgreSQL (ADR-035, plan T3) is prepared here: `migrations/0001_initial.sql` is the whole
+  schema on PostgreSQL (with the twelve Live read-mirror triggers, gated on `ov.mirror_skip`), and
+  `scripts/import-sqlite-to-pg.js` moves the SQLite data over with a per-table report. In production that
+  needs `DATABASE_URL` (runtime, through PgBouncer) and `DATABASE_DIRECT_URL` (the owner, for migrations);
+  `VALKEY_URL`/`VALKEY_PREFIX` put the per-actor rate-limit counters on Valkey instead of this process.
 - **Import:** `scripts/import-from-live.js --live-db <snapshot> [--apply]` — a dry run unless
   `--apply` (which backs Chat's database up first), idempotent, never drops a row of Chat's tables
   (`import_hold`), reports counts per table.
@@ -94,11 +99,11 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 
 | Concern | Where it lives | How Chat reaches it |
 | --- | --- | --- |
-| Messages, DMs, channel sounds, TTS voice overrides, relay users, first chats, IP-approval queue, moderation log | **Chat** (authority from the cutover) | its own SQLite; Live keeps a read mirror (`POST /internal/chat-effects/mirror`) |
+| Messages, DMs, channel sounds, TTS voice overrides, relay users, first chats, IP-approval queue, moderation log | **Chat** (authority from the cutover) | its own database (`CHAT_DB_PATH` SQLite today; PostgreSQL per plan T3 — `migrations/`, `scripts/import-sqlite-to-pg.js`); Live keeps a read mirror (`POST /internal/chat-effects/mirror`) |
 | Accounts, roles, streams, channels, bans, IP approvals, follows, cosmetics, tags, site settings | **Live** (Network for identity) | `server/live-context.js` → `GET/POST /internal/chat-context/*` (service token, `live.chat_context.read`) |
 | Coins, AI viewers, arena, media queue, hardware, pastes, translation, PowerChat, notifications | **Live** | `server/live-context.js` → `POST /internal/chat-effects/*` (`live.chat_effects.write`) |
 | Live's own chat pushes and writes (AI viewers, relays, donations, `/api/mod`, recaps, calls) | **Live → Chat** | `POST /internal/live/calls` (`chat.live_bridge.write`), presence `GET /internal/live/presence` (`chat.presence.read`) |
-| The six chat tables (moderators, moderation settings, emotes, tags, AI summaries, timeline) | **Chat** (C-04 done) | Chat's own SQLite; Live reads through `GET /internal/moderation/*` (`chat.moderation.read`), 30 s cached |
+| The six chat tables (moderators, moderation settings, emotes, tags, AI summaries, timeline) | **Chat** (C-04 done) | Chat's own database; Live reads through `GET /internal/moderation/*` (`chat.moderation.read`), 30 s cached |
 | Emote image bytes | **OpenVibe.Media** (namespace `chat`) | `server/media/client.js` (openvibe-sdk `createObjectsClient`), Chat's service token (`media.object.upload` / `.delete`); the row keeps `media_url` + `media_asset_id` |
 | Chat-AI summaries (global / per-chatter insight + timeline) | **OpenVibe.AI** (namespace `chat.*`) | `server/ai/client.js` (openvibe-sdk `createAiClient`), Chat's service token (`ai.run.create` / `ai.run.read`); workflows `chat.global` / `chat.profile`; extractive fallback when AI does not answer |
 | Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |

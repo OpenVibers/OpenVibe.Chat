@@ -230,3 +230,41 @@ Found while moving; deliberately not fixed in this wave (fix after the cutover, 
   fields the chat client object does not have).
 - The AI-viewer / PowerChat "is moderator" flag passes the channel owner's user id where a channel
   id belongs (`canModerateChannel(user, channelUserId)`).
+
+## PostgreSQL switch (plan T3, ADR-035)
+
+Chat's own database moves from the SQLite file to PostgreSQL; the Live read mirror and the bridge are
+unchanged in meaning. This is a runbook for that one deploy — the schema is `migrations/0001_initial.sql`
+(applied by `openvibe-sdk/db` at boot, owner role) and the data moves once.
+
+**Prerequisites.** `DATABASE_URL` (the runtime role, through PgBouncer — DML only, no session state) and
+`DATABASE_DIRECT_URL` (the owner role, a direct connection, for migrations). `VALKEY_URL` / `VALKEY_PREFIX`
+are optional: with them the per-actor rate-limit counters are shared across processes and hosts, without
+them they stay in this process (as before). The role pair is the one `openvibe-sdk/testing`'s `store:'pg'`
+creates, so `npm run test:pg` rehearses the same shape.
+
+**Rehearse on a copy.** Take a consistent copy of the running database and import it into a local PGlite:
+
+    sqlite3 /var/lib/openvibe-chat/chat.db ".backup /tmp/chat-pg-source.db"
+    node scripts/import-sqlite-to-pg.js --sqlite /tmp/chat-pg-source.db --pglite ./data/pglite
+
+The import prints one line per table (rows + checksum) and records the whole report in `import_runs`. It
+runs with `ov.mirror_skip = '1'`, so the imported rows (which came from Live) are never queued back into
+Live's read mirror. A problem (a source column with no target, a verification mismatch) makes it exit 1.
+
+**Switch.** Drain Chat (stop the unit), take a final copy, and import it as the owner:
+
+    node scripts/import-sqlite-to-pg.js --sqlite /var/lib/openvibe-chat/chat.db --url "$DATABASE_DIRECT_URL"
+
+Set `DATABASE_URL` and `DATABASE_DIRECT_URL` in `/etc/openvibe/chat.env`, start the new release, and check
+`GET /ready`: `db` ok (its `max_message_id` is the pre-cutover `SELECT MAX(id) FROM chat_messages`), the
+optional `valkey` check ok when `VALKEY_URL` is set (skipped otherwise), and `mirror.pending` 0 once the
+relay has flushed. Compare a few counts against the source with `scripts/parity-check.js` (repointed at
+PostgreSQL) before retiring the SQLite file.
+
+**Rollback** is the previous release plus the retained SQLite file: stop Chat, restore `DATABASE_URL` to
+unset (the old release reads `CHAT_DB_PATH`), restore the copy taken before the switch, and start the old
+release. The Live read mirror keeps Live's copy current throughout, so a rollback loses nothing Live has
+already seen. Keep the SQLite file read-only for the rollback window; do not delete it until the
+PostgreSQL deploy has served a full release.
+
