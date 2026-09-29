@@ -109,8 +109,9 @@ function initDb({ captureMirror = false } = {}) {
     // auth/network-session.js resolves a verified Network token to its user by subject.
     d.exec('CREATE INDEX IF NOT EXISTS idx_ctx_users_subject ON ctx_users(subject_id)');
     // C-04 is done: Chat is the only writer of the six tables, so there is no authority left to
-    // record. The table's migration drops it from databases an earlier release created; a new
-    // database never gets it (schema.sql no longer has it).
+    // record. Drop the table from databases an earlier release created (it stayed one release for N-1);
+    // a new database never gets it (schema.sql no longer has it).
+    d.exec('DROP TABLE IF EXISTS table_authority');
     if (captureMirror) installMirrorTriggers();
     return d;
 }

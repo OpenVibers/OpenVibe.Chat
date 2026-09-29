@@ -184,14 +184,6 @@ CREATE INDEX IF NOT EXISTS idx_mod_actions_created ON moderation_actions(created
 CREATE INDEX IF NOT EXISTS idx_mod_actions_actor ON moderation_actions(actor_user_id);
 CREATE INDEX IF NOT EXISTS idx_mod_actions_scope ON moderation_actions(scope_type, scope_id);
 
--- Kept one release for N-1 (ADR-016): the previous release reads it, and its rows say 'chat' for all six, so a
--- rollback still leaves Chat the writer. Nothing in this release reads or writes it; the next release drops it.
-CREATE TABLE IF NOT EXISTS table_authority (
-    table_name TEXT PRIMARY KEY,
-    authority TEXT NOT NULL CHECK(authority IN ('chat', 'live')),
-    note TEXT
-);
-
 -- ── 2. The six chat-target tables (Chat is their only writer since C-04) ──
 
 CREATE TABLE IF NOT EXISTS channel_moderators (
