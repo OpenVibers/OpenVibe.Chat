@@ -104,8 +104,10 @@ function stmt(sql) {
     return s;
 }
 
+/** → { changes, lastInsertRowid }, better-sqlite3's shape (callers pass it on, some into answers). */
 async function run(sql, params = []) {
-    return stmt(sql).run(...(Array.isArray(params) ? params : [params]));
+    const r = await stmt(sql).run(...(Array.isArray(params) ? params : [params]));
+    return { changes: r.changes, lastInsertRowid: r.lastInsertRowid };
 }
 
 async function get(sql, params = []) {
