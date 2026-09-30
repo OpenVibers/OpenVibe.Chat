@@ -812,6 +812,55 @@ function insertProblems(db, statements) {
     return problems;
 }
 
+// ── PostgreSQL (a release on openvibe-sdk/db, plan T3) ─────────
+
+/**
+ * The migrations a release applied (ov_migrations), each with its file's text from `dir`: its schema, rebuilt
+ * exactly by applying them again (migrations are append-only and checksummed). → [{ file, sql }]
+ */
+async function pgMigrations(db, dir) {
+    const files = fs.existsSync(dir) ? fs.readdirSync(dir).filter((f) => /^\d{4,}_.+\.sql$/.test(f)) : [];
+    const out = [];
+    for (const r of await db.many('SELECT id FROM ov_migrations ORDER BY id')) {
+        const file = files.find((f) => Number(f.split('_')[0]) === Number(r.id));
+        if (file) out.push({ file, sql: fs.readFileSync(path.join(dir, file), 'utf8') });
+    }
+    return out;
+}
+
+/** PREPAREs every statement on db (a missing table or column, or a type that no longer fits, fails). → [{ sql, error }] */
+async function pgPrepareProblems(db, statements) {
+    const problems = [];
+    for (const sql of statements) {
+        try {
+            await db.tx(async (t) => { await t.query(`PREPARE n1_check AS ${sql}`); await t.query('DEALLOCATE n1_check'); });
+        } catch (e) { problems.push({ sql, error: e.message }); }
+    }
+    return problems;
+}
+
+/** insertProblems on PostgreSQL: a column now NOT NULL without a default (nor identity, nor generated) that an N-1 INSERT does not name. */
+async function pgInsertProblems(db, statements) {
+    const problems = [];
+    const cols = new Map();
+    const required = async (table) => {
+        if (!cols.has(table)) {
+            cols.set(table, (await db.many(`SELECT column_name FROM information_schema.columns
+                WHERE table_schema = current_schema() AND table_name = $1 AND is_nullable = 'NO' AND column_default IS NULL
+                  AND is_identity = 'NO' AND is_generated = 'NEVER'`, [table])).map((r) => r.column_name));
+        }
+        return cols.get(table);
+    };
+    for (const sql of statements) {
+        const m = /^\s*INSERT\s+INTO\s+"?(\w+)"?\s*\(([^)]*)\)\s*(VALUES|SELECT)/i.exec(sql);
+        if (!m) continue;
+        const named = new Set(m[2].split(',').map((c) => c.trim().replace(/^"|"$/g, '').toLowerCase()));
+        const missing = (await required(m[1])).filter((c) => !named.has(c.toLowerCase()));
+        if (missing.length) problems.push({ sql, error: `${m[1]}.${missing.join(', ')} is NOT NULL without a default, and N-1 does not set it` });
+    }
+    return problems;
+}
+
 // ── Git ──────────────────────────────────────────────────────
 
 /** A detached worktree of `ref` in a temp directory sharing root's node_modules → { dir, sha, remove() }. */
@@ -852,4 +901,5 @@ module.exports = {
     wsSends, wsHandled, wsSession, wsMessages, wsReads, wsProblems,
     stringLiterals, sqlLiterals, stripSqlComments, normalizeSql, lazyDDL, readTree, schemaDDL, prepareProblems, insertProblems,
     worktree, gitFiles, summarize,
+    pgMigrations, pgPrepareProblems, pgInsertProblems,
 };

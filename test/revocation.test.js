@@ -36,7 +36,7 @@ t('boot', async () => {
     alice = h.addUser('alice', { subject: ids.newId('user') });
     bob = h.addUser('bob', { subject: ids.newId('user') });
     bot = h.addUser('helperbot', { subject: alice.subject_id, apiScopes: ['chat'] });
-    for (const u of [alice, bob]) h.ctx.upsertUser(h.live.users.get(u.id));
+    for (const u of [alice, bob]) await h.ctx.upsertUser(h.live.users.get(u.id));
     assert.ok(require('../server/events/consumer').TOPICS.includes('network.user.token_valid_after'), 'Chat subscribes to it');
 });
 
@@ -45,7 +45,7 @@ t('a sign-out everywhere closes the person\'s socket within 5 seconds; others st
     const b = await signedIn(tokenFor(bob));
     assert.strictEqual(a.auth.core_username, 'alice');
     const started = Date.now();
-    const out = h.eventsConsumer.apply(event(alice.subject_id, Date.now() - 5000));
+    const out = await h.eventsConsumer.apply(event(alice.subject_id, Date.now() - 5000));
     assert.strictEqual(out.outcome, 'revoked');
     const c = await closed(a.ws);
     assert.strictEqual(c.code, 4001);
@@ -64,8 +64,8 @@ t('the old token is refused afterwards; a newer one works; a redelivery and an o
     const fresh = await signedIn(tokenFor(alice, 0));
     assert.strictEqual(fresh.auth.core_username, 'alice', 'a token issued after the cutoff works');
     const ev = event(alice.subject_id, Date.now() - 120000, 'password_changed');
-    assert.strictEqual(h.eventsConsumer.apply(ev).outcome, 'unchanged', 'an older cutoff never moves it back');
-    assert.strictEqual(h.eventsConsumer.apply(ev).duplicate, true);
+    assert.strictEqual((await h.eventsConsumer.apply(ev)).outcome, 'unchanged', 'an older cutoff never moves it back');
+    assert.strictEqual((await h.eventsConsumer.apply(ev)).duplicate, true);
     assert.strictEqual(fresh.ws.readyState, 1);
     fresh.ws.close();
 });
@@ -73,14 +73,14 @@ t('the old token is refused afterwards; a newer one works; a redelivery and an o
 t('bots on an API token and events from anyone but Network are left alone', async () => {
     const b = await signedIn(bot.token);
     assert.strictEqual(b.auth.core_username, 'helperbot');
-    assert.strictEqual(h.eventsConsumer.apply(event(alice.subject_id, Date.now() + 1000)).outcome, 'revoked');
+    assert.strictEqual((await h.eventsConsumer.apply(event(alice.subject_id, Date.now() + 1000))).outcome, 'revoked');
     await new Promise((r) => setTimeout(r, 200));
     assert.strictEqual(b.ws.readyState, 1, 'API-token socket stays');
     b.ws.close();
     const forged = { ...event(bob.subject_id, Date.now()), source: 'live' };
-    assert.strictEqual(h.eventsConsumer.apply(forged).outcome, 'ignored:source');
+    assert.strictEqual((await h.eventsConsumer.apply(forged)).outcome, 'ignored:source');
     const bad = event(bob.subject_id, Date.now()); bad.payload.valid_after = 'soon';
-    assert.strictEqual(h.eventsConsumer.apply(bad).outcome, 'ignored:payload');
+    assert.strictEqual((await h.eventsConsumer.apply(bad)).outcome, 'ignored:payload');
 });
 
 t.run(async () => { if (h && h.close) await h.close(); });

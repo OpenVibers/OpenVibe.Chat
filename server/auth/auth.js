@@ -179,8 +179,8 @@ async function optionalAuth(req, res, next) {
 /**
  * Express middleware — requires admin role
  */
-function requireAdmin(req, res, next) {
-    requireAuth(req, res, () => {
+async function requireAdmin(req, res, next) {
+    await requireAuth(req, res, () => {
         if (!require('./permissions').isAdmin(req.user)) {
             return res.status(403).json({ error: 'Admin access required' });
         }

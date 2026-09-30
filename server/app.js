@@ -105,10 +105,10 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
     // without; `live_sync` is optional, because chat keeps flowing from warm caches while Live is
     // down (live-context.js), so a stale sync degrades the service instead of taking it out.
-    function timed(fn) {
+    async function timed(fn) {
         const t0 = process.hrtime.bigint();
         let out;
-        try { out = fn(); } catch (err) { out = { ok: false, error: String((err && err.message) || err).split('\n')[0].slice(0, 200) }; }
+        try { out = await fn(); } catch (err) { out = { ok: false, error: String((err && err.message) || err).split('\n')[0].slice(0, 200) }; }
         const { ok, error, detail } = out;
         return {
             status: ok ? 'ok' : 'fail', required: false,
@@ -117,11 +117,23 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
             checked_at: new Date().toISOString(),
         };
     }
-    app.get('/ready', (req, res) => {
+    async function timedAsync(fn) {
+        const t0 = process.hrtime.bigint();
+        let out;
+        try { out = await fn(); } catch (err) { out = { ok: false, error: String((err && err.message) || err).split('\n')[0].slice(0, 200) }; }
+        const { ok, error, detail, skipped } = out;
+        return {
+            status: ok ? 'ok' : 'fail', required: false,
+            ...(error ? { error } : {}), ...(detail !== undefined ? { detail } : {}), ...(skipped ? { skipped } : {}),
+            latency_ms: Math.round(Number(process.hrtime.bigint() - t0) / 1e5) / 10,
+            checked_at: new Date().toISOString(),
+        };
+    }
+    app.get('/ready', async (req, res) => {
         const checks = {
             // A real read of a chat table (MAX of the rowid is an index seek, not a scan).
-            db: { ...timed(() => ({ ok: true, detail: { max_message_id: db.get('SELECT MAX(id) AS id FROM chat_messages').id } })), required: true },
-            live_sync: timed(() => {
+            db: { ...await timed(async () => ({ ok: true, detail: { max_message_id: (await db.get('SELECT MAX(id) AS id FROM chat_messages')).id } })), required: true },
+            live_sync: await timed(() => {
                 const s = ctx.syncStatus(config.live.syncStaleMs);
                 const detail = { ...s, threshold_ms: config.live.syncStaleMs };
                 if (s.last_success_at === null) return { ok: false, error: 'no successful Live sync since start', detail };
@@ -129,12 +141,18 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
                 if (s.late_steps.length) return { ok: false, error: `Live sync late: ${s.late_steps.join(', ')}`, detail };
                 return { ok: true, detail };
             }),
+            // Optional: without VALKEY_URL the per-actor limits count in this process only.
+            valkey: { ...(await timedAsync(async () => {
+                const v = require('./net/actor-limits').limits.valkey();
+                if (!v) return { ok: true, skipped: 'VALKEY_URL not set: per-actor limits count in this process only' };
+                return await v.ready();
+            })), required: false },
         };
         const failed = Object.keys(checks).filter((k) => checks[k].required && checks[k].status !== 'ok');
         const degraded = Object.keys(checks).filter((k) => !checks[k].required && checks[k].status !== 'ok');
         const ready = failed.length === 0;
         let pending = null;
-        if (mirror && checks.db.status === 'ok') { try { pending = mirror.pending(); } catch { /* reported by db */ } }
+        if (mirror && checks.db.status === 'ok') { try { pending = await mirror.pending(); } catch { /* reported by db */ } }
         res.set('Cache-Control', 'no-store');
         res.status(ready ? 200 : 503).json({
             ready,

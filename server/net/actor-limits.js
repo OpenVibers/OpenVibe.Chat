@@ -27,7 +27,7 @@
  */
 'use strict';
 
-const { createActorLimiter } = require('openvibe-sdk/limits');
+const { createActorLimiter, createValkeyLimitStore } = require('openvibe-sdk/limits');
 const config = require('../config');
 const { requestUser } = require('../auth/auth');
 
@@ -46,16 +46,52 @@ function actor(req) {
     return personOf(req.user) || personOf(req.ovActorUser) || `ip:${req.ip || (req.socket && req.socket.remoteAddress) || 'unknown'}`;
 }
 
-const limits = createActorLimiter({
-    limits: { minute: config.limits.minute, hour: config.limits.hour },
-    actor,
-    now: () => clock.now(),
-    onLimited(e) {
-        // The actor is a subject id, a user id or an address, never a token.
-        console.warn(`[Limits] ${e.name}: ${e.actor} refused, over ${e.limit} per ${e.window}`);
-        if (refused) refused.inc({ limit: e.name, window: e.window });
-    },
-});
+// The counters: in this process, or shared across processes on Valkey once server/index.js calls
+// useValkey() at boot (ADR-035). A limiter built before that is replaced on the next request.
+let store = null;
+let valkeyHandle = null;
+let limiter = null;
+let generation = 0;
+
+/** A refusal: logged once, counted in chat_rate_limited_total (the actor is never a token). */
+function onLimited(e) {
+    console.warn(`[Limits] ${e.name}: ${e.actor} refused, over ${e.limit} per ${e.window}`);
+    if (refused) refused.inc({ limit: e.name, window: e.window });
+}
+
+function current() {
+    if (!limiter) {
+        limiter = createActorLimiter({
+            limits: { minute: config.limits.minute, hour: config.limits.hour },
+            actor,
+            now: () => clock.now(),
+            onLimited,
+            ...(store ? { store } : {}),
+        });
+    }
+    return limiter;
+}
+
+/** The middleware factory (each API calls limits(name), possibly with its own numbers). */
+function limits(name, own) {
+    let mw = null;
+    let built = -1;
+    return (req, res, next) => {
+        if (built !== generation || !mw) { mw = current()(name, own); built = generation; }
+        return mw(req, res, next);
+    };
+}
+limits.stats = () => current().stats();
+limits.reset = () => current().reset();
+/** Count on Valkey (an openvibe-sdk/valkey handle), from now on; null keeps the in-process counters. */
+limits.useValkey = function useValkey(valkey) {
+    valkeyHandle = valkey || null;
+    store = valkey ? createValkeyLimitStore(valkey) : null;
+    limiter = null;
+    generation++;
+};
+/** The Valkey handle, for /ready (null when VALKEY_URL is unset). */
+limits.valkey = () => valkeyHandle;
 
 /**
  * Resolve the caller's token once (the same resolution requireAuth and optionalAuth then reuse), so

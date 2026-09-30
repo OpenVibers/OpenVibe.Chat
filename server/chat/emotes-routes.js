@@ -190,9 +190,9 @@ const DEFAULT_EMOTES = [
 //  ROUTES
 // ══════════════════════════════════════════════════════════════
 
-router.get('/global', (req, res) => {
+router.get('/global', async (req, res) => {
     try {
-        const emotes = db.getGlobalEmotes().map((e) => ({
+        const emotes = (await db.getGlobalEmotes()).map((e) => ({
             id: `custom-${e.id}`,
             code: e.code,
             url: fileUrl(e),
@@ -208,10 +208,10 @@ router.get('/global', (req, res) => {
     }
 });
 
-router.get('/channel/:userId', (req, res) => {
+router.get('/channel/:userId', async (req, res) => {
     try {
         const userId = parseInt(req.params.userId);
-        const emotes = db.getChannelEmotes(userId).map((e) => ({
+        const emotes = (await db.getChannelEmotes(userId)).map((e) => ({
             id: `custom-${e.id}`,
             emote_id: e.id,
             code: e.code,
@@ -230,9 +230,9 @@ router.get('/channel/:userId', (req, res) => {
     }
 });
 
-router.get('/mine', requireAuth, (req, res) => {
+router.get('/mine', requireAuth, async (req, res) => {
     try {
-        const emotes = db.getEmotesByUser(req.user.id).map((e) => ({
+        const emotes = (await db.getEmotesByUser(req.user.id)).map((e) => ({
             id: e.id,
             code: e.code,
             url: fileUrl(e),
@@ -242,7 +242,7 @@ router.get('/mine', requireAuth, (req, res) => {
             is_global: !!e.is_global,
             created_at: e.created_at,
         }));
-        res.json({ emotes, count: db.countChannelEmotes(req.user.id), max: config.emotes.maxPerChannel });
+        res.json({ emotes, count: await db.countChannelEmotes(req.user.id), max: config.emotes.maxPerChannel });
     } catch (err) {
         res.status(500).json({ error: 'Failed to load emotes' });
     }
@@ -275,25 +275,25 @@ router.post('/', requireAuth, emoteUpload.single('image'), async (req, res) => {
             const channel = await ctx.ensureChannelForUser(channelOwnerId);
             if (!channel) return res.status(404).json({ error: 'Channel not found' });
             await ctx.ensurePolicy(channel.id);
-            const settings = ctx.getChannelModerationSettings(channel.id);
-            const isMod = permissions.canModerateChannel(req.user, channel.id);
+            const settings = await ctx.getChannelModerationSettings(channel.id);
+            const isMod = await permissions.canModerateChannel(req.user, channel.id);
             if (!settings.custom_emotes_enabled && !isMod) {
                 return res.status(403).json({ error: 'This streamer has disabled viewer emote uploads.' });
             }
             if (settings.uploads_mods_only && !isMod) {
                 return res.status(403).json({ error: 'Only channel mods can upload emotes here.' });
             }
-            if (db.countChannelEmotes(channelOwnerId) >= config.emotes.maxPerChannel) {
+            if (await db.countChannelEmotes(channelOwnerId) >= config.emotes.maxPerChannel) {
                 return res.status(400).json({ error: `This channel is full (${config.emotes.maxPerChannel} emotes max) — the streamer needs to remove some first.` });
             }
-            if (db.getChannelEmoteByCode(channelOwnerId, code)) {
+            if (await db.getChannelEmoteByCode(channelOwnerId, code)) {
                 return res.status(409).json({ error: `This channel already has an emote named "${code}".` });
             }
         } else {
-            if (db.countChannelEmotes(req.user.id) >= config.emotes.maxPerChannel) {
+            if (await db.countChannelEmotes(req.user.id) >= config.emotes.maxPerChannel) {
                 return res.status(400).json({ error: `Your channel is full (${config.emotes.maxPerChannel} emotes max) — remove some to add more.` });
             }
-            const existing = db.get('SELECT id FROM emotes WHERE user_id = ? AND code = ? AND channel_owner_id IS NULL', [req.user.id, code]);
+            const existing = await db.get('SELECT id FROM emotes WHERE user_id = ? AND code = ? AND channel_owner_id IS NULL', [req.user.id, code]);
             if (existing) return res.status(409).json({ error: `You already have an emote named "${code}"` });
         }
 
@@ -305,13 +305,13 @@ router.post('/', requireAuth, emoteUpload.single('image'), async (req, res) => {
         let sizeMin = 25, sizeMax = 400;
         if (channelOwnerId) {
             const channel = await ctx.ensureChannelForUser(channelOwnerId);
-            const st = channel ? ctx.getChannelModerationSettings(channel.id) : null;
+            const st = channel ? await ctx.getChannelModerationSettings(channel.id) : null;
             if (st) { sizeMin = st.emote_size_min || 50; sizeMax = st.emote_size_max || 200; }
         }
         const size = Math.min(sizeMax, Math.max(sizeMin, parseInt(req.body.size) || 100));
 
         const uploaded = await media.uploadObject(req.file.buffer, { filename: req.file.originalname, mimeType: req.file.mimetype });
-        const result = db.createEmote({
+        const result = await db.createEmote({
             user_id: req.user.id,
             code,
             url: uploaded.url,
@@ -326,7 +326,7 @@ router.post('/', requireAuth, emoteUpload.single('image'), async (req, res) => {
         });
 
         if (isChannelUpload) {
-            try { require('./chat-server').broadcastToOwnerStreams(channelOwnerId, { type: 'emotes-updated' }); } catch { /* */ }
+            try { await require('./chat-server').broadcastToOwnerStreams(channelOwnerId, { type: 'emotes-updated' }); } catch { /* */ }
         }
         res.json({
             emote: {
@@ -361,13 +361,13 @@ router.use((err, req, res, next) => {
 
 router.patch('/:id', requireAuth, async (req, res) => {
     try {
-        const emote = db.getEmoteById(req.params.id);
+        const emote = await db.getEmoteById(req.params.id);
         if (!emote) return res.status(404).json({ error: 'Emote not found' });
         let allowed = emote.user_id === req.user.id || permissions.can(req.user, 'staff.assets.manage');
         if (!allowed) {
             const ownerId = emote.channel_owner_id || emote.user_id;
             const channel = await ctx.ensureChannelForUser(ownerId);
-            if (channel && permissions.canModerateChannel(req.user, channel.id)) allowed = true;
+            if (channel && await permissions.canModerateChannel(req.user, channel.id)) allowed = true;
         }
         if (!allowed) return res.status(403).json({ error: 'Not your emote' });
 
@@ -381,7 +381,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
                 return res.status(400).json({ error: 'Emote code can only contain letters, numbers, and underscores' });
             }
             const scopeOwner = emote.channel_owner_id || emote.user_id;
-            const clash = (db.getChannelEmotes(scopeOwner) || [])
+            const clash = (await db.getChannelEmotes(scopeOwner) || [])
                 .find((e) => e.id !== emote.id && String(e.code).toLowerCase() === code.toLowerCase());
             if (clash) return res.status(409).json({ error: `An emote named "${clash.code}" already exists in this channel.` });
             patch.code = code;
@@ -390,7 +390,7 @@ router.patch('/:id', requireAuth, async (req, res) => {
             let sizeMin = 25, sizeMax = 400;
             const ownerId = emote.channel_owner_id || emote.user_id;
             const channel = await ctx.ensureChannelForUser(ownerId);
-            const st = channel ? ctx.getChannelModerationSettings(channel.id) : null;
+            const st = channel ? await ctx.getChannelModerationSettings(channel.id) : null;
             if (st) { sizeMin = st.emote_size_min || 50; sizeMax = st.emote_size_max || 200; }
             patch.size = Math.min(sizeMax, Math.max(sizeMin, parseInt(req.body.size) || 100));
         }
@@ -398,12 +398,12 @@ router.patch('/:id', requireAuth, async (req, res) => {
             return res.status(400).json({ error: 'Nothing to change' });
         }
 
-        db.updateEmote(emote.id, patch);
+        await db.updateEmote(emote.id, patch);
         if (patch.code && patch.code !== emote.code) {
-            try { db.updateChannelSoundEmoteRefs(emote.channel_owner_id || emote.user_id, emote.code, patch.code); } catch { /* */ }
+            try { await db.updateChannelSoundEmoteRefs(emote.channel_owner_id || emote.user_id, emote.code, patch.code); } catch { /* */ }
         }
         if (emote.channel_owner_id) {
-            try { require('./chat-server').broadcastToOwnerStreams(emote.channel_owner_id, { type: 'emotes-updated' }); } catch { /* */ }
+            try { await require('./chat-server').broadcastToOwnerStreams(emote.channel_owner_id, { type: 'emotes-updated' }); } catch { /* */ }
         }
         res.json({ message: 'Emote updated', code: patch.code ?? emote.code, size: patch.size ?? emote.size });
     } catch (err) {
@@ -413,20 +413,20 @@ router.patch('/:id', requireAuth, async (req, res) => {
 
 router.delete('/:id', requireAuth, async (req, res) => {
     try {
-        const emote = db.getEmoteById(req.params.id);
+        const emote = await db.getEmoteById(req.params.id);
         if (!emote) return res.status(404).json({ error: 'Emote not found' });
         let allowed = emote.user_id === req.user.id || permissions.can(req.user, 'staff.assets.manage');
         if (!allowed) {
             const ownerId = emote.channel_owner_id || emote.user_id;
             const channel = await ctx.ensureChannelForUser(ownerId);
-            if (channel && permissions.canModerateChannel(req.user, channel.id)) allowed = true;
+            if (channel && await permissions.canModerateChannel(req.user, channel.id)) allowed = true;
         }
         if (!allowed) return res.status(403).json({ error: 'Not your emote' });
 
-        db.deleteEmote(emote.id);
+        await db.deleteEmote(emote.id);
         await media.deleteObject(emote.media_asset_id);
         if (emote.channel_owner_id) {
-            try { require('./chat-server').broadcastToOwnerStreams(emote.channel_owner_id, { type: 'emotes-updated' }); } catch { /* */ }
+            try { await require('./chat-server').broadcastToOwnerStreams(emote.channel_owner_id, { type: 'emotes-updated' }); } catch { /* */ }
         }
         res.json({ message: 'Emote deleted' });
     } catch (err) {
@@ -575,7 +575,7 @@ router.get('/all/:streamId', optionalAuth, async (req, res) => {
         let globalCustom = [];
         let channelEmotes = [];
         if (sources.custom !== false) {
-            globalCustom = db.getGlobalEmotes().map((e) => ({
+            globalCustom = (await db.getGlobalEmotes()).map((e) => ({
                 id: `custom-${e.id}`,
                 code: e.code,
                 url: fileUrl(e),
@@ -588,7 +588,7 @@ router.get('/all/:streamId', optionalAuth, async (req, res) => {
             }));
 
             if (streamUserId) {
-                channelEmotes = db.getChannelEmotes(streamUserId).filter((e) => !e.is_global).map((e) => ({
+                channelEmotes = (await db.getChannelEmotes(streamUserId)).filter((e) => !e.is_global).map((e) => ({
                     id: `custom-${e.id}`,
                     emote_id: e.id,
                     code: e.code,
@@ -643,7 +643,7 @@ router.get('/all/:streamId', optionalAuth, async (req, res) => {
 
         let emoteScale = 100;
         if (channel) {
-            const st = ctx.getChannelModerationSettings(channel.id);
+            const st = await ctx.getChannelModerationSettings(channel.id);
             if (st && st.emote_scale) emoteScale = Number(st.emote_scale) || 100;
         }
 

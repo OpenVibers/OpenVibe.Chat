@@ -23,7 +23,7 @@ const networkBlocks = require('./network-blocks');
 // ── Schema & Migrations ──────────────────────────────────────
 
 function ensureTables() {
-    // The DM tables are created with the rest of Chat's schema (server/db/schema.sql).
+    // The DM tables are created with the rest of Chat's schema (migrations/0001_initial.sql).
     db.getDb();
 }
 
@@ -33,8 +33,8 @@ function ensureTables() {
  * Find an existing 1-on-1 conversation between two users.
  * Returns conversation row or null.
  */
-function findDirectConversation(userIdA, userIdB) {
-    return db.get(`
+async function findDirectConversation(userIdA, userIdB) {
+    return await db.get(`
         SELECT c.* FROM dm_conversations c
         JOIN dm_participants p1 ON p1.conversation_id = c.id AND p1.user_id = ?
         JOIN dm_participants p2 ON p2.conversation_id = c.id AND p2.user_id = ?
@@ -46,18 +46,18 @@ function findDirectConversation(userIdA, userIdB) {
  * Create a new conversation. Returns the new conversation id.
  * participantIds should include the creator.
  */
-function createConversation(createdBy, participantIds, name = null) {
+async function createConversation(createdBy, participantIds, name = null) {
     const isGroup = participantIds.length > 2 ? 1 : 0;
-    const result = db.run(
+    const result = await db.run(
         `INSERT INTO dm_conversations (name, is_group, created_by) VALUES (?, ?, ?)`,
         [isGroup ? (name || null) : null, isGroup, createdBy]
     );
     const convId = result.lastInsertRowid;
     const insert = db.getDb().prepare(
-        `INSERT OR IGNORE INTO dm_participants (conversation_id, user_id, subject_id) VALUES (?, ?, ?)`
+        `INSERT INTO dm_participants (conversation_id, user_id, subject_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`
     );
     for (const uid of participantIds) {
-        insert.run(convId, uid, db.subjectFor(uid));
+        await insert.run(convId, uid, await db.subjectFor(uid));
     }
     return convId;
 }
@@ -65,35 +65,35 @@ function createConversation(createdBy, participantIds, name = null) {
 /**
  * Get or create a 1-on-1 conversation between two users.
  */
-function getOrCreateDirect(userIdA, userIdB) {
-    const existing = findDirectConversation(userIdA, userIdB);
+async function getOrCreateDirect(userIdA, userIdB) {
+    const existing = await findDirectConversation(userIdA, userIdB);
     if (existing) return existing.id;
-    return createConversation(userIdA, [userIdA, userIdB]);
+    return await createConversation(userIdA, [userIdA, userIdB]);
 }
 
 /**
  * Add a participant to an existing group conversation.
  */
-function addParticipant(conversationId, userId) {
-    db.run(
-        `INSERT OR IGNORE INTO dm_participants (conversation_id, user_id, subject_id) VALUES (?, ?, ?)`,
-        [conversationId, userId, db.subjectFor(userId)]
+async function addParticipant(conversationId, userId) {
+    await db.run(
+        `INSERT INTO dm_participants (conversation_id, user_id, subject_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
+        [conversationId, userId, await db.subjectFor(userId)]
     );
     // Mark as group if > 2 participants
-    const count = db.get(
+    const count = (await db.get(
         `SELECT COUNT(*) as c FROM dm_participants WHERE conversation_id = ?`,
         [conversationId]
-    )?.c || 0;
+    ))?.c || 0;
     if (count > 2) {
-        db.run(`UPDATE dm_conversations SET is_group = 1 WHERE id = ?`, [conversationId]);
+        await db.run(`UPDATE dm_conversations SET is_group = 1 WHERE id = ?`, [conversationId]);
     }
 }
 
 /**
  * Remove a participant from a group conversation.
  */
-function removeParticipant(conversationId, userId) {
-    db.run(
+async function removeParticipant(conversationId, userId) {
+    await db.run(
         `DELETE FROM dm_participants WHERE conversation_id = ? AND user_id = ?`,
         [conversationId, userId]
     );
@@ -102,8 +102,8 @@ function removeParticipant(conversationId, userId) {
 /**
  * Check if a user is a participant in a conversation.
  */
-function isParticipant(conversationId, userId) {
-    return !!db.get(
+async function isParticipant(conversationId, userId) {
+    return !!await db.get(
         `SELECT 1 FROM dm_participants WHERE conversation_id = ? AND user_id = ?`,
         [conversationId, userId]
     );
@@ -112,15 +112,15 @@ function isParticipant(conversationId, userId) {
 /**
  * Rename a group conversation.
  */
-function renameConversation(conversationId, name) {
-    db.run(`UPDATE dm_conversations SET name = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [name, conversationId]);
+async function renameConversation(conversationId, name) {
+    await db.run(`UPDATE dm_conversations SET name = ?, updated_at = ov_now() WHERE id = ?`, [name, conversationId]);
 }
 
 /**
  * Get all conversations for a user with last message preview and unread count.
  */
-function getConversations(userId) {
-    return db.all(`
+async function getConversations(userId) {
+    return await db.all(`
         SELECT
             c.id,
             c.name,
@@ -140,8 +140,8 @@ function getConversations(userId) {
 /**
  * Get participants of a conversation (with user profile info).
  */
-function getParticipants(conversationId) {
-    return db.all(`
+async function getParticipants(conversationId) {
+    return await db.all(`
         SELECT u.id, u.username, u.display_name, u.avatar_url, u.profile_color
         FROM dm_participants p
         JOIN ctx_users u ON u.id = p.user_id
@@ -152,8 +152,8 @@ function getParticipants(conversationId) {
 /**
  * Get a single conversation by id (with participant info for the requesting user).
  */
-function getConversation(conversationId) {
-    return db.get(`SELECT * FROM dm_conversations WHERE id = ?`, [conversationId]) || null;
+async function getConversation(conversationId) {
+    return await db.get(`SELECT * FROM dm_conversations WHERE id = ?`, [conversationId]) || null;
 }
 
 // ── Message helpers ──────────────────────────────────────────
@@ -161,22 +161,22 @@ function getConversation(conversationId) {
 /**
  * Send a message in a conversation. Returns the message row.
  */
-function sendMessage(conversationId, senderId, text) {
+async function sendMessage(conversationId, senderId, text) {
     if (!text || !text.trim()) return null;
     const trimmed = text.trim().slice(0, 2000); // max 2000 chars
-    const senderSubject = db.subjectFor(senderId);
-    return db.transaction(() => {
-        const result = db.run(
+    const senderSubject = await db.subjectFor(senderId);
+    return await db.tx(async () => {
+        const result = await db.run(
             `INSERT INTO dm_messages (conversation_id, sender_id, message, sender_subject_id) VALUES (?, ?, ?, ?)`,
             [conversationId, senderId, trimmed, senderSubject]
         );
         // Touch conversation updated_at
-        db.run(`UPDATE dm_conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = ?`, [conversationId]);
+        await db.run(`UPDATE dm_conversations SET updated_at = ov_now() WHERE id = ?`, [conversationId]);
         // Auto-mark read for sender
-        markRead(conversationId, senderId);
+        await markRead(conversationId, senderId);
         // The event names who is in the conversation, never what was said.
-        const participants = db.all('SELECT user_id, subject_id FROM dm_participants WHERE conversation_id = ?', [conversationId]);
-        outbox.enqueue({
+        const participants = await db.all('SELECT user_id, subject_id FROM dm_participants WHERE conversation_id = ?', [conversationId]);
+        await outbox.enqueue({
             event_type: 'chat.dm.created',
             visibility: 'subject',
             actorSubject: senderSubject,
@@ -186,20 +186,20 @@ function sendMessage(conversationId, senderId, text) {
                 conversation_id: Number(conversationId),
                 sender_user_id: senderId,
                 sender_subject: senderSubject,
-                participants: participants.map((p) => ({ user_id: p.user_id, subject: p.subject_id || db.subjectFor(p.user_id) })),
+                participants: (await Promise.all(participants.map(async (p) => ({ user_id: p.user_id, subject: p.subject_id || await db.subjectFor(p.user_id) })))),
             },
         });
-        return db.get(`SELECT * FROM dm_messages WHERE id = ?`, [result.lastInsertRowid]);
+        return await db.get(`SELECT * FROM dm_messages WHERE id = ?`, [result.lastInsertRowid]);
     });
 }
 
 /**
  * Get messages in a conversation (paginated, newest first).
  */
-function getMessages(conversationId, limit = 50, before = null, after = null) {
+async function getMessages(conversationId, limit = 50, before = null, after = null) {
     if (after) {
         // Fetch messages newer than `after` id (for live polling)
-        return db.all(`
+        return await db.all(`
             SELECT m.*, u.username, u.display_name, u.avatar_url, u.profile_color
             FROM dm_messages m
             JOIN ctx_users u ON u.id = m.sender_id
@@ -209,7 +209,7 @@ function getMessages(conversationId, limit = 50, before = null, after = null) {
         `, [conversationId, after, limit]);
     }
     if (before) {
-        return db.all(`
+        return await db.all(`
             SELECT m.*, u.username, u.display_name, u.avatar_url, u.profile_color
             FROM dm_messages m
             JOIN ctx_users u ON u.id = m.sender_id
@@ -218,7 +218,7 @@ function getMessages(conversationId, limit = 50, before = null, after = null) {
             LIMIT ?
         `, [conversationId, before, limit]);
     }
-    return db.all(`
+    return await db.all(`
         SELECT m.*, u.username, u.display_name, u.avatar_url, u.profile_color
         FROM dm_messages m
         JOIN ctx_users u ON u.id = m.sender_id
@@ -231,9 +231,9 @@ function getMessages(conversationId, limit = 50, before = null, after = null) {
 /**
  * Mark a conversation as read for a user (set last_read_at to now).
  */
-function markRead(conversationId, userId) {
-    db.run(
-        `UPDATE dm_participants SET last_read_at = CURRENT_TIMESTAMP WHERE conversation_id = ? AND user_id = ?`,
+async function markRead(conversationId, userId) {
+    await db.run(
+        `UPDATE dm_participants SET last_read_at = ov_now() WHERE conversation_id = ? AND user_id = ?`,
         [conversationId, userId]
     );
 }
@@ -241,14 +241,14 @@ function markRead(conversationId, userId) {
 /**
  * Get total unread message count across all conversations for a user.
  */
-function getTotalUnread(userId) {
-    const row = db.get(`
-        SELECT COALESCE(SUM(unread), 0) as total FROM (
+async function getTotalUnread(userId) {
+    const row = await db.get(`
+        SELECT CAST(COALESCE(SUM(unread), 0) AS BIGINT) as total FROM (
             SELECT COUNT(*) as unread
             FROM dm_messages m
             JOIN dm_participants p ON p.conversation_id = m.conversation_id AND p.user_id = ?
             WHERE m.created_at > p.last_read_at AND m.sender_id != ?
-        )
+        ) AS per_conversation
     `, [userId, userId]);
     return row?.total || 0;
 }
@@ -257,11 +257,11 @@ function getTotalUnread(userId) {
  * Search users by username/display_name for the "new message" user picker.
  * Excludes the requesting user.
  */
-function searchUsers(query, excludeUserId, limit = 10) {
+async function searchUsers(query, excludeUserId, limit = 10) {
     if (!query || query.length < 2) return [];
     networkBlocks.ensureSchema();
-    const me = db.subjectFor(excludeUserId) || '';
-    return db.all(`
+    const me = await db.subjectFor(excludeUserId) || '';
+    return await db.all(`
         SELECT id, username, display_name, avatar_url, profile_color
         FROM ctx_users
         WHERE id != ? AND is_banned = 0
@@ -269,7 +269,7 @@ function searchUsers(query, excludeUserId, limit = 10) {
           AND id NOT IN (SELECT blocker_id FROM dm_blocks WHERE blocked_id = ?)
           AND COALESCE(subject_id, '') NOT IN (SELECT blocked_subject FROM network_blocks WHERE blocker_subject = ? AND active = 1)
           AND COALESCE(subject_id, '') NOT IN (SELECT blocker_subject FROM network_blocks WHERE blocked_subject = ? AND active = 1)
-          AND (username LIKE ? COLLATE NOCASE OR display_name LIKE ? COLLATE NOCASE)
+          AND (username ILIKE ? OR display_name ILIKE ?)
         LIMIT ?
     `, [excludeUserId, excludeUserId, excludeUserId, me, me, `%${query}%`, `%${query}%`, limit]);
 }
@@ -280,19 +280,19 @@ function searchUsers(query, excludeUserId, limit = 10) {
  * Check if either user has blocked the other (bidirectional): in Chat's dm_blocks, or on the network
  * (platform blocks, ./network-blocks.js, by Network subject).
  */
-function isBlockedEither(userIdA, userIdB) {
-    return !!db.get(
+async function isBlockedEither(userIdA, userIdB) {
+    return !!await db.get(
         `SELECT 1 FROM dm_blocks
          WHERE (blocker_id = ? AND blocked_id = ?) OR (blocker_id = ? AND blocked_id = ?)`,
         [userIdA, userIdB, userIdB, userIdA]
-    ) || networkBlocks.eitherBlockedUsers(userIdA, userIdB);
+    ) || await networkBlocks.eitherBlockedUsers(userIdA, userIdB);
 }
 
 /**
  * Check if blocker has blocked blocked (one-directional).
  */
-function hasBlocked(blockerId, blockedId) {
-    return !!db.get(
+async function hasBlocked(blockerId, blockedId) {
+    return !!await db.get(
         `SELECT 1 FROM dm_blocks WHERE blocker_id = ? AND blocked_id = ?`,
         [blockerId, blockedId]
     );
@@ -301,18 +301,18 @@ function hasBlocked(blockerId, blockedId) {
 /**
  * Block a user.
  */
-function blockUser(blockerId, blockedId) {
-    db.run(
-        `INSERT OR IGNORE INTO dm_blocks (blocker_id, blocked_id, blocker_subject_id) VALUES (?, ?, ?)`,
-        [blockerId, blockedId, db.subjectFor(blockerId)]
+async function blockUser(blockerId, blockedId) {
+    await db.run(
+        `INSERT INTO dm_blocks (blocker_id, blocked_id, blocker_subject_id) VALUES (?, ?, ?) ON CONFLICT DO NOTHING`,
+        [blockerId, blockedId, await db.subjectFor(blockerId)]
     );
 }
 
 /**
  * Unblock a user.
  */
-function unblockUser(blockerId, blockedId) {
-    db.run(
+async function unblockUser(blockerId, blockedId) {
+    await db.run(
         `DELETE FROM dm_blocks WHERE blocker_id = ? AND blocked_id = ?`,
         [blockerId, blockedId]
     );
@@ -321,8 +321,8 @@ function unblockUser(blockerId, blockedId) {
 /**
  * Get all users blocked by blockerId.
  */
-function getBlockedUsers(blockerId) {
-    return db.all(`
+async function getBlockedUsers(blockerId) {
+    return await db.all(`
         SELECT u.id, u.username, u.display_name, u.avatar_url, u.profile_color, b.created_at as blocked_at
         FROM dm_blocks b
         JOIN ctx_users u ON u.id = b.blocked_id
@@ -334,18 +334,18 @@ function getBlockedUsers(blockerId) {
 /**
  * Delete a message (only the sender can delete their own message).
  */
-function deleteMessage(messageId, userId) {
-    const msg = db.get(`SELECT * FROM dm_messages WHERE id = ?`, [messageId]);
+async function deleteMessage(messageId, userId) {
+    const msg = await db.get(`SELECT * FROM dm_messages WHERE id = ?`, [messageId]);
     if (!msg || msg.sender_id !== userId) return false;
-    db.run(`DELETE FROM dm_messages WHERE id = ?`, [messageId]);
+    await db.run(`DELETE FROM dm_messages WHERE id = ?`, [messageId]);
     return true;
 }
 
 /**
  * Get the number of participants in a conversation.
  */
-function getParticipantCount(conversationId) {
-    const row = db.get(
+async function getParticipantCount(conversationId) {
+    const row = await db.get(
         `SELECT COUNT(*) as c FROM dm_participants WHERE conversation_id = ?`,
         [conversationId]
     );
@@ -399,8 +399,8 @@ function checkMessageSpam(text) {
  * Check if this message is a duplicate of the user's recent messages.
  * Returns true if the exact same text was sent within the last N seconds.
  */
-function isDuplicateMessage(conversationId, senderId, text, windowSeconds = 30) {
-    const row = db.get(`
+async function isDuplicateMessage(conversationId, senderId, text, windowSeconds = 30) {
+    const row = await db.get(`
         SELECT 1 FROM dm_messages
         WHERE conversation_id = ? AND sender_id = ? AND message = ?
           AND created_at > datetime('now', '-' || ? || ' seconds')
@@ -413,8 +413,8 @@ function isDuplicateMessage(conversationId, senderId, text, windowSeconds = 30) 
  * Check if a user account is too new to send DMs (minimum account age).
  * Returns { tooNew: boolean, minutesRemaining: number }
  */
-function isAccountTooNew(userId, minMinutes = 5) {
-    const user = db.get(`SELECT created_at FROM ctx_users WHERE id = ?`, [userId]);
+async function isAccountTooNew(userId, minMinutes = 5) {
+    const user = await db.get(`SELECT created_at FROM ctx_users WHERE id = ?`, [userId]);
     if (!user || !user.created_at) return { tooNew: false, minutesRemaining: 0 };
     const created = new Date(user.created_at.endsWith('Z') ? user.created_at : user.created_at + 'Z');
     const ageMs = Date.now() - created.getTime();

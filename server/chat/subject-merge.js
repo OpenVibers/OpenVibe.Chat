@@ -15,8 +15,63 @@ const db = require('../db/database');
 const SUBJECT_RE = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const MERGE_RE = /^mrg_[0-9A-HJKMNP-TV-Z]{26}$/;
 
-const cols = (d, t) => { try { return d.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name); } catch { return []; } };
-const has = (d, t, c) => cols(d, t).includes(c);
+// Static statements per table (plan T3 decision 7: no interpolated identifiers). @to/@from: a subject or a Live id.
+const BY_SUBJECT_MESSAGES = [
+    'UPDATE chat_messages SET subject_id = @to WHERE subject_id = @from',
+    'UPDATE room_messages SET subject_id = @to WHERE subject_id = @from',
+    'UPDATE dm_messages SET sender_subject_id = @to WHERE sender_subject_id = @from',
+];
+const BY_USER = [
+    'UPDATE chat_messages SET user_id = @to WHERE user_id = @from',
+    'UPDATE chat_messages SET channel_user_id = @to WHERE channel_user_id = @from',
+    'UPDATE room_messages SET user_id = @to WHERE user_id = @from',
+    'UPDATE dm_messages SET sender_id = @to WHERE sender_id = @from',
+    'UPDATE dm_conversations SET created_by = @to WHERE created_by = @from',
+];
+// Membership: (group, user) is one row; the survivor's stays.
+const MEMBERSHIP = [
+    {
+        counter: 'dm',
+        groups: 'SELECT conversation_id AS g FROM dm_participants WHERE user_id = ?',
+        has: 'SELECT 1 FROM dm_participants WHERE conversation_id = ? AND user_id = ?',
+        drop: 'DELETE FROM dm_participants WHERE conversation_id = ? AND user_id = ?',
+        move: 'UPDATE dm_participants SET user_id = ? WHERE conversation_id = ? AND user_id = ?',
+        subject: 'UPDATE dm_participants SET subject_id = @to WHERE subject_id = @from',
+    },
+    {
+        counter: 'rooms',
+        groups: 'SELECT room_id AS g FROM room_members WHERE user_id = ?',
+        has: 'SELECT 1 FROM room_members WHERE room_id = ? AND user_id = ?',
+        drop: 'DELETE FROM room_members WHERE room_id = ? AND user_id = ?',
+        move: 'UPDATE room_members SET user_id = ? WHERE room_id = ? AND user_id = ?',
+        subject: null,
+    },
+];
+const BY_SUBJECT_OTHER = [
+    'UPDATE rooms SET owner_subject = @to WHERE owner_subject = @from',
+    'UPDATE room_attachments SET attached_by_subject = @to WHERE attached_by_subject = @from',
+    'UPDATE calls SET created_by_subject = @to WHERE created_by_subject = @from',
+    'UPDATE calls SET target_subject = @to WHERE target_subject = @from',
+];
+// Blocks, from either side: the survivor's pair wins, blocking oneself goes.
+const DM_BLOCKS = [
+    { rows: 'SELECT id, blocked_id AS o FROM dm_blocks WHERE blocker_id = ?', exists: 'SELECT 1 FROM dm_blocks WHERE blocker_id = ? AND blocked_id = ?', move: 'UPDATE dm_blocks SET blocker_id = ? WHERE id = ?' },
+    { rows: 'SELECT id, blocker_id AS o FROM dm_blocks WHERE blocked_id = ?', exists: 'SELECT 1 FROM dm_blocks WHERE blocked_id = ? AND blocker_id = ?', move: 'UPDATE dm_blocks SET blocked_id = ? WHERE id = ?' },
+];
+const NETWORK_BLOCKS = [
+    {
+        rows: 'SELECT blocked_subject AS o FROM network_blocks WHERE blocker_subject = ?',
+        exists: 'SELECT 1 FROM network_blocks WHERE blocker_subject = ? AND blocked_subject = ?',
+        drop: 'DELETE FROM network_blocks WHERE blocker_subject = ? AND blocked_subject = ?',
+        move: 'UPDATE network_blocks SET blocker_subject = ? WHERE blocker_subject = ? AND blocked_subject = ?',
+    },
+    {
+        rows: 'SELECT blocker_subject AS o FROM network_blocks WHERE blocked_subject = ?',
+        exists: 'SELECT 1 FROM network_blocks WHERE blocked_subject = ? AND blocker_subject = ?',
+        drop: 'DELETE FROM network_blocks WHERE blocked_subject = ? AND blocker_subject = ?',
+        move: 'UPDATE network_blocks SET blocked_subject = ? WHERE blocked_subject = ? AND blocker_subject = ?',
+    },
+];
 
 /** The payload { merge_id, from, into }, or null. */
 function payloadOf(event) {
@@ -25,53 +80,44 @@ function payloadOf(event) {
     return { merge_id: p.merge_id, from: p.from, into: p.into };
 }
 
-function apply({ from, into, merge_id: mergeId }, { log = console } = {}) {
+async function apply({ from, into, merge_id: mergeId }, { log = console } = {}) {
     const d = db.getDb();
-    const idOf = (s) => { const r = d.prepare('SELECT id FROM ctx_users WHERE subject_id = ? ORDER BY id LIMIT 1').get(s); return r ? r.id : null; };
-    const a = idOf(from); const b = idOf(into);
+    const idOf = async (s) => { const r = await d.prepare('SELECT id FROM ctx_users WHERE subject_id = ? ORDER BY id LIMIT 1').get(s); return r ? r.id : null; };
+    const a = await idOf(from); const b = await idOf(into);
     const both = a != null && b != null && a !== b;
     const c = { messages: 0, dm: 0, rooms: 0, dropped: 0 };
-    d.transaction(() => {
-        const set = (t, col, to, fromVal) => (has(d, t, col) ? d.prepare(`UPDATE ${t} SET ${col} = ? WHERE ${col} = ?`).run(to, fromVal).changes : 0);
+    await d.tx(async () => {
+        const set = async (text, to, fromVal) => (await d.prepare(text).run({ to, from: fromVal })).changes;
         // Messages: by subject, and by Live user id when both accounts have one.
-        c.messages += set('chat_messages', 'subject_id', into, from) + set('room_messages', 'subject_id', into, from) + set('dm_messages', 'sender_subject_id', into, from);
-        if (both) {
-            set('chat_messages', 'user_id', b, a); set('chat_messages', 'channel_user_id', b, a);
-            set('room_messages', 'user_id', b, a); set('dm_messages', 'sender_id', b, a);
-            set('dm_conversations', 'created_by', b, a);
-        }
-        // Membership: (conversation, user) and (room, user) are one row each; the survivor's stays.
-        for (const [t, group] of [['dm_participants', 'conversation_id'], ['room_members', 'room_id']]) {
-            if (!has(d, t, 'user_id')) continue;
+        for (const q of BY_SUBJECT_MESSAGES) c.messages += await set(q, into, from);
+        if (both) for (const q of BY_USER) await set(q, b, a);
+        for (const m of MEMBERSHIP) {
             if (both) {
-                for (const r of d.prepare(`SELECT ${group} AS g FROM ${t} WHERE user_id = ?`).all(a)) {
-                    if (d.prepare(`SELECT 1 FROM ${t} WHERE ${group} = ? AND user_id = ?`).get(r.g, b)) { d.prepare(`DELETE FROM ${t} WHERE ${group} = ? AND user_id = ?`).run(r.g, a); c.dropped++; }
-                    else { d.prepare(`UPDATE ${t} SET user_id = ? WHERE ${group} = ? AND user_id = ?`).run(b, r.g, a); c[t === 'dm_participants' ? 'dm' : 'rooms']++; }
+                for (const r of await d.prepare(m.groups).all(a)) {
+                    if (await d.prepare(m.has).get(r.g, b)) { await d.prepare(m.drop).run(r.g, a); c.dropped++; }
+                    else { await d.prepare(m.move).run(b, r.g, a); c[m.counter]++; }
                 }
             }
-            if (has(d, t, 'subject_id')) set(t, 'subject_id', into, from);
+            if (m.subject) await set(m.subject, into, from);
         }
-        set('rooms', 'owner_subject', into, from); set('room_attachments', 'attached_by_subject', into, from);
-        set('calls', 'created_by_subject', into, from); set('calls', 'target_subject', into, from);
+        for (const q of BY_SUBJECT_OTHER) await set(q, into, from);
         // DM blocks (by Live user id, unique per pair) and the platform-block projection (by subject).
-        if (both && has(d, 'dm_blocks', 'blocker_id')) {
-            for (const [col, other] of [['blocker_id', 'blocked_id'], ['blocked_id', 'blocker_id']]) {
-                for (const r of d.prepare(`SELECT id, ${other} AS o FROM dm_blocks WHERE ${col} = ?`).all(a)) {
-                    if (r.o === b || d.prepare(`SELECT 1 FROM dm_blocks WHERE ${col} = ? AND ${other} = ?`).get(b, r.o)) { d.prepare('DELETE FROM dm_blocks WHERE id = ?').run(r.id); c.dropped++; }
-                    else d.prepare(`UPDATE dm_blocks SET ${col} = ? WHERE id = ?`).run(b, r.id);
+        if (both) {
+            for (const q of DM_BLOCKS) {
+                for (const r of await d.prepare(q.rows).all(a)) {
+                    if (r.o === b || await d.prepare(q.exists).get(b, r.o)) { await d.prepare('DELETE FROM dm_blocks WHERE id = ?').run(r.id); c.dropped++; }
+                    else await d.prepare(q.move).run(b, r.id);
                 }
             }
         }
-        set('dm_blocks', 'blocker_subject_id', into, from);
-        if (has(d, 'network_blocks', 'blocker_subject')) {
-            for (const [col, other] of [['blocker_subject', 'blocked_subject'], ['blocked_subject', 'blocker_subject']]) {
-                for (const r of d.prepare(`SELECT ${other} AS o FROM network_blocks WHERE ${col} = ?`).all(from)) {
-                    if (r.o === into || d.prepare(`SELECT 1 FROM network_blocks WHERE ${col} = ? AND ${other} = ?`).get(into, r.o)) d.prepare(`DELETE FROM network_blocks WHERE ${col} = ? AND ${other} = ?`).run(from, r.o);
-                    else d.prepare(`UPDATE network_blocks SET ${col} = ? WHERE ${col} = ? AND ${other} = ?`).run(into, from, r.o);
-                }
+        await set('UPDATE dm_blocks SET blocker_subject_id = @to WHERE blocker_subject_id = @from', into, from);
+        for (const q of NETWORK_BLOCKS) {
+            for (const r of await d.prepare(q.rows).all(from)) {
+                if (r.o === into || await d.prepare(q.exists).get(into, r.o)) await d.prepare(q.drop).run(from, r.o);
+                else await d.prepare(q.move).run(into, from, r.o);
             }
         }
-    })();
+    });
     log.log(`[Merge] ${mergeId}: ${JSON.stringify({ live_users: [a, b], ...c })}`);
     return 'merged';
 }

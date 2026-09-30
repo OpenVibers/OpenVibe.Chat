@@ -45,7 +45,7 @@ t('boot, and some of everything while Live is up', async () => {
     alice = h.addUser('alice', { subject: ids.newId('user') });
     bob = h.addUser('bob', { subject: ids.newId('user') });
     carol = h.addUser('carol', { subject: ids.newId('user') });
-    for (const u of [alice, bob, carol]) { h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); }
+    for (const u of [alice, bob, carol]) { await h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); }
     [aliceJwt, bobJwt, carolJwt] = [alice, bob, carol].map(jwt);
     let r = await req('POST', '/api/dm/conversations', { token: aliceJwt, json: { user_ids: [bob.id] } });
     assert.strictEqual(r.status, 200, r.text);

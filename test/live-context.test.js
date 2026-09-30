@@ -18,8 +18,8 @@ t('boot', async () => {
     mod = h.addUser('moddy');
     channelId = h.addChannel(streamer.id, { moderators: [mod.id], settings: { max_message_length: 60 } });
     // The settings and moderator rows are Chat's own (C-04 done); seed them here.
-    h.setChannelSettings(channelId, { max_message_length: 60 });
-    h.db.addChannelModerator(channelId, mod.id, streamer.id);
+    await h.setChannelSettings(channelId, { max_message_length: 60 });
+    await h.db.addChannelModerator(channelId, mod.id, streamer.id);
     streamId = h.addStream(streamer.id, channelId);
     h.live.follows.set(alice.id, [streamer.id]);
     await h.ctx.sync();
@@ -66,14 +66,14 @@ t('Live down: chat keeps flowing from caches; new tokens fall back to anonymous'
 });
 
 t('invalidation never leaves a gap: a moderator stays a moderator while the policy reloads', async () => {
-    h.ctx.invalidateChannel(channelId);
-    assert.strictEqual(h.ctx.isChannelModerator(mod.id, channelId), true);
+    await h.ctx.invalidateChannel(channelId);
+    assert.strictEqual(await h.ctx.isChannelModerator(mod.id, channelId), true);
     await h.sleep(100);
-    assert.strictEqual(h.ctx.isChannelModerator(mod.id, channelId), true);
+    assert.strictEqual(await h.ctx.isChannelModerator(mod.id, channelId), true);
     // A moderator removed from Chat's own row loses the power.
-    h.db.removeChannelModerator(channelId, mod.id);
+    await h.db.removeChannelModerator(channelId, mod.id);
     await h.sleep(150);
-    assert.strictEqual(h.ctx.isChannelModerator(mod.id, channelId), false);
+    assert.strictEqual(await h.ctx.isChannelModerator(mod.id, channelId), false);
 });
 
 t('bans: user/stream/site scope, CIDR, and expires_at read as an instant (ISO or SQLite format)', async () => {
@@ -118,7 +118,7 @@ t('a ban written through Live is in Chat’s cache when the effect answers, even
 });
 
 t('followers-only uses the viewer’s warm follow list', async () => {
-    h.setChannelSettings(channelId, { followers_only: 1 });
+    await h.setChannelSettings(channelId, { followers_only: 1 });
     await h.sleep(150);
     const stranger = h.addUser('stranger');
     await h.ctx.sync();

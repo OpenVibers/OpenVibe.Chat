@@ -70,10 +70,10 @@ async function main() {
         console.log(JSON.stringify(report, null, 2));
         return;
     }
-    const Database = require('better-sqlite3');
-    const liveDb = new Database(args.liveDb, { readonly: true, fileMustExist: true });
+    const { openSqlite } = require('./lib/sqlite');
+    const liveDb = openSqlite(args.liveDb);
     let planned;
-    try { planned = migration.plan(liveDb); } finally { liveDb.close(); }
+    try { planned = await migration.plan(liveDb); } finally { liveDb.close(); }
     const report = await migration.migrate(planned, { apply: args.apply, backup: args.backup, liveDbPath: args.liveDb, log: (m) => console.error(m) });
     console.log(JSON.stringify(report, null, 2));
     if (!args.apply) console.error('dry run: nothing written (add --apply --backup <file> to write)');

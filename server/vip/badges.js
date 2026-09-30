@@ -38,7 +38,7 @@ function enabled() {
 
 function build() {
     const tokenClient = {
-        authHeaders: () => serviceAuth.headers(AUDIENCE, SCOPE),
+        authHeaders: async () => await serviceAuth.headers(AUDIENCE, SCOPE),
         invalidate: () => serviceAuth.invalidate(AUDIENCE, SCOPE),
     };
     const vip = createVipClient({

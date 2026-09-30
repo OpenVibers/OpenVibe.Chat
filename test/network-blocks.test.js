@@ -40,22 +40,22 @@ t('boot', async () => {
 t('the projection keeps the newest revision per pair', async () => {
     const nb = require('../server/chat/network-blocks');
     const e1 = event(bob.subject_id, alice.subject_id, true, 1);
-    assert.strictEqual(h.eventsConsumer.apply(e1).outcome, 'blocked');
-    assert.strictEqual(h.eventsConsumer.apply(e1).duplicate, true, 'a redelivery is a no-op');
-    assert.ok(nb.hasBlocked(bob.subject_id, alice.subject_id));
-    assert.ok(!nb.hasBlocked(alice.subject_id, bob.subject_id), 'one direction');
-    assert.ok(nb.eitherBlockedUsers(alice.id, bob.id) && nb.eitherBlockedUsers(bob.id, alice.id));
+    assert.strictEqual((await h.eventsConsumer.apply(e1)).outcome, 'blocked');
+    assert.strictEqual((await h.eventsConsumer.apply(e1)).duplicate, true, 'a redelivery is a no-op');
+    assert.ok(await nb.hasBlocked(bob.subject_id, alice.subject_id));
+    assert.ok(!await nb.hasBlocked(alice.subject_id, bob.subject_id), 'one direction');
+    assert.ok(await nb.eitherBlockedUsers(alice.id, bob.id) && await nb.eitherBlockedUsers(bob.id, alice.id));
     // Out of order: revision 3 (unblock) then the late revision 2 (block) changes nothing.
-    assert.strictEqual(h.eventsConsumer.apply(event(dave.subject_id, carol.subject_id, false, 3)).outcome, 'unblocked');
-    assert.strictEqual(h.eventsConsumer.apply(event(dave.subject_id, carol.subject_id, true, 2)).outcome, 'unchanged', 'an older revision never wins');
-    assert.ok(!nb.hasBlocked(dave.subject_id, carol.subject_id));
+    assert.strictEqual((await h.eventsConsumer.apply(event(dave.subject_id, carol.subject_id, false, 3))).outcome, 'unblocked');
+    assert.strictEqual((await h.eventsConsumer.apply(event(dave.subject_id, carol.subject_id, true, 2))).outcome, 'unchanged', 'an older revision never wins');
+    assert.ok(!await nb.hasBlocked(dave.subject_id, carol.subject_id));
     // Only Network's, only valid payloads.
-    assert.strictEqual(h.eventsConsumer.apply(event(dave.subject_id, carol.subject_id, true, 9, { source: 'live' })).outcome, 'ignored:source');
+    assert.strictEqual((await h.eventsConsumer.apply(event(dave.subject_id, carol.subject_id, true, 9, { source: 'live' }))).outcome, 'ignored:source');
     const bad = event(dave.subject_id, carol.subject_id, true, 9); bad.payload.blocked = 'carol';
-    assert.strictEqual(h.eventsConsumer.apply(bad).outcome, 'ignored:payload');
+    assert.strictEqual((await h.eventsConsumer.apply(bad)).outcome, 'ignored:payload');
     const zero = event(dave.subject_id, carol.subject_id, true, 0);
-    assert.strictEqual(h.eventsConsumer.apply(zero).outcome, 'ignored:payload', 'revision starts at 1');
-    assert.ok(!nb.hasBlocked(dave.subject_id, carol.subject_id));
+    assert.strictEqual((await h.eventsConsumer.apply(zero)).outcome, 'ignored:payload', 'revision starts at 1');
+    assert.ok(!await nb.hasBlocked(dave.subject_id, carol.subject_id));
 });
 
 t('DMs: bob blocked alice on the network — refused both ways, same shapes as dm_blocks', async () => {
@@ -86,7 +86,7 @@ t('DMs: bob blocked alice on the network — refused both ways, same shapes as d
 });
 
 t('an unblock lifts it', async () => {
-    assert.strictEqual(h.eventsConsumer.apply(event(bob.subject_id, alice.subject_id, false, 2)).outcome, 'unblocked');
+    assert.strictEqual((await h.eventsConsumer.apply(event(bob.subject_id, alice.subject_id, false, 2))).outcome, 'unblocked');
     let r = await h.http('POST', `/api/dm/conversations/${convAB}/messages`, { token: alice.token, body: { message: 'hi again' } });
     assert.strictEqual(r.status, 200, r.text);
     r = await h.http('POST', `/api/dm/conversations/${group}/participants`, { token: carol.token, body: { user_id: alice.id } });

@@ -105,10 +105,10 @@ function deliver(event, { secret = SECRET, now = Date.now(), headers = {}, strip
     return h.http('POST', '/internal/events', { raw, headers: { 'Content-Type': 'application/json', 'X-OpenVibe-Event-Id': event.event_id, ...signed, ...headers } });
 }
 const bridge = (commits) => h.http('POST', '/internal/live/calls', { token: BRIDGE, body: { boot: 'live-boot-1', ops: [{ seq: ++n, op: 'deployNotice', args: [commits] }] } });
-const cards = () => h.db.all("SELECT id, metadata FROM chat_messages WHERE message_type = 'system' AND metadata LIKE '%\"kind\":\"deploy\"%' ORDER BY id").map((r) => ({ id: r.id, ...JSON.parse(r.metadata) }));
-const card = (id) => cards().find((c) => c.id === id);
-const speak = (text) => h.db.saveChatMessage({ stream_id: streamId, user_id: viewer.id, username: viewer.username, message: text, message_type: 'chat', is_global: false });
-const releaseRow = (head) => h.db.get('SELECT * FROM deploy_releases WHERE head = ?', [head]);
+const cards = async () => (await h.db.all("SELECT id, metadata FROM chat_messages WHERE message_type = 'system' AND metadata LIKE '%\"kind\":\"deploy\"%' ORDER BY id")).map((r) => ({ id: r.id, ...JSON.parse(r.metadata) }));
+const card = async (id) => (await cards()).find((c) => c.id === id);
+const speak = async (text) => await h.db.saveChatMessage({ stream_id: streamId, user_id: viewer.id, username: viewer.username, message: text, message_type: 'chat', is_global: false });
+const releaseRow = async (head) => await h.db.get('SELECT * FROM deploy_releases WHERE head = ?', [head]);
 
 t('boot with the consumer on and a stub Events', async () => {
     const eventsPort = await new Promise((r) => eventsServer.listen(0, '127.0.0.1', () => r(eventsServer.address().port)));
@@ -168,8 +168,8 @@ t('signature v2 only: bad signature, stale or future timestamp, v1-only, unsigne
     // A v2 header that names another time than X-OpenVibe-Timestamp.
     r = await deliver(ev, { headers: { 'X-OpenVibe-Timestamp': String(Math.floor(Date.now() / 1000) - 5) } });
     assert.strictEqual(r.status, 401);
-    assert.strictEqual(cards().length, 0, 'nothing was applied');
-    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM chat_event_inbox').n, 0);
+    assert.strictEqual((await cards()).length, 0, 'nothing was applied');
+    assert.strictEqual((await h.db.get('SELECT COUNT(*) AS n FROM chat_event_inbox')).n, 0);
     // Signed but not an envelope.
     r = await deliver({ event_type: 'live.release.deployed' });
     assert.strictEqual(r.status, 400);
@@ -198,27 +198,27 @@ t('no CHAT_EVENTS_SECRET: the route answers 503', async () => {
 });
 
 t('live.release.deployed makes the deploy card; the same event again is one card (inbox)', async () => {
-    speak('before the first card');
+    await speak('before the first card');
     const ev = release([commit('a', 'events: first'), commit('b', 'events: second')]);
     let r = await deliver(ev);
     assert.strictEqual(r.status, 200, r.text);
     assert.deepStrictEqual([r.body.duplicate, r.body.outcome], [false, 'announced']);
     const id = r.body.detail.message_id;
-    const c = card(id);
+    const c = await card(id);
     assert.deepStrictEqual(c.commits.map((x) => x.subject), ['events: first', 'events: second']);
     assert.strictEqual(c.deploys, 1);
-    const row = h.db.getChatMessageById(id);
+    const row = await h.db.getChatMessageById(id);
     assert.strictEqual(row.message_type, 'system');
     assert.strictEqual(row.is_global, 1);
     assert.strictEqual(row.username, 'OpenVibe.Live');
     assert.strictEqual(row.message, '🚀 2 updates shipped: events: first · events: second');
-    const before = cards().length;
+    const before = (await cards()).length;
     r = await deliver(ev);                              // Events redelivers (a lost acknowledgement)
     assert.deepStrictEqual([r.status, r.body.duplicate, r.body.outcome], [200, true, null]);
     r = await deliver(ev, { now: Date.now() + 1000 });   // a later attempt, new signature
     assert.strictEqual(r.body.duplicate, true);
-    assert.strictEqual(cards().length, before, 'still one card');
-    assert.strictEqual(card(id).deploys, 1, 'not folded into itself');
+    assert.strictEqual((await cards()).length, before, 'still one card');
+    assert.strictEqual((await card(id)).deploys, 1, 'not folded into itself');
     // Late joiners get this announcement once, keyed by the row id (as with the bridge).
     const late = await h.ws({ ip: '198.51.100.70' });
     late.sendJson({ type: 'join' });
@@ -226,47 +226,47 @@ t('live.release.deployed makes the deploy card; the same event again is one card
     assert.strictEqual(upd.id, id);
     assert.deepStrictEqual(upd.fresh, [commit('a').hash, commit('b').hash]);
     late.close();
-    const rel = releaseRow(commit('a').hash);
+    const rel = await releaseRow(commit('a').hash);
     assert.deepStrictEqual([rel.first_via, rel.message_id, rel.event_id, rel.bridge_at], ['events', id, ev.event_id, null]);
 });
 
 t('bridge first, then the event for the same head: one card', async () => {
-    speak('a stream message, so the next deploy is a new card');
+    await speak('a stream message, so the next deploy is a new card');
     const commits = [commit('c', 'bridge: head'), commit('d', 'bridge: parent')];
     const b = await bridge(commits);
     const id = b.body.results[0].result.id;
     assert.strictEqual(b.body.results[0].result.announced, 2);
-    const before = cards().length;
+    const before = (await cards()).length;
     const r = await deliver(release(commits));
     assert.deepStrictEqual([r.status, r.body.duplicate, r.body.outcome], [200, false, 'duplicate:release']);
     assert.strictEqual(r.body.detail.message_id, id);
-    assert.strictEqual(cards().length, before, 'no second card');
-    assert.strictEqual(card(id).deploys, 1, 'the card was not folded again');
-    const rel = releaseRow(commits[0].hash);
+    assert.strictEqual((await cards()).length, before, 'no second card');
+    assert.strictEqual((await card(id)).deploys, 1, 'the card was not folded again');
+    const rel = await releaseRow(commits[0].hash);
     assert.strictEqual(rel.first_via, 'bridge');
     assert.ok(rel.bridge_at && rel.event_at, 'both paths are recorded as having delivered it');
 });
 
 t('the event first, then the bridge for the same head: one card', async () => {
-    speak('another stream message');
+    await speak('another stream message');
     const commits = [commit('e', 'event: head')];
     const r = await deliver(release(commits));
     assert.strictEqual(r.body.outcome, 'announced');
     const id = r.body.detail.message_id;
-    const before = cards().length;
+    const before = (await cards()).length;
     const b = await bridge(commits);
     assert.deepStrictEqual(b.body.results[0].result, { announced: 0, id, duplicate: true });
     // A retried bridge op (Live's durable queue after a lost response) is the same.
     const again = await bridge(commits);
     assert.strictEqual(again.body.results[0].result.duplicate, true);
-    assert.strictEqual(cards().length, before);
-    assert.strictEqual(card(id).deploys, 1);
-    const rel = releaseRow(commits[0].hash);
+    assert.strictEqual((await cards()).length, before);
+    assert.strictEqual((await card(id)).deploys, 1);
+    const rel = await releaseRow(commits[0].hash);
     assert.deepStrictEqual([rel.first_via, !!rel.event_at, !!rel.bridge_at], ['events', true, true]);
 });
 
 t('folding as before: the next deploy folds into the last card; a stream message in between starts a new card', async () => {
-    speak('new card next');
+    await speak('new card next');
     let r = await deliver(release([commit('1', 'fold: one')]));
     const first = r.body.detail.message_id;
     assert.strictEqual(r.body.outcome, 'announced');
@@ -275,23 +275,23 @@ t('folding as before: the next deploy folds into the last card; a stream message
     assert.strictEqual(b.body.results[0].result.id, first, 'the bridge folds into the card the event made');
     r = await deliver(release([commit('3', 'fold: three')]));
     assert.deepStrictEqual([r.body.outcome, r.body.detail.message_id], ['folded', first]);
-    assert.strictEqual(card(first).deploys, 3);
-    assert.deepStrictEqual(card(first).commits.map((c) => c.subject), ['fold: three', 'fold: two', 'fold: one']);
+    assert.strictEqual((await card(first)).deploys, 3);
+    assert.deepStrictEqual((await card(first)).commits.map((c) => c.subject), ['fold: three', 'fold: two', 'fold: one']);
     r = await deliver(release([commit('2', 'fold: two')]));
     assert.strictEqual(r.body.outcome, 'duplicate:release', 'the bridge already announced that head');
-    assert.strictEqual(card(first).deploys, 3);
+    assert.strictEqual((await card(first)).deploys, 3);
     // Someone speaks in a stream room (the global feed shows it): the next deploy is a new card.
-    speak('hello brother');
+    await speak('hello brother');
     r = await deliver(release([commit('4', 'fold: four')]));
     assert.strictEqual(r.body.outcome, 'announced');
     const next = r.body.detail.message_id;
     assert.notStrictEqual(next, first);
-    assert.strictEqual(card(next).deploys, 1);
-    assert.strictEqual(card(first).deploys, 3, 'the old card is left as it was');
+    assert.strictEqual((await card(next)).deploys, 1);
+    assert.strictEqual((await card(first)).deploys, 3, 'the old card is left as it was');
 });
 
 t('what a release event must be: from Live, a release subject, commits, not stale', async () => {
-    const before = cards().length;
+    const before = (await cards()).length;
     const ev = release([commit('5')]);
     let r = await deliver({ ...ev, event_id: ids.newId('event'), source: 'media' });
     assert.strictEqual(r.body.outcome, 'ignored:source');
@@ -303,8 +303,8 @@ t('what a release event must be: from Live, a release subject, commits, not stal
     assert.strictEqual(r.body.outcome, 'ignored:stale', 'an operator replay of an old deploy says nothing');
     r = await deliver({ ...ev, event_id: ids.newId('event'), event_type: 'live.stream.started' });
     assert.strictEqual(r.body.outcome, 'ignored:type');
-    assert.strictEqual(cards().length, before);
-    assert.strictEqual(releaseRow(commit('6').hash), undefined);
+    assert.strictEqual((await cards()).length, before);
+    assert.strictEqual(await releaseRow(commit('6').hash), undefined);
 });
 
 t('network.module.updated drops a cached chat.preferences copy when newer; an older revision is ignored', async () => {
@@ -325,12 +325,12 @@ t('network.module.updated drops a cached chat.preferences copy when newer; an ol
     assert.strictEqual(r.body.outcome, 'unchanged');
     assert.strictEqual(prefs._cached(ANN).revision, 2);
     // ...other namespaces and other sources are acknowledged and not recorded...
-    const inbox = h.db.get('SELECT COUNT(*) AS n FROM chat_event_inbox').n;
+    const inbox = (await h.db.get('SELECT COUNT(*) AS n FROM chat_event_inbox')).n;
     r = await deliver(moduleUpdated(9, { namespace: 'tools.usage' }));
     assert.strictEqual(r.body.outcome, 'ignored:namespace');
     r = await deliver(moduleUpdated(9, { source: 'live' }));
     assert.strictEqual(r.body.outcome, 'ignored:source');
-    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM chat_event_inbox').n, inbox);
+    assert.strictEqual((await h.db.get('SELECT COUNT(*) AS n FROM chat_event_inbox')).n, inbox);
     assert.strictEqual(prefs._cached(ANN).revision, 2);
     // ...and the newer revision drops it at once: the next read is Network's.
     const ev = moduleUpdated(3);
@@ -368,7 +368,7 @@ t('vip.membership.changed from VIP drops the cached badge answers at once; from 
 
 t('an event delivered with the secret the subscription holds verifies; /ready reports the consumer', async () => {
     const sub = stubEvents.subs.find((s) => s.topic_pattern === 'live.release.deployed');
-    speak('end-to-end next');
+    await speak('end-to-end next');
     const r = await deliver(release([commit('7', 'through the subscription')]), { secret: sub.secret, headers: { 'X-OpenVibe-Subscription-Id': sub.id } });
     assert.deepStrictEqual([r.status, r.body.outcome], [200, 'announced']);
     const ready = await h.http('GET', '/ready');
@@ -380,10 +380,10 @@ t('an event delivered with the secret the subscription holds verifies; /ready re
 });
 
 t('inbox receipts older than Events’ retention are pruned', async () => {
-    h.db.run("INSERT INTO chat_event_inbox (consumer, event_id, processed_at) VALUES ('chat', 'evt_OLD', ?)", [Date.now() - 40 * 86400e3]);
-    const kept = h.db.get('SELECT COUNT(*) AS n FROM chat_event_inbox').n - 1;
-    assert.strictEqual(h.eventsConsumer.prune(), 1);
-    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM chat_event_inbox').n, kept);
+    await h.db.run("INSERT INTO chat_event_inbox (consumer, event_id, processed_at) VALUES ('chat', 'evt_OLD', ?)", [Date.now() - 40 * 86400e3]);
+    const kept = (await h.db.get('SELECT COUNT(*) AS n FROM chat_event_inbox')).n - 1;
+    assert.strictEqual(await h.eventsConsumer.prune(), 1);
+    assert.strictEqual((await h.db.get('SELECT COUNT(*) AS n FROM chat_event_inbox')).n, kept);
 });
 
 t.run(async () => { if (h) await h.close(); eventsServer.close(); });

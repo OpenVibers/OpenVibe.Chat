@@ -45,8 +45,8 @@ t('a REST fallback message, a DM and a moderation action each leave one envelope
     assert.deepStrictEqual(sent.body, { ok: true });
     const conv = await h.http('POST', '/api/dm/conversations', { token: alice.token, body: { user_ids: [bob.id] } });
     await h.http('POST', `/api/dm/conversations/${conv.body.conversation.id}/messages`, { token: alice.token, body: { message: 'dm text' } });
-    h.db.logModerationAction({ scope_type: 'site', actor_user_id: alice.id, target_user_id: bob.id, action_type: 'site_timeout', details: { duration: 60 } });
-    const rows = h.db.all('SELECT event_type, event, sent_at FROM events_outbox ORDER BY seq');
+    await h.db.logModerationAction({ scope_type: 'site', actor_user_id: alice.id, target_user_id: bob.id, action_type: 'site_timeout', details: { duration: 60 } });
+    const rows = await h.db.all('SELECT event_type, event, sent_at FROM events_outbox ORDER BY seq');
     assert.deepStrictEqual(rows.map((r) => r.event_type), ['chat.message.created', 'chat.dm.created', 'chat.moderation.action']);
     for (const r of rows) {
         const env = JSON.parse(r.event);
@@ -70,21 +70,21 @@ t('a REST fallback message, a DM and a moderation action each leave one envelope
 t('Events down: rows wait with the error; back up: published once, marked sent', async () => {
     eventsMode = 'down';
     await h.eventsRelay.flush();
-    const waiting = h.db.all('SELECT attempts, last_error, sent_at FROM events_outbox');
+    const waiting = await h.db.all('SELECT attempts, last_error, sent_at FROM events_outbox');
     assert.ok(waiting.every((r) => r.attempts === 1 && /503/.test(r.last_error) && r.sent_at === null));
     eventsMode = 'ok';
     const r = await h.eventsRelay.flush();
     assert.strictEqual(r.sent, 3);
     assert.strictEqual(received.length, 3);
-    assert.ok(h.db.all('SELECT sent_at FROM events_outbox').every((x) => x.sent_at));
+    assert.ok((await h.db.all('SELECT sent_at FROM events_outbox')).every((x) => x.sent_at));
     assert.strictEqual((await h.eventsRelay.flush()).sent, 0, 'nothing twice');
     assert.ok(h.tokenRequests.some((x) => x.audience === 'openvibe.events' && x.scope === 'events.event.publish'));
 });
 
 t('mirror: every change to Chat’s tables reaches Live, newest state per row', async () => {
-    const id = Number(h.db.saveChatMessage({ stream_id: streamId, user_id: bob.id, username: 'Bob', message: 'to be deleted', message_type: 'chat' }).lastInsertRowid);
-    h.db.deleteChatMessage(id, streamer.id);
-    h.db.recordFirstChat(`user:${bob.id}`, streamer.id);
+    const id = Number((await h.db.saveChatMessage({ stream_id: streamId, user_id: bob.id, username: 'Bob', message: 'to be deleted', message_type: 'chat' })).lastInsertRowid);
+    await h.db.deleteChatMessage(id, streamer.id);
+    await h.db.recordFirstChat(`user:${bob.id}`, streamer.id);
     await h.mirrorRelay.flush();
     const byTable = (tbl) => h.live.mirror.filter((c) => c.table === tbl);
     const msgChanges = byTable('chat_messages').filter((c) => c.row && c.row.id === id);
@@ -95,10 +95,10 @@ t('mirror: every change to Chat’s tables reaches Live, newest state per row', 
     assert.ok(byTable('dm_messages').length === 1 && byTable('dm_participants').length === 2 && byTable('dm_conversations').length >= 1);
     assert.ok(byTable('moderation_actions').length === 1);
     assert.deepStrictEqual(byTable('stream_first_chats')[0].row.chatter_key, `user:${bob.id}`);
-    assert.strictEqual(h.mirrorRelay.pending(), 0);
+    assert.strictEqual(await h.mirrorRelay.pending(), 0);
     // A delete travels as a delete.
-    const dmId = h.db.get('SELECT id FROM dm_messages').id;
-    const conv = h.db.get('SELECT conversation_id FROM dm_messages').conversation_id;
+    const dmId = (await h.db.get('SELECT id FROM dm_messages')).id;
+    const conv = (await h.db.get('SELECT conversation_id FROM dm_messages')).conversation_id;
     assert.strictEqual((await h.http('DELETE', `/api/dm/conversations/${conv}/messages/${dmId}`, { token: alice.token })).status, 200);
     await h.mirrorRelay.flush();
     assert.deepStrictEqual(h.live.mirror.at(-1), { table: 'dm_messages', op: 'delete', pk: { id: dmId } });
@@ -106,7 +106,7 @@ t('mirror: every change to Chat’s tables reaches Live, newest state per row', 
 
 t('mirror: Live refusing (not yet CHAT_AUTHORITY=chat) keeps the queue; accepted later', async () => {
     h.live.mirrorStatus = 409;
-    h.db.recordRelayUser('twitch', 'Zed');
+    await h.db.recordRelayUser('twitch', 'Zed');
     const r = await h.mirrorRelay.flush();
     assert.ok(r.pending >= 1 && /409/.test(r.error));
     h.live.mirrorStatus = 200;
@@ -120,17 +120,18 @@ t('scripts/mirror-flush.js drains the queue without the service (rollback)', asy
     const { spawn } = require('child_process');
     const path = require('path');
     h.live.mirrorStatus = 409;
-    h.db.recordRelayUser('twitch', 'Late');
+    await h.db.recordRelayUser('twitch', 'Late');
     await h.mirrorRelay.flush();
-    assert.ok(h.mirrorRelay.pending() >= 1);
+    assert.ok(await h.mirrorRelay.pending() >= 1);
     h.live.mirrorStatus = 200;
+    const env = { ...process.env, ...(await h.childDbEnv()) };
     const r = await new Promise((resolve) => {
-        const c = spawn(process.execPath, [path.join(__dirname, '..', 'scripts', 'mirror-flush.js')], { env: { ...process.env } });
+        const c = spawn(process.execPath, [path.join(__dirname, '..', 'scripts', 'mirror-flush.js')], { env });
         let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); c.on('close', (code) => resolve({ code, out }));
     });
     assert.strictEqual(r.code, 0, r.out);
     assert.strictEqual(JSON.parse(r.out.slice(r.out.indexOf('{'))).pending, 0);
-    assert.strictEqual(h.mirrorRelay.pending(), 0);
+    assert.strictEqual(await h.mirrorRelay.pending(), 0);
     assert.strictEqual(h.live.mirror.at(-1).row.username, 'late');
 });
 

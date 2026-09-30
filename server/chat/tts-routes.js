@@ -192,22 +192,22 @@ async function queueRoom(req, res) {
     if (streamId) {
         const stream = await ctx.ensureStream(streamId).catch(() => null);
         if (!stream) { res.status(404).json({ error: 'No such stream' }); return null; }
-        channel = stream.channel_id ? ctx.getChannelById(stream.channel_id) : ctx.getChannelByUserId(stream.user_id);
+        channel = stream.channel_id ? await ctx.getChannelById(stream.channel_id) : await ctx.getChannelByUserId(stream.user_id);
         if (channel) await ctx.ensurePolicy(channel.id).catch(() => {});   // channel moderators
-        allowed = permissions.canModerateStream(req.user, streamId);
+        allowed = await permissions.canModerateStream(req.user, streamId);
     } else {
-        channel = ctx.getChannelByUserId(channelUserId);
+        channel = await ctx.getChannelByUserId(channelUserId);
         if (channel) await ctx.ensurePolicy(channel.id).catch(() => {});
         allowed = req.user.id === channelUserId || permissions.isGlobalModOrAbove(req.user)
-            || (!!channel && permissions.isChannelMod(req.user, channel.id));
+            || (!!channel && await permissions.isChannelMod(req.user, channel.id));
     }
     if (!allowed) { res.status(403).json({ error: 'Only the broadcaster and moderators can manage the TTS and sound queue' }); return null; }
     return { room: audioQueue.roomKey({ streamId, channelUserId }), streamId, channelUserId, channel };
 }
 
-function logQueueAction(req, r, action, details) {
+async function logQueueAction(req, r, action, details) {
     try {
-        db.logModerationAction({
+        await db.logModerationAction({
             scope_type: r.channel ? 'channel' : 'site',
             scope_id: r.channel ? r.channel.id : undefined,
             actor_user_id: req.user.id,
@@ -221,7 +221,7 @@ router.get('/queue', requireAuth, async (req, res) => {
     try {
         const r = await queueRoom(req, res);
         if (!r) return;
-        res.json(audioQueue.list(r.room, { recent: req.query.recent }));
+        res.json(await audioQueue.list(r.room, { recent: req.query.recent }));
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -234,10 +234,10 @@ router.post('/queue/skip', requireAuth, queueModerate, async (req, res) => {
         const r = await queueRoom(req, res);
         if (!r) return;
         const id = parseInt(req.body && req.body.id, 10) || null;
-        const skipped = audioQueue.skip(r.room, { id, actor: `user:${req.user.username}` });
+        const skipped = await audioQueue.skip(r.room, { id, actor: `user:${req.user.username}` });
         if (!skipped) return res.status(id ? 404 : 409).json({ error: id ? 'No such request waiting or playing' : 'Nothing to skip' });
-        logQueueAction(req, r, 'tts_skip', { request_id: skipped.id, kind: skipped.kind });
-        res.json({ skipped: { id: skipped.id, kind: skipped.kind, requested_by: skipped.requested_by }, queue: audioQueue.list(r.room) });
+        await logQueueAction(req, r, 'tts_skip', { request_id: skipped.id, kind: skipped.kind });
+        res.json({ skipped: { id: skipped.id, kind: skipped.kind, requested_by: skipped.requested_by }, queue: await audioQueue.list(r.room) });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -245,9 +245,9 @@ router.post('/queue/clear', requireAuth, queueModerate, async (req, res) => {
     try {
         const r = await queueRoom(req, res);
         if (!r) return;
-        const ids = audioQueue.clear(r.room, { actor: `user:${req.user.username}` });
-        if (ids.length) logQueueAction(req, r, 'tts_clear', { request_ids: ids });
-        res.json({ cleared: ids, queue: audioQueue.list(r.room) });
+        const ids = await audioQueue.clear(r.room, { actor: `user:${req.user.username}` });
+        if (ids.length) await logQueueAction(req, r, 'tts_clear', { request_ids: ids });
+        res.json({ cleared: ids, queue: await audioQueue.list(r.room) });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -257,9 +257,9 @@ router.post('/queue/:id/report', requireAuth, queueReport, async (req, res) => {
         if (!r) return;
         const state = String((req.body && req.body.state) || '');
         if (state !== 'played' && state !== 'failed') return res.status(400).json({ error: "state must be 'played' or 'failed'" });
-        const ok = audioQueue.report(r.room, parseInt(req.params.id, 10), state, { error: req.body && req.body.error, actor: `user:${req.user.username}` });
+        const ok = await audioQueue.report(r.room, parseInt(req.params.id, 10), state, { error: req.body && req.body.error, actor: `user:${req.user.username}` });
         if (!ok) return res.status(409).json({ error: 'That request is not playing' });
-        res.json({ ok: true, queue: audioQueue.list(r.room) });
+        res.json({ ok: true, queue: await audioQueue.list(r.room) });
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

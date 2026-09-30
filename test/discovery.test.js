@@ -21,15 +21,15 @@ const PRIVATE = [/\/messages/, /\/settings/, /\/auth\//, /\/api\//, /\/internal\
 t('boot', async () => {
     h = await boot({ env: { CHAT_WEB_URL: SITE } });
     alice = h.addUser('alice', { subject: ids.newId('user') });
-    h.ctx.upsertUser(h.live.users.get(alice.id));
+    await h.ctx.upsertUser(h.live.users.get(alice.id));
     const rooms = require('../server/rooms/rooms');
-    rooms.create(alice, { name: 'Night Owls', topic: 'Late chats' });
-    rooms.create(alice, { name: 'Closed Room', slug: 'private-room', visibility: 'private' });
+    await rooms.create(alice, { name: 'Night Owls', topic: 'Late chats' });
+    await rooms.create(alice, { name: 'Closed Room', slug: 'private-room', visibility: 'private' });
     await h.http('POST', '/api/chat/send', { token: alice.token, body: { message: 'hello from the test' } });
     // Backdate the message so "lastmod is the data's own day" is checkable against "not today".
     const db = require('../server/db/database');
-    db.run("UPDATE chat_messages SET timestamp = '2026-01-02 03:04:05' WHERE id = (SELECT MAX(id) FROM chat_messages)");
-    h.db.run("UPDATE rooms SET last_message_at = '2026-02-03 04:05:06' WHERE slug = 'night-owls'");
+    await db.run("UPDATE chat_messages SET timestamp = '2026-01-02 03:04:05' WHERE id = (SELECT MAX(id) FROM chat_messages)");
+    await h.db.run("UPDATE rooms SET last_message_at = '2026-02-03 04:05:06' WHERE slug = 'night-owls'");
     require('../server/chat/history-store').invalidate('global');
 });
 

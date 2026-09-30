@@ -30,15 +30,15 @@ t('boot', async () => {
 t('export, then erase and confirm', async () => {
     const accountData = require('../server/chat/account-data');
     const d = require('../server/db/database').getDb();
-    d.prepare("INSERT INTO chat_messages (user_id, username, message, channel_user_id, subject_id) VALUES (?, 'dana', 'hi otto', ?, ?), (?, 'otto', 'hi dana', ?, ?), (?, 'dana_old', 'old me', ?, ?)")
+    await d.prepare("INSERT INTO chat_messages (user_id, username, message, channel_user_id, subject_id) VALUES (?, 'dana', 'hi otto', ?, ?), (?, 'otto', 'hi dana', ?, ?), (?, 'dana_old', 'old me', ?, ?)")
         .run(dana.id, otto.id, dana.subject_id, otto.id, dana.id, otto.subject_id, old.id, otto.id, old.subject_id);
     const pair = (await h.http('POST', '/api/dm/conversations', { token: dana.token, body: { user_ids: [otto.id] } })).body.conversation.id;
     assert.ok((await h.http('POST', `/api/dm/conversations/${pair}/messages`, { token: dana.token, body: { message: 'psst' } })).status < 300);
     assert.ok((await h.http('POST', `/api/dm/conversations/${pair}/messages`, { token: otto.token, body: { message: 'what' } })).status < 300);
     require('../server/chat/network-blocks').ensureSchema && require('../server/chat/network-blocks').ensureSchema();
-    d.prepare('INSERT INTO network_blocks (blocker_subject, blocked_subject, active, revision, updated_at) VALUES (?, ?, 1, 1, 0), (?, ?, 1, 1, 0)').run(dana.subject_id, otto.subject_id, otto.subject_id, dana.subject_id);
-    d.prepare("INSERT INTO moderation_actions (action_type, actor_user_id, target_user_id, actor_subject_id) VALUES ('timeout', ?, ?, ?)").run(otto.id, dana.id, otto.subject_id);
-    d.prepare("INSERT INTO user_tags (user_id, tag_id) VALUES (?, 'veteran')").run(dana.id);
+    await d.prepare('INSERT INTO network_blocks (blocker_subject, blocked_subject, active, revision, updated_at) VALUES (?, ?, 1, 1, 0), (?, ?, 1, 1, 0)').run(dana.subject_id, otto.subject_id, otto.subject_id, dana.subject_id);
+    await d.prepare("INSERT INTO moderation_actions (action_type, actor_user_id, target_user_id, actor_subject_id) VALUES ('timeout', ?, ?, ?)").run(otto.id, dana.id, otto.subject_id);
+    await d.prepare("INSERT INTO user_tags (user_id, tag_id) VALUES (?, 'veteran')").run(dana.id);
 
     const sent = [];
     let failNext = false;
@@ -61,14 +61,14 @@ t('export, then erase and confirm', async () => {
     const del = ev('network.account.deleted', { deletion_id: `del_${ids.ulid()}`, subject: dana.subject_id, aliases: [old.subject_id], requested_at: new Date().toISOString(), deleted_at: new Date().toISOString() });
     failNext = true;
     await assert.rejects(accountData.apply(del, { send }), /confirmation refused: 503/);
-    const q = (sql, ...a) => d.prepare(sql).all(...a);
-    assert.deepStrictEqual(q('SELECT message FROM chat_messages ORDER BY id').map((m) => m.message), ['hi dana'], "hers and the alias's gone; otto's stays");
-    assert.deepStrictEqual(q('SELECT message FROM dm_messages ORDER BY id').map((m) => m.message), ['what'], 'the DM she sent goes, his reply stays');
-    assert.deepStrictEqual(q('SELECT user_id FROM dm_participants WHERE conversation_id = ?', pair).map((p) => p.user_id), [otto.id]);
-    assert.strictEqual(q('SELECT * FROM network_blocks').length, 0, 'blocks both ways');
-    assert.strictEqual(q('SELECT * FROM moderation_actions').length, 1, 'moderation history stays');
-    assert.strictEqual(q('SELECT * FROM user_tags').length, 0, 'the tags table is Chat’s and goes');
-    assert.strictEqual(d.prepare('SELECT username FROM ctx_users WHERE id = ?').get(dana.id).username, `deleted-${dana.id}`);
+    const q = async (sql, ...a) => await d.prepare(sql).all(...a);
+    assert.deepStrictEqual((await q('SELECT message FROM chat_messages ORDER BY id')).map((m) => m.message), ['hi dana'], "hers and the alias's gone; otto's stays");
+    assert.deepStrictEqual((await q('SELECT message FROM dm_messages ORDER BY id')).map((m) => m.message), ['what'], 'the DM she sent goes, his reply stays');
+    assert.deepStrictEqual((await q('SELECT user_id FROM dm_participants WHERE conversation_id = ?', pair)).map((p) => p.user_id), [otto.id]);
+    assert.strictEqual((await q('SELECT * FROM network_blocks')).length, 0, 'blocks both ways');
+    assert.strictEqual((await q('SELECT * FROM moderation_actions')).length, 1, 'moderation history stays');
+    assert.strictEqual((await q('SELECT * FROM user_tags')).length, 0, 'the tags table is Chat’s and goes');
+    assert.strictEqual((await d.prepare('SELECT username FROM ctx_users WHERE id = ?').get(dana.id)).username, `deleted-${dana.id}`);
     assert.strictEqual(await accountData.apply(del, { send }), 'confirmed', 'the retry confirms without erasing again');
     const conf = sent[1];
     assert.ok(validate('network.account-deletion-confirmation@1', conf.body).valid, JSON.stringify(validate('network.account-deletion-confirmation@1', conf.body).errors));

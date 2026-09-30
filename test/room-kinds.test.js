@@ -65,7 +65,7 @@ t('boot (CHAT_CALLS=1)', async () => {
     own = mk('owner1'); md = mk('mod1'); spk = mk('speaker1'); par = mk('part1'); mem = mk('member1'); vw = mk('viewer1');
     blk = mk('blocked1'); out = mk('outsider1'); staff = mk('staff1', { role: 'global_mod' }); banned = mk('banned1');
     bot = h.addUser('bot1', { apiScopes: ['chat'] });
-    for (const u of [own, md, spk, par, mem, vw, blk, out, staff, banned, bot]) h.ctx.upsertUser(h.live.users.get(u.id));
+    for (const u of [own, md, spk, par, mem, vw, blk, out, staff, banned, bot]) await h.ctx.upsertUser(h.live.users.get(u.id));
 });
 
 t('the matrix: what every role may do in every kind, public and private', async () => {
@@ -80,31 +80,31 @@ t('the matrix: what every role may do in every kind, public and private', async 
     for (const kind of ['community', 'call', 'system']) {
         for (const visibility of ['public', 'private']) {
             const owner = kind === 'system' ? staff : own;
-            const room = rooms.bySlug(rooms.create(owner, { name: `M ${kind} ${visibility}`, kind, visibility }).slug);
+            const room = await rooms.bySlug((await rooms.create(owner, { name: `M ${kind} ${visibility}`, kind, visibility })).slug);
             assert.deepStrictEqual(rooms.KIND_ROLES[kind], Object.keys(EXPECT[kind]), `${kind}: its roles`);
-            for (const role of Object.keys(EXPECT[kind])) if (role !== 'owner') rooms.setRole(room, owner, byRole[role].id, role);
+            for (const role of Object.keys(EXPECT[kind])) if (role !== 'owner') await rooms.setRole(room, owner, byRole[role].id, role);
             for (const [role, want] of Object.entries(EXPECT[kind])) {
                 const who = role === 'owner' ? owner : byRole[role];
-                const a = rooms.access(room, who);
+                const a = await rooms.access(room, who);
                 assert.strictEqual(a.role, role, `${kind}/${visibility}: ${who.username} is ${role}`);
                 // A system room's owner is chat staff: they may post and manage anyway.
                 assert.strictEqual(flags(a), want, `${kind}/${visibility}/${role}`);
             }
             const pub = visibility === 'public';
             const listen = kind === 'call' && pub ? 'j' : '-';
-            assert.strictEqual(flags(rooms.access(room, out)), pub ? `r-${listen}---` : '------', `${kind}/${visibility}: signed in, no role`);
-            assert.strictEqual(flags(rooms.access(room, null)), pub ? `r-${listen}---` : '------', `${kind}/${visibility}: signed out`);
-            if (kind !== 'system') assert.strictEqual(flags(rooms.access(room, staff)), `r-${kind === 'call' ? 'jt' : '--'}mM`, `${kind}/${visibility}: chat staff without a role`);
-            else assert.strictEqual(flags(rooms.access(room, staff)), 'rp--mM', 'system: staff post');
+            assert.strictEqual(flags(await rooms.access(room, out)), pub ? `r-${listen}---` : '------', `${kind}/${visibility}: signed in, no role`);
+            assert.strictEqual(flags(await rooms.access(room, null)), pub ? `r-${listen}---` : '------', `${kind}/${visibility}: signed out`);
+            if (kind !== 'system') assert.strictEqual(flags(await rooms.access(room, staff)), `r-${kind === 'call' ? 'jt' : '--'}mM`, `${kind}/${visibility}: chat staff without a role`);
+            else assert.strictEqual(flags(await rooms.access(room, staff)), 'rp--mM', 'system: staff post');
         }
     }
     // A site ban: reading stays, posting and talking go, whatever the role.
-    const room = rooms.bySlug(rooms.create(own, { name: 'Banned Test', kind: 'call' }).slug);
-    rooms.setRole(room, own, banned.id, 'speaker');
-    assert.strictEqual(flags(rooms.access(room, banned)), 'rpjt--');
+    const room = await rooms.bySlug((await rooms.create(own, { name: 'Banned Test', kind: 'call' })).slug);
+    await rooms.setRole(room, own, banned.id, 'speaker');
+    assert.strictEqual(flags(await rooms.access(room, banned)), 'rpjt--');
     h.live.addBan({ user_id: banned.id });
     await h.ctx.invalidateBans();
-    assert.strictEqual(flags(rooms.access(room, banned)), 'r-j---', 'banned: reads and listens only');
+    assert.strictEqual(flags(await rooms.access(room, banned)), 'r-j---', 'banned: reads and listens only');
     h.live.clearBans();
     await h.ctx.invalidateBans();
 });
@@ -140,7 +140,7 @@ t('roles belong to their kind, mods are the owner\'s, and joining gives the kind
     assert.strictEqual((await api('POST', '/open-stage/members', md, { username: 'member1', role: 'mod' })).status, 403, 'only the owner appoints mods');
     assert.strictEqual((await api('POST', '/open-stage/members', par, { username: 'member1', role: 'viewer' })).status, 403, 'a speaker is not a moderator');
     await api('POST', '/open-stage/members', md, { username: 'part1', role: 'participant' });
-    const log = h.db.all("SELECT action_type, details FROM moderation_actions WHERE scope_type = 'room' AND scope_id = 'open-stage' ORDER BY id").map((x) => x.action_type);
+    const log = (await h.db.all("SELECT action_type, details FROM moderation_actions WHERE scope_type = 'room' AND scope_id = 'open-stage' ORDER BY id")).map((x) => x.action_type);
     assert.deepStrictEqual(log, ['room_mod_add', 'room_speaker_add', 'room_speaker_remove']);
 
     // Posting follows the role: viewers and system-room viewers read only; staff post in system rooms.
@@ -237,8 +237,8 @@ t('a role change reaches the running call at once; a ban in the call blocks in t
     assert.strictEqual(spkWs.welcome.canTalk, true);
     ownWs.sendJson({ type: 'ban', targetPeerId: spkWs.welcome.peerId });
     await spkWs.closed;
-    const room = rooms.bySlug('open-stage');
-    assert.strictEqual(rooms.access(room, spk).role, 'blocked');
+    const room = await rooms.bySlug('open-stage');
+    assert.strictEqual((await rooms.access(room, spk)).role, 'blocked');
     assert.strictEqual((await api('GET', '/open-stage', spk)).status, 404, 'blocked: the room is gone for them');
 
     // Turning the room private drops people who are not members (a guest listening).
@@ -257,7 +257,7 @@ t('attachments: a manager attaches with their own token, idempotently; detach; n
     assert.deepStrictEqual([r.body.created, r.body.attachment.service, r.body.attachment.resource, r.body.room.slug], [true, 'community', 'general', 'tea-talk']);
     r = await api('POST', '/tea-talk/attachments', own, { service: 'community', resource: 'general', title: 'General' });
     assert.deepStrictEqual([r.status, r.body.created], [200, false], 'the same attachment again is a no-op');
-    assert.strictEqual(h.db.get("SELECT COUNT(*) AS n FROM room_attachments WHERE resource = 'general'").n, 1);
+    assert.strictEqual((await h.db.get("SELECT COUNT(*) AS n FROM room_attachments WHERE resource = 'general'")).n, 1);
     assert.strictEqual((await api('POST', '/tea-talk/attachments', mem, { service: 'community', resource: 'help' })).status, 403, 'members do not attach');
     assert.strictEqual((await api('POST', '/back-stage/attachments', out, { service: 'community', resource: 'help' })).status, 404, 'a private room stays missing');
     assert.strictEqual((await api('POST', '/tea-talk/attachments', bot, { service: 'community', resource: 'help' })).status, 403, 'API tokens do not attach');

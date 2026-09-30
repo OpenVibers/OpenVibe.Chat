@@ -18,7 +18,7 @@ t('boot', async () => {
     bob = h.addUser('bob', { subject: ids.newId('user') });
     cat = h.addUser('cat', { subject: ids.newId('user') });
     mod = h.addUser('staffmod', { subject: ids.newId('user'), role: 'global_mod' });
-    for (const u of [ann, bob, cat, mod]) h.ctx.upsertUser(h.live.users.get(u.id));
+    for (const u of [ann, bob, cat, mod]) await h.ctx.upsertUser(h.live.users.get(u.id));
 });
 
 t('create, list, join, post, history and unread', async () => {
@@ -87,7 +87,7 @@ t('moderation: delete and block, owner-only mods, logged; live delivery only to 
     assert.strictEqual(r.body.role, 'blocked');
     await bobWs.next((m) => m.type === 'room_left');
     assert.strictEqual((await api('POST', '/night-owls/messages', bob, { message: 'let me back' })).status, 404, 'blocked: the room is gone for them');
-    const logged = h.db.all("SELECT action_type FROM moderation_actions WHERE scope_type = 'room' ORDER BY id");
+    const logged = await h.db.all("SELECT action_type FROM moderation_actions WHERE scope_type = 'room' ORDER BY id");
     assert.deepStrictEqual(logged.map((x) => x.action_type), ['delete_message', 'room_block']);
     for (const ws of [annWs, bobWs, outsider]) ws.close();
 });
@@ -111,15 +111,15 @@ t('slow mode and site bans', async () => {
 t('realtime plane (WS-I task 9): public rooms announce messages and redactions, private rooms never do', async () => {
     const { validate } = require('openvibe-contracts');
     const dan = h.addUser('dan', { subject: ids.newId('user') });
-    h.ctx.upsertUser(h.live.users.get(dan.id));
+    await h.ctx.upsertUser(h.live.users.get(dan.id));
     const db = require('../server/db/database');
-    const since = (db.get('SELECT MAX(rowid) AS n FROM events_outbox') || {}).n || 0;
-    const newEvents = () => db.all('SELECT event FROM events_outbox WHERE rowid > ? ORDER BY rowid', [since]).map((r) => JSON.parse(r.event)).filter((e) => /^chat\.room\./.test(e.event_type));
+    const since = (await db.get('SELECT MAX(seq) AS n FROM events_outbox') || {}).n || 0;
+    const newEvents = async () => (await db.all('SELECT event FROM events_outbox WHERE seq > ? ORDER BY seq', [since])).map((r) => JSON.parse(r.event)).filter((e) => /^chat\.room\./.test(e.event_type));
     let r = await api('POST', '/', dan, { name: 'Open Plaza' });
     assert.strictEqual(r.status, 201, r.text);
     r = await api('POST', '/open-plaza/messages', dan, { message: 'hello plaza' });
     const msgId = r.body.message.id;
-    let ev = newEvents();
+    let ev = await newEvents();
     assert.strictEqual(ev.length, 1);
     assert.deepStrictEqual([ev[0].event_type, ev[0].visibility, ev[0].subject], ['chat.room.message.created', 'public', { type: 'chat_room_message', id: String(msgId) }]);
     assert.strictEqual(ev[0].payload.room.slug, 'open-plaza'); assert.strictEqual(ev[0].payload.text, 'hello plaza');
@@ -130,13 +130,13 @@ t('realtime plane (WS-I task 9): public rooms announce messages and redactions, 
     r = await api('POST', '/', dan, { name: 'Back Room', visibility: 'private' });
     assert.strictEqual(r.status, 201, r.text);
     await api('POST', '/back-room/messages', dan, { message: 'just us' });
-    assert.strictEqual(newEvents().length, 1, 'no event for a private room');
+    assert.strictEqual((await newEvents()).length, 1, 'no event for a private room');
 
     // Deleting a public message redacts it; turning the room private redacts the rest.
     await api('POST', '/open-plaza/messages', dan, { message: 'second' });
     await api('POST', '/open-plaza/messages', dan, { message: 'third' });
     assert.strictEqual((await api('DELETE', `/open-plaza/messages/${msgId}`, dan)).status, 200);
-    ev = newEvents();
+    ev = await newEvents();
     const del = ev.filter((e) => e.event_type === 'chat.room.message.deleted');
     assert.strictEqual(del.length, 1);
     assert.deepStrictEqual(del[0].payload.message_ids, [msgId]);
@@ -144,10 +144,10 @@ t('realtime plane (WS-I task 9): public rooms announce messages and redactions, 
     assert.ok(validate('chat.room.message.deleted@1', del[0].payload).valid);
     r = await api('PATCH', '/open-plaza', dan, { visibility: 'private' });
     assert.strictEqual(r.status, 200, r.text);
-    const last = newEvents().filter((e) => e.event_type === 'chat.room.message.deleted').pop();
+    const last = (await newEvents()).filter((e) => e.event_type === 'chat.room.message.deleted').pop();
     assert.strictEqual(last.payload.message_ids.length, 2, 'the two remaining public messages are redacted');
     await api('POST', '/open-plaza/messages', dan, { message: 'now private' });
-    assert.strictEqual(newEvents().filter((e) => e.event_type === 'chat.room.message.created').length, 3, 'nothing new once private');
+    assert.strictEqual((await newEvents()).filter((e) => e.event_type === 'chat.room.message.created').length, 3, 'nothing new once private');
 });
 
 t.run(async () => { if (h && h.close) await h.close(); });

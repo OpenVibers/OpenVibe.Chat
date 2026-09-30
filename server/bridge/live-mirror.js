@@ -6,8 +6,9 @@
  * and rollback means Live becomes the authority again. So every change Chat makes to its tables
  * (C-02) is copied into Live's tables of the same name, same ids:
  *
- *   - this connection's TEMP triggers (db.initDb({ captureMirror: true })) record each change in
- *     live_mirror_outbox — writes by the importer (rows that came from Live) are never recorded;
+ *   - PostgreSQL triggers on the twelve tables (migrations/0001_initial.sql) record each change in
+ *     live_mirror_outbox in the writing transaction — skipped where the transaction set ov.mirror_skip = '1'
+ *     (the importers: rows that came from Live are never recorded);
  *   - this relay sends batches to Live's POST /internal/chat-effects/mirror (capability
  *     live.chat_mirror.write) as { changes: [{ table, op: 'upsert', row } | { table, op: 'delete', pk }] }
  *     with the row as it is NOW (so repeated changes to one row collapse into one upsert);
@@ -26,14 +27,30 @@ const BATCH = 200;
 const MAX_BODY = 800 * 1024;   // Live parses JSON bodies up to 1 MB
 const SCOPE = 'live.chat_mirror.write';
 
+// The row as it is now, per mirrored table (static statements, keyed as db.CHAT_TABLES).
+const ROW_SQL = {
+    chat_messages: 'SELECT * FROM chat_messages WHERE id = ?',
+    dm_conversations: 'SELECT * FROM dm_conversations WHERE id = ?',
+    dm_participants: 'SELECT * FROM dm_participants WHERE id = ?',
+    dm_messages: 'SELECT * FROM dm_messages WHERE id = ?',
+    dm_blocks: 'SELECT * FROM dm_blocks WHERE id = ?',
+    tts_voice_overrides: 'SELECT * FROM tts_voice_overrides WHERE identity_key = ?',
+    channel_sounds: 'SELECT * FROM channel_sounds WHERE id = ?',
+    relay_users: 'SELECT * FROM relay_users WHERE id = ?',
+    hidden_relay_users: 'SELECT * FROM hidden_relay_users WHERE id = ?',
+    pending_ip_messages: 'SELECT * FROM pending_ip_messages WHERE id = ?',
+    stream_first_chats: 'SELECT * FROM stream_first_chats WHERE chatter_key = ? AND channel_user_id = ?',
+    moderation_actions: 'SELECT * FROM moderation_actions WHERE id = ?',
+};
+
 function createMirror({ config, fetchImpl = (...a) => globalThis.fetch(...a), log = console } = {}) {
     let timer = null;
     let busy = false;
     let lastError = null;
 
-    function pending() { return db.get('SELECT COUNT(*) AS n FROM live_mirror_outbox')?.n || 0; }
+    async function pending() { return (await db.get('SELECT COUNT(*) AS n FROM live_mirror_outbox'))?.n || 0; }
 
-    function buildChanges(rows) {
+    async function buildChanges(rows) {
         // Newest state per row: several changes to one key collapse into the last op.
         const byKey = new Map();
         for (const r of rows) byKey.set(`${r.tbl}|${r.pk}`, r);
@@ -44,9 +61,8 @@ function createMirror({ config, fetchImpl = (...a) => globalThis.fetch(...a), lo
             let pk;
             try { pk = JSON.parse(r.pk); } catch { continue; }
             if (r.op === 'delete') { changes.push({ table: r.tbl, op: 'delete', pk }); continue; }
-            const where = cols.map((c) => `${c} = ?`).join(' AND ');
-            const row = db.get(`SELECT * FROM ${r.tbl} WHERE ${where}`, cols.map((c) => pk[c]));
-            changes.push(row ? { table: r.tbl, op: 'upsert', row } : { table: r.tbl, op: 'delete', pk });
+            const row = await db.get(ROW_SQL[r.tbl], cols.map((c) => pk[c]));
+            changes.push(row ? { table: r.tbl, op: 'upsert', row: r.tbl === 'moderation_actions' ? db.moderationRow(row) : r.tbl === 'chat_messages' ? db.chatMessageRow(row) : row } : { table: r.tbl, op: 'delete', pk });
         }
         return changes;
     }
@@ -58,9 +74,9 @@ function createMirror({ config, fetchImpl = (...a) => globalThis.fetch(...a), lo
         let sent = 0;
         try {
             for (;;) {
-                const rows = db.all('SELECT seq, tbl, op, pk FROM live_mirror_outbox ORDER BY seq LIMIT ?', [BATCH]);
+                const rows = await db.all('SELECT seq, tbl, op, pk FROM live_mirror_outbox ORDER BY seq LIMIT ?', [BATCH]);
                 if (!rows.length) break;
-                const changes = buildChanges(rows);
+                const changes = await buildChanges(rows);
                 // Requests stay under Live's body limit; a batch is acknowledged when all its parts are.
                 const parts = [[]];
                 let size = 0;
@@ -91,17 +107,26 @@ function createMirror({ config, fetchImpl = (...a) => globalThis.fetch(...a), lo
                 }
                 if (failed) break;
                 const maxSeq = rows[rows.length - 1].seq;
-                db.run('DELETE FROM live_mirror_outbox WHERE seq <= ?', [maxSeq]);
+                await db.run('DELETE FROM live_mirror_outbox WHERE seq <= ?', [maxSeq]);
                 sent += changes.length;
                 lastError = null;
             }
         } finally { busy = false; }
-        if (lastError) log.warn(`[Mirror] Live mirror waiting (${pending()} pending): ${lastError}`);
-        return { sent, pending: pending(), error: lastError };
+        if (lastError) log.warn(`[Mirror] Live mirror waiting (${await pending()} pending): ${lastError}`);
+        return { sent, pending: await pending(), error: lastError };
     }
 
+    // The triggers record every change; with the mirror off (rehearsals, tests) nothing is kept, as when the capture
+    // was per connection and off: the queue is emptied on the same cadence instead of sent.
+    async function discard() { await db.run('DELETE FROM live_mirror_outbox'); }
+
     function start() {
-        if (timer || !config.live.mirror) return;
+        if (timer) return;
+        if (!config.live.mirror) {
+            timer = setInterval(() => { discard().catch((e) => log.warn('[Mirror]', e.message)); }, config.live.mirrorIntervalMs);
+            if (timer.unref) timer.unref();
+            return;
+        }
         timer = setInterval(() => { flush().catch((e) => log.warn('[Mirror]', e.message)); }, config.live.mirrorIntervalMs);
         if (timer.unref) timer.unref();
     }

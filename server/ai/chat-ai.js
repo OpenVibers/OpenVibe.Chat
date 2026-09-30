@@ -58,7 +58,7 @@ let _tickInFlight = false;
 let _lastUserPass = 0;
 
 // ── Small utils ──────────────────────────────────────────────────────────────
-// DB timestamps are UTC 'YYYY-MM-DD HH:MM:SS' (CURRENT_TIMESTAMP). Match that format.
+// DB timestamps are UTC 'YYYY-MM-DD HH:MM:SS' (ov_now()). Match that format.
 function _sqlTime(d) { return new Date(d).toISOString().slice(0, 19).replace('T', ' '); }
 function _parseSqlTime(s) { return s ? new Date(String(s).replace(' ', 'T') + 'Z').getTime() : 0; }
 function _clip(str, n) { str = (str == null ? '' : String(str)).trim(); return str.length > n ? str.slice(0, n) : str; }
@@ -120,10 +120,10 @@ function _cleanTimeline(arr) {
 
 // ── GLOBAL ───────────────────────────────────────────────────────────────────
 async function _refreshGlobal() {
-    const prior = db.getChatAiSummary('global', 0, 'global');
+    const prior = await db.getChatAiSummary('global', 0, 'global');
     const hw = prior ? (prior.last_message_id || 0) : 0;
-    const maxId = db.getMaxChatMessageId();
-    const newCount = maxId > hw ? db.countChatMessagesSince(hw) : 0;
+    const maxId = await db.getMaxChatMessageId();
+    const newCount = maxId > hw ? await db.countChatMessagesSince(hw) : 0;
     if (newCount === 0) return false;
 
     const ageMs = prior && prior.updated_at ? (Date.now() - _parseSqlTime(prior.updated_at)) : Infinity;
@@ -131,14 +131,14 @@ async function _refreshGlobal() {
     if (newCount < GLOBAL_MSG_THRESHOLD && ageMs < GLOBAL_MAX_AGE_MS) return false;
 
     const now = Date.now();
-    const nthTs = db.getNthRecentChatTs(WINDOW_TARGET_MESSAGES);
+    const nthTs = await db.getNthRecentChatTs(WINDOW_TARGET_MESSAGES);
     let startMs = nthTs ? _parseSqlTime(nthTs) : (now - WINDOW_MAX_MS);
     startMs = Math.min(startMs, now - WINDOW_MIN_MS);
     startMs = Math.max(startMs, now - WINDOW_MAX_MS);
     const windowStart = _sqlTime(startMs);
     const windowLabel = _windowLabel(now - startMs);
 
-    const rows = db.getChatMessagesForAi({ sinceTs: windowStart, order: 'desc', limit: MAX_BATCH_MESSAGES });
+    const rows = await db.getChatMessagesForAi({ sinceTs: windowStart, order: 'desc', limit: MAX_BATCH_MESSAGES });
     if (!rows.length) return false;
     const priorMemory = prior ? (prior.memory_json || '') : '';
     let priorTl = [];
@@ -153,8 +153,8 @@ async function _refreshGlobal() {
     if (!parsed) return false;
 
     const nowIso = _sqlTime(now);
-    db.addChatTimelineEvents('global', 0, _stampAdditions(parsed.timeline, nowIso, now));
-    db.upsertChatAiSummary({
+    await db.addChatTimelineEvents('global', 0, _stampAdditions(parsed.timeline, nowIso, now));
+    await db.upsertChatAiSummary({
         scope: 'global', subject_id: 0, window: 'global',
         overview: _clip(parsed.recent_overview || '', 2000),
         memory_json: _clip(parsed.memory || priorMemory, MEMORY_MAX_CHARS),
@@ -172,13 +172,13 @@ async function _refreshGlobal() {
 
 // ── PER-USER ─────────────────────────────────────────────────────────────────
 async function _refreshUser(uid, maxId) {
-    const prior = db.getChatAiSummary('user', uid, 'rolling');
+    const prior = await db.getChatAiSummary('user', uid, 'rolling');
     const now = Date.now();
 
     const dayStart = _sqlTime(now - 24 * 60 * 60 * 1000);
-    let dayRows = db.getChatMessagesForAi({ sinceTs: dayStart, userId: uid, order: 'asc', limit: MAX_BATCH_MESSAGES });
+    let dayRows = await db.getChatMessagesForAi({ sinceTs: dayStart, userId: uid, order: 'asc', limit: MAX_BATCH_MESSAGES });
     let has24h = dayRows.length > 0;
-    if (!dayRows.length) dayRows = db.getChatMessagesForAi({ userId: uid, order: 'desc', limit: 80 });
+    if (!dayRows.length) dayRows = await db.getChatMessagesForAi({ userId: uid, order: 'desc', limit: 80 });
     if (!dayRows.length) return false;
 
     const uname = dayRows[dayRows.length - 1].username || `user#${uid}`;
@@ -192,11 +192,11 @@ async function _refreshUser(uid, maxId) {
     if (!parsed) parsed = extractive.profileFrom(dayRows, { name: uname, subjectKind: 'user', priorMemory, has24h, seen: totalSeen, now });
     if (!parsed) return false;
 
-    const newCount = db.countChatMessagesSince(prior ? (prior.last_message_id || 0) : 0, uid);
+    const newCount = await db.countChatMessagesSince(prior ? (prior.last_message_id || 0) : 0, uid);
     const nowIso = _sqlTime(now);
     const _lastRow = dayRows[dayRows.length - 1] || {};
     const activityTs = _lastRow.timestamp || _lastRow.created_at || nowIso;
-    db.upsertChatAiSummary({
+    await db.upsertChatAiSummary({
         scope: 'user', subject_id: uid, window: 'rolling',
         overview: JSON.stringify({
             today: _clip(parsed.overview_24h || '', 1200),
@@ -207,7 +207,7 @@ async function _refreshUser(uid, maxId) {
         timeline_json: _mergeTimeline(prior ? prior.timeline_json : '[]', parsed.timeline, activityTs, now),
         message_count: totalSeen + newCount,
         window_message_count: dayRows.length,
-        last_message_id: maxId || db.getMaxChatMessageId(),
+        last_message_id: maxId || await db.getMaxChatMessageId(),
         window_label: has24h ? 'past 24h' : 'recent',
         window_start: has24h ? dayStart : null,
         window_end: nowIso,
@@ -221,7 +221,7 @@ async function _userPass() {
     const sinceTs = _sqlTime(Date.now() - USER_DISCOVERY_LOOKBACK_DAYS * 86400000);
     let candidates = [];
     try {
-        candidates = db.getUsersNeedingChatAi({ threshold: USER_MSG_THRESHOLD, staleCutoffIso: staleCutoff, sinceTs, limit: USER_MAX_PER_TICK });
+        candidates = await db.getUsersNeedingChatAi({ threshold: USER_MSG_THRESHOLD, staleCutoffIso: staleCutoff, sinceTs, limit: USER_MAX_PER_TICK });
     } catch (e) { console.warn('[ChatAI] user discovery failed:', e.message); return; }
     for (const c of candidates) {
         if (!c.uid) continue;
@@ -232,13 +232,13 @@ async function _userPass() {
 
 // ── PER RELAY-USER (external platform chatters bridged in) ────────────────────
 async function _refreshRelayUser(ru) {
-    const prior = db.getChatAiSummary('relay', ru.id, 'rolling');
+    const prior = await db.getChatAiSummary('relay', ru.id, 'rolling');
     const now = Date.now();
     const dayStart = _sqlTime(now - 24 * 60 * 60 * 1000);
 
-    let dayRows = db.getRelayChatMessagesForAi({ platform: ru.platform, rawUsername: ru.username, sinceTs: dayStart, order: 'asc', limit: MAX_BATCH_MESSAGES });
+    let dayRows = await db.getRelayChatMessagesForAi({ platform: ru.platform, rawUsername: ru.username, sinceTs: dayStart, order: 'asc', limit: MAX_BATCH_MESSAGES });
     let has24h = dayRows.length > 0;
-    if (!dayRows.length) dayRows = db.getRelayChatMessagesForAi({ platform: ru.platform, rawUsername: ru.username, order: 'desc', limit: 80 });
+    if (!dayRows.length) dayRows = await db.getRelayChatMessagesForAi({ platform: ru.platform, rawUsername: ru.username, order: 'desc', limit: 80 });
     if (!dayRows.length) return false;
 
     const uname = ru.display_name || ru.username;
@@ -252,7 +252,7 @@ async function _refreshRelayUser(ru) {
     if (!parsed) return false;
 
     const nowIso = _sqlTime(now);
-    db.upsertChatAiSummary({
+    await db.upsertChatAiSummary({
         scope: 'relay', subject_id: ru.id, window: 'rolling',
         overview: JSON.stringify({
             today: _clip(parsed.overview_24h || '', 1200),
@@ -263,7 +263,7 @@ async function _refreshRelayUser(ru) {
         timeline_json: _mergeTimeline(prior ? prior.timeline_json : '[]', parsed.timeline, nowIso, now),
         message_count: ru.message_count || 0,
         window_message_count: dayRows.length,
-        last_message_id: db.getMaxChatMessageId(),
+        last_message_id: await db.getMaxChatMessageId(),
         window_label: has24h ? 'past 24h' : 'recent',
         window_start: has24h ? dayStart : null,
         window_end: nowIso,
@@ -275,7 +275,7 @@ async function _refreshRelayUser(ru) {
 async function _relayPass() {
     const lookbackIso = _sqlTime(Date.now() - USER_DISCOVERY_LOOKBACK_DAYS * 86400000);
     let candidates = [];
-    try { candidates = db.getRelayUsersNeedingChatAi({ lookbackIso, threshold: 8, limit: USER_MAX_PER_TICK }); }
+    try { candidates = await db.getRelayUsersNeedingChatAi({ lookbackIso, threshold: 8, limit: USER_MAX_PER_TICK }); }
     catch (e) { console.warn('[ChatAI] relay discovery failed:', e.message); return; }
     for (const ru of candidates) {
         if (!ru.id) continue;
@@ -288,13 +288,13 @@ async function _relayPass() {
 async function _refreshAnon(anonId) {
     const subjectId = db.anonSubjectId(anonId);
     if (!subjectId) return false;
-    const prior = db.getChatAiSummary('anon', subjectId, 'rolling');
+    const prior = await db.getChatAiSummary('anon', subjectId, 'rolling');
     const now = Date.now();
     const dayStart = _sqlTime(now - 24 * 60 * 60 * 1000);
 
-    let dayRows = db.getAnonChatMessagesForAi({ anonId, sinceTs: dayStart, order: 'asc', limit: MAX_BATCH_MESSAGES });
+    let dayRows = await db.getAnonChatMessagesForAi({ anonId, sinceTs: dayStart, order: 'asc', limit: MAX_BATCH_MESSAGES });
     let has24h = dayRows.length > 0;
-    if (!dayRows.length) dayRows = db.getAnonChatMessagesForAi({ anonId, order: 'desc', limit: 80 });
+    if (!dayRows.length) dayRows = await db.getAnonChatMessagesForAi({ anonId, order: 'desc', limit: 80 });
     if (!dayRows.length) return false;
 
     const priorMemory = prior ? (prior.memory_json || '') : '';
@@ -306,7 +306,7 @@ async function _refreshAnon(anonId) {
     if (!parsed) return false;
 
     const nowIso = _sqlTime(now);
-    db.upsertChatAiSummary({
+    await db.upsertChatAiSummary({
         scope: 'anon', subject_id: subjectId, window: 'rolling',
         overview: JSON.stringify({
             today: _clip(parsed.overview_24h || '', 1200),
@@ -317,7 +317,7 @@ async function _refreshAnon(anonId) {
         timeline_json: _mergeTimeline(prior ? prior.timeline_json : '[]', parsed.timeline, nowIso, now),
         message_count: dayRows.length,
         window_message_count: dayRows.length,
-        last_message_id: db.getMaxChatMessageId(),
+        last_message_id: await db.getMaxChatMessageId(),
         window_label: has24h ? 'past 24h' : 'recent',
         window_start: has24h ? dayStart : null,
         window_end: nowIso,
@@ -331,7 +331,7 @@ async function _anonPass() {
     const sinceTs = _sqlTime(Date.now() - USER_DISCOVERY_LOOKBACK_DAYS * 86400000);
     let candidates = [];
     try {
-        candidates = db.getAnonsNeedingChatAi({ threshold: USER_MSG_THRESHOLD, staleCutoffIso: staleCutoff, sinceTs, limit: USER_MAX_PER_TICK });
+        candidates = await db.getAnonsNeedingChatAi({ threshold: USER_MSG_THRESHOLD, staleCutoffIso: staleCutoff, sinceTs, limit: USER_MAX_PER_TICK });
     } catch (e) { console.warn('[ChatAI] anon discovery failed:', e.message); return; }
     for (const c of candidates) {
         if (!c.anon_id) continue;
@@ -365,12 +365,12 @@ async function _tick() {
 // One-time: backfill the growing timeline log from the existing summary JSON.
 async function _seedTimelineEvents() {
     try {
-        if ((db.getChatTimelineEvents({ scope: 'global', limit: 1 }) || []).length) return;
-        const row = db.getChatAiSummary('global', 0, 'global');
+        if ((await db.getChatTimelineEvents({ scope: 'global', limit: 1 }) || []).length) return;
+        const row = await db.getChatAiSummary('global', 0, 'global');
         if (!row) return;
         let tl = []; try { tl = JSON.parse(row.timeline_json || '[]'); } catch { tl = []; }
         const cleaned = _cleanTimeline(tl);
-        if (cleaned.length) { db.addChatTimelineEvents('global', 0, cleaned); console.log(`[ChatAI] Seeded ${cleaned.length} timeline event(s)`); }
+        if (cleaned.length) { await db.addChatTimelineEvents('global', 0, cleaned); console.log(`[ChatAI] Seeded ${cleaned.length} timeline event(s)`); }
     } catch { /* */ }
 }
 
@@ -406,8 +406,8 @@ function _parseOverviews(row) {
     };
 }
 
-function getGlobalInsight() {
-    const row = db.getChatAiSummary('global', 0, 'global');
+async function getGlobalInsight() {
+    const row = await db.getChatAiSummary('global', 0, 'global');
     if (!row) return null;
     let timeline = [];
     try { timeline = _cleanTimeline(JSON.parse(row.timeline_json || '[]')); } catch { /* */ }
@@ -422,18 +422,18 @@ function getGlobalInsight() {
     };
 }
 
-function getUserInsight(userId) {
-    const row = db.getChatAiSummary('user', userId, 'rolling');
+async function getUserInsight(userId) {
+    const row = await db.getChatAiSummary('user', userId, 'rolling');
     return row ? _parseOverviews(row) : null;
 }
 
-function getRelayUserInsight(relayId) {
-    const row = db.getChatAiSummary('relay', relayId, 'rolling');
+async function getRelayUserInsight(relayId) {
+    const row = await db.getChatAiSummary('relay', relayId, 'rolling');
     return row ? _parseOverviews(row) : null;
 }
 
-function getAnonInsight(anonId) {
-    const row = db.getChatAiSummary('anon', db.anonSubjectId(anonId), 'rolling');
+async function getAnonInsight(anonId) {
+    const row = await db.getChatAiSummary('anon', db.anonSubjectId(anonId), 'rolling');
     return row ? _parseOverviews(row) : null;
 }
 

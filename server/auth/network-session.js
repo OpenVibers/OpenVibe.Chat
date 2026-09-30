@@ -51,10 +51,10 @@ function verify(token, publicKey, { issuer = config.networkUrl, now = Date.now()
 }
 
 /** The projected user for a verified token, or null when the projection cannot say which one. */
-function userFor(claims) {
+async function userFor(claims) {
     const subject = ids.isSubjectId('user', claims.subject_id) ? claims.subject_id : null;
     if (!subject) return null;
-    const rows = db.all('SELECT * FROM ctx_users WHERE subject_id = ? LIMIT 2', [subject]);
+    const rows = await db.all('SELECT * FROM ctx_users WHERE subject_id = ? LIMIT 2', [subject]);
     if (rows.length !== 1) return null;
     const row = rows[0];
     const user = {
@@ -82,19 +82,19 @@ async function authenticate(token) {
         const u = await ctx.authenticate(token);
         // Live resolved a Network token (first visit, another key): the same cutoff applies.
         const iat = u && u.auth_source !== 'api_token' ? tokenIat(token) : null;
-        if (iat != null && iat * 1000 < revocations.cutoffFor(u.subject_id)) return refuse(token);
+        if (iat != null && iat * 1000 < await revocations.cutoffFor(u.subject_id)) return refuse(token);
         return u;
     };
-    if (String(token).startsWith('hbt_')) return viaLive();
+    if (String(token).startsWith('hbt_')) return await viaLive();
     const key = await serviceAuth.ensureKey();
-    if (!key) return viaLive();
+    if (!key) return await viaLive();
     const r = verify(token, key);
     // Only a token signed by the key we hold is decided here; anything else is Live's to judge.
-    if (!r.ok) return r.reason === 'signature' || r.reason === 'malformed' ? viaLive() : refuse(token);
+    if (!r.ok) return r.reason === 'signature' || r.reason === 'malformed' ? await viaLive() : refuse(token);
     // Signed out everywhere, password changed, banned…: Network's cutoff for this person (WS-B task 4).
-    if (revocations.isRevoked(r.claims)) return refuse(token);
-    const user = userFor(r.claims);
-    if (!user) return viaLive();
+    if (await revocations.isRevoked(r.claims)) return refuse(token);
+    const user = await userFor(r.claims);
+    if (!user) return await viaLive();
     stats.local++;
     return user;
 }

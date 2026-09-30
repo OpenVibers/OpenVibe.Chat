@@ -23,10 +23,10 @@ function dayOf(ts) {
 }
 
 /** Public, indexable pages: the fixed ones plus every public room, each with a real lastmod. */
-function publicPages() {
-    const pages = rooms.list(null, { limit: 100 }).public;
+async function publicPages() {
+    const pages = (await rooms.list(null, { limit: 100 })).public;
     const out = [
-        { path: '/', changefreq: 'hourly', priority: 1.0, lastmod: () => newestGlobalMessage() },
+        { path: '/', changefreq: 'hourly', priority: 1.0, lastmod: async () => await newestGlobalMessage() },
         { path: '/rooms', changefreq: 'daily', priority: 0.8, lastmod: () => newestRoomActivity(pages) },
         { path: '/updates', changefreq: 'daily', priority: 0.5 },
     ];
@@ -36,9 +36,9 @@ function publicPages() {
     return out;
 }
 
-function newestGlobalMessage() {
+async function newestGlobalMessage() {
     try {
-        const row = historyStore.page('global', { limit: 1 }).messages[0];
+        const row = (await historyStore.page('global', { limit: 1 })).messages[0];
         return row ? dayOf(row.timestamp) : null;
     } catch { return null; }
 }
@@ -101,13 +101,12 @@ function createDiscoveryRoutes({ config }) {
         }));
     });
 
-    router.get('/sitemap.xml', (req, res) => {
-        const urls = publicPages().map((p) => ({
-            loc: abs(p.path),
-            ...(p.lastmod && p.lastmod() ? { lastmod: p.lastmod() } : {}),
-            changefreq: p.changefreq,
-            priority: p.priority,
-        }));
+    router.get('/sitemap.xml', async (req, res) => {
+        const urls = [];
+        for (const p of await publicPages()) {
+            const lastmod = p.lastmod ? await p.lastmod() : null;
+            urls.push({ loc: abs(p.path), ...(lastmod ? { lastmod } : {}), changefreq: p.changefreq, priority: p.priority });
+        }
         res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(seo.sitemapXml(urls));
     });
 

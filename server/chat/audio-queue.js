@@ -107,17 +107,17 @@ function estimatePlayMs({ audio, mimeType, seconds, speed } = {}) {
 }
 
 // ── Store ───────────────────────────────────────────────────────────────────────────────────────
-function getRequest(id) { return db.get('SELECT * FROM audio_requests WHERE id = ?', [id]) || null; }
+async function getRequest(id) { return await db.get('SELECT * FROM audio_requests WHERE id = ?', [id]) || null; }
 
 /**
  * Move one request along the state machine. Returns true when it moved (the row was in a state
  * that allows `to`); false when something else moved it first.
  */
-function transition(id, to, { error = null, actor = null, durationMs = null, now = Date.now() } = {}) {
+async function transition(id, to, { error = null, actor = null, durationMs = null, now = Date.now() } = {}) {
     const from = Object.keys(TRANSITIONS).filter((s) => TRANSITIONS[s].includes(to));
     if (!from.length) return false;
     const final = to !== 'playing';
-    const r = db.run(
+    const r = await db.run(
         `UPDATE audio_requests SET state = ?, error = COALESCE(?, error), actor = COALESCE(?, actor),
                 duration_ms = COALESCE(?, duration_ms),
                 started_at = CASE WHEN ? = 'playing' THEN ? ELSE started_at END,
@@ -135,7 +135,7 @@ const rooms = new Map(); // room → { busy, timer, playingId }
 let stopped = false;
 
 function roomState(room) {
-    if (!rooms.has(room)) rooms.set(room, { busy: false, timer: null, playingId: null, holdUntil: 0, holdTimer: null });
+    if (!rooms.has(room)) rooms.set(room, { busy: false, timer: null, playingId: null, makingId: null, holdUntil: 0, holdTimer: null });
     return rooms.get(room);
 }
 
@@ -145,7 +145,7 @@ function holdRoom(room, until) {
     if (st.holdUntil && st.holdUntil <= until) return;
     st.holdUntil = until;
     if (st.holdTimer) clearTimeout(st.holdTimer);
-    st.holdTimer = setTimeout(() => { st.holdUntil = 0; st.holdTimer = null; pump(room); }, Math.max(0, until - Date.now()));
+    st.holdTimer = setTimeout(() => { st.holdUntil = 0; st.holdTimer = null; pump(room).catch((err) => console.warn('[AudioQueue] pump:', err.message)); }, Math.max(0, until - Date.now()));
     if (st.holdTimer.unref) st.holdTimer.unref();
 }
 
@@ -180,29 +180,41 @@ function stop() {
  * Accept a request. Returns { id, queued: true } or { queued: false, reason } — `duplicate` (this
  * room already has this key), `full` (the room or this requester is at its limit).
  */
-function enqueue({ kind, streamId = null, channelUserId = null, requestedBy = null, identityKey = null, label = null, payload = {}, dedupeKey = null, maxRoom = null, maxPerRequester = null, now = Date.now() }) {
+async function enqueue({ kind, streamId = null, channelUserId = null, requestedBy = null, identityKey = null, label = null, payload = {}, dedupeKey = null, maxRoom = null, maxPerRequester = null, now = Date.now() }) {
     if (!KINDS.includes(kind)) throw new Error(`audio-queue: unknown kind ${kind}`);
     const room = roomKey({ streamId, channelUserId });
     if (!room) return { queued: false, reason: 'no_room' };
-    const result = db.transaction(() => {
-        if (dedupeKey && db.get('SELECT 1 FROM audio_requests WHERE room = ? AND dedupe_key = ?', [room, dedupeKey])) return { queued: false, reason: 'duplicate' };
+    // One transaction: the caps are counted in it, and the unique (room, dedupe_key) index decides a duplicate
+    // (ON CONFLICT DO NOTHING: no row back), so two processes enqueueing the same key store one row.
+    const result = await db.tx(async () => {
+        if (dedupeKey && await db.get('SELECT 1 FROM audio_requests WHERE room = ? AND dedupe_key = ?', [room, dedupeKey])) return { queued: false, reason: 'duplicate' };
         if (maxRoom) {
-            const n = db.get("SELECT COUNT(*) AS n FROM audio_requests WHERE room = ? AND state IN ('queued', 'playing')", [room]).n;
+            const n = (await db.get("SELECT COUNT(*) AS n FROM audio_requests WHERE room = ? AND state IN ('queued', 'playing')", [room])).n;
             if (n >= maxRoom) return { queued: false, reason: 'full' };
         }
         if (maxPerRequester && identityKey) {
-            const n = db.get("SELECT COUNT(*) AS n FROM audio_requests WHERE room = ? AND identity_key = ? AND state IN ('queued', 'playing')", [room, identityKey]).n;
+            const n = (await db.get("SELECT COUNT(*) AS n FROM audio_requests WHERE room = ? AND identity_key = ? AND state IN ('queued', 'playing')", [room, identityKey])).n;
             if (n >= maxPerRequester) return { queued: false, reason: 'full' };
         }
-        const r = db.run(
+        const r = await db.run(
             `INSERT INTO audio_requests (room, stream_id, channel_user_id, kind, state, requested_by, identity_key, label, payload, dedupe_key, created_at)
-             VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)`,
+             VALUES (?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?)
+             ON CONFLICT (room, dedupe_key) DO NOTHING`,
             [room, streamId || null, channelUserId || null, kind, requestedBy, identityKey, label ? String(label).slice(0, 300) : null, JSON.stringify(payload || {}), dedupeKey, now],
         );
+        if (!r.changes) return { queued: false, reason: 'duplicate' };
         return { queued: true, id: Number(r.lastInsertRowid), room };
     });
-    if (result.queued) setImmediate(() => pump(result.room));
+    if (result.queued) setImmediate(() => { pump(result.room).catch((err) => console.warn('[AudioQueue] pump:', err.message)); });
     return result;
+}
+
+/**
+ * Take a queued request to play (plan T3 decision 3): one atomic UPDATE, so of two pumps (two processes) at most
+ * one gets the row back; null = someone else took it, or it was skipped. Counts the attempt.
+ */
+async function claim(id) {
+    return await db.get("UPDATE audio_requests SET state = 'playing', attempts = attempts + 1 WHERE id = ? AND state = 'queued' RETURNING *", [id]) || null;
 }
 
 /** Play the next request of a room if none is playing. */
@@ -215,10 +227,14 @@ async function pump(room) {
         for (;;) {
             if (stopped) return;
             let row;
-            try { row = db.get("SELECT * FROM audio_requests WHERE room = ? AND state = 'queued' ORDER BY id LIMIT 1", [room]); } catch { return; }
+            try { row = await db.get("SELECT * FROM audio_requests WHERE room = ? AND state = 'queued' ORDER BY id LIMIT 1", [room]); } catch { return; }
             if (!row) return;
-            if (row.attempts >= MAX_ATTEMPTS) { transition(row.id, 'failed', { error: 'gave up after repeated attempts', actor: 'system' }); continue; }
-            db.run('UPDATE audio_requests SET attempts = attempts + 1 WHERE id = ?', [row.id]);
+            if (row.attempts >= MAX_ATTEMPTS) { await transition(row.id, 'failed', { error: 'gave up after repeated attempts', actor: 'system' }); continue; }
+            const claimed = await claim(row.id);
+            if (!claimed) continue;   // another pump took it (or it was skipped): the next one
+            row = claimed;
+            // The audio is made outside any transaction (a synth takes seconds); the row stays 'playing' meanwhile.
+            st.makingId = row.id;
             const perform = performers[row.kind];
             let made = null, error = null;
             try {
@@ -226,14 +242,17 @@ async function pump(room) {
                 if (!perform) error = `no performer for ${row.kind}`;
                 else if (!made || !made.frame) error = 'no audio';
             } catch (err) { error = (err && err.message) || 'failed'; }
+            st.makingId = null;
             if (stopped) return;
-            if (error) { transition(row.id, 'failed', { error: String(error).slice(0, 300), actor: 'system' }); continue; }
+            if (error) { await transition(row.id, 'failed', { error: String(error).slice(0, 300), actor: 'system' }); continue; }
             const durationMs = Math.round(Math.min(MAX_PLAY_MS, Math.max(MIN_PLAY_MS, Number(made.durationMs) || estimatePlayMs(made.frame))));
             // Skipped or cleared while it was being made: nothing goes out.
-            if (!transition(row.id, 'playing', { durationMs })) continue;
+            const now = Date.now();
+            const started = await db.run("UPDATE audio_requests SET started_at = ?, duration_ms = ? WHERE id = ? AND state = 'playing'", [now, durationMs, row.id]);
+            if (!started.changes) continue;
             try { if (deliver) deliver(row, { ...made.frame, request_id: row.id }); } catch (err) { console.warn('[AudioQueue] deliver:', err.message); }
             st.playingId = row.id;
-            st.timer = setTimeout(() => finish(room, row.id, 'played'), durationMs + GAP_MS);
+            st.timer = setTimeout(() => { finish(room, row.id, 'played').catch((err) => console.warn('[AudioQueue] finish:', err.message)); }, durationMs + GAP_MS);
             if (st.timer.unref) st.timer.unref();
             return;
         }
@@ -241,15 +260,15 @@ async function pump(room) {
 }
 
 /** End the playing request of a room (its window ended, it was skipped, or the client reported). */
-function finish(room, id, to, opts = {}) {
+async function finish(room, id, to, opts = {}) {
     const st = roomState(room);
     let moved = false;
-    try { moved = transition(id, to, opts); } catch { moved = false; }
+    try { moved = await transition(id, to, opts); } catch { moved = false; }
     if (st.playingId === id) {
         if (st.timer) clearTimeout(st.timer);
         st.timer = null;
         st.playingId = null;
-        setImmediate(() => pump(room));
+        setImmediate(() => { pump(room).catch((err) => console.warn('[AudioQueue] pump:', err.message)); });
     }
     return moved;
 }
@@ -258,25 +277,27 @@ function finish(room, id, to, opts = {}) {
  * Skip one request of a room: `id`, or else the one playing, or else the next queued.
  * Returns the skipped row or null.
  */
-function skip(room, { id = null, actor = null } = {}) {
+async function skip(room, { id = null, actor = null } = {}) {
     let row = null;
-    if (id) row = db.get("SELECT * FROM audio_requests WHERE id = ? AND room = ? AND state IN ('queued', 'playing')", [id, room]);
-    else row = db.get("SELECT * FROM audio_requests WHERE room = ? AND state = 'playing' ORDER BY id LIMIT 1", [room])
-        || db.get("SELECT * FROM audio_requests WHERE room = ? AND state = 'queued' ORDER BY id LIMIT 1", [room]);
+    if (id) row = await db.get("SELECT * FROM audio_requests WHERE id = ? AND room = ? AND state IN ('queued', 'playing')", [id, room]);
+    else row = await db.get("SELECT * FROM audio_requests WHERE room = ? AND state = 'playing' ORDER BY id LIMIT 1", [room])
+        || await db.get("SELECT * FROM audio_requests WHERE room = ? AND state = 'queued' ORDER BY id LIMIT 1", [room]);
     if (!row) return null;
-    const moved = row.state === 'playing' ? finish(room, row.id, 'skipped', { actor }) : transition(row.id, 'skipped', { actor });
+    // 'playing' and out (the room's clip) is finished; 'playing' still being made never went out: no skip frame.
+    const out = row.state === 'playing' && roomState(room).playingId === row.id;
+    const moved = out ? await finish(room, row.id, 'skipped', { actor }) : await transition(row.id, 'skipped', { actor });
     if (!moved) return null;
-    if (row.state === 'playing' && deliver) { try { deliver(row, { type: 'audio-skip', request_id: row.id, kind: row.kind }); } catch { /* */ } }
+    if (out && deliver) { try { deliver(row, { type: 'audio-skip', request_id: row.id, kind: row.kind }); } catch { /* */ } }
     return { ...row, state: 'skipped' };
 }
 
 /** Skip everything queued or playing in a room. Returns the ids skipped. */
-function clear(room, { actor = null } = {}) {
-    const rows = db.all("SELECT * FROM audio_requests WHERE room = ? AND state IN ('queued', 'playing') ORDER BY id", [room]);
+async function clear(room, { actor = null } = {}) {
+    const rows = await db.all("SELECT * FROM audio_requests WHERE room = ? AND state IN ('queued', 'playing') ORDER BY id", [room]);
     const ids = [];
     let sample = null;
     for (const row of rows) {
-        const moved = row.state === 'playing' ? finish(room, row.id, 'skipped', { actor }) : transition(row.id, 'skipped', { actor });
+        const moved = row.state === 'playing' ? await finish(room, row.id, 'skipped', { actor }) : await transition(row.id, 'skipped', { actor });
         if (moved) { ids.push(row.id); sample = sample || row; }
     }
     if (ids.length && deliver) { try { deliver(sample, { type: 'audio-clear', request_ids: ids }); } catch { /* */ } }
@@ -284,23 +305,23 @@ function clear(room, { actor = null } = {}) {
 }
 
 /** The playing client's report: its clip ended ('played') or could not play ('failed'). */
-function report(room, id, state, { error = null, actor = null } = {}) {
+async function report(room, id, state, { error = null, actor = null } = {}) {
     if (state !== 'played' && state !== 'failed') return false;
-    const row = db.get("SELECT * FROM audio_requests WHERE id = ? AND room = ? AND state = 'playing'", [id, room]);
+    const row = await db.get("SELECT * FROM audio_requests WHERE id = ? AND room = ? AND state = 'playing'", [id, room]);
     if (!row) return false;
-    return finish(room, row.id, state, { error: state === 'failed' ? String(error || 'playback failed').slice(0, 300) : null, actor });
+    return await finish(room, row.id, state, { error: state === 'failed' ? String(error || 'playback failed').slice(0, 300) : null, actor });
 }
 
 /** A room's queue: what plays now, what waits, and the latest finished requests. */
-function list(room, { recent = 20 } = {}) {
+async function list(room, { recent = 20 } = {}) {
     const shape = (r) => ({
         id: r.id, kind: r.kind, state: r.state, requested_by: r.requested_by, label: r.label,
         error: r.error, actor: r.actor, duration_ms: r.duration_ms,
         created_at: r.created_at, started_at: r.started_at, finished_at: r.finished_at,
     });
-    const playing = db.get("SELECT * FROM audio_requests WHERE room = ? AND state = 'playing' ORDER BY id LIMIT 1", [room]);
-    const queued = db.all("SELECT * FROM audio_requests WHERE room = ? AND state = 'queued' ORDER BY id", [room]);
-    const done = db.all("SELECT * FROM audio_requests WHERE room = ? AND state IN ('played', 'skipped', 'failed') ORDER BY COALESCE(finished_at, created_at) DESC, id DESC LIMIT ?", [room, Math.min(Math.max(parseInt(recent, 10) || 0, 0), 100)]);
+    const playing = await db.get("SELECT * FROM audio_requests WHERE room = ? AND state = 'playing' ORDER BY id LIMIT 1", [room]);
+    const queued = await db.all("SELECT * FROM audio_requests WHERE room = ? AND state = 'queued' ORDER BY id", [room]);
+    const done = await db.all("SELECT * FROM audio_requests WHERE room = ? AND state IN ('played', 'skipped', 'failed') ORDER BY COALESCE(finished_at, created_at) DESC, id DESC LIMIT ?", [room, Math.min(Math.max(parseInt(recent, 10) || 0, 0), 100)]);
     return { room, playing: playing ? shape(playing) : null, queued: queued.map(shape), recent: done.map(shape) };
 }
 
@@ -308,11 +329,11 @@ function list(room, { recent = 20 } = {}) {
  * Boot: rows playing when Chat stopped were delivered, so they are played; rows queued too long
  * ago fail as expired; every room with queued rows starts playing again.
  */
-function recover({ now = Date.now(), graceMs = RESUME_GRACE_MS } = {}) {
-    const played = db.run("UPDATE audio_requests SET state = 'played', finished_at = ?, error = 'delivered before a restart' WHERE state = 'playing'", [now]).changes;
-    const expired = db.run("UPDATE audio_requests SET state = 'failed', finished_at = ?, error = 'expired', actor = 'system' WHERE state = 'queued' AND created_at < ?", [now, now - STALE_MS]).changes;
-    db.run("DELETE FROM audio_requests WHERE state IN ('played', 'skipped', 'failed') AND COALESCE(finished_at, created_at) < ?", [now - KEEP_MS]);
-    const pending = db.all("SELECT DISTINCT room FROM audio_requests WHERE state = 'queued'").map((r) => r.room);
+async function recover({ now = Date.now(), graceMs = RESUME_GRACE_MS } = {}) {
+    const played = (await db.run("UPDATE audio_requests SET state = 'played', finished_at = ?, error = 'delivered before a restart' WHERE state = 'playing'", [now])).changes;
+    const expired = (await db.run("UPDATE audio_requests SET state = 'failed', finished_at = ?, error = 'expired', actor = 'system' WHERE state = 'queued' AND created_at < ?", [now, now - STALE_MS])).changes;
+    await db.run("DELETE FROM audio_requests WHERE state IN ('played', 'skipped', 'failed') AND COALESCE(finished_at, created_at) < ?", [now - KEEP_MS]);
+    const pending = (await db.all("SELECT DISTINCT room FROM audio_requests WHERE state = 'queued'")).map((r) => r.room);
     for (const room of pending) holdRoom(room, now + graceMs);
     if (played || expired || pending.length) console.log(`[AudioQueue] recovered: ${played} finished, ${expired} expired, ${pending.length} room(s) resuming`);
     return { played, expired, rooms: pending };
@@ -321,5 +342,5 @@ function recover({ now = Date.now(), graceMs = RESUME_GRACE_MS } = {}) {
 module.exports = {
     STATES, TRANSITIONS, KINDS, STALE_MS, GAP_MS, RESUME_GRACE_MS, RESUME_SETTLE_MS,
     canTransition, roomKey, estimatePlayMs, mp3Bitrate,
-    init, stop, enqueue, pump, skip, clear, report, list, recover, roomJoined, getRequest, transition,
+    init, stop, enqueue, pump, claim, skip, clear, report, list, recover, roomJoined, getRequest, transition,
 };

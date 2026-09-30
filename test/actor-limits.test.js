@@ -57,16 +57,16 @@ t('the next minute opens the window again', async () => {
 
 t('a write has its own number: 20 REST sends a minute, the 21st refused before it is stored', async () => {
     clock = Date.UTC(2026, 8, 27, 12, 5, 0);
-    const stored = () => h.db.get("SELECT COUNT(*) AS n FROM chat_messages WHERE message LIKE 'limits %'").n;
+    const stored = async () => (await h.db.get("SELECT COUNT(*) AS n FROM chat_messages WHERE message LIKE 'limits %'")).n;
     for (let i = 0; i < 20; i++) {
         const r = await h.http('POST', '/api/chat/send', { token: alice.token, body: { message: `limits ${i} from alice` } });
         assert.strictEqual(r.status, 200, `send ${i + 1}: ${r.text}`);
     }
-    const before = stored();
+    const before = await stored();
     const r = await h.http('POST', '/api/chat/send', { token: alice.token, body: { message: 'limits one more' } });
     assert.deepStrictEqual([r.status, r.body.code, r.headers.get('retry-after')], [429, 'rate_limited', '60']);
     assert.ok(r.body.detail.includes('chat.message.send'), r.body.detail);
-    assert.strictEqual(stored(), before, 'nothing stored');
+    assert.strictEqual(await stored(), before, 'nothing stored');
     assert.strictEqual((await h.http('POST', '/api/chat/send', { token: bob.token, body: { message: 'limits hi from bob' } })).status, 200, 'another person still sends');
     assert.strictEqual((await h.http('POST', '/api/chat/send', { token: 'nope', body: { message: 'x' } })).status, 401, 'a bad token: 401 from auth');
 });
@@ -96,6 +96,23 @@ t('who is counted', () => {
     assert.strictEqual(actor({ user: { id: 7, subject_id: null }, ip: '203.0.113.1' }), 'user:7', 'before the subject is known');
     assert.strictEqual(actor({ ovActorUser: { id: 7, subject_id: 'usr_a' }, ip: '203.0.113.1' }), 'user:usr_a', 'resolved before requireAuth');
     assert.strictEqual(actor({ ip: '203.0.113.1' }), 'ip:203.0.113.1');
+});
+
+t('shared counters: two handles count one budget on Valkey (skipped without VALKEY_URL)', async () => {
+    const { createTestValkey } = require('openvibe-sdk/testing');
+    const { createActorLimiter, createValkeyLimitStore } = require('openvibe-sdk/limits');
+    const v = createTestValkey({ prefix: 'chat-limits' });
+    if (!v) { console.log('  ○ valkey shared counters: skipped (VALKEY_URL unset: counters are per process)'); return; }
+    try {
+        const store = createValkeyLimitStore(v);
+        // Two limiter instances, one shared store: each builds the route's middleware (name, then windows).
+        const build = () => createActorLimiter({ limits: { minute: 2 }, actor: (r) => r.actor, now: () => 0, store, onLimited: null })('shared');
+        const a = build(); const b = build();
+        const send = (mw) => new Promise((resolve) => mw({ actor: 'user:usr_shared' }, { statusCode: 200, headers: {}, setHeader(k, x) { this.headers[k] = x; }, end(body) { this.body = body; resolve(this.statusCode); } }, () => resolve(200)));
+        assert.strictEqual(await send(a), 200, 'first handle counts 1');
+        assert.strictEqual(await send(b), 200, 'second handle sees the shared count (2)');
+        assert.strictEqual(await send(a), 429, 'third is over the shared budget, whichever handle');
+    } finally { await v.close(); }
 });
 
 t.run(async () => { if (h) await h.close(); });

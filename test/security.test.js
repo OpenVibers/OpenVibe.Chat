@@ -87,7 +87,7 @@ t('/me, /clear and ban notices from global chat or a channel room stay in that r
 });
 
 t('/me and /tts obey followers-only and the slur filter', async () => {
-    h.setChannelSettings(chanX, { followers_only: 1, slur_filter_enabled: 1, slur_filter_terms: 'bannedword' });
+    await h.setChannelSettings(chanX, { followers_only: 1, slur_filter_enabled: 1, slur_filter_terms: 'bannedword' });
     const viewer = await joined({ ip: '198.51.100.20', token: streamer.token, stream: streamX }, { streamId: streamX });
     const bobWs = await joined({ ip: '198.51.100.21', token: bob.token, stream: streamX }, { streamId: streamX });
     bobWs.sendJson({ type: 'chat', message: 'plain line' });
@@ -99,7 +99,7 @@ t('/me and /tts obey followers-only and the slur filter', async () => {
     assert.ok(await viewer.none((m) => /sneaks past/.test(m.message || ''), 500), '/me or /tts bypassed followers-only');
 
     h.live.follows.set(bob.id, [streamer.id]);
-    h.setChannelSettings(chanX, { slur_filter_enabled: 1, slur_filter_terms: 'bannedword' });
+    await h.setChannelSettings(chanX, { slur_filter_enabled: 1, slur_filter_terms: 'bannedword' });
     const bob2 = await joined({ ip: '198.51.100.22', token: bob.token, stream: streamX }, { streamId: streamX });
     bob2.sendJson({ type: 'chat', message: '/me says bannedword' });
     await bob2.next((m) => m.type === 'slur-blocked');
@@ -107,7 +107,7 @@ t('/me and /tts obey followers-only and the slur filter', async () => {
     bob2.sendJson({ type: 'chat', message: '/tts bannedword' });
     await bob2.next((m) => m.type === 'slur-blocked');
     assert.ok(await viewer.none((m) => /bannedword/.test(m.message || ''), 300), 'slur filter bypassed by /me or /tts');
-    h.setChannelSettings(chanX, null);
+    await h.setChannelSettings(chanX, null);
     for (const w of [viewer, bobWs, bob2]) w.close();
 });
 
@@ -124,21 +124,21 @@ t('joining the channel room without the stream id does not skip slow mode or IP 
     assert.ok(await own.none((m) => m.message === 'second within slow mode'), 'slow mode bypassed from the channel room');
     // (/slow 30 is the channel's saved setting now; the policy set below replaces it)
 
-    h.setChannelSettings(chanX, { ip_approval_mode: 1 });
+    await h.setChannelSettings(chanX, { ip_approval_mode: 1 });
     const fresh = await joined({ ip: '198.51.100.32' }, { channelUserId: streamer.id });
     fresh.sendJson({ type: 'chat', message: 'unapproved hello' });
     await fresh.next((m) => m.type === 'system' && /IP approval mode/.test(m.message));
     assert.ok(await own.none((m) => m.message === 'unapproved hello'), 'IP approval bypassed from the channel room');
-    assert.ok(h.db.get("SELECT 1 FROM pending_ip_messages WHERE message = 'unapproved hello'"), 'held for review');
+    assert.ok(await h.db.get("SELECT 1 FROM pending_ip_messages WHERE message = 'unapproved hello'"), 'held for review');
     await h.sleep(1100);
     fresh.sendJson({ type: 'chat', message: '/me unapproved action' });
     assert.ok(await own.none((m) => /unapproved action/.test(m.message || ''), 400), '/me bypassed IP approval');
-    h.setChannelSettings(chanX, null);
+    await h.setChannelSettings(chanX, null);
     for (const w of [own, sneaky, fresh]) w.close();
 });
 
 t('a catastrophic custom slur regex cannot freeze the chat server', async () => {
-    h.setChannelSettings(chanX, { slur_filter_enabled: 1, slur_filter_use_builtin: 0, slur_filter_regexes: '^(a|a)*$' });
+    await h.setChannelSettings(chanX, { slur_filter_enabled: 1, slur_filter_use_builtin: 0, slur_filter_regexes: '^(a|a)*$' });
     const viewer = await joined({ ip: '198.51.100.40', token: streamer.token, stream: streamX }, { streamId: streamX });
     const bobWs = await joined({ ip: '198.51.100.41', token: bob.token, stream: streamX }, { streamId: streamX });
     const line = 'a'.repeat(30) + 'b';
@@ -146,7 +146,7 @@ t('a catastrophic custom slur regex cannot freeze the chat server', async () => 
     bobWs.sendJson({ type: 'chat', message: line });
     await viewer.next((m) => m.type === 'chat' && m.message === line, 20000);
     assert.ok(Date.now() - started < 1500, `chat blocked for ${Date.now() - started}ms by a streamer regex`);
-    h.setChannelSettings(chanX, null);
+    await h.setChannelSettings(chanX, null);
     for (const w of [viewer, bobWs]) w.close();
 });
 

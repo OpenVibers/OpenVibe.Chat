@@ -31,7 +31,7 @@ t('boot', async () => {
     alice = h.addUser('alice', { subject: ids.newId('user') });
     bob = h.addUser('bob', { subject: ids.newId('user') });
     carol = h.addUser('carol', { subject: ids.newId('user') });
-    for (const u of [alice, bob, carol]) { h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); }
+    for (const u of [alice, bob, carol]) { await h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); }
 });
 
 t('the inbox: your conversations only, unread counts in the list and the navigation', async () => {
@@ -75,7 +75,7 @@ t('participants only: a guessed conversation looks like no conversation', async 
     assert.strictEqual((await dmApi('GET', `/conversations/${conv}`, carol)).status, 403);
     const r = await req('POST', `/messages/${conv}`, form(carol, { message: 'let me in' }));
     assert.match(r.headers.get('location'), /error=/);
-    assert.ok(!h.db.all('SELECT message FROM dm_messages WHERE conversation_id = ?', [conv]).some((m) => m.message === 'let me in'));
+    assert.ok(!(await h.db.all('SELECT message FROM dm_messages WHERE conversation_id = ?', [conv])).some((m) => m.message === 'let me in'));
     assert.strictEqual((await req('POST', `/messages/${conv}/block`, form(carol, {}))).headers.get('location'), '/messages', 'nor block from it');
 });
 
@@ -122,7 +122,7 @@ t('groups have no one to block', async () => {
     const page = await req('GET', `/messages/${gid}`, { headers: cookie(alice) });
     assert.ok(!/Block /.test(page.text));
     assert.match((await req('POST', `/messages/${gid}/block`, form(alice, {}))).headers.get('location'), new RegExp(`^/messages/${gid}\\?error=`));
-    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM dm_blocks WHERE blocker_id = ?', [alice.id]).n, 0);
+    assert.strictEqual((await h.db.get('SELECT COUNT(*) AS n FROM dm_blocks WHERE blocker_id = ?', [alice.id])).n, 0);
 });
 
 t.run(async () => { if (h && h.close) await h.close(); });

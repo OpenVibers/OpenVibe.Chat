@@ -25,10 +25,10 @@ const { limits } = require('../net/actor-limits');
  * their own view: network-blocks.js). Pages and cursor reads alike; latest_id and deleted_ids stay
  * the room's, so the reader's cursor moves on as everyone's does. Such answers are per reader.
  */
-function withoutBlocked(req, res, rows) {
+async function withoutBlocked(req, res, rows) {
     if (!req.user) return rows;
     res.set('Cache-Control', 'private, no-store');
-    const hidden = networkBlocks.blockedUserIds(req.user);
+    const hidden = await networkBlocks.blockedUserIds(req.user);
     if (!hidden.size) return rows;
     return rows.filter((m) => !(m.user_id && hidden.has(Number(m.user_id))));
 }
@@ -48,9 +48,9 @@ const exportLimit = limits('chat.export', { minute: 5, hour: 30 });
 // A staff member viewing, searching or exporting someone else's chat logs is recorded like any other
 // moderation action (moderation_actions → chat.moderation.action → the network audit log, ADR-022).
 // A person reading their own lines, or a streamer their own stream's, is not.
-function auditLogAccess(req, action_type, { scope_type = 'site', scope_id = null, target_user_id = null, details = {} } = {}) {
+async function auditLogAccess(req, action_type, { scope_type = 'site', scope_id = null, target_user_id = null, details = {} } = {}) {
     try {
-        db.logModerationAction({ scope_type, scope_id, actor_user_id: req.user.id, target_user_id, action_type, details });
+        await db.logModerationAction({ scope_type, scope_id, actor_user_id: req.user.id, target_user_id, action_type, details });
     } catch (err) {
         console.warn('[Chat] log access audit failed:', err.message);
     }
@@ -246,16 +246,16 @@ router.get('/gif/search', optionalAuth, gifLimit, async (req, res) => {
  * Each row must have reply_to_id (from DB). Adds a reply_to object
  * with { id, username, user_id, message } for the parent message.
  */
-function hydrateReplies(messages) {
+async function hydrateReplies(messages) {
     const replyIds = [...new Set(messages.map(m => m.reply_to_id).filter(Boolean))];
     if (!replyIds.length) return messages;
     const placeholders = replyIds.map(() => '?').join(',');
-    const parents = db.all(
+    const parents = await db.all(
         `SELECT id, username, user_id, message
          FROM chat_messages
          WHERE id IN (${placeholders})
            AND is_deleted = 0
-           AND (auto_delete_at IS NULL OR datetime(auto_delete_at) > CURRENT_TIMESTAMP)`,
+           AND (auto_delete_at IS NULL OR datetime(auto_delete_at) > ov_now())`,
         replyIds
     );
     const parentMap = new Map(parents.map(p => [p.id, p]));
@@ -313,7 +313,7 @@ router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour
         const replyToId = req.body.reply_to_id ? parseInt(req.body.reply_to_id) : null;
         let replyTo = null;
         if (replyToId) {
-            const parent = db.getChatMessageById(replyToId);
+            const parent = await db.getChatMessageById(replyToId);
             if (parent && !parent.is_deleted) {
                 replyTo = {
                     id: parent.id,
@@ -353,7 +353,7 @@ router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour
         // Save to database
         let savedId = null;
         try {
-            const result = db.saveChatMessage({
+            const result = await db.saveChatMessage({
                 stream_id: null,
                 user_id: req.user.id,
                 anon_id: null,
@@ -372,7 +372,7 @@ router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour
         if (replyTo) chatMsg.reply_to = replyTo;
 
         // Broadcast to all global chat clients
-        chatServer.broadcastGlobal(chatMsg);
+        await chatServer.broadcastGlobal(chatMsg);
         res.json({ ok: true });
     } catch (err) {
         console.error('[Chat] REST send error:', err.message);
@@ -381,7 +381,7 @@ router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour
 });
 
 // ── Search Chat Messages (admin or self) ─────────────────────
-router.get('/search', requireAuth, searchLimit, (req, res) => {
+router.get('/search', requireAuth, searchLimit, async (req, res) => {
     try {
         const limit = Math.min(parseInt(req.query.limit || '50'), 200);
         const offset = parseInt(req.query.offset || '0');
@@ -392,11 +392,11 @@ router.get('/search', requireAuth, searchLimit, (req, res) => {
         // Admin / global_mod can search anyone; others search only their own
         const effectiveUserId = permissions.canViewOtherUserLogs(req.user) ? userId : req.user.id;
 
-        const result = db.searchChatMessages({
+        const result = await db.searchChatMessages({
             query, userId: effectiveUserId, streamId, limit, offset,
         });
         if (effectiveUserId !== req.user.id) {
-            auditLogAccess(req, 'chat_log_search', { scope_type: streamId ? 'stream' : 'site', scope_id: streamId, target_user_id: effectiveUserId,
+            await auditLogAccess(req, 'chat_log_search', { scope_type: streamId ? 'stream' : 'site', scope_id: streamId, target_user_id: effectiveUserId,
                 details: { query: String(query).slice(0, 100), results: result.messages.length } });
         }
         publicRows(result.messages);
@@ -408,7 +408,7 @@ router.get('/search', requireAuth, searchLimit, (req, res) => {
 });
 
 // ── User Chat History ────────────────────────────────────────
-router.get('/user/:userId/history', requireAuth, (req, res) => {
+router.get('/user/:userId/history', requireAuth, async (req, res) => {
     try {
         const userId = parseInt(req.params.userId);
         const limit = Math.min(parseInt(req.query.limit || '50'), 200);
@@ -419,8 +419,8 @@ router.get('/user/:userId/history', requireAuth, (req, res) => {
             return res.status(403).json({ error: 'Access denied' });
         }
 
-        const result = db.getUserChatHistory(userId, limit, offset);
-        if (userId !== req.user.id && offset === 0) auditLogAccess(req, 'chat_log_view', { target_user_id: userId, details: { total: result.total } });
+        const result = await db.getUserChatHistory(userId, limit, offset);
+        if (userId !== req.user.id && offset === 0) await auditLogAccess(req, 'chat_log_view', { target_user_id: userId, details: { total: result.total } });
         publicRows(result.messages);
         res.json(result);
     } catch (err) {
@@ -442,9 +442,9 @@ router.get('/user/:username/profile', optionalAuth, async (req, res) => {
 });
 
 // ── Chat-relay (external) user info: join date (first message) etc. ──
-router.get('/relay-user/:platform/:username', optionalAuth, (req, res) => {
+router.get('/relay-user/:platform/:username', optionalAuth, async (req, res) => {
     try {
-        const r = db.getRelayUser(req.params.platform, req.params.username);
+        const r = await db.getRelayUser(req.params.platform, req.params.username);
         res.json({ relayUser: r || null });
     } catch (err) {
         res.status(500).json({ error: 'Failed to get relay user' });
@@ -459,14 +459,14 @@ router.get('/anon/:anonId', optionalAuth, async (req, res) => {
         // When the number was assigned is Live's (anon_ip_mappings); the chat counts are ours.
         const num = db.anonSubjectId(anonId);
         const firstSeen = num ? await ctx.anonFirstSeenByNum(num) : null;
-        res.json({ anon: db.getAnonMeta(anonId, firstSeen) });
+        res.json({ anon: await db.getAnonMeta(anonId, firstSeen) });
     } catch (err) {
         res.status(500).json({ error: 'Failed to get anon info' });
     }
 });
 
 // An anonymous chatter's chat-message history — same gate as native logs.
-router.get('/anon/:anonId/logs', requireAuth, (req, res) => {
+router.get('/anon/:anonId/logs', requireAuth, async (req, res) => {
     try {
         if (!permissions.canViewOtherUserLogs(req.user)) return res.status(403).json({ error: 'Not authorized' });
         const anonId = String(req.params.anonId || '');
@@ -474,7 +474,7 @@ router.get('/anon/:anonId/logs', requireAuth, (req, res) => {
         const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
         const offset = Math.max(parseInt(req.query.offset || '0', 10), 0);
         const query = String(req.query.q || '').trim();
-        const r = db.getAnonChatHistory(anonId, { limit, offset, query });
+        const r = await db.getAnonChatHistory(anonId, { limit, offset, query });
         res.json(r);
     } catch (err) {
         res.status(500).json({ error: 'Failed to get anon user logs' });
@@ -482,13 +482,13 @@ router.get('/anon/:anonId/logs', requireAuth, (req, res) => {
 });
 
 // A relay (external-platform) user's chat-message history — same gate as native logs.
-router.get('/relay-user/:platform/:username/logs', requireAuth, (req, res) => {
+router.get('/relay-user/:platform/:username/logs', requireAuth, async (req, res) => {
     try {
         if (!permissions.canViewOtherUserLogs(req.user)) return res.status(403).json({ error: 'Not authorized' });
         const limit = Math.min(parseInt(req.query.limit || '50', 10), 200);
         const offset = Math.max(parseInt(req.query.offset || '0', 10), 0);
         const query = String(req.query.q || '').trim();
-        const r = db.getRelayUserChatHistory(req.params.platform, req.params.username, { limit, offset, query });
+        const r = await db.getRelayUserChatHistory(req.params.platform, req.params.username, { limit, offset, query });
         res.json(r);
     } catch (err) {
         res.status(500).json({ error: 'Failed to get relay user logs' });
@@ -513,11 +513,11 @@ router.get('/global/history', optionalAuth, async (req, res) => {
         // after_id = cursor read: only what the caller has not seen (oldest→newest, PK range scan).
         // Anything else = a page: the newest rows, optionally before a timestamp.
         const out = afterId != null
-            ? historyStore.delta('global', { afterId, limit, channelUsername })
-            : historyStore.page('global', { limit, before, channelUsername });
-        out.messages = withoutBlocked(req, res, out.messages);
+            ? await historyStore.delta('global', { afterId, limit, channelUsername })
+            : await historyStore.page('global', { limit, before, channelUsername });
+        out.messages = await withoutBlocked(req, res, out.messages);
         await loadDecor(out.messages);
-        out.messages = publicRows(enrichMessagesWithCosmetics(hydrateReplies(out.messages.map((x) => ({ ...x })))));
+        out.messages = publicRows(enrichMessagesWithCosmetics(await hydrateReplies(out.messages.map((x) => ({ ...x })))));
         res.json(out);
     } catch (err) {
         res.status(500).json({ error: 'Failed to get global chat history' });
@@ -525,7 +525,7 @@ router.get('/global/history', optionalAuth, async (req, res) => {
 });
 
 // ── Chat Replay (for VOD/clip playback sync) ────────────────
-router.get('/:streamId/replay', optionalAuth, (req, res) => {
+router.get('/:streamId/replay', optionalAuth, async (req, res) => {
     try {
         const streamId = parseInt(req.params.streamId);
         if (!streamId) return res.status(400).json({ error: 'Invalid stream ID' });
@@ -533,7 +533,7 @@ router.get('/:streamId/replay', optionalAuth, (req, res) => {
         const from = req.query.from || null;  // ISO timestamp
         const to = req.query.to || null;      // ISO timestamp
 
-        const messages = publicRows(db.getChatReplay(streamId, from, to));
+        const messages = publicRows(await db.getChatReplay(streamId, from, to));
         res.json({ messages });
     } catch (err) {
         res.status(500).json({ error: 'Failed to get chat replay' });
@@ -580,7 +580,7 @@ router.get('/:streamId/history', optionalAuth, async (req, res) => {
                    LEFT JOIN ctx_users bu ON s.user_id = bu.id
                    LEFT JOIN ctx_users cu ON cm.channel_user_id = cu.id
                    WHERE cm.channel_user_id = ? AND cm.is_deleted = 0
-                     AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)`;
+                     AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > ov_now())`;
             params.push(broadcasterId);
         } else {
             sql = `${select}
@@ -591,7 +591,7 @@ router.get('/:streamId/history', optionalAuth, async (req, res) => {
                    LEFT JOIN ctx_users bu ON s.user_id = bu.id
                    LEFT JOIN ctx_users cu ON cm.channel_user_id = cu.id
                    WHERE cm.stream_id = ? AND cm.is_deleted = 0
-                     AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > CURRENT_TIMESTAMP)`;
+                     AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > ov_now())`;
             params.push(req.params.streamId);
         }
 
@@ -610,13 +610,13 @@ router.get('/:streamId/history', optionalAuth, async (req, res) => {
             params.push(limit);
         }
 
-        let rows = db.all(sql, params);
+        let rows = await db.all(sql, params);
         let complete = true;
         if (afterId != null) { complete = rows.length <= limit; rows = rows.slice(0, limit); } else rows.reverse();
         const latest_id = rows.reduce((m, x) => (x.id > m ? x.id : m), 0) || (afterId || 0);
-        rows = withoutBlocked(req, res, rows);
+        rows = await withoutBlocked(req, res, rows);
         await loadDecor(rows);
-        const messages = publicRows(enrichMessagesWithCosmetics(hydrateReplies(rows)));
+        const messages = publicRows(enrichMessagesWithCosmetics(await hydrateReplies(rows)));
 
         // Currently-live slots for this broadcaster — lets the client render a
         // "hop between live streams" affordance.
@@ -624,9 +624,9 @@ router.get('/:streamId/history', optionalAuth, async (req, res) => {
         let channel = null;
         if (broadcasterId) {
             try {
-                const owner = ctx.getUserById(broadcasterId);
+                const owner = await ctx.getUserById(broadcasterId);
                 channel = owner ? owner.username : null;
-                liveSlots = (ctx.getManagedStreamsByUserId(broadcasterId) || [])
+                liveSlots = (await ctx.getManagedStreamsByUserId(broadcasterId) || [])
                     .filter(ms => ms.is_currently_live)
                     .map(ms => ({
                         managed_stream_id: ms.id,
@@ -637,7 +637,7 @@ router.get('/:streamId/history', optionalAuth, async (req, res) => {
             } catch { /* non-critical */ }
         }
         // A cursor read also names the rows at or under the cursor deleted since (history-store.js).
-        const deleted = afterId != null ? { deleted_ids: historyStore.deletedIds(spanStreamer ? `channel:${broadcasterId}` : `stream:${parseInt(req.params.streamId, 10) || 0}`, afterId) } : {};
+        const deleted = afterId != null ? { deleted_ids: await historyStore.deletedIds(spanStreamer ? `channel:${broadcasterId}` : `stream:${parseInt(req.params.streamId, 10) || 0}`, afterId) } : {};
         res.json({
             messages, latest_id, complete, ...deleted, liveSlots, channel,
             activeStreamId: parseInt(req.params.streamId) || null,
@@ -657,16 +657,16 @@ router.get('/channel/:userId/history', optionalAuth, async (req, res) => {
         if (!userId) return res.status(400).json({ error: 'Bad user id' });
         const room = `channel:${userId}`;
         const out = req.query.after_id != null
-            ? historyStore.delta(room, { afterId: req.query.after_id, limit: req.query.limit })
-            : historyStore.page(room, { limit: req.query.limit, before: req.query.before });
-        out.messages = withoutBlocked(req, res, out.messages);
+            ? await historyStore.delta(room, { afterId: req.query.after_id, limit: req.query.limit })
+            : await historyStore.page(room, { limit: req.query.limit, before: req.query.before });
+        out.messages = await withoutBlocked(req, res, out.messages);
         await loadDecor(out.messages);
-        out.messages = publicRows(enrichMessagesWithCosmetics(hydrateReplies(out.messages.map((x) => ({ ...x })))));
+        out.messages = publicRows(enrichMessagesWithCosmetics(await hydrateReplies(out.messages.map((x) => ({ ...x })))));
         let liveSlots = [], channel = null;
         try {
-            const owner = ctx.getUserById(userId);
+            const owner = await ctx.getUserById(userId);
             channel = owner ? owner.username : null;
-            liveSlots = (ctx.getManagedStreamsByUserId(userId) || [])
+            liveSlots = (await ctx.getManagedStreamsByUserId(userId) || [])
                 .filter(ms => ms.is_currently_live)
                 .map(ms => ({ managed_stream_id: ms.id, slug: ms.slug, title: ms.title, live_session_id: ms.live_session_id }));
         } catch { /* non-critical */ }
@@ -718,7 +718,7 @@ router.post('/admin/purge/preview', requireAuth, searchLimit, async (req, res) =
                 }
             } else {
                 // Non-admin without streamId: scope to their most recent stream
-                const userStreams = ctx.getStreamsByUserId(req.user.id, 1);
+                const userStreams = await ctx.getStreamsByUserId(req.user.id, 1);
                 if (!userStreams?.length) {
                     return res.json({ count: 0 });
                 }
@@ -726,7 +726,7 @@ router.post('/admin/purge/preview', requireAuth, searchLimit, async (req, res) =
             }
         }
 
-        const count = db.countChatMessagesByTimeRange(effectiveStreamId, from, to);
+        const count = await db.countChatMessagesByTimeRange(effectiveStreamId, from, to);
         res.json({ count });
     } catch (e) {
         console.error('[Chat] Purge preview error:', e.message);
@@ -749,7 +749,7 @@ router.delete('/admin/purge', requireAuth, limits('chat.purge', { minute: 10, ho
                 }
             } else {
                 // Non-admin without streamId: scope to their most recent stream
-                const userStreams = ctx.getStreamsByUserId(req.user.id, 1);
+                const userStreams = await ctx.getStreamsByUserId(req.user.id, 1);
                 if (!userStreams?.length) {
                     return res.json({ deleted: 0 });
                 }
@@ -757,7 +757,7 @@ router.delete('/admin/purge', requireAuth, limits('chat.purge', { minute: 10, ho
             }
         }
 
-        const result = db.deleteChatMessagesByTimeRange(effectiveStreamId, from, to, req.user.display_name || req.user.username);
+        const result = await db.deleteChatMessagesByTimeRange(effectiveStreamId, from, to, req.user.display_name || req.user.username);
 
         // Every surface that showed those lines: the stream's sockets get the range (Live's chat.js
         // drops it by time, with its "purged" notice) and, by id, the rest of the channel room (other
@@ -769,15 +769,15 @@ router.delete('/admin/purge', requireAuth, limits('chat.purge', { minute: 10, ho
             const ids = (result && result.ids) || [];
             const gone = { type: 'delete-messages', ids };
             if (effectiveStreamId) {
-                chatServer.broadcastToStream(effectiveStreamId, payload);
+                await chatServer.broadcastToStream(effectiveStreamId, payload);
                 if (ids.length) {
-                    const ownerId = ctx.getStreamById(effectiveStreamId)?.user_id || null;
-                    chatServer.broadcastToChannelRoom(ownerId, effectiveStreamId, gone);
-                    chatServer.forwardToGlobal(effectiveStreamId, gone);
+                    const ownerId = (await ctx.getStreamById(effectiveStreamId))?.user_id || null;
+                    await chatServer.broadcastToChannelRoom(ownerId, effectiveStreamId, gone);
+                    await chatServer.forwardToGlobal(effectiveStreamId, gone);
                 }
             } else {
-                chatServer.broadcastGlobal(payload);
-                if (ids.length) chatServer.broadcastGlobal(gone);
+                await chatServer.broadcastGlobal(payload);
+                if (ids.length) await chatServer.broadcastGlobal(gone);
             }
         } catch { /* chat server may not be initialized */ }
 
@@ -804,7 +804,7 @@ router.get('/admin/logs', requireAuth, searchLimit, async (req, res) => {
                 }
             } else {
                 // Non-admin without streamId: scope to their most recent stream
-                const userStreams = ctx.getStreamsByUserId(req.user.id, 1);
+                const userStreams = await ctx.getStreamsByUserId(req.user.id, 1);
                 if (!userStreams?.length) {
                     return res.json({ rows: [], total: 0, page: 1, limit: 50, totalPages: 0 });
                 }
@@ -812,7 +812,7 @@ router.get('/admin/logs', requireAuth, searchLimit, async (req, res) => {
             }
         }
 
-        const result = db.getChatLogs({
+        const result = await db.getChatLogs({
             streamId: effectiveStreamId,
             username, search, from, to, messageType,
             page: parseInt(page) || 1,
@@ -821,8 +821,8 @@ router.get('/admin/logs', requireAuth, searchLimit, async (req, res) => {
         });
         // Staff browsing beyond their own stream: the first page of each view is recorded.
         if (permissions.can(req.user, 'staff.moderation.purge') && (parseInt(page) || 1) === 1) {
-            const own = effectiveStreamId && (ctx.getStreamsByUserId(req.user.id, 50) || []).some((st) => st.id === effectiveStreamId);
-            if (!own) auditLogAccess(req, 'chat_log_view', { scope_type: effectiveStreamId ? 'stream' : 'site', scope_id: effectiveStreamId || null,
+            const own = effectiveStreamId && (await ctx.getStreamsByUserId(req.user.id, 50) || []).some((st) => st.id === effectiveStreamId);
+            if (!own) await auditLogAccess(req, 'chat_log_view', { scope_type: effectiveStreamId ? 'stream' : 'site', scope_id: effectiveStreamId || null,
                 details: { username: username || null, search: search ? String(search).slice(0, 100) : null, from: from || null, to: to || null, include_deleted: includeDeleted === 'true', total: result.total } });
         }
         publicRows(result.rows);
@@ -850,14 +850,14 @@ router.get('/admin/logs/export', requireAuth, exportLimit, async (req, res) => {
         }
 
         // Get all matching rows (up to 50k)
-        const result = db.getChatLogs({
+        const result = await db.getChatLogs({
             streamId: streamId ? parseInt(streamId) : undefined,
             username, search, from, to, messageType,
             page: 1, limit: 50000,
         });
         if (permissions.can(req.user, 'staff.moderation.purge')) {
-            const own = streamId && (ctx.getStreamsByUserId(req.user.id, 50) || []).some((st) => st.id === parseInt(streamId));
-            if (!own) auditLogAccess(req, 'chat_log_export', { scope_type: streamId ? 'stream' : 'site', scope_id: streamId ? parseInt(streamId) : null,
+            const own = streamId && (await ctx.getStreamsByUserId(req.user.id, 50) || []).some((st) => st.id === parseInt(streamId));
+            if (!own) await auditLogAccess(req, 'chat_log_export', { scope_type: streamId ? 'stream' : 'site', scope_id: streamId ? parseInt(streamId) : null,
                 details: { format: format === 'csv' ? 'csv' : 'json', rows: result.rows.length, username: username || null, search: search ? String(search).slice(0, 100) : null, from: from || null, to: to || null } });
         }
         publicRows(result.rows);
@@ -882,13 +882,13 @@ router.get('/admin/logs/export', requireAuth, exportLimit, async (req, res) => {
 // ── Your own chat, to keep (WS-I task 7) ─────────────────────────────────────
 // Every message you sent that is still visible (not deleted, not expired), newest first, as JSON or
 // CSV. Up to 100,000 lines; `truncated` says when there were more.
-router.get('/me/export', requireAuth, exportLimit, (req, res) => {
+router.get('/me/export', requireAuth, exportLimit, async (req, res) => {
     try {
         const MAX = 100000, PAGE = 5000;
         const rows = [];
         let total = 0;
         for (let offset = 0; offset < MAX; offset += PAGE) {
-            const r = db.getUserChatHistory(req.user.id, PAGE, offset);
+            const r = await db.getUserChatHistory(req.user.id, PAGE, offset);
             total = r.total;
             rows.push(...r.messages);
             if (r.messages.length < PAGE) break;

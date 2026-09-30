@@ -24,8 +24,8 @@ const refused = (r, what) => assert.ok([401, 403, 404].includes(r.status), `${wh
 
 t('boot and seed', async () => {
     h = await boot({ env: { CHAT_CALLS: '1', CHAT_WEB_URL: 'https://openvibe.chat' } });
-    const mk = (name, opts = {}) => { const u = h.addUser(name, { subject: ids.newId('user'), ...opts }); h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); return u; };
-    ann = mk('ann', { role: 'streamer' }); bob = mk('bob', { role: 'streamer' }); cat = mk('cat');
+    const mk = async (name, opts = {}) => { const u = h.addUser(name, { subject: ids.newId('user'), ...opts }); await h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); return u; };
+    ann = await mk('ann', { role: 'streamer' }); bob = await mk('bob', { role: 'streamer' }); cat = await mk('cat');
     annStream = h.addStream(ann.id, h.addChannel(ann.id), { title: 'Ann live', is_live: 1 });
     bobStream = h.addStream(bob.id, h.addChannel(bob.id), { title: 'Bob live', is_live: 1 });
 
@@ -43,10 +43,10 @@ t('boot and seed', async () => {
     r = await api('POST', `/api/dm/conversations/${s.conv}/messages`, ann, { message: 'ann in the trio' });
     s.dmMsg = (r.body.message && r.body.message.id) || r.body.id;
 
-    s.sound = Number(h.db.createChannelSound({ channel_owner_id: ann.id, command: 'annhorn', url: '/api/sounds/file/none.mp3', created_by: ann.id, created_by_name: 'ann' }).lastInsertRowid);
+    s.sound = Number((await h.db.createChannelSound({ channel_owner_id: ann.id, command: 'annhorn', url: '/api/sounds/file/none.mp3', created_by: ann.id, created_by_name: 'ann' })).lastInsertRowid);
     const audioQueue = require('../server/chat/audio-queue');
     audioQueue.stop();   // nothing plays here: Ann's request stays queued, so any change to it is Bob's doing
-    s.annReq = audioQueue.enqueue({ kind: 'tts', streamId: annStream, requestedBy: cat.id, label: 'hello', payload: { text: 'hello' } });
+    s.annReq = await audioQueue.enqueue({ kind: 'tts', streamId: annStream, requestedBy: cat.id, label: 'hello', payload: { text: 'hello' } });
     s.annReqId = s.annReq && (s.annReq.id || (s.annReq.request && s.annReq.request.id));
     assert.ok(s.annReqId, JSON.stringify(s.annReq));
 });
@@ -57,15 +57,15 @@ const same = (a, b) => {
     const i = x.findIndex((v, k) => JSON.stringify(v) !== JSON.stringify(y[k]));
     assert.fail(`table #${i} changed:\n  before ${JSON.stringify(x[i]).slice(0, 600)}\n  after  ${JSON.stringify(y[i]).slice(0, 600)}`);
 };
-const snapshot = () => JSON.stringify([
-    h.db.all('SELECT * FROM rooms ORDER BY id'), h.db.all('SELECT room_id, user_id, role FROM room_members ORDER BY room_id, user_id'),
-    h.db.all('SELECT id, is_deleted FROM room_messages ORDER BY id'), h.db.all('SELECT * FROM room_attachments ORDER BY 1'),
-    h.db.all('SELECT conversation_id, user_id FROM dm_participants ORDER BY conversation_id, user_id'), h.db.all('SELECT id, message FROM dm_messages ORDER BY id'),
-    h.db.all('SELECT id, channel_owner_id, command FROM channel_sounds ORDER BY id'), h.db.all('SELECT id, state FROM audio_requests ORDER BY id'),
+const snapshot = async () => JSON.stringify([
+    await h.db.all('SELECT * FROM rooms ORDER BY id'), await h.db.all('SELECT room_id, user_id, role FROM room_members ORDER BY room_id, user_id'),
+    await h.db.all('SELECT id, is_deleted FROM room_messages ORDER BY id'), await h.db.all('SELECT * FROM room_attachments ORDER BY 1'),
+    await h.db.all('SELECT conversation_id, user_id FROM dm_participants ORDER BY conversation_id, user_id'), await h.db.all('SELECT id, message FROM dm_messages ORDER BY id'),
+    await h.db.all('SELECT id, channel_owner_id, command FROM channel_sounds ORDER BY id'), await h.db.all('SELECT id, state FROM audio_requests ORDER BY id'),
 ]);
 
 t('rooms: Bob, a member of Ann\'s room, cannot change it, delete her or Cat\'s messages, or hand out roles', async () => {
-    const before = snapshot();
+    const before = await snapshot();
     refused(await rooms('PATCH', `/${s.room}`, bob, { name: 'Bob Room', visibility: 'private', slow_seconds: 600 }), 'PATCH room');
     refused(await rooms('DELETE', `/${s.room}/messages/${s.annMsg}`, bob), 'delete Ann\'s message');
     refused(await rooms('DELETE', `/${s.room}/messages/${s.catMsg}`, bob), 'delete Cat\'s message');
@@ -74,27 +74,27 @@ t('rooms: Bob, a member of Ann\'s room, cannot change it, delete her or Cat\'s m
     }
     refused(await rooms('POST', `/${s.room}/attachments`, bob, { service: 'community', resource: 'bobs-space' }), 'attach');
     refused(await rooms('DELETE', `/${s.room}/attachments/community/anything`, bob), 'detach');
-    same(before, snapshot());
+    same(before, await snapshot());
 });
 
 t('group DM: Bob cannot delete Ann\'s message or remove Cat (only the creator removes others)', async () => {
-    const before = snapshot();
+    const before = await snapshot();
     refused(await api('DELETE', `/api/dm/conversations/${s.conv}/messages/${s.dmMsg}`, bob), 'delete Ann\'s DM');
     refused(await api('DELETE', `/api/dm/conversations/${s.conv}/participants/${cat.id}`, bob), 'remove Cat');
     refused(await api('DELETE', `/api/dm/conversations/${s.conv}/participants/${ann.id}`, bob), 'remove Ann');
-    same(before, snapshot());
+    same(before, await snapshot());
 });
 
 t('sounds: Bob cannot delete Ann\'s channel sound or rename her sound command', async () => {
-    const before = snapshot();
+    const before = await snapshot();
     refused(await api('DELETE', `/api/sounds/${s.sound}`, bob), 'delete sound');
     refused(await api('PATCH', '/api/sounds/command', bob, { channel_id: ann.id, command: 'annhorn', new_command: 'pwned', emote_code: 'x' }), 'rename command (channel)');
     refused(await api('PATCH', '/api/sounds/command', bob, { stream_id: annStream, command: 'annhorn', new_command: 'pwned' }), 'rename command (stream)');
-    same(before, snapshot());
+    same(before, await snapshot());
 });
 
 t('TTS/sound queue: Bob cannot read, skip, clear or report in Ann\'s room, nor reach her request through his own', async () => {
-    const before = snapshot();
+    const before = await snapshot();
     refused(await api('GET', `/api/tts/queue?stream_id=${annStream}`, bob), 'list Ann\'s queue');
     refused(await api('GET', `/api/tts/queue?channel_user_id=${ann.id}`, bob), 'list Ann\'s channel queue');
     refused(await api('POST', '/api/tts/queue/skip', bob, { stream_id: annStream, id: s.annReqId }), 'skip in Ann\'s room');
@@ -104,7 +104,7 @@ t('TTS/sound queue: Bob cannot read, skip, clear or report in Ann\'s room, nor r
     assert.ok([404, 409].includes(through.status), `Ann's request through Bob's room: ${through.status} ${through.text}`);
     const report = await api('POST', `/api/tts/queue/${s.annReqId}/report`, bob, { stream_id: bobStream, state: 'failed', error: 'x' });
     assert.ok([400, 403, 404, 409].includes(report.status), `report Ann's request from Bob's room: ${report.status} ${report.text}`);
-    same(before, snapshot());
+    same(before, await snapshot());
 });
 
 t('calls: Bob cannot change Ann\'s stream call settings or delete her voice channel', async () => {
@@ -119,9 +119,9 @@ t('calls: Bob cannot change Ann\'s stream call settings or delete her voice chan
 });
 
 t('moderation: Bob cannot purge Ann\'s stream chat', async () => {
-    h.db.saveChatMessage({ stream_id: annStream, channel_user_id: ann.id, user_id: cat.id, username: 'cat', message: 'cat chats on ann' });
-    const count = () => h.db.all('SELECT count(*) AS n FROM chat_messages WHERE stream_id = ? AND COALESCE(is_deleted, 0) = 0', [annStream])[0].n;
-    const before = count();
+    await h.db.saveChatMessage({ stream_id: annStream, channel_user_id: ann.id, user_id: cat.id, username: 'cat', message: 'cat chats on ann' });
+    const count = async () => (await h.db.all('SELECT count(*) AS n FROM chat_messages WHERE stream_id = ? AND COALESCE(is_deleted, 0) = 0', [annStream]))[0].n;
+    const before = await count();
     assert.ok(before >= 1);
     const range = { from: '2000-01-01T00:00:00Z', to: '2100-01-01T00:00:00Z' };
     for (const key of ['streamId', 'stream_id']) {
@@ -130,7 +130,7 @@ t('moderation: Bob cannot purge Ann\'s stream chat', async () => {
         const p = await api('POST', '/api/chat/admin/purge/preview', bob, { [key]: annStream, ...range });
         if (key === 'streamId') refused(p, 'preview Ann\'s stream');
     }
-    assert.strictEqual(count(), before, 'Ann\'s chat is intact');
+    assert.strictEqual(await count(), before, 'Ann\'s chat is intact');
 });
 
 t('preferences: a body naming Ann writes Bob\'s own record only', async () => {

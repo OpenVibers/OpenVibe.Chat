@@ -38,8 +38,20 @@ module.exports = {
         hour: Math.max(1, int(process.env.CHAT_LIMITS_HOUR, 3000)),
     },
 
-    // Chat's own SQLite database (systemd StateDirectory openvibe-chat).
-    dbPath: process.env.CHAT_DB_PATH || './data/chat.db',
+    // PostgreSQL (ADR-035): DATABASE_URL serves (through PgBouncer), DATABASE_DIRECT_URL runs migrations
+    // (the owner role, a direct connection). Development and `npm test` use an embedded PGlite instead
+    // (server/db/database.js openDb). DATABASE_POOL_MAX caps this process's pool (default 10).
+    db: {
+        url: process.env.DATABASE_URL || '',
+        directUrl: process.env.DATABASE_DIRECT_URL || '',
+        max: Math.max(1, int(process.env.DATABASE_POOL_MAX, 10)),
+    },
+
+    // Valkey: the shared per-actor rate-limit counters (openvibe-sdk/limits). Unset = in-process counters.
+    valkey: {
+        url: process.env.VALKEY_URL || '',
+        prefix: process.env.VALKEY_PREFIX || 'ov:chat:',
+    },
 
     // OpenVibe.Network — issuer of user JWTs and service tokens.
     networkUrl: strip(process.env.OV_NETWORK_URL || 'https://openvibe.network'),

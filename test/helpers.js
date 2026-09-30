@@ -285,7 +285,6 @@ async function boot({ env = {} } = {}) {
         HOST: '127.0.0.1',
         BASE_URL: 'https://openvibe.live',
         TRUST_PROXY: '2',
-        CHAT_DB_PATH: path.join(tmp, 'chat.db'),
         CHAT_CACHE_DIR: path.join(tmp, 'cache'),
         SOUNDS_PATH: path.join(tmp, 'sounds'),
         OV_NETWORK_URL: ISS,
@@ -319,14 +318,14 @@ async function boot({ env = {} } = {}) {
             return id;
         },
         /** Write the channel's own moderation settings row (the six chat tables are Chat's; C-04). */
-        setChannelSettings(channelId, settings) {
+        async setChannelSettings(channelId, settings) {
             const d = h.db.getDb();
-            d.prepare('DELETE FROM channel_moderation_settings WHERE channel_id = ?').run(Number(channelId));
+            await d.prepare('DELETE FROM channel_moderation_settings WHERE channel_id = ?').run(Number(channelId));
             if (settings) {
                 const keys = Object.keys(settings).filter((k) => /^[a-z_]+$/.test(k));
-                d.prepare(`INSERT INTO channel_moderation_settings (channel_id, ${keys.join(', ')}) VALUES (?, ${keys.map(() => '?').join(', ')})`).run(Number(channelId), ...keys.map((k) => settings[k]));
+                await d.prepare(`INSERT INTO channel_moderation_settings (channel_id, ${keys.join(', ')}) VALUES (?, ${keys.map(() => '?').join(', ')})`).run(Number(channelId), ...keys.map((k) => settings[k]));
             }
-            h.ctx.invalidateChannel(Number(channelId));
+            await h.ctx.invalidateChannel(Number(channelId));
         },
         addStream(userId, channelId, { title = 'Live now', is_live = 1, managed = null } = {}) {
             const id = 500 + live.streams.size;
@@ -403,15 +402,19 @@ async function boot({ env = {} } = {}) {
         try { h.chatServer.close(); } catch { /* */ }
         try { h.ctx.stop(); h.mirrorRelay.stop(); h.eventsRelay.stop(); } catch { /* */ }
         await new Promise((r) => h.server.close(() => r()));
-        try { h.db.close(); } catch { /* */ }
+        try { await h.db.close(); } catch { /* */ }
         h.children = [];
     };
+    /** The environment a process this test spawns needs to reach the same database (a script, a second Chat). */
+    h.childDbEnv = async () => (globalThis.__ovChatTestChildEnv ? await globalThis.__ovChatTestChildEnv() : {});
     h.freePort = () => new Promise((r) => { const s = http.createServer().listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => r(p)); }); });
     h.spawnChat = async ({ port, env = {} } = {}) => {
         const { spawn } = require('child_process');
+        // The same database as this process (test/helpers/pg-preload.mjs): the run's schema, or this PGlite over a socket.
+        const dbEnv = await h.childDbEnv();
         const child = spawn(process.execPath, [path.join(__dirname, '..', 'server', 'index.js')], {
             cwd: path.join(__dirname, '..'),
-            env: { ...process.env, PORT: String(port), ...env },
+            env: { ...process.env, ...dbEnv, PORT: String(port), ...env },
             stdio: ['ignore', 'pipe', 'pipe'],
         });
         child.log = '';
@@ -443,7 +446,7 @@ async function boot({ env = {} } = {}) {
         try { h.ctx.stop(); h.mirrorRelay.stop(); h.eventsRelay.stop(); h.eventsConsumer.stop(); h.subscriptions.stop(); } catch { /* */ }
         await new Promise((r) => h.server.close(() => r()));
         network.close(); liveServer.close(); if (liveServer.closeAllConnections) liveServer.closeAllConnections();
-        try { h.db.close(); } catch { /* */ }
+        try { await h.db.close(); } catch { /* */ }
         fs.rmSync(tmp, { recursive: true, force: true });
     };
     h.sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -461,6 +464,7 @@ function suite(name) {
             try { await s.fn(); process.stdout.write(`  ✓ ${s.label}\n`); } catch (err) { failed++; process.stdout.write(`  ✗ ${s.label}\n${err && err.stack || err}\n`); break; }
         }
         try { if (cleanup) await cleanup(); } catch { /* */ }
+        try { if (globalThis.__ovChatTestDbClose) await globalThis.__ovChatTestDbClose(); } catch { /* */ }
         process.stdout.write(`${name}: ${failed ? 'FAILED' : `${steps.length} checks passed`}\n`);
         process.exit(failed ? 1 : 0);
     };

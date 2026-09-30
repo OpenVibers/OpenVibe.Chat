@@ -13,12 +13,11 @@
  * real id — including a bridge broadcast whose insert was acknowledged before the restart).
  */
 const assert = require('assert');
-const Database = require('better-sqlite3');
 const path = require('path');
 const { boot, suite } = require('./helpers');
 
 const t = suite('restart-resume');
-let h, chat, port, dbFile, streamer, posters, reader, channelId, streamId;
+let h, chat, port, streamer, posters, reader, channelId, streamId;
 const REF = -(2 ** 40) - 1;
 const BOOT = 'live-boot-restart';
 let BRIDGE;
@@ -26,12 +25,9 @@ const sockets = [];
 
 const calls = (ops) => h.http('POST', '/internal/live/calls', { token: BRIDGE, body: { boot: BOOT, ops: ops.map((o, i) => ({ seq: i + 1, ...o })) } });
 
-// What the database says the rooms hold (a separate read-only connection: Chat is another process).
-function roomRows(where, params) {
-    const d = new Database(dbFile, { readonly: true, fileMustExist: true });
-    try {
-        return d.prepare(`SELECT id, message, message_type FROM chat_messages WHERE is_deleted = 0 AND ${where} ORDER BY id`).all(...params);
-    } finally { d.close(); }
+// What the database says the rooms hold (this process's own handle on the same database: Chat is another process).
+async function roomRows(where, params) {
+    return await h.db.getDb().prepare(`SELECT id, message, message_type FROM chat_messages WHERE is_deleted = 0 AND ${where} ORDER BY id`).all(...params);
 }
 
 /** A reader as Live's chat.js keeps one: shown rows by id and the cursor (the highest id shown). */
@@ -78,9 +74,9 @@ async function post(user, ip, text) {
     return own.id;
 }
 
-const streamRoom = { key: 'stream', rows: () => roomRows('channel_user_id = ?', [streamer.id]), delta: (after) => h.http('GET', `/api/chat/${streamId}/history?after_id=${after}`) };
-const channelRoom = { key: 'channel', rows: () => roomRows('channel_user_id = ?', [streamer.id]), delta: (after) => h.http('GET', `/api/chat/channel/${streamer.id}/history?after_id=${after}`) };
-const globalRoom = { key: 'global', rows: () => roomRows("message_type IN ('chat', 'system', 'channel-sound', 'soundboard', 'donation')", []), delta: (after) => h.http('GET', `/api/chat/global/history?after_id=${after}`) };
+const streamRoom = { key: 'stream', rows: async () => await roomRows('channel_user_id = ?', [streamer.id]), delta: (after) => h.http('GET', `/api/chat/${streamId}/history?after_id=${after}`) };
+const channelRoom = { key: 'channel', rows: async () => await roomRows('channel_user_id = ?', [streamer.id]), delta: (after) => h.http('GET', `/api/chat/channel/${streamer.id}/history?after_id=${after}`) };
+const globalRoom = { key: 'global', rows: async () => await roomRows("message_type IN ('chat', 'system', 'channel-sound', 'soundboard', 'donation')", []), delta: (after) => h.http('GET', `/api/chat/global/history?after_id=${after}`) };
 
 const readers = {};
 
@@ -92,7 +88,6 @@ t('boot the stubs, then Chat as its own process', async () => {
     posters = ['ann', 'ben', 'cat', 'dan', 'eve', 'fay'].map((n) => h.addUser(n));
     channelId = h.addChannel(streamer.id);
     streamId = h.addStream(streamer.id, channelId);
-    dbFile = path.join(h.tmp, 'chat.db');
     await h.detach();
     port = await h.freePort();
     chat = await h.spawnChat({ port });
@@ -136,7 +131,7 @@ t('the stream reader drops off; messages keep coming; Chat restarts (SIGTERM, ne
     // And one whose response Live never got: it will send it again after the restart.
     const lost = await calls([{ op: 'db', ref: REF - 3, key: 'live:r4', args: ['saveChatMessage', { stream_id: streamId, username: 'ChatBot', message: 'bridge retried', message_type: 'chat', source_platform: 'ai' }] }]);
     assert.ok(lost.body.results[0].ok, lost.text);
-    beforeMax = roomRows('1 = 1', []).reduce((m, x) => Math.max(m, x.id), 0);
+    beforeMax = (await roomRows('1 = 1', [])).reduce((m, x) => Math.max(m, x.id), 0);
 
     const closed = new Promise((r) => readers.global.ws.on('close', r));
     const exit = await h.stopChat(chat);
@@ -155,7 +150,7 @@ t('after the restart: the split broadcast of an acknowledged insert, a retried i
     const late = await calls([{ op: 'forwardToGlobal', args: [streamId, { type: 'chat', id: REF - 1, username: 'ChatBot', message: 'bridge across restart' }] }]);
     assert.ok(late.body.results[0].ok, late.text);
     const frame = await readers.global.ws.next((m) => m.type === 'chat' && m.message === 'bridge across restart');
-    assert.strictEqual(frame.id, roomRows("message = 'bridge across restart'", [])[0].id, 'the placeholder maps to the real id after a restart');
+    assert.strictEqual(frame.id, (await roomRows("message = 'bridge across restart'", []))[0].id, 'the placeholder maps to the real id after a restart');
 
     // The insert whose answer was lost comes again with its key and its broadcast: applied once,
     // and the broadcast carries the first insert's id.
@@ -164,7 +159,7 @@ t('after the restart: the split broadcast of an acknowledged insert, a retried i
         { op: 'forwardToGlobal', args: [streamId, { type: 'chat', id: REF - 3, username: 'ChatBot', message: 'bridge retried' }] },
     ]);
     assert.ok(retry.body.results.every((x) => x.ok), retry.text);
-    const once = roomRows("message = 'bridge retried'", []);
+    const once = await roomRows("message = 'bridge retried'", []);
     assert.strictEqual(once.length, 1, 'a retried insert is applied once across the restart');
     assert.strictEqual(retry.body.results[0].result.lastInsertRowid, once[0].id);
     assert.strictEqual((await readers.global.ws.next((m) => m.type === 'chat' && m.message === 'bridge retried')).id, once[0].id);
@@ -198,7 +193,7 @@ for (const [name, room] of [['stream', streamRoom], ['global', globalRoom], ['ch
         if (name === 'stream') await r.ws.next((m) => m.type === 'chat' && m.message === 'during reconnect');
 
         assert.deepStrictEqual(r.bad, [], `${name}: every frame carries its row's real id`);
-        const want = room.rows();
+        const want = await room.rows();
         assert.deepStrictEqual([...r.shown.keys()].sort((a, b) => a - b), want.map((x) => x.id), `${name}: exactly the room's rows`);
         const seen = new Set();
         for (const text of r.texts) { assert.ok(!seen.has(text), `${name}: "${text}" shown twice`); seen.add(text); }

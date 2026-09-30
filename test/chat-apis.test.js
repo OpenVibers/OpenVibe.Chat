@@ -70,10 +70,10 @@ t('internal read API: settings + moderator_ids validate, defaults for a channel 
 });
 
 t('internal read API: moderator_ids oldest first; the channels a user moderates validate', async () => {
-    h.db.addChannelModerator(channelId, mod.id, streamer.id);
-    h.db.run('UPDATE channel_moderators SET created_at = ? WHERE user_id = ?', ['2026-01-01 00:00:00', mod.id]);
-    h.db.addChannelModerator(channelId, stranger.id, streamer.id);
-    h.db.run('UPDATE channel_moderators SET created_at = ? WHERE user_id = ?', ['2026-02-01 00:00:00', stranger.id]);
+    await h.db.addChannelModerator(channelId, mod.id, streamer.id);
+    await h.db.run('UPDATE channel_moderators SET created_at = ? WHERE user_id = ?', ['2026-01-01 00:00:00', mod.id]);
+    await h.db.addChannelModerator(channelId, stranger.id, streamer.id);
+    await h.db.run('UPDATE channel_moderators SET created_at = ? WHERE user_id = ?', ['2026-02-01 00:00:00', stranger.id]);
     const r = await h.http('GET', `/internal/moderation/channels/${channelId}`, { token: RO });
     checkContract('chat.channel-moderation-result', r.body);
     assert.deepStrictEqual(r.body.moderator_ids, [mod.id, stranger.id]);
@@ -118,7 +118,7 @@ t('emote API: create uploads to Media, lists in Live\'s shapes, clash and cap', 
     assert.strictEqual(up.status, 200, JSON.stringify(up.body));
     assert.strictEqual(up.body.emote.code, 'hype');
     assert.strictEqual(up.body.emote.url, 'https://openvibe.media/chat/emote.png');
-    const row = h.db.get('SELECT * FROM emotes WHERE code = ?', ['hype']);
+    const row = await h.db.get('SELECT * FROM emotes WHERE code = ?', ['hype']);
     assert.strictEqual(row.media_asset_id, 777);
     assert.strictEqual(row.media_url, 'https://openvibe.media/chat/emote.png');
     assert.strictEqual(row.size, 150);
@@ -155,19 +155,19 @@ t('emote API: create uploads to Media, lists in Live\'s shapes, clash and cap', 
 });
 
 t('emote API: rename/resize, delete removes the Media object', async () => {
-    const row = h.db.get('SELECT * FROM emotes WHERE code = ?', ['hype']);
+    const row = await h.db.get('SELECT * FROM emotes WHERE code = ?', ['hype']);
     let r = await h.http('PATCH', `/api/emotes/${row.id}`, { token: streamer.token, body: { code: 'hype2', size: 300 } });
     assert.strictEqual(r.status, 200, r.text);
     assert.deepStrictEqual([r.body.code, r.body.size], ['hype2', 200], 'size clamped to the channel max (200)');
 
     r = await h.http('DELETE', `/api/emotes/${row.id}`, { token: streamer.token });
     assert.strictEqual(r.status, 200, r.text);
-    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM emotes WHERE id = ?', [row.id]).n, 0);
+    assert.strictEqual((await h.db.get('SELECT COUNT(*) AS n FROM emotes WHERE id = ?', [row.id])).n, 0);
     assert.deepStrictEqual(deletedAssets, [777], 'the Media object is removed');
 });
 
 t('emote API: not-mine is refused, sources round-trip through the Live-context effect', async () => {
-    const row = h.db.get('SELECT id FROM emotes WHERE code = ?', ['two']);
+    const row = await h.db.get('SELECT id FROM emotes WHERE code = ?', ['two']);
     const r = await h.http('PATCH', `/api/emotes/${row.id}`, { token: other.token, body: { code: 'nope' } });
     assert.strictEqual(r.status, 403, r.text);
 
@@ -212,7 +212,7 @@ t('moderators: list is public to any signed-in reader; moderation settings are m
 });
 
 t('moderation settings: owner writes, a mod cannot change policy keys', async () => {
-    h.db.addChannelModerator(channelId, mod.id, streamer.id);
+    await h.db.addChannelModerator(channelId, mod.id, streamer.id);
     let r = await h.http('PUT', `/api/chat/channels/${channelId}/moderation`, { token: streamer.token, body: { slow_mode_seconds: 12, ip_approval_mode: 1 } });
     assert.strictEqual(r.status, 200, r.text);
     assert.strictEqual(r.body.settings.slow_mode_seconds, 12);
@@ -239,7 +239,7 @@ t('moderation settings: owner writes, a mod cannot change policy keys', async ()
 t('alert op: Chat resolves the sound from its own row and broadcasts it', async () => {
     const snd = path.join(h.tmp, 'sounds', 'donation.mp3');
     fs.writeFileSync(snd, 'ID3alert');
-    h.db.setChannelAlertSound(channelId, 'donation', snd, 'audio/mpeg');
+    await h.db.setChannelAlertSound(channelId, 'donation', snd, 'audio/mpeg');
 
     const ws = await h.ws({ ip: '198.51.100.7', stream: streamId });
     ws.sendJson({ type: 'join', streamId, channelUserId: streamer.id, anonId: null });

@@ -24,12 +24,12 @@ const serviceAuth = require('../net/service-auth');
 const router = express.Router();
 const guard = serviceAuth.guard('chat.moderation.read');
 
-router.get('/channels/:channelId', guard, (req, res) => {
+router.get('/channels/:channelId', guard, async (req, res) => {
     try {
         const channelId = parseInt(req.params.channelId, 10);
         if (!channelId) return res.status(400).json({ ok: false, error: 'Invalid channel ID' });
-        const settings = db.getChannelModerationSettingsRow(channelId) || ctx.defaultModerationSettings(channelId);
-        const moderator_ids = db.getChannelModeratorIds(channelId);
+        const settings = await db.getChannelModerationSettingsRow(channelId) || ctx.defaultModerationSettings(channelId);
+        const moderator_ids = await db.getChannelModeratorIds(channelId);
         res.json({ ok: true, settings, moderator_ids });
     } catch (err) {
         console.error('[Moderation] channel read:', err.message);
@@ -37,11 +37,11 @@ router.get('/channels/:channelId', guard, (req, res) => {
     }
 });
 
-router.get('/users/:userId/channels', guard, (req, res) => {
+router.get('/users/:userId/channels', guard, async (req, res) => {
     try {
         const userId = parseInt(req.params.userId, 10);
         if (!userId) return res.status(400).json({ ok: false, error: 'Invalid user ID' });
-        const channels = db.getChannelsByModerator(userId).map((c) => ({
+        const channels = (await db.getChannelsByModerator(userId)).map((c) => ({
             channel_id: Number(c.channel_id),
             title: c.title == null ? null : String(c.title),
             owner_user_id: c.owner_user_id == null ? null : Number(c.owner_user_id),
@@ -54,13 +54,13 @@ router.get('/users/:userId/channels', guard, (req, res) => {
     }
 });
 
-router.get('/channels/:channelId/emote-count', guard, (req, res) => {
+router.get('/channels/:channelId/emote-count', guard, async (req, res) => {
     try {
         const raw = parseInt(req.params.channelId, 10);
         if (!raw) return res.status(400).json({ ok: false, error: 'Invalid channel ID' });
         // A channels.id resolves to its owner's user id (the emotes' key); a user id is used as it is.
-        const ownerId = (ctx.getChannelById(raw) || {}).user_id || raw;
-        res.json({ ok: true, count: db.countChannelEmotes(ownerId) });
+        const ownerId = (await ctx.getChannelById(raw) || {}).user_id || raw;
+        res.json({ ok: true, count: await db.countChannelEmotes(ownerId) });
     } catch (err) {
         console.error('[Moderation] emote count:', err.message);
         res.status(500).json({ ok: false, error: 'Failed to count emotes' });

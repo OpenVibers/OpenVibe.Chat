@@ -43,8 +43,8 @@ t('only Live’s service token, only from loopback', async () => {
 
 t('sending a chat message needs chat.message.send; without it only those ops are refused', async () => {
     const APP = 'app:app_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3';
-    const before = h.db.get('SELECT COUNT(*) AS n FROM chat_messages').n;
-    const outboxBefore = h.db.get('SELECT COUNT(*) AS n FROM events_outbox').n;
+    const before = (await h.db.get('SELECT COUNT(*) AS n FROM chat_messages')).n;
+    const outboxBefore = (await h.db.get('SELECT COUNT(*) AS n FROM events_outbox')).n;
     const commit = { hash: 'f'.repeat(40), short: 'fffffff', date: '2026-09-22T10:00:00Z', subject: 'denied deploy' };
     const sends = [
         { op: 'db', ref: REF - 50, key: 'live:denied:1', args: ['saveChatMessage', { stream_id: streamId, username: 'Bot', message: 'denied insert', message_type: 'chat' }] },
@@ -74,9 +74,9 @@ t('sending a chat message needs chat.message.send; without it only those ops are
     const denied = (m) => /denied (insert|line|dm|deploy)/.test(JSON.stringify(m));
     assert.ok(await viewerWs.none(denied), 'no refused message reached the stream room');
     assert.ok(await globalWs.none(denied), 'no refused message reached global chat');
-    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM chat_messages').n, before, 'nothing persisted');
-    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM events_outbox').n, outboxBefore, 'no chat.message.created');
-    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM bridge_applied WHERE key = ?', ['live:denied:1']).n, 0, 'a refused write is not marked applied');
+    assert.strictEqual((await h.db.get('SELECT COUNT(*) AS n FROM chat_messages')).n, before, 'nothing persisted');
+    assert.strictEqual((await h.db.get('SELECT COUNT(*) AS n FROM events_outbox')).n, outboxBefore, 'no chat.message.created');
+    assert.strictEqual((await h.db.get('SELECT COUNT(*) AS n FROM bridge_applied WHERE key = ?', ['live:denied:1'])).n, 0, 'a refused write is not marked applied');
     // The capability alone is not enough either: the bridge capability is still required.
     assert.strictEqual((await calls(sends.slice(0, 1), { token: h.serviceToken(['chat.message.send']) })).status, 403);
     // An app principal holding both may send.
@@ -101,16 +101,16 @@ t('a forwarded insert gets its real id, and later ops of the boot are rewritten'
     const cross = await globalWs.next((m) => m.type === 'chat' && m.message === 'beep boop');
     assert.strictEqual(cross.id, realId);
     assert.strictEqual(cross.stream_channel, 'streamer');
-    const row = h.db.getChatMessageById(realId);
+    const row = await h.db.getChatMessageById(realId);
     assert.strictEqual(row.channel_user_id, streamer.id, 'channel derived from the stream');
     assert.strictEqual(row.source_platform, 'ai');
 });
 
 t('a retried write (same key) is applied once and answers the first result', async () => {
-    const before = h.db.get('SELECT COUNT(*) AS n FROM chat_messages').n;
+    const before = (await h.db.get('SELECT COUNT(*) AS n FROM chat_messages')).n;
     const r = await calls([{ op: 'db', ref: REF, key: 'live:1', args: ['saveChatMessage', { stream_id: streamId, username: 'ChatBot', message: 'beep boop', message_type: 'chat' }] }]);
     assert.strictEqual(r.body.results[0].result.lastInsertRowid, realId);
-    assert.strictEqual(h.db.get('SELECT COUNT(*) AS n FROM chat_messages').n, before);
+    assert.strictEqual((await h.db.get('SELECT COUNT(*) AS n FROM chat_messages')).n, before);
 });
 
 t('placeholders are per Live boot', async () => {
@@ -127,12 +127,12 @@ t('only allow-listed writes; unknown ops refused', async () => {
         { op: 'db', args: ['deleteChatMessage', realId, streamer.id] },
     ]);
     assert.deepStrictEqual(r.body.results.map((x) => x.ok), [false, false, true]);
-    assert.ok(h.db.get('SELECT COUNT(*) AS n FROM chat_messages').n > 0);
-    assert.strictEqual(h.db.getChatMessageById(realId).is_deleted, 1);
+    assert.ok((await h.db.get('SELECT COUNT(*) AS n FROM chat_messages')).n > 0);
+    assert.strictEqual((await h.db.getChatMessageById(realId)).is_deleted, 1);
     // Moderation from Live's /api/mod lands in Chat's log, with an internal event.
     const m = await calls([{ op: 'db', ref: REF - 1, key: 'live:2', args: ['logModerationAction', { scope_type: 'site', actor_user_id: streamer.id, action_type: 'message_delete', details: { id: realId } }] }]);
     assert.ok(m.body.results[0].ok);
-    const ev = h.db.all("SELECT event FROM events_outbox WHERE event_type = 'chat.moderation.action'").map((x) => JSON.parse(x.event)).pop();
+    const ev = (await h.db.all("SELECT event FROM events_outbox WHERE event_type = 'chat.moderation.action'")).map((x) => JSON.parse(x.event)).pop();
     assert.strictEqual(ev.payload.action_type, 'message_delete');
     assert.strictEqual(ev.visibility, 'internal');
 });
@@ -147,11 +147,11 @@ t('DMs through the bridge keep the participant check', async () => {
 });
 
 t('a user update from Live refreshes sockets and rewrites stored names', async () => {
-    h.db.saveChatMessage({ stream_id: streamId, user_id: viewer.id, username: 'Viewer', message: 'old name line', message_type: 'chat' });
+    await h.db.saveChatMessage({ stream_id: streamId, user_id: viewer.id, username: 'Viewer', message: 'old name line', message_type: 'chat' });
     await calls([{ op: 'sendUserUpdate', args: [viewer.id, { id: viewer.id, username: 'viewer', display_name: 'Viewer Renamed', role: 'user', avatar_url: null, profile_color: '#123456' }] }]);
     const u = await viewerWs.next((m) => m.type === 'user-updated');
     assert.strictEqual(u.user.display_name, 'Viewer Renamed');
-    assert.strictEqual(h.db.get('SELECT username FROM chat_messages WHERE message = ?', ['old name line']).username, 'Viewer Renamed');
+    assert.strictEqual((await h.db.get('SELECT username FROM chat_messages WHERE message = ?', ['old name line'])).username, 'Viewer Renamed');
     await h.sleep(1100);
     viewerWs.sendJson({ type: 'chat', message: 'with the new name' });
     const own = await globalWs.next((m) => m.type === 'chat' && m.message === 'with the new name');
@@ -168,20 +168,20 @@ t('deploy notices: stored as one rolling global row, shown to everyone, folded o
     const commit = (n) => ({ hash: String(n).repeat(40).slice(0, 40), short: String(n).repeat(7), date: '2026-09-22T10:00:00Z', subject: `change ${n}` });
     let r = await calls([{ op: 'deployNotice', args: [[commit(1)]] }]);
     const id1 = r.body.results[0].result.id;
-    const row = h.db.getChatMessageById(id1);
+    const row = await h.db.getChatMessageById(id1);
     assert.strictEqual(row.message_type, 'system');
     assert.strictEqual(JSON.parse(row.metadata).kind, 'deploy');
     r = await calls([{ op: 'deployNotice', args: [[commit(2)]] }]);
     assert.strictEqual(r.body.results[0].result.id, id1, 'folded into the same row');
-    assert.strictEqual(JSON.parse(h.db.getChatMessageById(id1).metadata).deploys, 2);
+    assert.strictEqual(JSON.parse((await h.db.getChatMessageById(id1)).metadata).deploys, 2);
     // Someone speaks in a stream room (the global feed shows it): the next deploy is a new card,
     // so no card's time range runs past a message under it.
-    h.db.saveChatMessage({ stream_id: streamId, user_id: viewer.id, username: viewer.username, message: 'hello brother', message_type: 'chat', is_global: false });
+    await h.db.saveChatMessage({ stream_id: streamId, user_id: viewer.id, username: viewer.username, message: 'hello brother', message_type: 'chat', is_global: false });
     r = await calls([{ op: 'deployNotice', args: [[commit(3)]] }]);
     const id3 = r.body.results[0].result.id;
     assert.notStrictEqual(id3, id1, 'a message since the last card starts a new card');
-    assert.strictEqual(JSON.parse(h.db.getChatMessageById(id3).metadata).deploys, 1);
-    assert.strictEqual(JSON.parse(h.db.getChatMessageById(id1).metadata).deploys, 2, 'the old card is left as it was');
+    assert.strictEqual(JSON.parse((await h.db.getChatMessageById(id3)).metadata).deploys, 1);
+    assert.strictEqual(JSON.parse((await h.db.getChatMessageById(id1)).metadata).deploys, 2, 'the old card is left as it was');
     // A late joiner gets it once.
     const late = await h.ws({ ip: '198.51.100.52' });
     late.sendJson({ type: 'join' });
@@ -191,11 +191,11 @@ t('deploy notices: stored as one rolling global row, shown to everyone, folded o
 });
 
 t('the invalidate op is accepted for a channel and refuses an unknown kind', async () => {
-    assert.strictEqual(h.ctx.isChannelModerator(viewer.id, channelId), false);
-    h.db.addChannelModerator(channelId, viewer.id, streamer.id);       // the moderator row is Chat's own (C-04)
+    assert.strictEqual(await h.ctx.isChannelModerator(viewer.id, channelId), false);
+    await h.db.addChannelModerator(channelId, viewer.id, streamer.id);       // the moderator row is Chat's own (C-04)
     const r = await calls([{ op: 'invalidate', args: ['channel', channelId] }, { op: 'invalidate', args: ['nonsense', 1] }]);
     assert.deepStrictEqual(r.body.results.map((x) => x.ok), [true, false]);
-    assert.strictEqual(h.ctx.isChannelModerator(viewer.id, channelId), true);
+    assert.strictEqual(await h.ctx.isChannelModerator(viewer.id, channelId), true);
 });
 
 t('presence snapshot for Live’s synchronous reads', async () => {

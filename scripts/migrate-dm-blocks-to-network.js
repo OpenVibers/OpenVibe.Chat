@@ -13,7 +13,7 @@
  * Options:
  *   --out <file>   required with --apply; must not exist
  *   --resolve      first ask Live (live-context, as Chat does at runtime) for people missing from ctx_users
- *   --db <path>    Chat's database (default CHAT_DB_PATH, else ./data/chat.db)
+ *   Chat's database is the service's (DATABASE_URL / DATABASE_DIRECT_URL, or the development PGlite).
  *
  * People are Live ids here; each is mapped to its Network subject the way Chat records it: the blocker's
  * dm_blocks.blocker_subject_id (written when they blocked), else ctx_users.subject_id; the blocked person's
@@ -28,9 +28,8 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
 
-const USAGE = 'usage: node scripts/migrate-dm-blocks-to-network.js [--db <chat.db>] [--resolve] [--apply --out <file>]';
+const USAGE = 'usage: node scripts/migrate-dm-blocks-to-network.js [--resolve] [--apply --out <file>]';
 const SUBJECT_RE = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 function parseArgs(argv) {
@@ -42,7 +41,6 @@ function parseArgs(argv) {
         else if (a === '--dry-run') out.apply = false;
         else if (a === '--resolve') out.resolve = true;
         else if (a === '--out') out.out = value();
-        else if (a === '--db') out.db = value();
         else if (a === '-h' || a === '--help') out.help = true;
         else throw new Error(`unknown argument ${a}`);
     }
@@ -52,8 +50,8 @@ function parseArgs(argv) {
 }
 
 /** dm_blocks → { pairs: [{ blocker_subject, blocked_subject }], rows, skipped: { reason: n }, unmapped_ids } */
-function plan(db) {
-    const rows = db.all(`SELECT b.id, b.blocker_id, b.blocked_id, b.blocker_subject_id, a.subject_id AS blocker_ctx, c.subject_id AS blocked_ctx
+async function plan(db) {
+    const rows = await db.all(`SELECT b.id, b.blocker_id, b.blocked_id, b.blocker_subject_id, a.subject_id AS blocker_ctx, c.subject_id AS blocked_ctx
         FROM dm_blocks b LEFT JOIN ctx_users a ON a.id = b.blocker_id LEFT JOIN ctx_users c ON c.id = b.blocked_id ORDER BY b.id`);
     const ok = (s) => (SUBJECT_RE.test(String(s || '')) ? String(s) : null);
     const pairs = [];
@@ -79,21 +77,18 @@ async function main(argv, log = (m) => console.log(m)) {
     let args;
     try { args = parseArgs(argv); } catch (e) { log(`${e.message}\n${USAGE}`); return 2; }
     if (args.help) { log(USAGE); return 0; }
-    if (args.db) {
-        if (!fs.existsSync(args.db)) { log(`no Chat database at ${args.db}`); return 2; }
-        process.env.CHAT_DB_PATH = path.resolve(args.db);
-    }
     const db = require('../server/db/database');
+    await db.initDb();
     if (args.resolve) {
-        const missing = db.all(`SELECT DISTINCT id FROM (SELECT blocker_id AS id FROM dm_blocks UNION SELECT blocked_id FROM dm_blocks)
-            WHERE id NOT IN (SELECT id FROM ctx_users)`).map((r) => r.id);
+        const missing = (await db.all(`SELECT DISTINCT id FROM (SELECT blocker_id AS id FROM dm_blocks UNION SELECT blocked_id FROM dm_blocks) AS people
+            WHERE id NOT IN (SELECT id FROM ctx_users) ORDER BY id`)).map((r) => r.id);
         if (missing.length) {
             const ctx = require('../server/live-context');
             for (let i = 0; i < missing.length; i += 500) await ctx.ensureUsers(missing.slice(i, i + 500));
         }
         log(`asked Live for ${missing.length} person(s) missing from ctx_users`);
     }
-    const p = plan(db);
+    const p = await plan(db);
     const why = Object.entries(p.skipped).map(([k, n]) => `${k} ${n}`).join(', ') || 'none';
     log(`dm_blocks ${p.rows}; pairs for Network ${p.pairs.length}; skipped: ${why}`);
     if (p.unmapped_ids.length) log(`Live ids without a Network subject: ${p.unmapped_ids.slice(0, 50).join(', ')}${p.unmapped_ids.length > 50 ? ` (+${p.unmapped_ids.length - 50} more)` : ''}`);

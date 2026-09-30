@@ -44,19 +44,19 @@ const MODES = ['mic', 'mic+cam', 'cam+mic'];
 
 /* ── Voice Channels (global, non-stream) ───────────────────── */
 
-router.get('/voice-channels', optionalAuth, (req, res) => {
+router.get('/voice-channels', optionalAuth, async (req, res) => {
     try {
         res.set('Cache-Control', 'no-store'); // private calls differ per viewer; the list is pushed anyway
-        res.json({ channels: callServer.listChannels(req.user || null) });
+        res.json({ channels: await callServer.listChannels(req.user || null) });
     } catch (err) {
         console.error('[Calls]', err.message);
         res.status(500).json({ error: 'Failed to list voice channels' });
     }
 });
 
-router.get('/voice-channels/:channelId', optionalAuth, (req, res) => {
+router.get('/voice-channels/:channelId', optionalAuth, async (req, res) => {
     try {
-        const ch = callServer.getChannel(req.params.channelId, req.user || null);
+        const ch = await callServer.getChannel(req.params.channelId, req.user || null);
         if (!ch) return res.status(404).json({ error: 'Channel not found' });
         res.json({ channel: ch });
     } catch (err) {
@@ -77,9 +77,9 @@ router.post('/voice-channels', requireAuth, channelLimit, (req, res) => {
     }
 });
 
-router.delete('/voice-channels/:channelId', requireAuth, channelLimit, (req, res) => {
+router.delete('/voice-channels/:channelId', requireAuth, channelLimit, async (req, res) => {
     try {
-        const ok = callServer.deleteChannel(req.params.channelId, req.user);
+        const ok = await callServer.deleteChannel(req.params.channelId, req.user);
         if (!ok) return res.status(403).json({ error: 'Cannot delete this channel' });
         res.json({ deleted: true });
     } catch (err) {
@@ -92,16 +92,16 @@ router.delete('/voice-channels/:channelId', requireAuth, channelLimit, (req, res
 async function findUser(id, username) {
     let user = null;
     if (id > 0) {
-        user = ctx.getUserById(id);
-        if (!user) { await ctx.ensureUsers([id]).catch(() => {}); user = ctx.getUserById(id); }
+        user = await ctx.getUserById(id);
+        if (!user) { await ctx.ensureUsers([id]).catch(() => {}); user = await ctx.getUserById(id); }
     }
     if (!user && username) user = await ctx.ensureUserByUsername(username);
     return user || null;
 }
 
 /** The caller hears "no answer" when their ring times out (the frame the callee's browser sends). */
-function tellCallerNoAnswer(row, channelName, target) {
-    chatServer.sendDm(row.created_by, {
+async function tellCallerNoAnswer(row, channelName, target) {
+    await chatServer.sendDm(row.created_by, {
         type: 'vc-call-response',
         status: 'no-answer',
         channelId: row.channel_id,
@@ -129,11 +129,11 @@ router.post('/voice-channels/call-user', requireAuth, ringLimit, async (req, res
         const targetUser = await findUser(targetUserId, targetUsername);
         if (!targetUser) return res.status(404).json({ error: 'User not found' });
         if (targetUser.id === req.user.id) return res.status(400).json({ error: 'You cannot call yourself' });
-        try { if (dm.isBlockedEither && dm.isBlockedEither(req.user.id, targetUser.id)) return res.status(403).json({ error: 'You cannot call this user' }); } catch { /* */ }
+        try { if (dm.isBlockedEither && await dm.isBlockedEither(req.user.id, targetUser.id)) return res.status(403).json({ error: 'You cannot call this user' }); } catch { /* */ }
 
         // Reuse caller's existing temp channel if present; otherwise create a private one — a
         // 1:1 call is not something the whole site should see listed and be able to walk into.
-        const existing = (callServer.listChannels(req.user) || []).find(ch => !ch.permanent && !ch.streamId && ch.createdBy === req.user.id) || null;
+        const existing = (await callServer.listChannels(req.user) || []).find(ch => !ch.permanent && !ch.streamId && ch.createdBy === req.user.id) || null;
         const channel = existing || callServer.createChannel({
             name: `${req.user.display_name || req.user.username}'s call`,
             mode: 'mic+cam',
@@ -141,7 +141,7 @@ router.post('/voice-channels/call-user', requireAuth, ringLimit, async (req, res
             maxParticipants: 8,
             isPrivate: true,
         });
-        call = lifecycle.openDirect({ callerId: req.user.id, targetId: targetUser.id, channelId: channel.id });
+        call = await lifecycle.openDirect({ callerId: req.user.id, targetId: targetUser.id, channelId: channel.id });
         if (!callServer.invite(channel.id, targetUser.id)) throw new Error('the call channel is gone');
 
         const callerName = req.user.display_name || req.user.username || 'Someone';
@@ -157,7 +157,7 @@ router.post('/voice-channels/call-user', requireAuth, ringLimit, async (req, res
         };
 
         // Real-time invite for online users via existing chat WS connections.
-        chatServer.sendDm(targetUser.id, payload);
+        await chatServer.sendDm(targetUser.id, payload);
 
         // Persistent cross-site notification for offline users / later join (Live pushes it).
         ctx.effects.notifyCallInvite({
@@ -167,18 +167,18 @@ router.post('/voice-channels/call-user', requireAuth, ringLimit, async (req, res
             channel_name: channel.name,
         });
 
-        lifecycle.ring(call.id, { timeoutMs: config.calls.ringTimeoutMs, onTimeout: (row) => tellCallerNoAnswer(row, channel.name, targetUser) });
+        await lifecycle.ring(call.id, { timeoutMs: config.calls.ringTimeoutMs, onTimeout: async (row) => await tellCallerNoAnswer(row, channel.name, targetUser) });
 
         return res.json({ invited: true, reusedChannel: !!existing, channel });
     } catch (err) {
         if (err.code === 'CHANNEL_LIMIT') return res.status(400).json({ error: err.message });
-        if (call) { try { lifecycle.fail(call.id, `invite_failed: ${err.message}`); } catch { /* */ } }
+        if (call) { try { await lifecycle.fail(call.id, `invite_failed: ${err.message}`); } catch { /* */ } }
         console.error('[Calls]', err.message);
         return res.status(500).json({ error: 'Failed to call user' });
     }
 });
 
-router.post('/voice-channels/call-user/respond', requireAuth, answerLimit, (req, res) => {
+router.post('/voice-channels/call-user/respond', requireAuth, answerLimit, async (req, res) => {
     try {
         const callerUserId = Number(req.body?.caller_user_id || 0);
         const channelId = String(req.body?.channel_id || '').trim();
@@ -191,13 +191,13 @@ router.post('/voice-channels/call-user/respond', requireAuth, answerLimit, (req,
         if (!allowed.has(status)) return res.status(400).json({ error: 'Invalid response status' });
         if (callerUserId === req.user.id) return res.status(400).json({ error: 'Invalid caller target' });
         // Only an invited user can answer, and only to the caller who owns that channel.
-        const ch = callServer.getChannel(channelId, req.user);
+        const ch = await callServer.getChannel(channelId, req.user);
         if (!ch || ch.createdBy !== callerUserId || !callServer.hasInvite(channelId, req.user.id)) return res.status(403).json({ error: 'No such invite' });
 
-        try { lifecycle.respond({ callerId: callerUserId, targetId: req.user.id, channelId, status }); } catch (err) { console.warn('[Calls] lifecycle:', err.message); }
+        try { await lifecycle.respond({ callerId: callerUserId, targetId: req.user.id, channelId, status }); } catch (err) { console.warn('[Calls] lifecycle:', err.message); }
 
         const fromDisplayName = req.user.display_name || req.user.username || 'Someone';
-        chatServer.sendDm(callerUserId, {
+        await chatServer.sendDm(callerUserId, {
             type: 'vc-call-response',
             status,
             channelId,
@@ -248,9 +248,9 @@ router.put('/:id/call', requireAuth, channelLimit, async (req, res) => {
 
         // Create or remove stream voice channel
         if (call_mode) {
-            callServer.createStreamChannel(stream.id, call_mode, stream.user_id, stream);
+            await callServer.createStreamChannel(stream.id, call_mode, stream.user_id, stream);
         } else {
-            callServer.removeStreamChannel(stream.id);
+            await callServer.removeStreamChannel(stream.id);
         }
 
         res.json(callStatus(stream.id, call_mode));
@@ -262,7 +262,7 @@ router.put('/:id/call', requireAuth, channelLimit, async (req, res) => {
 
 router.get('/:id/call', optionalAuth, async (req, res) => {
     try {
-        const stream = ctx.getStreamById(req.params.id) || await ctx.ensureStream(req.params.id);
+        const stream = await ctx.getStreamById(req.params.id) || await ctx.ensureStream(req.params.id);
         if (!stream) return res.status(404).json({ error: 'Stream not found' });
         const ch = callServer.channels.get(`stream-${stream.id}`);
         res.json(callStatus(stream.id, ch ? ch.mode : null));
