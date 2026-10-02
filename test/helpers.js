@@ -342,6 +342,7 @@ async function boot({ env = {} } = {}) {
     h.eventsRelay = started.relay;
     h.eventsConsumer = started.events;
     h.subscriptions = started.subscriptions;
+    h.shutdown = started.shutdown;
     h.port = started.server.address().port;
     h.base = `http://127.0.0.1:${h.port}`;
     h.db = require('../server/db/database');
