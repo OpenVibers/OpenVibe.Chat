@@ -16,10 +16,27 @@
  *            window ends it is played and the next one goes out.
  *   played, skipped, failed  final.
  *
- * A Chat restart keeps the queue: `recover()` at boot finishes rows that were playing (they reached
- * the room before the restart), fails rows queued too long ago to still matter, and plays the rest
- * once the room has listeners again: a second after the first socket rejoins it (clients come back
- * 1–4 s after a restart notice), or after RESUME_GRACE_MS whatever happens.
+ * One clip per room across every Chat process: `claim()` takes the room's advisory lock in its
+ * transaction and takes nothing while the room has a playing row (the partial unique index
+ * idx_audio_requests_one_playing, migrations/0002, is the store's guarantee). A process that loses
+ * gets nothing; the room's next pump (the owner's, when its clip ends, or the heartbeat) plays it.
+ *
+ * Claims are owned: a playing row records its process (`claimed_by`, the instance id: host and port,
+ * or CHAT_AUDIO_INSTANCE_ID) and a lease (`lease_until`) the owner renews every HEARTBEAT_MS while it
+ * lives. Only a row whose owner is dead is ever settled by another hand — its lease has passed, or it
+ * is this process's own row from before a restart (same instance id) — by `recover()` at boot and by
+ * the heartbeat's sweep. Such a row:
+ *   - was never delivered (no started_at: its owner died while making it): it goes back to queued,
+ *     in its old place (the queue plays by id), once; `attempts` counts claims, so a row claimed
+ *     MAX_ATTEMPTS (2) times that dies again undelivered fails ('not delivered: its owner stopped
+ *     twice') and a clip that crashes Chat cannot loop;
+ *   - was delivered (started_at set): it is played ('delivered before a restart'), never replayed.
+ * A row of a live owner, on any process, is never touched.
+ *
+ * A Chat restart keeps the queue: `recover()` at boot settles its own and dead owners' playing rows
+ * as above, fails rows queued too long ago to still matter, and plays the rest once the room has
+ * listeners again: a second after the first socket rejoins it (clients come back 1–4 s after a
+ * restart notice), or after RESUME_GRACE_MS whatever happens.
  * A keyed request (a TTS of chat message m<id>) is queued once per room, so a retried bridge call
  * or a double delivery never reads it twice, even across a restart.
  *
@@ -31,6 +48,7 @@
  */
 'use strict';
 
+const os = require('os');
 const db = require('../db/database');
 
 const STATES = ['queued', 'playing', 'played', 'skipped', 'failed'];
@@ -47,7 +65,10 @@ const GAP_MS = 250;                  // between two clips
 const MIN_PLAY_MS = 500;
 const MAX_PLAY_MS = 60 * 1000;
 const STALE_MS = 5 * 60 * 1000;      // a request still queued this long after it was made is dropped
-const MAX_ATTEMPTS = 3;              // a request whose making crashed Chat this often fails
+const MAX_ATTEMPTS = 2;              // claims of one request: its owner may die undelivered once (one replay)
+const LEASE_MS = 30 * 1000;          // a playing row's owner is dead once its lease is this old…
+const HEARTBEAT_MS = 10 * 1000;      // …and a live owner renews it this often (and sweeps dead owners' rows)
+const LOCK_SPACE = 71_440_216;       // pg_advisory_xact_lock(LOCK_SPACE, hashtext(room)): one claim per room at a time
 const KEEP_MS = 7 * 24 * 3600 * 1000;
 const RESUME_GRACE_MS = 8000;        // after a restart, a room with waiting requests resumes by then…
 const RESUME_SETTLE_MS = 1000;       // …or this long after a socket rejoins it
@@ -131,6 +152,10 @@ async function transition(id, to, { error = null, actor = null, durationMs = nul
 // ── Runtime ─────────────────────────────────────────────────────────────────────────────────────
 const performers = {};   // kind → async (row, payload) → { frame, durationMs } | null
 let deliver = null;      // (row, frame) → void
+let instanceId = process.env.CHAT_AUDIO_INSTANCE_ID || `${os.hostname()}:${process.env.PORT || 4400}`;
+let clock = () => Date.now();
+let heartbeat = null;
+const waiting = new Set(); // rooms whose claim lost to another process's playing row: pumped again by the heartbeat
 const rooms = new Map(); // room → { busy, timer, playingId }
 let stopped = false;
 
@@ -158,16 +183,29 @@ function roomJoined(room) {
 /**
  * Wire the queue to the chat server: how each kind is made, and how a frame reaches a room.
  * `performers[kind](row, payload)` resolves { frame, durationMs } or null (nothing to play).
+ * `instanceId` names this process's claims (default: host and port); `clock` (ms) is for tests.
+ * `heartbeat: false` leaves lease renewal and the sweep to the caller (tests call tick()).
  */
-function init({ performers: p, deliver: d }) {
+function init({ performers: p, deliver: d, instanceId: id = null, clock: c = null, heartbeat: beat = true }) {
     Object.assign(performers, p || {});
     deliver = d;
+    if (id) instanceId = String(id);
+    if (c) clock = c;
     stopped = false;
+    if (heartbeat) clearInterval(heartbeat);
+    heartbeat = null;
+    if (beat) {
+        heartbeat = setInterval(() => { tick().catch((err) => console.warn('[AudioQueue] heartbeat:', err.message)); }, HEARTBEAT_MS);
+        if (heartbeat.unref) heartbeat.unref();
+    }
 }
 
 /** Stop pacing timers (shutdown). States stay as they are; recover() picks them up at boot. */
 function stop() {
     stopped = true;
+    if (heartbeat) clearInterval(heartbeat);
+    heartbeat = null;
+    waiting.clear();
     for (const st of rooms.values()) {
         if (st.timer) clearTimeout(st.timer);
         if (st.holdTimer) clearTimeout(st.holdTimer);
@@ -210,11 +248,34 @@ async function enqueue({ kind, streamId = null, channelUserId = null, requestedB
 }
 
 /**
- * Take a queued request to play (plan T3 decision 3): one atomic UPDATE, so of two pumps (two processes) at most
- * one gets the row back; null = someone else took it, or it was skipped. Counts the attempt.
+ * Take a queued request to play (plan T3 decision 3), owned by this process under a lease. One transaction holding
+ * the room's advisory lock: nothing while the room has a playing row (any process's), else one atomic UPDATE, so of
+ * two pumps (two processes) at most one gets a row of a room back. Counts the attempt.
+ * → the row, or null with `busy` set when the room is playing (null without it: someone took or skipped this row).
  */
-async function claim(id) {
-    return await db.get("UPDATE audio_requests SET state = 'playing', attempts = attempts + 1 WHERE id = ? AND state = 'queued' RETURNING *", [id]) || null;
+async function claim(id, { now = clock() } = {}) {
+    const out = await claimOrBusy(id, now);
+    return out.row;
+}
+async function claimOrBusy(id, now) {
+    try {
+        return await db.tx(async () => {
+            const q = await db.get("SELECT room FROM audio_requests WHERE id = ? AND state = 'queued'", [id]);
+            if (!q) return { row: null, busy: false };
+            await db.get('SELECT pg_advisory_xact_lock(?, hashtext(?)) AS locked', [LOCK_SPACE, q.room]);
+            if (await db.get("SELECT 1 AS one FROM audio_requests WHERE room = ? AND state = 'playing'", [q.room])) return { row: null, busy: true };
+            const row = await db.get(
+                `UPDATE audio_requests SET state = 'playing', attempts = attempts + 1, claimed_by = ?, lease_until = ?
+                  WHERE id = ? AND state = 'queued' RETURNING *`,
+                [instanceId, now + LEASE_MS, id],
+            );
+            return { row: row || null, busy: false };
+        });
+    } catch (err) {
+        // The one-playing-row index refused it: a claimer that does not take the lock (a previous release) won.
+        if (err && err.code === '23505') return { row: null, busy: true };
+        throw err;
+    }
 }
 
 /** Play the next request of a room if none is playing. */
@@ -228,10 +289,12 @@ async function pump(room) {
             if (stopped) return;
             let row;
             try { row = await db.get("SELECT * FROM audio_requests WHERE room = ? AND state = 'queued' ORDER BY id LIMIT 1", [room]); } catch { return; }
-            if (!row) return;
+            if (!row) { waiting.delete(room); return; }
             if (row.attempts >= MAX_ATTEMPTS) { await transition(row.id, 'failed', { error: 'gave up after repeated attempts', actor: 'system' }); continue; }
-            const claimed = await claim(row.id);
+            const { row: claimed, busy } = await claimOrBusy(row.id, clock());
+            if (busy) { waiting.add(room); return; }   // another process plays this room: its finish (or the heartbeat) pumps again
             if (!claimed) continue;   // another pump took it (or it was skipped): the next one
+            waiting.delete(room);
             row = claimed;
             // The audio is made outside any transaction (a synth takes seconds); the row stays 'playing' meanwhile.
             st.makingId = row.id;
@@ -326,21 +389,59 @@ async function list(room, { recent = 20 } = {}) {
 }
 
 /**
- * Boot: rows playing when Chat stopped were delivered, so they are played; rows queued too long
- * ago fail as expired; every room with queued rows starts playing again.
+ * Settle the playing rows of dead owners: a lease that has passed (or none: a previous release's claim), and with
+ * `mine` this instance's own rows (at boot they are from before the restart). Delivered → played; undelivered →
+ * queued again in its old place, or failed once it has been claimed MAX_ATTEMPTS times. A live owner's row is
+ * never touched. → { played, requeued, failed, rooms }
  */
-async function recover({ now = Date.now(), graceMs = RESUME_GRACE_MS } = {}) {
-    const played = (await db.run("UPDATE audio_requests SET state = 'played', finished_at = ?, error = 'delivered before a restart' WHERE state = 'playing'", [now])).changes;
+async function reclaimDead({ now = clock(), mine = false } = {}) {
+    const dead = `state = 'playing' AND (lease_until IS NULL OR lease_until < ?${mine ? ' OR claimed_by = ?' : ''})`;
+    const args = mine ? [now, instanceId] : [now];
+    const played = await db.all(`UPDATE audio_requests SET state = 'played', finished_at = ?, error = 'delivered before a restart'
+                                  WHERE ${dead} AND started_at IS NOT NULL RETURNING room`, [now, ...args]);
+    const failed = await db.all(`UPDATE audio_requests SET state = 'failed', finished_at = ?, error = 'not delivered: its owner stopped twice', actor = 'system'
+                                  WHERE ${dead} AND started_at IS NULL AND attempts >= ? RETURNING room`, [now, ...args, MAX_ATTEMPTS]);
+    const requeued = await db.all(`UPDATE audio_requests SET state = 'queued', claimed_by = NULL, lease_until = NULL, duration_ms = NULL
+                                    WHERE ${dead} AND started_at IS NULL AND attempts < ? RETURNING room`, [...args, MAX_ATTEMPTS]);
+    const rooms = [...new Set([...played, ...failed, ...requeued].map((r) => r.room))];
+    return { played: played.length, requeued: requeued.length, failed: failed.length, rooms };
+}
+
+/**
+ * The heartbeat (every HEARTBEAT_MS, or by hand in tests): renew this process's leases, settle dead owners' rows
+ * and pump the rooms that freed, and retry rooms whose claim lost to another process.
+ */
+async function tick({ now = clock() } = {}) {
+    if (stopped) return { renewed: 0, rooms: [] };
+    const renewed = (await db.run("UPDATE audio_requests SET lease_until = ? WHERE state = 'playing' AND claimed_by = ?", [now + LEASE_MS, instanceId])).changes;
+    const swept = await reclaimDead({ now });
+    if (swept.rooms.length) console.log(`[AudioQueue] swept dead owners' rows: ${swept.played} finished, ${swept.requeued} requeued, ${swept.failed} failed`);
+    const rooms = [...new Set([...swept.rooms, ...waiting])];
+    for (const room of rooms) await pump(room).catch((err) => console.warn('[AudioQueue] pump:', err.message));
+    return { renewed, ...swept, rooms };
+}
+
+/**
+ * Boot: this instance's rows from before the restart and dead owners' rows are settled (reclaimDead); rows
+ * queued too long ago fail as expired; every room with queued rows starts playing again. Another live process's
+ * playing rows stay as they are.
+ */
+async function recover({ now = clock(), graceMs = RESUME_GRACE_MS } = {}) {
+    const settled = await reclaimDead({ now, mine: true });
+    const played = settled.played;
     const expired = (await db.run("UPDATE audio_requests SET state = 'failed', finished_at = ?, error = 'expired', actor = 'system' WHERE state = 'queued' AND created_at < ?", [now, now - STALE_MS])).changes;
     await db.run("DELETE FROM audio_requests WHERE state IN ('played', 'skipped', 'failed') AND COALESCE(finished_at, created_at) < ?", [now - KEEP_MS]);
     const pending = (await db.all("SELECT DISTINCT room FROM audio_requests WHERE state = 'queued'")).map((r) => r.room);
     for (const room of pending) holdRoom(room, now + graceMs);
-    if (played || expired || pending.length) console.log(`[AudioQueue] recovered: ${played} finished, ${expired} expired, ${pending.length} room(s) resuming`);
-    return { played, expired, rooms: pending };
+    if (played || settled.requeued || settled.failed || expired || pending.length) {
+        console.log(`[AudioQueue] recovered: ${played} finished, ${settled.requeued} requeued, ${settled.failed} failed, ${expired} expired, ${pending.length} room(s) resuming`);
+    }
+    return { played, requeued: settled.requeued, failed: settled.failed, expired, rooms: pending };
 }
 
 module.exports = {
-    STATES, TRANSITIONS, KINDS, STALE_MS, GAP_MS, RESUME_GRACE_MS, RESUME_SETTLE_MS,
+    STATES, TRANSITIONS, KINDS, STALE_MS, GAP_MS, RESUME_GRACE_MS, RESUME_SETTLE_MS, MAX_ATTEMPTS, LEASE_MS, HEARTBEAT_MS,
     canTransition, roomKey, estimatePlayMs, mp3Bitrate,
-    init, stop, enqueue, pump, claim, skip, clear, report, list, recover, roomJoined, getRequest, transition,
+    init, stop, enqueue, pump, claim, skip, clear, report, list, recover, tick, reclaimDead, roomJoined, getRequest, transition,
+    get instanceId() { return instanceId; },
 };

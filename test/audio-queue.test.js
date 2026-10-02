@@ -6,7 +6,9 @@
  * recorded and the queue moves on; a keyed request is queued once; and a Chat restart (a real
  * process, SIGTERM) keeps the queue: what was playing is finished, what waited plays, in order,
  * once. The frames clients already know (tts-audio, soundboard-audio) are unchanged apart from a
- * new request_id.
+ * new request_id. The restart boundary across processes runs on an injected clock and instance ids:
+ * a live owner's playing row is never touched by another process's recover(); a dead owner's row
+ * is replayed once if it was never delivered, finished if it was.
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -254,7 +256,7 @@ t('restart: what was playing is finished, what waited plays in order once, stale
         await ins.run(`stream:${streamId}`, streamId, 'crashy', JSON.stringify({ file, title: '!crashy' }), Date.now(), 3);
     });
     port = await h.freePort();
-    chat = await h.spawnChat({ port });
+    chat = await h.spawnChat({ port, env: { CHAT_AUDIO_INSTANCE_ID: 'chat-under-test' } });
     assert.strictEqual((await raw(async (d) => await d.prepare("SELECT state, error FROM audio_requests WHERE label = 'stale'").get())).error, 'expired');
     // The room's queue is held until it has listeners again (a second after the first rejoins).
     await h.sleep(300);
@@ -278,7 +280,7 @@ t('restart: what was playing is finished, what waited plays in order once, stale
 
     const exit = await h.stopChat(chat);
     assert.deepStrictEqual(exit, { code: 0, signal: null }, chat.log);
-    chat = await h.spawnChat({ port });
+    chat = await h.spawnChat({ port, env: { CHAT_AUDIO_INSTANCE_ID: 'chat-under-test' } });
     await h.sleep(300);
     assert.strictEqual(await raw(async (d) => (await d.prepare('SELECT state FROM audio_requests WHERE id = ?').get(queued[1].id)).state), 'queued', 'nothing plays into an empty room');
     const ears2 = await joined(listenerUser, '198.51.100.130');
@@ -298,6 +300,88 @@ t('restart: what was playing is finished, what waited plays in order once, stale
     s.sendJson({ type: 'chat', message: '/cleartts' });
     await s.next((m) => m.type === 'system' && /^Cleared 1 TTS\/sound request\./.test(m.message));
     assert.strictEqual(await raw(async (d) => (await d.prepare('SELECT state FROM audio_requests WHERE id = ?').get(queued[2].id)).state), 'skipped');
+});
+
+// ── The restart boundary between processes: injected clock and instance ids, no sleeps ─────────────────────────
+const QUEUE = require.resolve('../server/chat/audio-queue');
+/** A fresh copy of the queue module standing for one Chat process (its own instance id, clock and rooms). */
+function proc(name, clockRef, plays) {
+    delete require.cache[QUEUE];
+    const q = require(QUEUE);
+    delete require.cache[QUEUE];
+    q.init({
+        performers: { tts: async () => ({ frame: { type: 'tts-audio', audio: '' }, durationMs: 1 }) },
+        deliver: (row, frame) => { if (frame.type === 'tts-audio') plays.push({ by: name, id: row.id }); },
+        instanceId: name, clock: () => clockRef.now, heartbeat: false,
+    });
+    return q;
+}
+t('restart boundary: live owners are left alone, a dead owner\'s clip is replayed once if undelivered, finished if delivered', async () => {
+    // A day ahead of the wall clock: nothing here can look expired to the queues running on real time in this run.
+    const T = Date.now() + 24 * 3600e3;
+    const clock = { now: T };
+    const plays = [];
+    const LEASE = aq.LEASE_MS;
+    const put = async (room, label, f) => Number((await h.db.run(
+        `INSERT INTO audio_requests (room, stream_id, kind, state, label, payload, created_at, attempts, claimed_by, lease_until, started_at)
+         VALUES (?, ?, 'tts', ?, ?, '{}', ?, ?, ?, ?, ?)`,
+        [room, Number(room.split(':')[1]), f.state, label, T - 1000, f.attempts || 0, f.owner || null, f.lease || null, f.started || null],
+    )).lastInsertRowid);
+    const row = async (id) => await h.db.get('SELECT state, attempts, claimed_by, lease_until, error FROM audio_requests WHERE id = ?', [id]);
+
+    // stream:9601 — process P is alive and playing; stream:9602 — a dead owner's clip still being made;
+    // stream:9603 — a dead owner's clip already delivered.
+    const live = await put('stream:9601', 'live', { state: 'playing', attempts: 1, owner: 'proc-p', lease: T + LEASE, started: T - 500 });
+    const liveNext = await put('stream:9601', 'live-next', { state: 'queued' });
+    const undelivered = await put('stream:9602', 'undelivered', { state: 'playing', attempts: 1, owner: 'proc-dead', lease: T - 1 });
+    const behind = await put('stream:9602', 'behind', { state: 'queued' });
+    const delivered = await put('stream:9603', 'delivered', { state: 'playing', attempts: 1, owner: 'proc-dead', lease: T - 1, started: T - 3000 });
+
+    const p = proc('proc-p', clock, plays);
+    const q = proc('proc-q', clock, plays);
+    const out = await q.recover({ now: T });   // Q boots while P lives
+    assert.ok(out.requeued >= 1 && out.played >= 1, JSON.stringify(out));
+    assert.deepStrictEqual(await row(live), { state: 'playing', attempts: 1, claimed_by: 'proc-p', lease_until: T + LEASE, error: null }, 'a live owner\'s row is untouched');
+    assert.strictEqual(await q.claim(liveNext), null, 'and its room plays nothing else meanwhile');
+    assert.deepStrictEqual(await row(undelivered), { state: 'queued', attempts: 1, claimed_by: null, lease_until: null, error: null }, 'undelivered: queued again');
+    assert.deepStrictEqual((await q.list('stream:9602')).queued.map((x) => x.id), [undelivered, behind], 'in its old place');
+    assert.deepStrictEqual(await row(delivered), { state: 'played', attempts: 1, claimed_by: 'proc-dead', lease_until: T - 1, error: 'delivered before a restart' }, 'delivered: finished, not replayed');
+
+    // P's heartbeat renews its lease; at the old expiry, Q's sweep still leaves P's row alone.
+    clock.now = T + LEASE - 1;
+    assert.strictEqual((await p.tick()).renewed, 1);
+    clock.now = T + LEASE + 1;
+    await q.tick();
+    assert.strictEqual((await row(live)).state, 'playing');
+    assert.strictEqual((await row(live)).claimed_by, 'proc-p');
+
+    // The replay: Q claims the requeued clip (its second claim), then dies before delivering it.
+    const again = await q.claim(undelivered);
+    assert.strictEqual(again.attempts, 2);
+    assert.strictEqual(again.claimed_by, 'proc-q');
+    q.stop();
+    // Within Q's lease nobody touches it; past it, R's sweep fails it (no second replay) and the room moves on.
+    const r = proc('proc-r', clock, plays);
+    clock.now = again.lease_until - 1;
+    await p.tick();   // P is still alive
+    clock.now = again.lease_until;
+    await r.tick();
+    assert.strictEqual((await row(undelivered)).state, 'playing', 'lease not yet passed');
+    clock.now = again.lease_until + 1;
+    const swept = await r.tick();
+    assert.ok(swept.failed >= 1, JSON.stringify(swept));
+    const dead = await row(undelivered);
+    assert.strictEqual(dead.state, 'failed');
+    assert.strictEqual(dead.error, 'not delivered: its owner stopped twice');
+    assert.strictEqual((await h.db.get('SELECT state, claimed_by FROM audio_requests WHERE id = ?', [behind])).claimed_by, 'proc-r');
+    assert.deepStrictEqual(plays, [{ by: 'proc-r', id: behind }], 'the next clip plays; the failed one never does');
+    assert.strictEqual((await row(live)).claimed_by, 'proc-p', 'P, alive throughout, still owns its clip');
+    assert.strictEqual((await row(live)).state, 'playing');
+    // A later recover() by anyone does not bring the failed clip back.
+    const s = proc('proc-s', clock, plays);
+    await s.recover({ now: clock.now });
+    assert.strictEqual((await row(undelivered)).state, 'failed');
+    for (const x of [p, r, s]) x.stop();
 });
 
 t.run(async () => {

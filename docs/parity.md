@@ -88,6 +88,14 @@ The gaps the script found on 2026-09-25, with the product decisions taken for th
   the channel room and the global feed too. Cursor reads name them in `deleted_ids`.
 - **`/clear` clears screens** (Twitch semantics) and now says so to the moderator: "Chat cleared on
   screen; messages stay in history — use purge to remove them."
+- **One TTS/sound clip per room across Chat processes** (2026-10-01). Two processes could each claim a
+  different queued request of one room and play both at once, and a booting process finished every
+  `playing` row, other live processes' included, dropping a clip whose owner died before delivering
+  it. A claim now holds the room's advisory lock and takes nothing while the room plays (partial
+  unique index `idx_audio_requests_one_playing`, `migrations/0002_audio_claim_owner.sql`); a playing
+  row carries its owner (`claimed_by`) and a lease (`lease_until`, renewed by the owner), and only a
+  dead owner's row is settled: `played` if its delivery had started, else replayed once in its old
+  place, then `failed` (see README, the TTS and sound queue).
 
 ## Fixed while building it
 

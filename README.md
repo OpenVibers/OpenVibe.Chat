@@ -31,10 +31,17 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   `/api/tts/*`), 101soundboards and channel sounds (`/api/sounds*`), moderation utils and the word
   filter, the deploy-notice card. Changes are confined to where they touched Live's data.
 - **The TTS and sound queue** (`audio-queue.js`, table `audio_requests`). TTS, channel `!sounds` and
-  101soundboards clips are persisted requests played one at a time per room — `queued → playing →
-  played`, or `skipped` / `failed` — so the queue survives a Chat restart (what was playing is
-  finished, what waited plays once the room has listeners again, requests older than 5 minutes
-  expire) and a keyed request (the TTS of message `m<id>`) is read once. The broadcaster and
+  101soundboards clips are persisted requests played one at a time per room, across every Chat
+  process (a claim holds the room's advisory lock; a partial unique index allows one `playing` row
+  per room) — `queued → playing → played`, or `skipped` / `failed` — so the queue survives a Chat
+  restart (what waited plays once the room has listeners again, requests older than 5 minutes
+  expire) and a keyed request (the TTS of message `m<id>`) is read once. A playing row is owned:
+  `claimed_by` (the process's instance id, host and port or `CHAT_AUDIO_INSTANCE_ID`) and a
+  30-second `lease_until` its owner renews every 10 s. Only a dead owner's row is settled — its
+  lease passed, or it is the restarted process's own — at boot and by the heartbeat's sweep; a live
+  process's clip is never touched. Such a row is `played` if its delivery had started, otherwise
+  queued again in its old place, once: claimed a second time and dead again undelivered, it
+  `failed` (`attempts` counts claims), so a clip that crashes Chat cannot loop. The broadcaster and
   moderators control it: `/skiptts [id]`, `/cleartts`, and `GET /api/tts/queue`,
   `POST /api/tts/queue/skip|clear`, `POST /api/tts/queue/:id/report` (the playing client's
   `played`/`failed`). Browsers get the same `tts-audio` / `soundboard-audio` frames as before, now
