@@ -400,7 +400,7 @@ async function boot({ env = {} } = {}) {
      * a restart is a real SIGTERM and a new process. h.port/h.base follow the child.
      */
     h.detach = async () => {
-        try { h.chatServer.close(); } catch { /* */ }
+        try { await h.chatServer.close(); } catch { /* */ }
         try { h.ctx.stop(); h.mirrorRelay.stop(); h.eventsRelay.stop(); } catch { /* */ }
         await new Promise((r) => h.server.close(() => r()));
         try { await h.db.close(); } catch { /* */ }
@@ -443,7 +443,7 @@ async function boot({ env = {} } = {}) {
 
     h.close = async () => {
         for (const c of h.children || []) { if (c.exitCode == null && c.signalCode == null) { c.kill('SIGKILL'); await c.exited; } }
-        try { h.chatServer.close(); } catch { /* */ }
+        try { await h.chatServer.close(); } catch { /* */ }
         try { h.ctx.stop(); h.mirrorRelay.stop(); h.eventsRelay.stop(); h.eventsConsumer.stop(); h.subscriptions.stop(); } catch { /* */ }
         await new Promise((r) => h.server.close(() => r()));
         network.close(); liveServer.close(); if (liveServer.closeAllConnections) liveServer.closeAllConnections();

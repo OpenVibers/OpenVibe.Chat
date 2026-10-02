@@ -37,6 +37,16 @@
  * as above, fails rows queued too long ago to still matter, and plays the rest once the room has
  * listeners again: a second after the first socket rejoins it (clients come back 1–4 s after a
  * restart notice), or after RESUME_GRACE_MS whatever happens.
+ *
+ * Start and stop are ordered, so a restart is the same every time:
+ *   - `recover()` closes the pump gate before its first await and opens it when the queue is settled and held:
+ *     a pump asked for meanwhile (a socket's request, the heartbeat) is parked and runs after, so a fresh claim of
+ *     this process is never read by recover() as a row left over from before the restart, and nothing plays out of order;
+ *   - `stop()` is async: it cancels the pacing timers, then waits for the work in flight (a pump making a clip, a
+ *     finish, a tick, a recover) before it resolves, and what that work does after the stop is limited to what a
+ *     restart settles anyway: a clip made but not yet delivered is left claimed and undelivered (replayed once), a
+ *     clip delivered is left with its started_at (played, 'delivered before a restart') and gets no pacing timer.
+ *     The chat server awaits it before it closes its sockets and the database.
  * A keyed request (a TTS of chat message m<id>) is queued once per room, so a retried bridge call
  * or a double delivery never reads it twice, even across a restart.
  *
@@ -134,7 +144,7 @@ async function getRequest(id) { return await db.get('SELECT * FROM audio_request
  * Move one request along the state machine. Returns true when it moved (the row was in a state
  * that allows `to`); false when something else moved it first.
  */
-async function transition(id, to, { error = null, actor = null, durationMs = null, now = Date.now() } = {}) {
+async function transition(id, to, { error = null, actor = null, durationMs = null, now = clock() } = {}) {
     const from = Object.keys(TRANSITIONS).filter((s) => TRANSITIONS[s].includes(to));
     if (!from.length) return false;
     const final = to !== 'playing';
@@ -154,7 +164,11 @@ const performers = {};   // kind → async (row, payload) → { frame, durationM
 let deliver = null;      // (row, frame) → void
 let instanceId = process.env.CHAT_AUDIO_INSTANCE_ID || `${os.hostname()}:${process.env.PORT || 4400}`;
 let clock = () => Date.now();
+let timers = { setTimeout, clearTimeout };   // the pacing, hold and deferral timers (tests drive them by hand)
 let heartbeat = null;
+const inflight = new Set(); // pumps, finishes, ticks and recovers still running: stop() waits for them
+const deferred = new Set(); // rooms a pump was asked for while recover() ran: pumped when it is done
+let recovering = false;
 const waiting = new Set(); // rooms whose claim lost to another process's playing row: pumped again by the heartbeat
 const rooms = new Map(); // room → { busy, timer, playingId }
 let stopped = false;
@@ -166,32 +180,37 @@ function roomState(room) {
 
 /** Hold a room's queue until `until` (restart recovery), then play. A shorter hold replaces a longer one. */
 function holdRoom(room, until) {
+    if (stopped) return;
     const st = roomState(room);
     if (st.holdUntil && st.holdUntil <= until) return;
     st.holdUntil = until;
-    if (st.holdTimer) clearTimeout(st.holdTimer);
-    st.holdTimer = setTimeout(() => { st.holdUntil = 0; st.holdTimer = null; pump(room).catch((err) => console.warn('[AudioQueue] pump:', err.message)); }, Math.max(0, until - Date.now()));
+    if (st.holdTimer) timers.clearTimeout(st.holdTimer);
+    st.holdTimer = timers.setTimeout(() => { st.holdUntil = 0; st.holdTimer = null; pump(room).catch((err) => console.warn('[AudioQueue] pump:', err.message)); }, Math.max(0, until - clock()));
     if (st.holdTimer.unref) st.holdTimer.unref();
 }
 
 /** A socket joined a room: a queue held since a restart plays shortly. */
 function roomJoined(room) {
     const st = room && rooms.get(room);
-    if (st && st.holdUntil > Date.now()) holdRoom(room, Date.now() + RESUME_SETTLE_MS);
+    if (st && st.holdUntil > clock()) holdRoom(room, clock() + RESUME_SETTLE_MS);
 }
 
 /**
  * Wire the queue to the chat server: how each kind is made, and how a frame reaches a room.
  * `performers[kind](row, payload)` resolves { frame, durationMs } or null (nothing to play).
  * `instanceId` names this process's claims (default: host and port); `clock` (ms) is for tests.
- * `heartbeat: false` leaves lease renewal and the sweep to the caller (tests call tick()).
+ * `heartbeat: false` leaves lease renewal and the sweep to the caller (tests call tick()); `timers`
+ * ({ setTimeout, clearTimeout }) replaces the pacing, hold and deferral timers (tests fire them by hand).
  */
-function init({ performers: p, deliver: d, instanceId: id = null, clock: c = null, heartbeat: beat = true }) {
+function init({ performers: p, deliver: d, instanceId: id = null, clock: c = null, timers: t = null, heartbeat: beat = true }) {
     Object.assign(performers, p || {});
     deliver = d;
     if (id) instanceId = String(id);
     if (c) clock = c;
+    if (t) timers = { ...timers, ...t };
     stopped = false;
+    recovering = false;
+    deferred.clear();
     if (heartbeat) clearInterval(heartbeat);
     heartbeat = null;
     if (beat) {
@@ -200,17 +219,37 @@ function init({ performers: p, deliver: d, instanceId: id = null, clock: c = nul
     }
 }
 
-/** Stop pacing timers (shutdown). States stay as they are; recover() picks them up at boot. */
-function stop() {
+/** Run `work` as something stop() and idle() wait for. */
+function track(work) {
+    inflight.add(work);
+    const done = () => inflight.delete(work);
+    work.then(done, done);
+    return work;
+}
+/** Resolves once nothing is in flight (what a timer or a request started has finished). */
+async function idle() {
+    while (inflight.size) await Promise.allSettled([...inflight]);
+}
+
+/**
+ * Stop (shutdown): cancel the pacing timers, then wait (at most `graceMs`) for the work in flight, so nothing
+ * of this process's queue is still touching the database or the sockets once it resolves. States stay as they are;
+ * recover() picks them up at boot. Never rejects.
+ */
+async function stop({ graceMs = 3000 } = {}) {
     stopped = true;
     if (heartbeat) clearInterval(heartbeat);
     heartbeat = null;
     waiting.clear();
+    deferred.clear();
     for (const st of rooms.values()) {
-        if (st.timer) clearTimeout(st.timer);
-        if (st.holdTimer) clearTimeout(st.holdTimer);
+        if (st.timer) timers.clearTimeout(st.timer);
+        if (st.holdTimer) timers.clearTimeout(st.holdTimer);
         st.timer = null; st.holdTimer = null;
     }
+    let bound;
+    await Promise.race([idle(), new Promise((resolve) => { bound = setTimeout(resolve, graceMs); })]);
+    clearTimeout(bound);
     rooms.clear();
 }
 
@@ -243,7 +282,7 @@ async function enqueue({ kind, streamId = null, channelUserId = null, requestedB
         if (!r.changes) return { queued: false, reason: 'duplicate' };
         return { queued: true, id: Number(r.lastInsertRowid), room };
     });
-    if (result.queued) setImmediate(() => { pump(result.room).catch((err) => console.warn('[AudioQueue] pump:', err.message)); });
+    if (result.queued) timers.setTimeout(() => { pump(result.room).catch((err) => console.warn('[AudioQueue] pump:', err.message)); }, 0);
     return result;
 }
 
@@ -278,17 +317,20 @@ async function claimOrBusy(id, now) {
     }
 }
 
-/** Play the next request of a room if none is playing. */
-async function pump(room) {
+/** Play the next request of a room if none is playing (not while recover() runs: the room is pumped when it is done). */
+function pump(room) { return track(pumpRoom(room)); }
+async function pumpRoom(room) {
     if (stopped || !room) return;
+    if (recovering) { deferred.add(room); return; }
     const st = roomState(room);
-    if (st.busy || st.playingId || st.holdUntil > Date.now()) return;
+    if (st.busy || st.playingId || st.holdUntil > clock()) return;
     st.busy = true;
     try {
         for (;;) {
             if (stopped) return;
             let row;
             try { row = await db.get("SELECT * FROM audio_requests WHERE room = ? AND state = 'queued' ORDER BY id LIMIT 1", [room]); } catch { return; }
+            if (stopped) return;
             if (!row) { waiting.delete(room); return; }
             if (row.attempts >= MAX_ATTEMPTS) { await transition(row.id, 'failed', { error: 'gave up after repeated attempts', actor: 'system' }); continue; }
             const { row: claimed, busy } = await claimOrBusy(row.id, clock());
@@ -310,12 +352,12 @@ async function pump(room) {
             if (error) { await transition(row.id, 'failed', { error: String(error).slice(0, 300), actor: 'system' }); continue; }
             const durationMs = Math.round(Math.min(MAX_PLAY_MS, Math.max(MIN_PLAY_MS, Number(made.durationMs) || estimatePlayMs(made.frame))));
             // Skipped or cleared while it was being made: nothing goes out.
-            const now = Date.now();
-            const started = await db.run("UPDATE audio_requests SET started_at = ?, duration_ms = ? WHERE id = ? AND state = 'playing'", [now, durationMs, row.id]);
+            const started = await db.run("UPDATE audio_requests SET started_at = ?, duration_ms = ? WHERE id = ? AND state = 'playing'", [clock(), durationMs, row.id]);
             if (!started.changes) continue;
             try { if (deliver) deliver(row, { ...made.frame, request_id: row.id }); } catch (err) { console.warn('[AudioQueue] deliver:', err.message); }
+            if (stopped) return;   // delivered (started_at is set: a restart counts it played); stop() cleared the timers, so no window to pace
             st.playingId = row.id;
-            st.timer = setTimeout(() => { finish(room, row.id, 'played').catch((err) => console.warn('[AudioQueue] finish:', err.message)); }, durationMs + GAP_MS);
+            st.timer = timers.setTimeout(() => { finish(room, row.id, 'played').catch((err) => console.warn('[AudioQueue] finish:', err.message)); }, durationMs + GAP_MS);
             if (st.timer.unref) st.timer.unref();
             return;
         }
@@ -323,15 +365,16 @@ async function pump(room) {
 }
 
 /** End the playing request of a room (its window ended, it was skipped, or the client reported). */
-async function finish(room, id, to, opts = {}) {
+function finish(room, id, to, opts = {}) { return track(finishRoom(room, id, to, opts)); }
+async function finishRoom(room, id, to, opts) {
     const st = roomState(room);
     let moved = false;
     try { moved = await transition(id, to, opts); } catch { moved = false; }
     if (st.playingId === id) {
-        if (st.timer) clearTimeout(st.timer);
+        if (st.timer) timers.clearTimeout(st.timer);
         st.timer = null;
         st.playingId = null;
-        setImmediate(() => { pump(room).catch((err) => console.warn('[AudioQueue] pump:', err.message)); });
+        if (!stopped) timers.setTimeout(() => { pump(room).catch((err) => console.warn('[AudioQueue] pump:', err.message)); }, 0);
     }
     return moved;
 }
@@ -411,7 +454,8 @@ async function reclaimDead({ now = clock(), mine = false } = {}) {
  * The heartbeat (every HEARTBEAT_MS, or by hand in tests): renew this process's leases, settle dead owners' rows
  * and pump the rooms that freed, and retry rooms whose claim lost to another process.
  */
-async function tick({ now = clock() } = {}) {
+function tick(opts) { return track(tickOnce(opts)); }
+async function tickOnce({ now = clock() } = {}) {
     if (stopped) return { renewed: 0, rooms: [] };
     const renewed = (await db.run("UPDATE audio_requests SET lease_until = ? WHERE state = 'playing' AND claimed_by = ?", [now + LEASE_MS, instanceId])).changes;
     const swept = await reclaimDead({ now });
@@ -426,7 +470,19 @@ async function tick({ now = clock() } = {}) {
  * queued too long ago fail as expired; every room with queued rows starts playing again. Another live process's
  * playing rows stay as they are.
  */
-async function recover({ now = clock(), graceMs = RESUME_GRACE_MS } = {}) {
+function recover(opts) { return track(recoverOnce(opts)); }
+async function recoverOnce({ now = clock(), graceMs = RESUME_GRACE_MS } = {}) {
+    recovering = true;   // before the first await: no pump of this process runs until the queue is settled and held
+    try {
+        return await settleAtBoot(now, graceMs);
+    } finally {
+        recovering = false;
+        const asked = [...deferred];
+        deferred.clear();
+        for (const room of asked) pump(room).catch((err) => console.warn('[AudioQueue] pump:', err.message));
+    }
+}
+async function settleAtBoot(now, graceMs) {
     const settled = await reclaimDead({ now, mine: true });
     const played = settled.played;
     const expired = (await db.run("UPDATE audio_requests SET state = 'failed', finished_at = ?, error = 'expired', actor = 'system' WHERE state = 'queued' AND created_at < ?", [now, now - STALE_MS])).changes;
@@ -442,6 +498,6 @@ async function recover({ now = clock(), graceMs = RESUME_GRACE_MS } = {}) {
 module.exports = {
     STATES, TRANSITIONS, KINDS, STALE_MS, GAP_MS, RESUME_GRACE_MS, RESUME_SETTLE_MS, MAX_ATTEMPTS, LEASE_MS, HEARTBEAT_MS,
     canTransition, roomKey, estimatePlayMs, mp3Bitrate,
-    init, stop, enqueue, pump, claim, skip, clear, report, list, recover, tick, reclaimDead, roomJoined, getRequest, transition,
+    init, stop, idle, enqueue, pump, claim, skip, clear, report, list, recover, tick, reclaimDead, roomJoined, getRequest, transition,
     get instanceId() { return instanceId; },
 };
