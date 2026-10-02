@@ -24,6 +24,7 @@ const ctx = require('../live-context');
 const { requireAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const permissions = require('../auth/permissions');
+const { positiveInt } = require('./route-params');
 
 // Per-actor limits (net/actor-limits.js), after requireAuth and before the upload is read: reads take
 // the defaults at app.js (sound files are left to the per-address limit). An upload is up to
@@ -314,7 +315,9 @@ router.use((err, req, res, next) => {
 // ── Delete a sound ───────────────────────────────────────────
 router.delete('/:id', requireAuth, editLimit, async (req, res) => {
     try {
-        const sound = await db.getChannelSoundById(parseInt(req.params.id));
+        const soundId = positiveInt(req.params.id);
+        if (soundId === null) return res.status(400).json({ error: 'invalid sound id' });
+        const sound = await db.getChannelSoundById(soundId);
         if (!sound) return res.status(404).json({ error: 'Sound not found' });
         let allowed = sound.created_by === req.user.id || permissions.can(req.user, 'staff.assets.manage');
         if (!allowed) {

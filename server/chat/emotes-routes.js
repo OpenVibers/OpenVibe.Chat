@@ -33,6 +33,7 @@ const config = require('../config');
 const media = require('../media/client');
 const { requireAuth, optionalAuth } = require('../auth/auth');
 const permissions = require('../auth/permissions');
+const { positiveInt } = require('./route-params');
 
 const router = express.Router();
 
@@ -210,7 +211,8 @@ router.get('/global', async (req, res) => {
 
 router.get('/channel/:userId', async (req, res) => {
     try {
-        const userId = parseInt(req.params.userId);
+        const userId = positiveInt(req.params.userId);
+        if (userId === null) return res.status(400).json({ error: 'invalid user id' });
         const emotes = (await db.getChannelEmotes(userId)).map((e) => ({
             id: `custom-${e.id}`,
             emote_id: e.id,
@@ -361,7 +363,9 @@ router.use((err, req, res, next) => {
 
 router.patch('/:id', requireAuth, async (req, res) => {
     try {
-        const emote = await db.getEmoteById(req.params.id);
+        const id = positiveInt(req.params.id);
+        if (id === null) return res.status(400).json({ error: 'invalid emote id' });
+        const emote = await db.getEmoteById(id);
         if (!emote) return res.status(404).json({ error: 'Emote not found' });
         let allowed = emote.user_id === req.user.id || permissions.can(req.user, 'staff.assets.manage');
         if (!allowed) {
@@ -413,7 +417,9 @@ router.patch('/:id', requireAuth, async (req, res) => {
 
 router.delete('/:id', requireAuth, async (req, res) => {
     try {
-        const emote = await db.getEmoteById(req.params.id);
+        const id = positiveInt(req.params.id);
+        if (id === null) return res.status(400).json({ error: 'invalid emote id' });
+        const emote = await db.getEmoteById(id);
         if (!emote) return res.status(404).json({ error: 'Emote not found' });
         let allowed = emote.user_id === req.user.id || permissions.can(req.user, 'staff.assets.manage');
         if (!allowed) {

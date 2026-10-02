@@ -24,6 +24,7 @@ const db = require('../db/database');
 const ctx = require('../live-context');
 const { requireAuth } = require('../auth/auth');
 const permissions = require('../auth/permissions');
+const { positiveInt } = require('./route-params');
 
 const router = express.Router();
 
@@ -128,7 +129,8 @@ router.post('/:channelId/mods', requireAuth, async (req, res) => {
 router.delete('/:channelId/mods/:userId', requireAuth, async (req, res) => {
     try {
         const channelId = parseInt(req.params.channelId);
-        const userId = parseInt(req.params.userId);
+        const userId = positiveInt(req.params.userId);
+        if (userId === null) return res.status(400).json({ error: 'invalid user id' });
         const channel = await ctx.getChannelById(channelId);
         if (!channel) return res.status(404).json({ error: 'Channel not found' });
         if (!canAssignMods(req.user, channel)) {
@@ -266,7 +268,8 @@ router.get('/:channelId/moderation/chat-search', requireAuth, requireChannelAcce
 // ── Delete a channel chat message ────────────────────────────
 router.post('/:channelId/moderation/messages/:messageId/delete', requireAuth, requireChannelAccess, async (req, res) => {
     try {
-        const messageId = parseInt(req.params.messageId, 10);
+        const messageId = positiveInt(req.params.messageId);
+        if (messageId === null) return res.status(400).json({ error: 'invalid message id' });
         const message = await db.getChatMessageById(messageId);
         if (!message) return res.status(404).json({ error: 'Message not found' });
 

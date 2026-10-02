@@ -20,6 +20,7 @@ const { limits } = require('../net/actor-limits');
 const dm = require('./dm');
 const ctx = require('../live-context');
 const prefStores = require('../prefs/stores');
+const { idParam } = require('./route-params');
 
 /**
  * The target's chat.dm_settings (Network user module): does this person accept a new direct
@@ -38,6 +39,11 @@ function publicMessage(m) {
 
 // All DM routes require authentication
 router.use(requireAuth);
+
+// Ids are validated before the handler (and its queries) see them, one rule per param name.
+router.param('id', idParam('invalid conversation id'));
+router.param('userId', idParam('invalid user id'));
+router.param('msgId', idParam('invalid message id'));
 
 // Per-actor limits (net/actor-limits.js), after requireAuth: reads take the defaults at app.js; each
 // write below has its own number. The per-person DM limits further down (10 messages a minute, 5 new

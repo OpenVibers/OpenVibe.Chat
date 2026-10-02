@@ -33,6 +33,7 @@ const permissions = require('../auth/permissions');
 const { isOwner } = permissions;
 const ttsEngine = require('./tts-engine');
 const audioQueue = require('./audio-queue');
+const { positiveInt } = require('./route-params');
 const db = require('../db/database');
 const ctx = require('../live-context');
 const config = require('../config');
@@ -253,11 +254,13 @@ router.post('/queue/clear', requireAuth, queueModerate, async (req, res) => {
 
 router.post('/queue/:id/report', requireAuth, queueReport, async (req, res) => {
     try {
+        const requestId = positiveInt(req.params.id);
+        if (requestId === null) return res.status(400).json({ error: 'invalid request id' });
         const r = await queueRoom(req, res);
         if (!r) return;
         const state = String((req.body && req.body.state) || '');
         if (state !== 'played' && state !== 'failed') return res.status(400).json({ error: "state must be 'played' or 'failed'" });
-        const ok = await audioQueue.report(r.room, parseInt(req.params.id, 10), state, { error: req.body && req.body.error, actor: `user:${req.user.username}` });
+        const ok = await audioQueue.report(r.room, requestId, state, { error: req.body && req.body.error, actor: `user:${req.user.username}` });
         if (!ok) return res.status(409).json({ error: 'That request is not playing' });
         res.json({ ok: true, queue: await audioQueue.list(r.room) });
     } catch (e) { res.status(500).json({ error: e.message }); }
