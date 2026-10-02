@@ -21,7 +21,7 @@ nginx locations (`deploy/nginx/openvibe.live-chat.locations.conf`, included in L
 
 | nginx location | Chat serves |
 | --- | --- |
-| `^~ /ws/chat` | the chat WebSocket (`?stream=`; session cookie or Authorization bearer) |
+| `^~ /ws/chat` | the chat WebSocket (`?stream=`; session cookie or Authorization bearer; the deprecated `?token=` still works; protocol unchanged) |
 | `^~ /api/chat/` | `GET gif/providers`, `GET gif/trending`, `GET gif/search`, `POST send`, `GET search`, `GET user/:userId/history`, `GET user/:username/profile`, `GET relay-user/:platform/:username`, `GET relay-user/:platform/:username/logs`, `GET anon/:anonId`, `GET anon/:anonId/logs`, `GET filters/friendly`, `GET global/history`, `GET :streamId/replay`, `GET :streamId/history`, `GET channel/:userId/history`, `GET :streamId/users`, `POST admin/purge/preview`, `DELETE admin/purge`, `GET admin/logs`, `GET admin/logs/export` |
 | `^~ /api/dm/` | `GET/POST conversations`, `GET/PATCH conversations/:id`, `GET/POST conversations/:id/messages`, `DELETE conversations/:id/messages/:msgId`, `POST conversations/:id/read`, `POST conversations/:id/participants`, `DELETE conversations/:id/participants/:userId`, `GET unread`, `GET users/search`, `GET blocks`, `POST/DELETE blocks/:userId`, `GET blocks/check/:userId` |
 | `^~ /api/tts/` | `GET voices`, `GET settings`, `GET/PUT admin/settings`, `POST admin/test`, `GET audio/:file` (Chat's clips; Live's arena/mod-preview clips are fetched from Live under the same URL), `GET queue`, `POST queue/skip`, `POST queue/clear`, `POST queue/:id/report` (the TTS and sound queue) |

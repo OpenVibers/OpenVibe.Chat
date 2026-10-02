@@ -1,7 +1,7 @@
 /**
  * OpenVibe.Chat — request authentication.
  *
- * The same tokens Live accepts (a Network RS256 JWT in Authorization / ov_token cookie,
+ * The same tokens Live accepts (a Network RS256 JWT in Authorization / ov_token cookie / Live's legacy token cookie (not on WebSockets),
  * or an hbt_ API token) with the same rules, resolved by Live through live-context.authenticate()
  * — Live owns the account links, auto-creates first-time accounts and knows API-token scopes.
  * Moved from OpenVibe.Live server/auth/auth.js; the middleware are async now because resolution
@@ -72,7 +72,21 @@ function extractToken(req, { legacyCookie = true } = {}) {
 /**
  * Extract the token for a WebSocket upgrade request
  */
+const urlTokenUses = { jwt: 0, api_token: 0 };
 function extractWsToken(req) {
+    // DEPRECATED (C-05): a ?token= query param. Browsers send the token in their first join message
+    // and bots should use the Authorization header; URLs end up in proxy logs. Still honoured (and
+    // counted, /metrics chat_ws_url_token_uses) while Live's bot guide and call client still send it.
+    try {
+        const url = new URL(req.url || '/', 'http://localhost');
+        const queryToken = url.searchParams.get('token');
+        if (queryToken && queryToken !== 'null' && queryToken !== 'undefined') {
+            urlTokenUses[queryToken.startsWith('hbt_') ? 'api_token' : 'jwt']++;
+            return queryToken;
+        }
+    } catch { /* fall through */ }
+
+    // Live's legacy `token` cookie rides along with ov_token on every browser upgrade: ignored.
     return extractToken(req, { legacyCookie: false });
 }
 
@@ -180,4 +194,5 @@ module.exports = {
     requireAuth,
     optionalAuth,
     requireAdmin,
+    urlTokenUses: () => ({ ...urlTokenUses }),
 };

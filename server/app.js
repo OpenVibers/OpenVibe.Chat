@@ -81,6 +81,9 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     // How sign-ins resolve (auth/network-session.js): here, through Live, or refused.
     metrics.registry.gauge({ name: 'chat_auth_resolutions', help: 'Token resolutions since start, by where they were decided', labelNames: ['via'],
         collect: () => Object.entries(require('./auth/network-session').stats()).map(([via, n]) => ({ labels: { via }, value: n })) });
+    // Deprecated ?token= on /ws/chat (C-05), by kind, since start: when both stay at 0, the shim goes.
+    metrics.registry.gauge({ name: 'chat_ws_url_token_uses', help: 'WebSocket upgrades that carried the token in the URL (deprecated), by token kind', labelNames: ['kind'],
+        collect: () => Object.entries(require('./auth/auth').urlTokenUses()).map(([kind, n]) => ({ labels: { kind }, value: n })) });
 
     /** Exact allow-list only (no subdomain wildcard). */
     function isAllowedOrigin(origin) {
@@ -279,14 +282,6 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
         }
         const isCall = url.startsWith('/ws/call') && !!callServer && config.calls.enabled;
         if (!url.startsWith('/ws/chat') && !isCall) { socket.destroy(); return; }
-        const query = new URL(url, 'http://localhost').searchParams;
-        // A URL token is refused (URLs land in proxy logs). Live's legacy `token` cookie rides along
-        // with ov_token on every browser upgrade, so it is ignored (extractWsToken), not refused.
-        // This runs before the IP-ban check: a banned IP carrying ?token= gets this 401, not a bare destroy.
-        if (query.has('token')) {
-            socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
-            return;
-        }
         try {
             const wsIp = chatServer.getClientIp(req);
             if (ctx.isIpBanned(wsIp, null)) {
