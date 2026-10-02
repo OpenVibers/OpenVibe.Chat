@@ -36,15 +36,17 @@ function apiTokenAllows(req, scopes) {
 /**
  * Extract the token from Authorization header or cookie
  */
-function extractToken(req) {
+function extractToken(req, { legacyCookie = true } = {}) {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
         return authHeader.slice(7);
     }
 
-    // The Network session cookie is shared with the browser.
+    // The Network session cookie is shared with the browser. REST still accepts Live's legacy
+    // 'token' cookie (as Live does); WebSocket upgrades ignore it (legacyCookie: false).
     if (req.cookies) {
         if (req.cookies.ov_token) return req.cookies.ov_token;
+        if (legacyCookie && req.cookies.token) return req.cookies.token;
     }
 
     // Raw Node/WebSocket upgrade requests do not go through cookie-parser,
@@ -61,6 +63,7 @@ function extractToken(req) {
             try { parsed[key] = decodeURIComponent(value); } catch { parsed[key] = value; }
         }
         if (parsed.ov_token) return parsed.ov_token;
+        if (legacyCookie && parsed.token) return parsed.token;
     }
 
     return null;
@@ -70,7 +73,7 @@ function extractToken(req) {
  * Extract the token for a WebSocket upgrade request
  */
 function extractWsToken(req) {
-    return extractToken(req);
+    return extractToken(req, { legacyCookie: false });
 }
 
 /**

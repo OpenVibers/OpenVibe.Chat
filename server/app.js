@@ -280,8 +280,10 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
         const isCall = url.startsWith('/ws/call') && !!callServer && config.calls.enabled;
         if (!url.startsWith('/ws/chat') && !isCall) { socket.destroy(); return; }
         const query = new URL(url, 'http://localhost').searchParams;
-        const legacyCookie = String(req.headers.cookie || '').split(';').some((part) => part.trim().startsWith('token='));
-        if (query.has('token') || legacyCookie) {
+        // A URL token is refused (URLs land in proxy logs). Live's legacy `token` cookie rides along
+        // with ov_token on every browser upgrade, so it is ignored (extractWsToken), not refused.
+        // This runs before the IP-ban check: a banned IP carrying ?token= gets this 401, not a bare destroy.
+        if (query.has('token')) {
             socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
             return;
         }

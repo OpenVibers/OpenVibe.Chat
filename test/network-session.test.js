@@ -100,7 +100,7 @@ t('/metrics counts where sign-ins were decided', async () => {
     for (const via of ['local', 'live', 'rejected']) assert.match(m, new RegExp(`chat_auth_resolutions\\{[^}]*via="${via}"[^}]*\\} [1-9]`), via);
 });
 
-t('WebSocket upgrades reject URL tokens and the legacy cookie with 401', async () => {
+t('WebSocket upgrades reject URL tokens with 401 and ignore the legacy cookie', async () => {
     const WebSocket = require('ws');
     const token = jwt(claimsFor(alice));
     const rejected = (path, headers = {}) => new Promise((resolve, reject) => {
@@ -110,8 +110,8 @@ t('WebSocket upgrades reject URL tokens and the legacy cookie with 401', async (
         ws.on('error', reject);
     });
     assert.strictEqual(await rejected(`/ws/chat?token=${encodeURIComponent(token)}`), 401);
-    assert.strictEqual(await rejected('/ws/chat', { cookie: `token=${token}` }), 401);
-    const ws = await h.ws({ cookie: `ov_token=${token}` });
+    // Live sets the legacy `token` cookie beside ov_token on every sign-in: ignored, not refused.
+    const ws = await h.ws({ cookie: `token=${token}; ov_token=${token}` });
     ws.sendJson({ type: 'join' });
     assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'alice');
     ws.close();
