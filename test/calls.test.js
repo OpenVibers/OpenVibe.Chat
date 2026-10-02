@@ -17,13 +17,12 @@ const t = suite('calls');
 let h, config, callServer, lifecycle;
 let ann, bob, cat, dan, eve, kay, staff, streamer, liveStream, offStream;
 
-/** Open /ws/call as a browser would (through nginx: the address in CF-Connecting-IP). */
+/** Open /ws/call with a bearer (through nginx: the address in CF-Connecting-IP). */
 function callWs({ channelId, token = null, ip = '203.0.113.20', origin = 'https://openvibe.live', onOpen = null } = {}) {
     return new Promise((resolve, reject) => {
         const qs = new URLSearchParams();
         if (channelId != null) qs.set('channelId', channelId);
-        if (token) qs.set('token', token);
-        const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws/call?${qs}`, { headers: { 'cf-connecting-ip': ip, origin } });
+        const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws/call?${qs}`, { headers: { 'cf-connecting-ip': ip, origin, ...(token ? { authorization: `Bearer ${token}` } : {}) } });
         const all = [];
         const waiters = [];
         ws.on('message', (d) => {

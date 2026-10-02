@@ -524,7 +524,8 @@ Reporting a vulnerability: [SECURITY.md](SECURITY.md). The rules the code keeps:
 
 - **Auth.** People sign in with a Network session JWT, verified here with the Network's key (tokens
   issued before a subject's `token_valid_after` are refused), or an `hbt_` API token resolved through
-  Live; `?token=` on `/ws/chat` is deprecated. Services use client-credentials tokens for audience
+  Live; WebSocket upgrades use the session cookie or Authorization bearer, and reject URL tokens.
+  Services use client-credentials tokens for audience
   `openvibe.chat`, checked per capability (`chat.live_bridge.write`, `chat.message.send`,
   `chat.presence.read`). Staff gates ask the contracts staff map.
 - **Private data.** DMs are delivered only to participants, and private rooms only to members

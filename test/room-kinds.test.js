@@ -23,8 +23,7 @@ const api = (method, path, u, body) => h.http(method, `/api/chat/rooms${path}`, 
 function callWs({ channelId, token = null, ip = '203.0.113.30' } = {}) {
     return new Promise((resolve, reject) => {
         const qs = new URLSearchParams({ channelId });
-        if (token) qs.set('token', token);
-        const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws/call?${qs}`, { headers: { 'cf-connecting-ip': ip, origin: 'https://openvibe.live' } });
+        const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws/call?${qs}`, { headers: { 'cf-connecting-ip': ip, origin: 'https://openvibe.live', ...(token ? { authorization: `Bearer ${token}` } : {}) } });
         const all = [];
         const waiters = [];
         ws.on('message', (d) => {

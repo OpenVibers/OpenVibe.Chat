@@ -100,25 +100,29 @@ t('/metrics counts where sign-ins were decided', async () => {
     for (const via of ['local', 'live', 'rejected']) assert.match(m, new RegExp(`chat_auth_resolutions\\{[^}]*via="${via}"[^}]*\\} [1-9]`), via);
 });
 
-t('a token in the WebSocket URL still works (deprecated, C-05) and is counted', async () => {
-    const before = require('../server/auth/auth').urlTokenUses().jwt;
-    const ws = await h.ws({ token: jwt(claimsFor(alice)) });
+t('WebSocket upgrades reject URL tokens and the legacy cookie with 401', async () => {
+    const WebSocket = require('ws');
+    const token = jwt(claimsFor(alice));
+    const rejected = (path, headers = {}) => new Promise((resolve, reject) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${h.port}${path}`, { headers: { origin: 'https://openvibe.live', ...headers } });
+        ws.on('open', () => { ws.close(); reject(new Error('upgrade accepted')); });
+        ws.on('unexpected-response', (_req, res) => { res.resume(); resolve(res.statusCode); });
+        ws.on('error', reject);
+    });
+    assert.strictEqual(await rejected(`/ws/chat?token=${encodeURIComponent(token)}`), 401);
+    assert.strictEqual(await rejected('/ws/chat', { cookie: `token=${token}` }), 401);
+    const ws = await h.ws({ cookie: `ov_token=${token}` });
     ws.sendJson({ type: 'join' });
-    const auth = await ws.next((m) => m.type === 'auth');
-    assert.strictEqual(auth.core_username, 'alice');
+    assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'alice');
     ws.close();
-    assert.strictEqual(require('../server/auth/auth').urlTokenUses().jwt, before + 1);
-    assert.match((await h.http('GET', '/metrics')).text, /chat_ws_url_token_uses\{[^}]*kind="jwt"[^}]*\} [1-9]/);
 });
 
-t('bots authenticate the upgrade with an Authorization header, no token in the URL', async () => {
-    const before = require('../server/auth/auth').urlTokenUses();
+t('bots authenticate the upgrade with an Authorization header', async () => {
     const ws = await h.ws({ bearer: jwt(claimsFor(carol)) });
     ws.sendJson({ type: 'join' });
     const auth = await ws.next((m) => m.type === 'auth');
     assert.deepStrictEqual([auth.authenticated, auth.core_username], [true, 'carol']);
     ws.close();
-    assert.deepStrictEqual(require('../server/auth/auth').urlTokenUses(), before, 'not counted as a URL token');
 });
 
 t.run(async () => { if (h && h.close) await h.close(); });
