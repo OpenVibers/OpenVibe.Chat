@@ -15,6 +15,7 @@
  */
 const crypto = require('crypto');
 const express = require('express');
+const cache = require('openvibe-shared/cache-policy');
 
 const ACCESS_COOKIE = 'ov_token';
 const REFRESH_COOKIE = 'ov_refresh';
@@ -178,7 +179,7 @@ function createSessionRoutes({ config, viewers, fetchImpl = globalThis.fetch, lo
     });
 
     router.get('/me', async (req, res) => {
-        res.set('Cache-Control', 'private, no-store');
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
         // No credential at all (a guest) is signed out, not an error: the shared navbar asks this on every
         // page view, and a 401 logged a console error on each (browser check, OpenVibe.Host). A credential
         // that is present but invalid or expired still answers 401.

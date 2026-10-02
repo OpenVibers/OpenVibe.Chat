@@ -26,13 +26,17 @@ const LINKS = [
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const hashes = new Map();
-function asset(rel) {
+/** The content hash in a /web asset's URL: what `?v=` must equal for the bytes to be immutable. */
+function assetVersion(rel) {
     if (!hashes.has(rel)) {
         let v = 'dev';
         try { v = crypto.createHash('sha256').update(fs.readFileSync(path.join(PUBLIC_DIR, rel))).digest('hex').slice(0, 10); } catch { /* missing asset */ }
         hashes.set(rel, v);
     }
-    return `/web/${rel}?v=${hashes.get(rel)}`;
+    return hashes.get(rel);
+}
+function asset(rel) {
+    return `/web/${rel}?v=${assetVersion(rel)}`;
 }
 
 /** The site's links, with the signed-in person's unread counts (o.counts: { rooms, messages }). */
@@ -109,4 +113,4 @@ document.addEventListener('DOMContentLoaded', function () {
 </html>`;
 }
 
-module.exports = { renderPage, asset, esc, SITE_NAME, DEFAULT_DESCRIPTION, NETWORK_URL };
+module.exports = { renderPage, asset, assetVersion, esc, SITE_NAME, DEFAULT_DESCRIPTION, NETWORK_URL };

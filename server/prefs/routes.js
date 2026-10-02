@@ -17,6 +17,7 @@
 'use strict';
 
 const express = require('express');
+const cache = require('openvibe-shared/cache-policy');
 const { requireAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const { PrefsError } = require('./module-store');
@@ -33,7 +34,7 @@ function fail(res, err) {
     return res.status(500).json({ error: 'Internal server error' });
 }
 
-const reply = (res, out) => res.set('Cache-Control', 'private, no-store').set('ETag', `"${out.revision}"`).json(out);
+const reply = (res, out) => res.set('Cache-Control', cache.htmlHeaders({ private: true })).set('ETag', `"${out.revision}"`).json(out);
 
 function routesFor(store, key) {
     const router = express.Router();

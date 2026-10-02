@@ -13,6 +13,7 @@
  */
 const crypto = require('crypto');
 const express = require('express');
+const cache = require('openvibe-shared/cache-policy');
 
 const TTL_SECONDS = 3600;
 const STUN = { urls: 'stun:stun.l.google.com:19302' };
@@ -64,7 +65,7 @@ function createIceRoutes() {
     const router = express.Router();
     router.get('/', optionalAuth, (req, res) => {
         const { iceServers: list, ephemeral } = iceServers(req.user ? `u${req.user.id}` : 'anon');
-        res.set('Cache-Control', ephemeral ? 'private, max-age=300' : 'private, no-store').json({ iceServers: list });
+        res.set('Cache-Control', ephemeral ? 'private, max-age=300' : cache.htmlHeaders({ private: true })).json({ iceServers: list });
     });
     return router;
 }

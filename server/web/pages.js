@@ -31,7 +31,8 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
-const { renderPage, esc, SITE_NAME } = require('./layout');
+const cache = require('openvibe-shared/cache-policy');
+const { renderPage, assetVersion, esc, SITE_NAME } = require('./layout');
 const { createSessionRoutes } = require('./session');
 const { createDiscoveryRoutes, homeJsonLd } = require('./discovery');
 const session = require('../auth/network-session');
@@ -127,7 +128,7 @@ function createWebRoutes({ config }) {
     };
     const page = async (req, res, status, o) => {
         const actor = o.actor || await viewerOf(req);
-        res.status(status).set('Cache-Control', o.cache || 'private, no-store').type('html')
+        res.status(status).set('Cache-Control', o.cache || cache.htmlHeaders({ private: true })).type('html')
             .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: await countsOf(actor), ...o }));
     };
     const needUser = async (req, res) => {
@@ -139,7 +140,16 @@ function createWebRoutes({ config }) {
 
     router.use('/auth', createSessionRoutes({ config: webConfig, viewers }));
     router.use('/shared', ovServe.handler());
-    router.use('/web', express.static(PUBLIC_DIR, { maxAge: '365d', immutable: true, index: false }));
+    // A /web asset is content-addressed by layout.asset()'s ?v=: only that exact version is immutable,
+    // anything else (a stale link, a hand-typed URL) gets the short public window.
+    router.use('/web', express.static(PUBLIC_DIR, {
+        index: false,
+        setHeaders(res, filePath) {
+            const rel = path.relative(PUBLIC_DIR, filePath).split(path.sep).join('/');
+            const v = res.req && res.req.query && res.req.query.v;
+            res.setHeader('Cache-Control', cache.assetHeaders(rel, { hashed: !!v && v === assetVersion(rel) }));
+        },
+    }));
 
     // ── Global chat ──
     router.get('/', async (req, res) => {
@@ -594,7 +604,7 @@ ${attachList}`,
 
     // ── What shipped, robots, sitemap ──
     router.get('/updates', async (req, res) => await page(req, res, 200, {
-        title: `What shipped on ${SITE_NAME}`, path: '/updates', robots: 'index, follow', cache: 'public, max-age=300',
+        title: `What shipped on ${SITE_NAME}`, path: '/updates', robots: 'index, follow', cache: cache.htmlHeaders({ maxAge: 300 }),
         body: frame.updatesBody({ service: 'chat', siteName: SITE_NAME }) + `<script src="${ovServe.url('shipped.js')}" defer></script>`,
     }));
     // ── robots.txt, llms.txt, sitemap.xml: server/web/discovery.js, the shared SEO kit ──

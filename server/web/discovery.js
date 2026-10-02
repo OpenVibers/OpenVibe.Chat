@@ -12,6 +12,7 @@
  */
 const express = require('express');
 const seo = require('openvibe-shared/seo');
+const cache = require('openvibe-shared/cache-policy');
 const historyStore = require('../chat/history-store');
 const rooms = require('../rooms/rooms');
 
@@ -75,7 +76,7 @@ function createDiscoveryRoutes({ config }) {
     router.get('/robots.txt', (req, res) => {
         // The same rules as before, plus the search and AI crawlers the shared kit names by name and
         // the sitemap. Every previous Disallow is kept.
-        res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send(seo.robotsTxt({
+        res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.robotsTxt({
             sitemaps: [abs('/sitemap.xml')],
             allow: ['/', '/updates', '/rooms', '/r/'],
             disallow: ['/r/*/settings', '/messages', '/settings', '/auth/', '/api/'],
@@ -83,7 +84,7 @@ function createDiscoveryRoutes({ config }) {
     });
 
     router.get('/llms.txt', (req, res) => {
-        res.type('text/plain').set('Cache-Control', 'public, max-age=3600').send(seo.llmsTxt({
+        res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.llmsTxt({
             name: 'OpenVibe.Chat',
             summary: 'OpenVibe.Chat: the network-wide chat room of OpenVibe, plus its rooms and the direct messages of its members.',
             details: 'One OpenVibe account works here and on every other OpenVibe site. Anyone can read the global chat and the public rooms without an account; posting needs a signed-in person. The global chat and the public room pages are readable as plain HTML without JavaScript and update live over the site\'s own WebSocket. Direct messages, room settings and the API are per-person and are never listed here.',
@@ -107,7 +108,7 @@ function createDiscoveryRoutes({ config }) {
             const lastmod = p.lastmod ? await p.lastmod() : null;
             urls.push({ loc: abs(p.path), ...(lastmod ? { lastmod } : {}), changefreq: p.changefreq, priority: p.priority });
         }
-        res.type('application/xml').set('Cache-Control', 'public, max-age=3600').send(seo.sitemapXml(urls));
+        res.type('application/xml').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.sitemapXml(urls));
     });
 
     return router;

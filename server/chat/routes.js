@@ -12,6 +12,7 @@
  * GET  /api/chat/user/:username/profile - Get user profile card data
  */
 const express = require('express');
+const cache = require('openvibe-shared/cache-policy');
 const db = require('../db/database');
 const ctx = require('../live-context');
 const { optionalAuth, requireAuth } = require('../auth/auth');
@@ -27,7 +28,7 @@ const { limits } = require('../net/actor-limits');
  */
 async function withoutBlocked(req, res, rows) {
     if (!req.user) return rows;
-    res.set('Cache-Control', 'private, no-store');
+    res.set('Cache-Control', cache.htmlHeaders({ private: true }));
     const hidden = await networkBlocks.blockedUserIds(req.user);
     if (!hidden.size) return rows;
     return rows.filter((m) => !(m.user_id && hidden.has(Number(m.user_id))));
@@ -91,15 +92,15 @@ function enrichMessagesWithCosmetics(messages) {
     const cosmetics = { getCosmeticProfile: (id) => ctx.getCosmeticProfile(id) };
     const tags = { getTagProfile: (id) => ctx.getTagProfile(id) };
     if (!Array.isArray(messages)) return messages;
-    const cache = new Map();
+    const profileCache = new Map();
     for (const m of messages) {
         if (!m || !m.user_id) continue;
-        let prof = cache.get(m.user_id);
+        let prof = profileCache.get(m.user_id);
         if (!prof) {
             prof = {};
             try { if (cosmetics) Object.assign(prof, cosmetics.getCosmeticProfile(m.user_id) || {}); } catch { /* */ }
             try { if (tags) prof.tag = tags.getTagProfile(m.user_id) || null; } catch { /* */ }
-            cache.set(m.user_id, prof);
+            profileCache.set(m.user_id, prof);
         }
         if (prof.nameFX) m.nameFX = prof.nameFX;
         if (prof.particleFX) m.particleFX = prof.particleFX;
@@ -895,7 +896,7 @@ router.get('/me/export', requireAuth, exportLimit, async (req, res) => {
         }
         const lines = rows.slice(0, MAX).map((m) => ({ id: m.id, timestamp: m.timestamp, message: m.message, message_type: m.message_type || 'chat', stream_id: m.stream_id || null, stream_title: m.stream_title || null, is_global: !!m.is_global }));
         const stamp = new Date().toISOString().slice(0, 10);
-        res.set('Cache-Control', 'private, no-store');
+        res.set('Cache-Control', cache.htmlHeaders({ private: true }));
         if (req.query.format === 'csv') {
             const header = 'id,timestamp,message,message_type,stream_id,stream_title,is_global\n';
             res.set('Content-Disposition', `attachment; filename="my-chat-${stamp}.csv"`);
