@@ -208,6 +208,6 @@ t('global chat (no creator room) never asks VIP', async () => {
 });
 
 t.run(async () => {
-    try { h.chatServer.close(); } catch { /* */ }
+    try { await h.chatServer.close(); } catch { /* */ }
     vip.server.close();
 });

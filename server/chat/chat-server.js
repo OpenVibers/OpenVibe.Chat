@@ -2767,7 +2767,7 @@ class ChatServer {
         }
     }
 
-    close() {
+    async close() {
         if (this.wss) {
             if (this.heartbeatInterval) {
                 clearInterval(this.heartbeatInterval);
@@ -2781,7 +2781,8 @@ class ChatServer {
                 clearInterval(this._autoDeleteSweepInterval);
                 this._autoDeleteSweepInterval = null;
             }
-            audioQueue.stop();
+            // The queue's work in flight (a clip being made or delivered) ends before the sockets and the database close.
+            await audioQueue.stop();
             this.wss.clients.forEach(ws => ws.close());
             this.wss.close();
         }
