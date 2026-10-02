@@ -23,6 +23,7 @@
  * may talk, a demoted one is muted, a blocked person is dropped.
  */
 const express = require('express');
+const cache = require('openvibe-shared/cache-policy');
 const { requireAuth, optionalAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
@@ -78,7 +79,7 @@ async function readable(req, res) {
 }
 
 router.get('/', optionalAuth, async (req, res) => {
-    try { res.set('Cache-Control', 'private, no-store').json(await rooms.list(req.user || null, { limit: req.query.limit })); } catch (err) { send(res, err); }
+    try { res.set('Cache-Control', cache.htmlHeaders({ private: true })).json(await rooms.list(req.user || null, { limit: req.query.limit })); } catch (err) { send(res, err); }
 });
 
 router.post('/', requireAuth, createLimit, async (req, res) => {
@@ -88,7 +89,7 @@ router.post('/', requireAuth, createLimit, async (req, res) => {
 router.get('/:slug', optionalAuth, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     const a = await rooms.access(room, req.user || null);
-    res.set('Cache-Control', 'private, no-store').json({
+    res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({
         room: await rooms.publicRoom(room, { role: a.role }),
         can: { read: a.read, post: a.post, join: a.join, talk: a.talk, moderate: a.moderate, manage: a.manage },
         ...(room.kind === 'call' ? { call: callOf(room) } : {}),
@@ -104,7 +105,7 @@ router.get('/:slug/messages', optionalAuth, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     try {
         const messages = await rooms.history(room, { before: req.query.before ?? null, after: req.query.after ?? null, limit: req.query.limit });
-        res.set('Cache-Control', 'private, no-store').json({ messages, latest_id: messages.length ? messages[messages.length - 1].id : null });
+        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ messages, latest_id: messages.length ? messages[messages.length - 1].id : null });
     } catch (err) { send(res, err); }
 });
 
@@ -150,7 +151,7 @@ router.post('/:slug/read', requireAuth, readLimit, async (req, res) => {
 router.get('/:slug/members', optionalAuth, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     const moderate = (await rooms.access(room, req.user || null)).moderate;
-    res.set('Cache-Control', 'private, no-store').json({ members: (await rooms.members(room, { seen: moderate })).filter((m) => m.role !== 'blocked' || moderate) });
+    res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ members: (await rooms.members(room, { seen: moderate })).filter((m) => m.role !== 'blocked' || moderate) });
 });
 
 router.post('/:slug/members', requireAuth, manageLimit, async (req, res) => {
@@ -170,7 +171,7 @@ router.post('/:slug/members', requireAuth, manageLimit, async (req, res) => {
 router.get('/:slug/attachments', requireAuth, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     if (!(await rooms.access(room, req.user)).manage) return res.status(403).json({ error: 'Only the room\'s owner sees where it is attached', code: 'rooms.not_owner' });
-    res.set('Cache-Control', 'private, no-store').json({ attachments: await rooms.attachments(room) });
+    res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ attachments: await rooms.attachments(room) });
 });
 
 router.post('/:slug/attachments', requireAuth, personOnly, attachLimit, async (req, res) => {
