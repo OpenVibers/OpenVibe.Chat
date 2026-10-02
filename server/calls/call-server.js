@@ -18,7 +18,7 @@
  * temporary channels. Stream-linked channels are auto-created when a
  * streamer enables voice on their stream (Live asks: POST /internal/calls/stream-channel).
  *
- * WebSocket path: /ws/call?channelId=<id>&token=X
+ * WebSocket path: /ws/call?channelId=<id> (session cookie or Authorization bearer)
  *
  * Channel modes:
  *   'mic'      — Microphone only

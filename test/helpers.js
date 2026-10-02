@@ -361,13 +361,12 @@ async function boot({ env = {} } = {}) {
     };
 
     const WebSocket = require('ws');
-    /** Open /ws/chat as a browser would (through nginx: the address arrives in CF-Connecting-IP). */
-    h.ws = ({ ip = '203.0.113.10', token = null, bearer = null, stream = null, origin = 'https://openvibe.live', query = '' } = {}) => new Promise((resolve, reject) => {
+    /** Open /ws/chat with a bearer or session cookie (through nginx: the address arrives in CF-Connecting-IP). */
+    h.ws = ({ ip = '203.0.113.10', token = null, bearer = null, cookie = null, stream = null, origin = 'https://openvibe.live', query = '' } = {}) => new Promise((resolve, reject) => {
         const qs = new URLSearchParams();
         if (stream) qs.set('stream', stream);
-        if (token) qs.set('token', token);
         const url = `ws://127.0.0.1:${h.port}/ws/chat${qs.toString() ? `?${qs}` : ''}${query}`;
-        const ws = new WebSocket(url, { headers: { 'cf-connecting-ip': ip, origin, ...(bearer ? { authorization: `Bearer ${bearer}` } : {}) } });
+        const ws = new WebSocket(url, { headers: { 'cf-connecting-ip': ip, origin, ...(bearer || token ? { authorization: `Bearer ${bearer || token}` } : {}), ...(cookie ? { cookie } : {}) } });
         const all = [];
         const waiters = [];
         ws.on('message', (d) => {

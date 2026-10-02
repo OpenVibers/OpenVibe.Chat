@@ -102,13 +102,21 @@ t('/metrics counts where sign-ins were decided', async () => {
 
 t('a token in the WebSocket URL still works (deprecated, C-05) and is counted', async () => {
     const before = require('../server/auth/auth').urlTokenUses().jwt;
-    const ws = await h.ws({ token: jwt(claimsFor(alice)) });
+    const ws = await h.ws({ query: `?token=${encodeURIComponent(jwt(claimsFor(alice)))}` });
     ws.sendJson({ type: 'join' });
-    const auth = await ws.next((m) => m.type === 'auth');
-    assert.strictEqual(auth.core_username, 'alice');
+    assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'alice');
     ws.close();
     assert.strictEqual(require('../server/auth/auth').urlTokenUses().jwt, before + 1);
     assert.match((await h.http('GET', '/metrics')).text, /chat_ws_url_token_uses\{[^}]*kind="jwt"[^}]*\} [1-9]/);
+});
+
+t('WebSocket upgrades ignore the legacy token cookie', async () => {
+    const token = jwt(claimsFor(alice));
+    // Live sets the legacy `token` cookie beside ov_token on every sign-in: ignored, not refused.
+    const ws = await h.ws({ cookie: `token=${token}; ov_token=${token}` });
+    ws.sendJson({ type: 'join' });
+    assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'alice');
+    ws.close();
 });
 
 t('bots authenticate the upgrade with an Authorization header, no token in the URL', async () => {

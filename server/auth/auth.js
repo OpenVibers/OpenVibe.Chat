@@ -1,7 +1,7 @@
 /**
  * OpenVibe.Chat — request authentication.
  *
- * The same tokens Live accepts (a Network RS256 JWT in Authorization / ov_token / token cookie,
+ * The same tokens Live accepts (a Network RS256 JWT in Authorization / ov_token cookie / Live's legacy token cookie (not on WebSockets),
  * or an hbt_ API token) with the same rules, resolved by Live through live-context.authenticate()
  * — Live owns the account links, auto-creates first-time accounts and knows API-token scopes.
  * Moved from OpenVibe.Live server/auth/auth.js; the middleware are async now because resolution
@@ -36,16 +36,17 @@ function apiTokenAllows(req, scopes) {
 /**
  * Extract the token from Authorization header or cookie
  */
-function extractToken(req) {
+function extractToken(req, { legacyCookie = true } = {}) {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
         return authHeader.slice(7);
     }
 
-    // Check both cookie names: 'token' (legacy openvibelive) and 'ov_token' (shared network)
+    // The Network session cookie is shared with the browser. REST still accepts Live's legacy
+    // 'token' cookie (as Live does); WebSocket upgrades ignore it (legacyCookie: false).
     if (req.cookies) {
         if (req.cookies.ov_token) return req.cookies.ov_token;
-        if (req.cookies.token) return req.cookies.token;
+        if (legacyCookie && req.cookies.token) return req.cookies.token;
     }
 
     // Raw Node/WebSocket upgrade requests do not go through cookie-parser,
@@ -62,7 +63,7 @@ function extractToken(req) {
             try { parsed[key] = decodeURIComponent(value); } catch { parsed[key] = value; }
         }
         if (parsed.ov_token) return parsed.ov_token;
-        if (parsed.token) return parsed.token;
+        if (legacyCookie && parsed.token) return parsed.token;
     }
 
     return null;
@@ -75,7 +76,7 @@ const urlTokenUses = { jwt: 0, api_token: 0 };
 function extractWsToken(req) {
     // DEPRECATED (C-05): a ?token= query param. Browsers send the token in their first join message
     // and bots should use the Authorization header; URLs end up in proxy logs. Still honoured (and
-    // counted, /metrics chat_ws_url_token_uses) while bots move off it.
+    // counted, /metrics chat_ws_url_token_uses) while Live's bot guide and call client still send it.
     try {
         const url = new URL(req.url || '/', 'http://localhost');
         const queryToken = url.searchParams.get('token');
@@ -85,12 +86,8 @@ function extractWsToken(req) {
         }
     } catch { /* fall through */ }
 
-    // Fall back to cookie / Authorization header
-    const direct = extractToken(req);
-    if (direct) return direct;
-
-    // Legacy: req.query fallback for non-URL parse environments
-    return (req.query && req.query.token) || null;
+    // Live's legacy `token` cookie rides along with ov_token on every browser upgrade: ignored.
+    return extractToken(req, { legacyCookie: false });
 }
 
 /**
