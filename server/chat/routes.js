@@ -20,6 +20,7 @@ const permissions = require('../auth/permissions');
 const historyStore = require('./history-store');
 const networkBlocks = require('./network-blocks');
 const { limits } = require('../net/actor-limits');
+const { positiveInt } = require('./route-params');
 
 /**
  * A signed-in reader does not get the lines of people they blocked on the network (one-way; only
@@ -411,7 +412,8 @@ router.get('/search', requireAuth, searchLimit, async (req, res) => {
 // ── User Chat History ────────────────────────────────────────
 router.get('/user/:userId/history', requireAuth, async (req, res) => {
     try {
-        const userId = parseInt(req.params.userId);
+        const userId = positiveInt(req.params.userId);
+        if (userId === null) return res.status(400).json({ error: 'invalid user id' });
         const limit = Math.min(parseInt(req.query.limit || '50'), 200);
         const offset = parseInt(req.query.offset || '0');
 
@@ -550,12 +552,14 @@ router.get('/:streamId/replay', optionalAuth, async (req, res) => {
 // Pass ?scope=stream to restrict to the single session (legacy behavior).
 router.get('/:streamId/history', optionalAuth, async (req, res) => {
     try {
+        const streamId = positiveInt(req.params.streamId);
+        if (streamId === null) return res.status(400).json({ error: 'Invalid stream ID' });
         const limit = Math.min(parseInt(req.query.limit || '500'), 500);
         const before = req.query.before; // ISO timestamp for pagination
         const scope = req.query.scope || 'streamer';
 
         // Resolve which broadcaster this stream belongs to.
-        const stream = await ctx.ensureStream(req.params.streamId);
+        const stream = await ctx.ensureStream(streamId);
         const broadcasterId = stream ? stream.user_id : null;
         const spanStreamer = scope !== 'stream' && broadcasterId;
 
@@ -593,7 +597,7 @@ router.get('/:streamId/history', optionalAuth, async (req, res) => {
                    LEFT JOIN ctx_users cu ON cm.channel_user_id = cu.id
                    WHERE cm.stream_id = ? AND cm.is_deleted = 0
                      AND (cm.auto_delete_at IS NULL OR datetime(cm.auto_delete_at) > ov_now())`;
-            params.push(req.params.streamId);
+            params.push(streamId);
         }
 
         // after_id: cursor read (oldest→newest, primary-key range scan) for reopen/reconnect.
@@ -638,10 +642,10 @@ router.get('/:streamId/history', optionalAuth, async (req, res) => {
             } catch { /* non-critical */ }
         }
         // A cursor read also names the rows at or under the cursor deleted since (history-store.js).
-        const deleted = afterId != null ? { deleted_ids: await historyStore.deletedIds(spanStreamer ? `channel:${broadcasterId}` : `stream:${parseInt(req.params.streamId, 10) || 0}`, afterId) } : {};
+        const deleted = afterId != null ? { deleted_ids: await historyStore.deletedIds(spanStreamer ? `channel:${broadcasterId}` : `stream:${streamId}`, afterId) } : {};
         res.json({
             messages, latest_id, complete, ...deleted, liveSlots, channel,
-            activeStreamId: parseInt(req.params.streamId) || null,
+            activeStreamId: streamId,
             activeManagedId: stream ? (stream.managed_stream_id || null) : null,
         });
     } catch (err) {
