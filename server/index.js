@@ -25,6 +25,7 @@ const subscriptions = require('./events/subscriptions');
 const chatAi = require('./ai/chat-ai');
 const { limits } = require('./net/actor-limits');
 const { createValkey } = require('openvibe-sdk/valkey');
+const { gracefulStop, within } = require('openvibe-sdk/service');
 const { createApp } = require('./app');
 
 let rejectionsLogged = false;
@@ -73,33 +74,37 @@ async function start() {
     console.log(`[Chat] listening on http://${config.host}:${server.address().port} (ws /ws/chat${config.calls.enabled ? ', /ws/call' : ''})`);
     const subs = subscriptions.startAtBoot({ config, port: server.address().port });
 
-    let stopping = false;
-    const shutdown = async () => {
-        if (stopping) return;
-        stopping = true;
-        console.log('[Chat] shutting down');
-        try {
-            await chatServer.broadcastAll({
+    // systemd sends SIGTERM (SIGINT by hand); openvibe-sdk/service's gracefulStop takes the signal, runs the stop
+    // steps in order (nothing new starts), drains the HTTP server, runs the close steps, then exits 0. drainMs
+    // bounds the drain; deadlineMs 8000 is the manifest's lifecycle.shutdown.deadlineSeconds (openvibe-contracts
+    // manifests/services/chat.json) and deadlineExitCode 0 keeps the hand-written hard timer's exit 0. The mirror
+    // flush stays bounded at 3 s (within). The stop steps keep the old shutdown's exact order; a step that throws
+    // is logged and the stop goes on.
+    const { stop: shutdown } = gracefulStop({
+        name: 'Chat',
+        server,
+        drainMs: 4000,
+        deadlineMs: 8000,
+        deadlineExitCode: 0,
+        stop: [
+            () => chatServer.broadcastAll({
                 type: 'server_restart',
                 message: '⚙️ Chat server restarting — you will be reconnected automatically.',
                 timestamp: new Date().toISOString(),
-            });
-        } catch { /* non-critical */ }
-        ctx.stop();
-        relay.stop();
-        mirror.stop();
-        events.stop();
-        chatAi.stop();
-        subs.stop();
-        try { if (valkey) await valkey.close(); } catch { /* */ }
-        try { await Promise.race([mirror.flush(), new Promise((r) => setTimeout(r, 3000))]); } catch { /* */ }
-        try { chatServer.close(); } catch { /* */ }
-        try { await callServer.close(); } catch { /* */ }
-        server.close(async () => { await db.close(); process.exit(0); });
-        setTimeout(() => process.exit(0), 5000).unref();
-    };
-    process.on('SIGTERM', shutdown);
-    process.on('SIGINT', shutdown);
+            }),
+            () => ctx.stop(),
+            () => relay.stop(),
+            () => mirror.stop(),
+            () => events.stop(),
+            () => chatAi.stop(),
+            () => subs.stop(),
+            () => { if (valkey) return valkey.close(); },
+            () => within(3000, mirror.flush()),
+            () => chatServer.close(),
+            () => callServer.close(),
+        ],
+        close: [() => db.close()],
+    });
     return { server, mirror, relay, bridge, events, callServer, subscriptions: subs, shutdown };
 }
 
