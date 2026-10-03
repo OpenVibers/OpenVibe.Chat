@@ -197,6 +197,22 @@ t('auth-update: sent before its welcome, the token admits the socket as that acc
     await bye(s, other);
 });
 
+t('the pre-admission buffer is capped: 201 early messages close the socket (1008); a few are replayed', async () => {
+    const warm = h.ctx.warm;
+    h.ctx.warm = async (...a) => { await h.sleep(250); return warm.apply(h.ctx, a); };
+    try {
+        // 201 messages while the socket is being admitted: the buffer does not grow past the cap.
+        const flood = await callWs({ channelId: 'public', token: ann.token, ip: '198.51.100.60', onOpen: (ws) => { for (let i = 0; i < 201; i++) ws.sendJson({ type: 'noop' }); } });
+        assert.strictEqual(await new Promise((r) => flood.on('close', (code) => r(code))), 1008, 'closed with 1008, not buffered without bound');
+        assert.ok(!flood.all.some((m) => m.type === 'welcome'), 'never admitted');
+        // A few messages before admission: still admitted, and the buffer is replayed (the auth-update in it).
+        const few = await callWs({ channelId: 'public', ip: '198.51.100.61', onOpen: (ws) => { ws.sendJson({ type: 'noop' }); ws.sendJson({ type: 'auth-update', token: cat.token }); } });
+        const self = await few.next((m) => m.type === 'self-updated');
+        assert.strictEqual(self.participant.username, 'cat', 'the early messages were replayed once admitted');
+        await bye(few);
+    } finally { h.ctx.warm = warm; }
+});
+
 t('a cookie call socket is cookie-reliant unless its first message is auth-update with the token (the J7 gate)', async () => {
     const auth = require('../server/auth/auth');
     const before = auth.wsCookieReliant();
