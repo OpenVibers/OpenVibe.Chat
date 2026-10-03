@@ -380,6 +380,25 @@ class ChatServer {
     }
 
     /**
+     * Re-authenticate a socket from a token in a join message, so an anonymous or guest socket can
+     * become the signed-in member without reconnecting. A token for a different account than the one
+     * the socket already carries is ignored: a socket cannot change identity mid-session.
+     */
+    async _applyJoinToken(client, msg) {
+        if (!msg.token) return;
+        const user = await authenticateWs(msg.token).catch(() => null);
+        if (!user) return;
+        if (client.user && client.user.id !== user.id) {
+            console.warn(`[Chat] Ignoring token identity mismatch for ${client.user.username} -> ${user.username}`);
+            return;
+        }
+        client.user = user;
+        await this._hiddenFromUserList(user);   // warm chat.presence_prefs before the next user list
+        client.tokenIat = session.tokenIat(msg.token);
+        client.anonId = null; // no longer anonymous
+    }
+
+    /**
      * Handle incoming chat message
      */
     async handleMessage(ws, msg) {
@@ -417,19 +436,7 @@ class ChatServer {
             case 'join':
             case 'join_stream': {
                 // (Re-)authenticate if a token is provided
-                if (msg.token) {
-                    const user = await authenticateWs(msg.token).catch(() => null);
-                    if (user) {
-                        if (!client.user || client.user.id === user.id) {
-                            client.user = user;
-                            await this._hiddenFromUserList(user);   // warm chat.presence_prefs before the next user list
-                            client.tokenIat = session.tokenIat(msg.token);
-                            client.anonId = null; // no longer anonymous
-                        } else {
-                            console.warn(`[Chat] Ignoring token identity mismatch for ${client.user.username} -> ${user.username}`);
-                        }
-                    }
-                }
+                await this._applyJoinToken(client, msg);
                 const oldStream = client.streamId;
                 const nextStreamId = parseInt(msg.streamId || msg.stream_id) || null;
                 const requestedChannel = parseInt(msg.channelUserId || msg.channel_user_id) || null;
@@ -510,6 +517,9 @@ class ChatServer {
                 break;
             // Chat rooms (server/rooms/, openvibe.chat): a socket follows one room at a time.
             case 'join_room': {
+                // A room socket can still arrive anonymous or as a guest: authenticate a token the
+                // same way as join, so room access is resolved with the member's identity.
+                await this._applyJoinToken(client, msg);
                 const rooms = require('../rooms/rooms');
                 const room = await rooms.bySlug(msg.room);
                 const a = room ? await rooms.access(room, client.user) : null;

@@ -27,6 +27,13 @@ nginx locations (`deploy/nginx/openvibe.live-chat.locations.conf`, included in L
 | `^~ /api/tts/` | `GET voices`, `GET settings`, `GET/PUT admin/settings`, `POST admin/test`, `GET audio/:file` (Chat's clips; Live's arena/mod-preview clips are fetched from Live under the same URL), `GET queue`, `POST queue/skip`, `POST queue/clear`, `POST queue/:id/report` (the TTS and sound queue) |
 | `= /api/sounds` and `^~ /api/sounds/` | `POST /api/sounds` (upload), `GET channel/:userId`, `GET all/:streamId`, `DELETE :id`, `PATCH command`, `GET file/:filename`, `GET alert/mine`, `POST/DELETE alert/:kind` |
 
+> **WebSocket credentials.** C-05 shipped in `2dcca25`: a `/ws/chat` upgrade authenticates with the
+> session cookie or an `Authorization` bearer, and Live's legacy `token` cookie is ignored there. The
+> deprecated `?token=` query param is still honoured for Live's bot guide and call client, counted in
+> `chat_ws_url_token_uses`. C-06 — dropping the `ov_token` cookie fallback so upgrades authenticate by
+> bearer only — is gated on `chat_ws_cookie_uses` reading 0 for a full release together with the
+> browser client sending its token in the join message.
+
 Stay on Live (do not route): `/api/chat-ai/*` (the trailing slash in `/api/chat/` keeps it out),
 `/api/emotes/*`, `/api/channels/*` (channel moderation dashboard), `/api/mod/*`, `/api/media/*`,
 `/ws/call` (until the calls cutover, `docs/calls-cutover.md`), `/ws/broadcast`, `/ws/control`, and

@@ -34,19 +34,21 @@ function apiTokenAllows(req, scopes) {
 }
 
 /**
- * Extract the token from Authorization header or cookie
+ * Extract the token and where it came from (Bearer header, the Network `ov_token` cookie, or Live's
+ * legacy `token` cookie). Internal: extractToken returns the token alone, while extractWsToken also
+ * needs the source so it can count the cookie fallback (C-06).
  */
-function extractToken(req, { legacyCookie = true } = {}) {
+function extractTokenFrom(req, { legacyCookie = true } = {}) {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
-        return authHeader.slice(7);
+        return { token: authHeader.slice(7), from: 'header' };
     }
 
     // The Network session cookie is shared with the browser. REST still accepts Live's legacy
     // 'token' cookie (as Live does); WebSocket upgrades ignore it (legacyCookie: false).
     if (req.cookies) {
-        if (req.cookies.ov_token) return req.cookies.ov_token;
-        if (legacyCookie && req.cookies.token) return req.cookies.token;
+        if (req.cookies.ov_token) return { token: req.cookies.ov_token, from: 'ov_token_cookie' };
+        if (legacyCookie && req.cookies.token) return { token: req.cookies.token, from: 'legacy_cookie' };
     }
 
     // Raw Node/WebSocket upgrade requests do not go through cookie-parser,
@@ -62,17 +64,27 @@ function extractToken(req, { legacyCookie = true } = {}) {
             if (!key) continue;
             try { parsed[key] = decodeURIComponent(value); } catch { parsed[key] = value; }
         }
-        if (parsed.ov_token) return parsed.ov_token;
-        if (legacyCookie && parsed.token) return parsed.token;
+        if (parsed.ov_token) return { token: parsed.ov_token, from: 'ov_token_cookie' };
+        if (legacyCookie && parsed.token) return { token: parsed.token, from: 'legacy_cookie' };
     }
 
-    return null;
+    return { token: null, from: null };
+}
+
+/**
+ * Extract the token from Authorization header or cookie
+ */
+function extractToken(req, opts) {
+    return extractTokenFrom(req, opts).token;
 }
 
 /**
  * Extract the token for a WebSocket upgrade request
  */
 const urlTokenUses = { jwt: 0, api_token: 0 };
+// WS upgrades that authenticated from the Network `ov_token` cookie (the C-06 removal gate), by
+// token kind: when both stay at 0 for a release the cookie fallback can be deleted.
+const wsCookieUses = { jwt: 0, api_token: 0 };
 function extractWsToken(req) {
     // DEPRECATED (C-05): a ?token= query param. Browsers send the token in their first join message
     // and bots should use the Authorization header; URLs end up in proxy logs. Still honoured (and
@@ -86,8 +98,13 @@ function extractWsToken(req) {
         }
     } catch { /* fall through */ }
 
-    // Live's legacy `token` cookie rides along with ov_token on every browser upgrade: ignored.
-    return extractToken(req, { legacyCookie: false });
+    // Live's legacy `token` cookie rides along with ov_token on every browser upgrade: ignored. The
+    // ov_token cookie still authenticates the upgrade; count those so C-06 can be gated on it.
+    const { token, from } = extractTokenFrom(req, { legacyCookie: false });
+    if (token && from === 'ov_token_cookie') {
+        wsCookieUses[token.startsWith('hbt_') ? 'api_token' : 'jwt']++;
+    }
+    return token;
 }
 
 /**
@@ -195,4 +212,5 @@ module.exports = {
     optionalAuth,
     requireAdmin,
     urlTokenUses: () => ({ ...urlTokenUses }),
+    wsCookieUses: () => ({ ...wsCookieUses }),
 };

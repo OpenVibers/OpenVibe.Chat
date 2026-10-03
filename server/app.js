@@ -84,6 +84,10 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     // Deprecated ?token= on /ws/chat (C-05), by kind, since start: when both stay at 0, the shim goes.
     metrics.registry.gauge({ name: 'chat_ws_url_token_uses', help: 'WebSocket upgrades that carried the token in the URL (deprecated), by token kind', labelNames: ['kind'],
         collect: () => Object.entries(require('./auth/auth').urlTokenUses()).map(([kind, n]) => ({ labels: { kind }, value: n })) });
+    // WS upgrades that authenticated from the ov_token cookie (the C-06 removal gate), by kind,
+    // since start: the browser's cookie fallback goes once both stay at 0 for a release.
+    metrics.registry.gauge({ name: 'chat_ws_cookie_uses', help: 'WebSocket upgrades that authenticated from the ov_token cookie, by token kind', labelNames: ['via'],
+        collect: () => Object.entries(require('./auth/auth').wsCookieUses()).map(([via, n]) => ({ labels: { via }, value: n })) });
 
     /** Exact allow-list only (no subdomain wildcard). */
     function isAllowedOrigin(origin) {
