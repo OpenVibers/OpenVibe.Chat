@@ -18,11 +18,11 @@ let h, config, callServer, lifecycle;
 let ann, bob, cat, dan, eve, kay, staff, streamer, liveStream, offStream;
 
 /** Open /ws/call with a bearer (through nginx: the address in CF-Connecting-IP). */
-function callWs({ channelId, token = null, ip = '203.0.113.20', origin = 'https://openvibe.live', onOpen = null } = {}) {
+function callWs({ channelId, token = null, cookie = null, ip = '203.0.113.20', origin = 'https://openvibe.live', onOpen = null } = {}) {
     return new Promise((resolve, reject) => {
         const qs = new URLSearchParams();
         if (channelId != null) qs.set('channelId', channelId);
-        const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws/call?${qs}`, { headers: { 'cf-connecting-ip': ip, origin, ...(token ? { authorization: `Bearer ${token}` } : {}) } });
+        const ws = new WebSocket(`ws://127.0.0.1:${h.port}/ws/call?${qs}`, { headers: { 'cf-connecting-ip': ip, origin, ...(token ? { authorization: `Bearer ${token}` } : {}), ...(cookie ? { cookie } : {}) } });
         const all = [];
         const waiters = [];
         ws.on('message', (d) => {
@@ -182,19 +182,72 @@ t('signalling: offer / answer / ice-candidate relayed between two signed-in sock
     await bye(a2, b);
 });
 
-t('auth-update: an anonymous socket signs in (sent before its welcome, handled after, in order)', async () => {
+t('auth-update: sent before its welcome, the token admits the socket as that account (then handled, in order)', async () => {
     const other = await join({ channelId: 'public', token: bob.token, ip: '198.51.100.2' });
     const s = await callWs({ channelId: 'public', ip: '198.51.100.4', onOpen: (ws) => ws.sendJson({ type: 'auth-update', token: cat.token }) });
     const w = await s.next((m) => m.type === 'welcome');
-    assert.ok(w.participants.find((x) => x.peerId === w.peerId).anonId, 'joined as anon');
+    assert.deepStrictEqual([w.participants.find((x) => x.peerId === w.peerId).username, w.participants.find((x) => x.peerId === w.peerId).anonId], ['cat', null], 'joined as cat');
     const self = await s.next((m) => m.type === 'self-updated');
     assert.deepStrictEqual([self.participant.username, self.participant.userId, self.participant.anonId, self.canModerate], ['cat', cat.id, null, false]);
-    const upd = await other.next((m) => m.type === 'peer-updated');
-    assert.deepStrictEqual([upd.peerId, upd.username], [w.peerId, 'cat']);
+    const joined = await other.next((m) => m.type === 'peer-joined');
+    assert.deepStrictEqual([joined.peerId, joined.username], [w.peerId, 'cat']);
     s.sendJson({ type: 'auth-update', token: dan.token });
     const again = await s.next((m) => m.type === 'self-updated');
     assert.strictEqual(again.participant.username, 'cat', 'a different account cannot take over the socket');
     await bye(s, other);
+});
+
+t('a cookie call socket is cookie-reliant unless its first message is auth-update with the token (the J7 gate)', async () => {
+    const auth = require('../server/auth/auth');
+    const before = auth.wsCookieReliant();
+    // The page's client: auth-update with the token first. Not counted.
+    const s = await callWs({ channelId: 'public', cookie: `ov_token=${cat.token}`, ip: '198.51.100.5', onOpen: (ws) => ws.sendJson({ type: 'auth-update', token: cat.token }) });
+    assert.strictEqual((await s.next((m) => m.type === 'self-updated')).participant.username, 'cat');
+    assert.deepStrictEqual(auth.wsCookieReliant(), before);
+    // A client that never presents its token: its first auth-update counts it, once.
+    const old = await callWs({ channelId: 'public', cookie: `ov_token=${dan.token}`, ip: '198.51.100.6' });
+    await old.next((m) => m.type === 'welcome');
+    old.sendJson({ type: 'mute', muted: true });
+    old.sendJson({ type: 'auth-update' });
+    old.sendJson({ type: 'mute', muted: false });
+    await old.next((m) => m.type === 'self-updated');
+    assert.deepStrictEqual(auth.wsCookieReliant(), { ...before, jwt: before.jwt + 1 });
+    // A slow admission: the auth-update that arrives while the socket is being admitted still counts.
+    const canModerate = callServer._canModerate;
+    callServer._canModerate = async (...a) => { await h.sleep(300); return canModerate.apply(callServer, a); };
+    let slow;
+    try {
+        slow = await callWs({ channelId: 'public', cookie: `ov_token=${eve.token}`, ip: '198.51.100.7', onOpen: (ws) => setTimeout(() => ws.sendJson({ type: 'auth-update', token: eve.token }), 100) });
+        await slow.next((m) => m.type === 'welcome');
+        assert.strictEqual((await slow.next((m) => m.type === 'self-updated')).participant.username, 'eve');
+    } finally { callServer._canModerate = canModerate; }
+    assert.deepStrictEqual(auth.wsCookieReliant(), { ...before, jwt: before.jwt + 1 });
+    await bye(s, old, slow);
+});
+
+t('call reliance waits for auth-update and counts silent or rejected-token sockets', async () => {
+    const auth = require('../server/auth/auth');
+    const before = auth.wsCookieReliant().jwt;
+    const wrongType = await callWs({ channelId: 'public', cookie: `ov_token=${cat.token}`, ip: '198.51.100.10', onOpen: (ws) => {
+        ws.sendJson({ type: 'join', token: cat.token });
+        ws.sendJson({ type: 'auth-update', token: cat.token });
+    } });
+    await wrongType.next((m) => m.type === 'self-updated');
+    assert.strictEqual(auth.wsCookieReliant().jwt, before, 'a join frame cannot settle call auth');
+    await bye(wrongType);
+
+    const rejected = await callWs({ channelId: 'public', cookie: `ov_token=${dan.token}`, ip: '198.51.100.11', onOpen: (ws) => ws.sendJson({ type: 'auth-update', token: 'invalid-token' }) });
+    assert.strictEqual((await rejected.next((m) => m.type === 'self-updated')).participant.username, 'dan');
+    assert.strictEqual(auth.wsCookieReliant().jwt, before + 1);
+    await bye(rejected);
+
+    const silent = await callWs({ channelId: 'public', cookie: `ov_token=${eve.token}`, ip: '198.51.100.12' });
+    await silent.next((m) => m.type === 'welcome');
+    await until(() => auth.wsCookieReliant().jwt === before + 2, 2000);
+    silent.sendJson({ type: 'auth-update', token: eve.token });
+    await silent.next((m) => m.type === 'self-updated');
+    assert.strictEqual(auth.wsCookieReliant().jwt, before + 2, 'a later message does not double count');
+    await bye(silent);
 });
 
 t('limits: 3 sockets per address, 8 per channel', async () => {
@@ -332,8 +385,16 @@ t('call-user: ringing → accepted → active → ended; private call; Live aske
     ring = await lifecycle.get(ring.id);
     assert.deepStrictEqual([ring.state, ring.end_reason], ['active', null]);
     assert.ok(ring.answered_at >= ring.started_at);
-    const c = await join({ channelId: annCall, token: cat.token, ip: '198.51.100.43' });
+    // No cookie and no bearer on the upgrade (a browser after J7): the token in the first message,
+    // sent a moment after the socket opened, is what admits the invitee.
+    const admission = callServer._admission;
+    callServer._admission = async (...args) => { if (!args[2]) await h.sleep(300); return admission.apply(callServer, args); };
+    let c;
+    try {
+        c = await join({ channelId: annCall, ip: '198.51.100.43', onOpen: (ws) => setTimeout(() => ws.sendJson({ type: 'auth-update', token: cat.token }), 100) });
+    } finally { callServer._admission = admission; }
     assert.ok(c.welcome, c.error);
+    assert.strictEqual(c.welcome.participants.find((p) => p.peerId === c.welcome.peerId).username, 'cat');
     await h.sleep(1400);
     assert.strictEqual((await lifecycle.get(ring.id)).state, 'active', 'an answered call is not missed');
     await bye(a, c, annChat, catChat, anon, outsider);

@@ -42,7 +42,7 @@
 const WebSocket = require('ws');
 const config = require('../config');
 const ctx = require('../live-context');
-const { extractWsToken, authenticateWs } = require('../auth/auth');
+const { extractWsTokenFrom, wsCookieReliance, authenticateWs } = require('../auth/auth');
 const permissions = require('../auth/permissions');
 const chatServer = require('../chat/chat-server');
 const lifecycle = require('./lifecycle');
@@ -53,6 +53,7 @@ const cosmetics = { getCosmeticProfile: (userId) => ctx.getCosmeticProfile(userI
 const WS_HEARTBEAT_MS = 30000;
 const MAX_PARTICIPANTS = 8;
 const MAX_SOCKETS_PER_IP = 3;          // one household in one channel; never one host filling it
+const FIRST_TOKEN_WAIT_MS = 1000;    // how long a refused anonymous socket waits for its auth-update
 const KICK_COOLDOWN_MS = 60 * 1000;
 const PUBLIC_CHANNEL_ID = 'public';
 const MODES = ['mic', 'mic+cam', 'cam+mic'];
@@ -298,7 +299,7 @@ class CallServer {
     async _handleConnection(ws, req) {
         const url = new URL(req.url, 'http://localhost');
         const channelId = url.searchParams.get('channelId') || url.searchParams.get('streamId');
-        const token = extractWsToken(req);
+        const { token, from: tokenFrom } = extractWsTokenFrom(req);
         // CF-Connecting-IP / X-Forwarded-For only when nginx's peer is Cloudflare (net/client-ip.js), as on /ws/chat.
         const ip = chatServer.getClientIp(req);
 
@@ -330,11 +331,12 @@ class CallServer {
             const user = await authenticateWs(token).catch(() => null);
             if (!user) await chatServer._resolveUnifiedAnonNum(chatServer.normalizeIp(ip)).catch(() => {});
             await ctx.warm({ user, streamId: first && first.streamId ? first.streamId : null, ip }).catch(() => {});
-            ws.off('message', onEarlyMessage);
             ws.off('close', onEarlyClose);
             ws.off('error', onEarlyClose);
             if (closedEarly || ws.readyState !== WebSocket.OPEN) return;
-            await this._admit(ws, { resolvedId, ip, user, stream, early });
+            // Messages keep buffering until _admit attaches the socket's handler: none falls in between.
+            await this._admit(ws, { resolvedId, ip, user, stream, early, stopBuffering: () => ws.off('message', onEarlyMessage),
+                cookieReliance: user && tokenFrom === 'ov_token_cookie' ? wsCookieReliance(token) : null });
         })().catch((err) => {
             console.warn('[Call] connection setup failed:', err.message);
             try { ws.close(1011, 'setup failed'); } catch {}
@@ -342,7 +344,7 @@ class CallServer {
     }
 
     /** The rest of Live's _handleConnection, once the socket's identity is known. */
-    async _admit(ws, { resolvedId, ip, user, stream, early }) {
+    async _admit(ws, { resolvedId, ip, user, stream, early, stopBuffering, cookieReliance = null }) {
         // The channel may have gone while the socket signed in.
         const channel = this.channels.get(resolvedId);
         if (!channel) { ws.send(JSON.stringify({ type: 'error', message: 'Voice channel not found' })); ws.close(); return; }
@@ -353,16 +355,24 @@ class CallServer {
             if (!stream || !stream.is_live) { ws.send(JSON.stringify({ type: 'error', message: 'Stream not live' })); ws.close(); return; }
         }
 
-        if (channel.private && !await this._canSeePrivate(channel, user)) { ws.send(JSON.stringify({ type: 'error', message: 'This is a private call' })); ws.close(); return; }
-
-        // A call room: the room's roles decide who is in and who talks.
-        let roomAccess = null;
-        if (channel.roomSlug) {
-            const room = await this._roomOf(resolvedId);
-            roomAccess = room ? await rooms.access(room, user) : null;
-            if (!roomAccess || !roomAccess.read) { ws.send(JSON.stringify({ type: 'error', message: 'Voice channel not found' })); ws.close(); return; }
-            if (!roomAccess.join) { ws.send(JSON.stringify({ type: 'error', message: 'You cannot join this call' })); ws.close(); return; }
+        // Admission counts the token the client presents in its first message (auth-update) too: once
+        // J7 drops the cookie fallback a browser's upgrade is anonymous, and a private call or a
+        // members-only room must still let it in. A socket refused while anonymous waits briefly for
+        // that message.
+        user = await this._presentedUser(early, user);
+        let admission = await this._admission(channel, resolvedId, user);
+        if (admission.error && !user) {
+            // Admission itself may have awaited Live while auth-update arrived in the buffer.
+            user = await this._presentedUser(early, user);
+            if (!user) {
+                await this._firstAuthMessage(ws, FIRST_TOKEN_WAIT_MS);
+                if (ws.readyState !== WebSocket.OPEN) return;
+                user = await this._presentedUser(early, user);
+            }
+            if (user) admission = await this._admission(channel, resolvedId, user);
         }
+        if (admission.error) { ws.send(JSON.stringify({ type: 'error', message: admission.error })); ws.close(); return; }
+        const roomAccess = admission.roomAccess;
         const listenOnly = !!(roomAccess && !roomAccess.talk);
 
         const peerId = this._generatePeerId();
@@ -449,19 +459,74 @@ class CallServer {
 
         // One message at a time per socket, in arrival order (auth-update resolves a token first).
         let queue = Promise.resolve();
+        const relianceTimer = cookieReliance ? setTimeout(() => {
+            // Give an auth-update already queued for processing a chance to resolve first.
+            queue.finally(() => cookieReliance());
+        }, FIRST_TOKEN_WAIT_MS) : null;
+        if (relianceTimer) ws.once('close', () => { clearTimeout(relianceTimer); queue.finally(() => cookieReliance()); });
         const onMessage = (data) => {
             // Rate limit: 200/s. A newcomer to a full room sends seven offers and their candidates in
             // a burst; the old 50/s silently dropped some of them and the join stalled.
             const now = Date.now();
             if (now - clientInfo._msgResetTime > 1000) { clientInfo._msgCount = 0; clientInfo._msgResetTime = now; }
             if (++clientInfo._msgCount > 200) return;
-            queue = queue.then(async () => await this._handleMessage(ws, JSON.parse(data), resolvedId, peerId))
+            let msg;
+            try { msg = JSON.parse(data); } catch (err) { console.warn('[Call] Message error for peer', peerId, ':', err.message); return; }
+            queue = queue.then(async () => {
+                const accepted = await this._handleMessage(ws, msg, resolvedId, peerId);
+                if (cookieReliance && msg.type === 'auth-update') cookieReliance(accepted);
+            })
                 .catch((err) => { console.warn('[Call] Message error for peer', peerId, ':', err.message); });
         };
+        stopBuffering();
         ws.on('message', onMessage);
         ws.on('close', async () => await this._handleDisconnect(ws, resolvedId, peerId));
         ws.on('error', async () => await this._handleDisconnect(ws, resolvedId, peerId));
         for (const data of early) onMessage(data);
+    }
+
+    /** Whether `user` may enter `channel`: { error } or { roomAccess } (null outside call rooms). */
+    async _admission(channel, channelId, user) {
+        if (channel.private && !await this._canSeePrivate(channel, user)) return { error: 'This is a private call' };
+        // A call room: the room's roles decide who is in and who talks.
+        if (!channel.roomSlug) return { roomAccess: null };
+        const room = await this._roomOf(channelId);
+        const roomAccess = room ? await rooms.access(room, user) : null;
+        if (!roomAccess || !roomAccess.read) return { error: 'Voice channel not found' };
+        if (!roomAccess.join) return { error: 'You cannot join this call' };
+        return { roomAccess };
+    }
+
+    /**
+     * The account of the token in the socket's first message when that is an auth-update carrying
+     * one, else `user`. As auth-update: an invalid token changes nothing, and it never replaces the
+     * upgrade's account with another.
+     */
+    async _presentedUser(early, user) {
+        let first = null;
+        for (const data of early) {
+            let msg;
+            try { msg = JSON.parse(data); } catch { continue; }
+            if (msg?.type === 'auth-update') { first = msg; break; }
+        }
+        if (!first || typeof first.token !== 'string' || !first.token.trim()) return user;
+        const next = await authenticateWs(first.token).catch(() => null);
+        if (!next || (user && user.id !== next.id)) return user;
+        await ctx.ensureDecor([next.id]).catch(() => {});
+        return next;
+    }
+
+    /** Resolves on the next auth-update (buffered by then), close, or timeout. */
+    _firstAuthMessage(ws, ms) {
+        return new Promise((resolve) => {
+            const done = () => { clearTimeout(timer); ws.off('message', onMessage); ws.off('close', done); resolve(); };
+            const onMessage = (data) => {
+                try { if (JSON.parse(data)?.type === 'auth-update') done(); } catch { /* wait */ }
+            };
+            const timer = setTimeout(done, ms);
+            ws.on('message', onMessage);
+            ws.on('close', done);
+        });
     }
 
     async _canModerate(user, channelId) {
@@ -514,6 +579,7 @@ class CallServer {
             case 'auth-update': {
                 const c = room.get(peerId); if (!c) break;
                 let user = c.user || null;
+                let acceptedToken = false;
                 if (typeof msg.token === 'string' && msg.token.trim()) {
                     const nextUser = await authenticateWs(msg.token).catch(() => null);
                     if (!nextUser) {
@@ -522,6 +588,7 @@ class CallServer {
                         console.warn(`[Call] auth-update identity mismatch for peer ${peerId}: keeping existing user ${user.username}, ignoring ${nextUser.username}`);
                     } else {
                         user = nextUser;
+                        acceptedToken = true;
                     }
                     if (user) await ctx.ensureDecor([user.id]).catch(() => {});
                     // The socket may have left while the token was resolved.
@@ -550,7 +617,7 @@ class CallServer {
                 }));
                 const u = JSON.stringify({ type: 'peer-updated', ...pInfo });
                 for (const [pid, info] of room) { if (pid !== peerId && info.ws.readyState === WebSocket.OPEN) info.ws.send(u); }
-                break;
+                return acceptedToken;
             }
             case 'force-mute': {
                 const sender = room.get(peerId); if (!sender || !await this._canModerate(sender.user, channelId)) break;

@@ -11,6 +11,11 @@
   var latest = Number(cfg.latest) || 0;
   var LIVE = 'https://openvibe.live';
 
+  // The session token (the ov_token cookie is JS-readable), presented in each socket's first message.
+  function sessionToken() {
+    var m = /(?:^|;\s*)ov_token=([^;]+)/.exec(document.cookie || '');
+    return m ? decodeURIComponent(m[1]) : undefined;
+  }
   function nearBottom() { return !feed || feed.scrollHeight - feed.scrollTop - feed.clientHeight < 120; }
   function toBottom() { if (feed) feed.scrollTop = feed.scrollHeight; }
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
@@ -88,7 +93,7 @@
       ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
       ws.onopen = function () {
         delay = 1000;
-        ws.send(JSON.stringify({ type: 'join' }));
+        ws.send(JSON.stringify({ type: 'join', token: sessionToken() }));
         if (live) live.hidden = false;
         if (opened) catchUp();
         opened = true;
@@ -197,7 +202,7 @@
     }
     function connect() {
       ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
-      ws.onopen = function () { delay = 1000; ws.send(JSON.stringify({ type: 'join_room', room: cfg.room })); if (opened) catchUpRoom(); opened = true; };
+      ws.onopen = function () { delay = 1000; ws.send(JSON.stringify({ type: 'join_room', room: cfg.room, token: sessionToken() })); if (opened) catchUpRoom(); opened = true; };
       ws.onmessage = function (ev) {
         var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
         if (m.type === 'room_joined') { if (live) live.hidden = false; }
