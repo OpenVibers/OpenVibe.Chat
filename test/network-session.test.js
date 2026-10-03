@@ -119,6 +119,25 @@ t('WebSocket upgrades ignore the legacy token cookie', async () => {
     ws.close();
 });
 
+t('an upgrade from the ov_token cookie is counted (C-06 gate)', async () => {
+    const before = require('../server/auth/auth').wsCookieUses().jwt;
+    const ws = await h.ws({ cookie: `ov_token=${jwt(claimsFor(alice))}` });
+    ws.sendJson({ type: 'join' });
+    assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'alice');
+    ws.close();
+    assert.strictEqual(require('../server/auth/auth').wsCookieUses().jwt, before + 1);
+    assert.match((await h.http('GET', '/metrics')).text, /chat_ws_cookie_uses\{[^}]*kind="jwt"[^}]*\} [1-9]/);
+});
+
+t('an ov_token cookie that does not resolve to an account is not counted', async () => {
+    const before = require('../server/auth/auth').wsCookieUses().jwt;
+    const ws = await h.ws({ cookie: `ov_token=${jwt(claimsFor(alice), crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey)}` });
+    ws.sendJson({ type: 'join' });
+    assert.strictEqual((await ws.next((m) => m.type === 'auth')).authenticated, false);
+    ws.close();
+    assert.strictEqual(require('../server/auth/auth').wsCookieUses().jwt, before);
+});
+
 t('bots authenticate the upgrade with an Authorization header, no token in the URL', async () => {
     const before = require('../server/auth/auth').urlTokenUses();
     const ws = await h.ws({ bearer: jwt(claimsFor(carol)) });

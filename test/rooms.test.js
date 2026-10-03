@@ -92,6 +92,20 @@ t('moderation: delete and block, owner-only mods, logged; live delivery only to 
     for (const ws of [annWs, bobWs, outsider]) ws.close();
 });
 
+t('join_room authenticates a token in the message; a different account\'s token is refused', async () => {
+    // secret-club is private: only its members (ann, bob) can open it.
+    const anon = await h.ws({ ip: '203.0.113.31' });
+    anon.sendJson({ type: 'join_room', room: 'secret-club' });
+    assert.strictEqual((await anon.next((m) => m.type === 'room_joined' || m.type === 'room_error')).type, 'room_error', 'anonymous: no access');
+    anon.sendJson({ type: 'join_room', room: 'secret-club', token: bob.token });
+    assert.strictEqual((await anon.next((m) => m.type === 'room_joined')).role, 'member', 'the token makes the socket bob');
+    const catWs = await h.ws({ ip: '203.0.113.32', token: cat.token });
+    catWs.sendJson({ type: 'join_room', room: 'secret-club', token: bob.token });
+    const r = await catWs.next((m) => m.type === 'room_joined' || m.type === 'room_error');
+    assert.deepStrictEqual([r.type, r.code], ['room_error', 'rooms.not_found'], 'a socket cannot switch to another account');
+    for (const ws of [anon, catWs]) ws.close();
+});
+
 t('slow mode and site bans', async () => {
     let r = await api('PATCH', '/night-owls', ann, { slow_seconds: 30 });
     assert.strictEqual(r.body.room.slow_seconds, 30);
