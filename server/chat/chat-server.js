@@ -22,7 +22,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const db = require('../db/database');
 const ctx = require('../live-context');
-const { extractWsToken, authenticateWs } = require('../auth/auth');
+const { extractWsTokenFrom, countWsCookieUse, authenticateWs } = require('../auth/auth');
 const session = require('../auth/network-session');
 const { clientIpOf } = require('../net/client-ip');
 const permissions = require('../auth/permissions');
@@ -268,7 +268,7 @@ class ChatServer {
         }
 
         const urlParams = new URL(req.url, 'http://localhost').searchParams;
-        const token = extractWsToken(req);
+        const { token, from: tokenFrom } = extractWsTokenFrom(req);
         const streamId = parseInt(urlParams.get('stream')) || null;
 
         ws.isAlive = true;
@@ -289,6 +289,7 @@ class ChatServer {
         (async () => {
             // Authenticate (optional — anon if no token)
             const user = await authenticateWs(token).catch(() => null);
+            if (user && tokenFrom === 'ov_token_cookie') countWsCookieUse(token);
             if (!user) await this._resolveUnifiedAnonNum(this.normalizeIp(ip)).catch(() => {});
             await ctx.warm({ user, streamId, ip }).catch(() => {});
             ws.off('message', onEarlyMessage);

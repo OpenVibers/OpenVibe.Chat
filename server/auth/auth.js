@@ -79,13 +79,15 @@ function extractToken(req, opts) {
 }
 
 /**
- * Extract the token for a WebSocket upgrade request
+ * Extract the token for a WebSocket upgrade request, and where it came from ('url', 'header',
+ * 'ov_token_cookie' or null)
  */
 const urlTokenUses = { jwt: 0, api_token: 0 };
-// WS upgrades that authenticated from the Network `ov_token` cookie (the C-06 removal gate), by
-// token kind: when both stay at 0 for a release the cookie fallback can be deleted.
+// /ws/chat upgrades that authenticated from the Network `ov_token` cookie (the C-06 removal gate),
+// by token kind, counted once the token resolved to an account (countWsCookieUse): when both stay
+// at 0 for a release the cookie fallback can be deleted.
 const wsCookieUses = { jwt: 0, api_token: 0 };
-function extractWsToken(req) {
+function extractWsTokenFrom(req) {
     // DEPRECATED (C-05): a ?token= query param. Browsers send the token in their first join message
     // and bots should use the Authorization header; URLs end up in proxy logs. Still honoured (and
     // counted, /metrics chat_ws_url_token_uses) while Live's bot guide and call client still send it.
@@ -94,17 +96,21 @@ function extractWsToken(req) {
         const queryToken = url.searchParams.get('token');
         if (queryToken && queryToken !== 'null' && queryToken !== 'undefined') {
             urlTokenUses[queryToken.startsWith('hbt_') ? 'api_token' : 'jwt']++;
-            return queryToken;
+            return { token: queryToken, from: 'url' };
         }
     } catch { /* fall through */ }
 
-    // Live's legacy `token` cookie rides along with ov_token on every browser upgrade: ignored. The
-    // ov_token cookie still authenticates the upgrade; count those so C-06 can be gated on it.
-    const { token, from } = extractTokenFrom(req, { legacyCookie: false });
-    if (token && from === 'ov_token_cookie') {
-        wsCookieUses[token.startsWith('hbt_') ? 'api_token' : 'jwt']++;
-    }
-    return token;
+    // Live's legacy `token` cookie rides along with ov_token on every browser upgrade: ignored.
+    return extractTokenFrom(req, { legacyCookie: false });
+}
+
+function extractWsToken(req) {
+    return extractWsTokenFrom(req).token;
+}
+
+/** Count a /ws/chat upgrade that the ov_token cookie authenticated (call once the user resolved). */
+function countWsCookieUse(token) {
+    wsCookieUses[token.startsWith('hbt_') ? 'api_token' : 'jwt']++;
 }
 
 /**
@@ -207,6 +213,8 @@ module.exports = {
     extractToken,
     requestUser,
     extractWsToken,
+    extractWsTokenFrom,
+    countWsCookieUse,
     authenticateWs,
     requireAuth,
     optionalAuth,
