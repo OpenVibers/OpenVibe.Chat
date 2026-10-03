@@ -53,6 +53,7 @@ const cosmetics = { getCosmeticProfile: (userId) => ctx.getCosmeticProfile(userI
 const WS_HEARTBEAT_MS = 30000;
 const MAX_PARTICIPANTS = 8;
 const MAX_SOCKETS_PER_IP = 3;          // one household in one channel; never one host filling it
+const MAX_EARLY_MESSAGES = 200;       // pre-admission buffer cap; past it the socket is closed (same as the 200/s rate limit)
 const FIRST_TOKEN_WAIT_MS = 1000;    // how long a refused anonymous socket waits for its auth-update
 const KICK_COOLDOWN_MS = 60 * 1000;
 const PUBLIC_CHANNEL_ID = 'public';
@@ -319,7 +320,7 @@ class CallServer {
         // meanwhile wait, in order, and are handled once the socket is in the room.
         const early = [];
         let closedEarly = false;
-        const onEarlyMessage = (data) => early.push(data);
+        const onEarlyMessage = (data) => { if (early.length >= MAX_EARLY_MESSAGES) { try { ws.close(1008, 'Too many messages'); } catch {} return; } early.push(data); };
         const onEarlyClose = () => { closedEarly = true; };
         ws.on('message', onEarlyMessage);
         ws.on('close', onEarlyClose);

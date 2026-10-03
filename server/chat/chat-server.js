@@ -39,6 +39,7 @@ const tags = { getTagProfile: (userId) => ctx.getTagProfile(userId) };
 // Concurrent chat sockets per address. Generous: one person has several tabs, a school or
 // carrier NAT puts many people behind one address; this only stops one host opening thousands.
 const MAX_CHAT_SOCKETS_PER_IP = 48;
+const MAX_EARLY_MESSAGES = 200;       // pre-admission buffer cap; past it the socket is closed
 
 const DEBUG_DM_DELIVERY = process.env.DEBUG_DM_DELIVERY === '1';
 
@@ -281,7 +282,7 @@ class ChatServer {
         // meanwhile wait, in order, and are handled once the connection is registered.
         const early = [];
         let closedEarly = false;
-        const onEarlyMessage = (data) => early.push(data);
+        const onEarlyMessage = (data) => { if (early.length >= MAX_EARLY_MESSAGES) { try { ws.close(1008, 'Too many messages'); } catch {} return; } early.push(data); };
         const onEarlyClose = () => { closedEarly = true; };
         ws.on('message', onEarlyMessage);
         ws.on('close', onEarlyClose);

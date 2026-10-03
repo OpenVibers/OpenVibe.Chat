@@ -62,6 +62,35 @@ t('anonymous socket upgrades to signed-in on join with a token', async () => {
     ws.close();
 });
 
+t('the pre-admission buffer is capped: 201 early messages close the socket (1008); a few are replayed', async () => {
+    const warm = h.ctx.warm;
+    h.ctx.warm = async (...a) => { await h.sleep(250); return warm.apply(h.ctx, a); };
+    try {
+        // 201 messages while the socket is being admitted: the buffer does not grow past the cap.
+        const flood = await h.ws({ ip: '198.51.100.90', token: alice.token, stream: streamId });
+        const closed = new Promise((r) => flood.on('close', (code) => r(code)));
+        for (let i = 0; i < 201; i++) flood.sendJson({ type: 'join', streamId });
+        assert.strictEqual(await closed, 1008, 'closed with 1008, not buffered without bound');
+        assert.ok(!flood.all.some((m) => m.type === 'auth'), 'never registered');
+        // A few messages before admission: still registered, and the buffer is replayed in order.
+        const few = await h.ws({ ip: '198.51.100.91', token: mod.token, stream: streamId });
+        few.sendJson({ type: 'join', streamId, token: mod.token });
+        few.sendJson({ type: 'chat', message: 'from the buffer' });
+        const auth = await few.next((m) => m.type === 'auth');
+        assert.strictEqual(auth.username, 'Moddy');
+        const end = Date.now() + 2000;
+        let saved = null;
+        for (;;) {
+            saved = (await h.http('GET', `/api/chat/${streamId}/history`)).body.messages.find((m) => m.message === 'from the buffer');
+            if (saved) break;
+            if (Date.now() > end) throw new Error('the buffered chat frame was not replayed');
+            await h.sleep(20);
+        }
+        assert.strictEqual(saved.core_username, 'moddy', 'the early chat frame was replayed once admitted');
+        few.close();
+    } finally { h.ctx.warm = warm; }
+});
+
 let aliceWs, bobWs, globalWs, msgId;
 t('chat into a stream room: room delivery, global cross-feed, persistence, outbox, Live reactions', async () => {
     aliceWs = await h.ws({ ip: '198.51.100.20', token: alice.token, stream: streamId });
