@@ -22,7 +22,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const db = require('../db/database');
 const ctx = require('../live-context');
-const { extractWsTokenFrom, countWsCookieUse, authenticateWs } = require('../auth/auth');
+const { extractWsTokenFrom, countWsCookieUse, wsCookieReliance, authenticateWs } = require('../auth/auth');
 const session = require('../auth/network-session');
 const { clientIpOf } = require('../net/client-ip');
 const permissions = require('../auth/permissions');
@@ -296,7 +296,8 @@ class ChatServer {
             ws.off('close', onEarlyClose);
             ws.off('error', onEarlyClose);
             if (closedEarly || ws.readyState !== WebSocket.OPEN) return;
-            this._registerConnection(ws, req, { ip, streamId, user, early, tokenIat: user ? session.tokenIat(token) : null });
+            this._registerConnection(ws, req, { ip, streamId, user, early, tokenIat: user ? session.tokenIat(token) : null,
+                cookieReliance: user && tokenFrom === 'ov_token_cookie' ? wsCookieReliance(token) : null });
         })().catch((err) => {
             console.warn('[Chat] connection setup failed:', err.message);
             try { ws.close(1011, 'setup failed'); } catch {}
@@ -304,7 +305,7 @@ class ChatServer {
     }
 
     /** The rest of Live's handleConnection, once the socket's identity is known. */
-    _registerConnection(ws, req, { ip, streamId, user, early, tokenIat = null }) {
+    _registerConnection(ws, req, { ip, streamId, user, early, tokenIat = null, cookieReliance = null }) {
         const perIp = this._ipSockets.get(ip) || 0;
         if (ip && ip !== 'unknown' && perIp >= MAX_CHAT_SOCKETS_PER_IP && !permissions.can(user, 'staff.limits.exempt')) {
             ws.close(4029, 'Too many connections');
@@ -359,7 +360,7 @@ class ChatServer {
                 console.warn('[Chat] Malformed message from', ws._clientIp || 'unknown', ':', err.message);
                 return;
             }
-            chain = chain.then(async () => await this.handleMessage(ws, msg)).catch((err) => {
+            chain = chain.then(async () => await this.handleMessage(ws, msg, cookieReliance)).catch((err) => {
                 console.warn('[Chat] message handling failed:', err.message);
             });
         };
@@ -386,23 +387,24 @@ class ChatServer {
      * the socket already carries is ignored: a socket cannot change identity mid-session.
      */
     async _applyJoinToken(client, msg) {
-        if (!msg.token) return;
+        if (!msg.token) return false;
         const user = await authenticateWs(msg.token).catch(() => null);
-        if (!user) return;
+        if (!user) return false;
         if (client.user && client.user.id !== user.id) {
             console.warn(`[Chat] Ignoring token identity mismatch for ${client.user.username} -> ${user.username}`);
-            return;
+            return false;
         }
         client.user = user;
         await this._hiddenFromUserList(user);   // warm chat.presence_prefs before the next user list
         client.tokenIat = session.tokenIat(msg.token);
         client.anonId = null; // no longer anonymous
+        return true;
     }
 
     /**
      * Handle incoming chat message
      */
-    async handleMessage(ws, msg) {
+    async handleMessage(ws, msg, cookieReliance = null) {
         const client = this.clients.get(ws);
         if (!client) return;
 
@@ -437,7 +439,8 @@ class ChatServer {
             case 'join':
             case 'join_stream': {
                 // (Re-)authenticate if a token is provided
-                await this._applyJoinToken(client, msg);
+                const acceptedToken = await this._applyJoinToken(client, msg);
+                if (cookieReliance) cookieReliance(acceptedToken);
                 const oldStream = client.streamId;
                 const nextStreamId = parseInt(msg.streamId || msg.stream_id) || null;
                 const requestedChannel = parseInt(msg.channelUserId || msg.channel_user_id) || null;
@@ -520,7 +523,8 @@ class ChatServer {
             case 'join_room': {
                 // A room socket can still arrive anonymous or as a guest: authenticate a token the
                 // same way as join, so room access is resolved with the member's identity.
-                await this._applyJoinToken(client, msg);
+                const acceptedToken = await this._applyJoinToken(client, msg);
+                if (cookieReliance) cookieReliance(acceptedToken);
                 const rooms = require('../rooms/rooms');
                 const room = await rooms.bySlug(msg.room);
                 const a = room ? await rooms.access(room, client.user) : null;

@@ -181,4 +181,41 @@ t('unknown pages: a browser gets the site\'s HTML 404 page, the API and other cl
     assert.match(post.headers.get('content-type'), /^application\/json/, 'a form post to nowhere keeps JSON');
 });
 
+// Run a page script (public/web/) in a sandbox with fake elements and sockets: the sockets it opened
+// (each with what it sent) and the listeners it added to elements ('<id>:<event>').
+const runClient = (file, page, docCookie) => {
+    const sockets = [];
+    const listeners = {};
+    const element = (id) => ({ hidden: false, textContent: '', appendChild() {}, setAttribute() {}, removeAttribute() {}, querySelector: () => null, addEventListener: (ev, fn) => { listeners[`${id}:${ev}`] = fn; } });
+    function WebSocket(url) { this.url = url; this.readyState = 1; this.sent = []; sockets.push(this); }
+    WebSocket.prototype.send = function (d) { this.sent.push(JSON.parse(d)); };
+    WebSocket.prototype.close = function () {};
+    require('vm').runInNewContext(require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'web', file), 'utf8'), {
+        window: { __OV_PAGE: { chat: page }, RTCPeerConnection: function () {}, WebSocket, addEventListener() {} },
+        WebSocket, navigator: {}, location: { protocol: 'https:', host: 'openvibe.chat' },
+        document: { cookie: docCookie, hidden: false, getElementById: element, createElement: () => element(null), addEventListener() {} },
+        fetch: async () => ({ ok: false }), setTimeout: () => 0, setInterval: () => 0,
+    });
+    return { sockets, listeners };
+};
+
+t('the page scripts present the session token in the first message of every socket (C-06)', async () => {
+    const signedIn = `ov_sso_hint=account; ov_token=${encodeURIComponent(alice.token)}`;
+    for (const [page, first] of [[{ view: 'global' }, { type: 'join' }], [{ view: 'room', room: 'lobby' }, { type: 'join_room', room: 'lobby' }]]) {
+        for (const [docCookie, token] of [[signedIn, alice.token], ['ov_sso_hint=guest', undefined]]) {
+            const { sockets } = runClient('chat.js', page, docCookie);
+            sockets[0].onopen();
+            assert.deepStrictEqual(sockets[0].sent[0], { ...first, ...(token ? { token } : {}) }, `${page.view}, ${token ? 'signed in' : 'guest'}`);
+        }
+    }
+    // The call socket opens on Join; a member's first message is auth-update with the token.
+    for (const [docCookie, sent] of [[signedIn, [{ type: 'auth-update', token: alice.token }]], ['', []]]) {
+        const { sockets, listeners } = runClient('call.js', { view: 'room', room: 'lobby', call: { join: true, talk: false, channel: 'room-lobby' } }, docCookie);
+        listeners['oc-call-join:click']();
+        await new Promise((r) => setImmediate(r));
+        sockets[0].onopen();
+        assert.deepStrictEqual(sockets[0].sent, sent, docCookie ? 'call, signed in' : 'call, guest');
+    }
+});
+
 t.run(async () => { if (h && h.close) await h.close(); });

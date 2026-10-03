@@ -84,10 +84,15 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     // Deprecated ?token= on /ws/chat (C-05), by kind, since start: when both stay at 0, the shim goes.
     metrics.registry.gauge({ name: 'chat_ws_url_token_uses', help: 'WebSocket upgrades that carried the token in the URL (deprecated), by token kind', labelNames: ['kind'],
         collect: () => Object.entries(require('./auth/auth').urlTokenUses()).map(([kind, n]) => ({ labels: { kind }, value: n })) });
-    // /ws/chat upgrades that authenticated from the ov_token cookie (the C-06 removal gate), by kind,
-    // since start: the browser's cookie fallback goes once both stay at 0 for a release.
+    // /ws/chat upgrades that authenticated from the ov_token cookie, by kind, since start: the raw
+    // "cookie seen" series. Browsers send the cookie on every same-origin upgrade, so it never reads 0.
     metrics.registry.gauge({ name: 'chat_ws_cookie_uses', help: '/ws/chat upgrades whose ov_token cookie resolved to an account, by token kind', labelNames: ['kind'],
         collect: () => Object.entries(require('./auth/auth').wsCookieUses()).map(([kind, n]) => ({ labels: { kind }, value: n })) });
+    // The C-06 removal gate (J7): /ws/chat and /ws/call sockets the cookie authenticated whose first
+    // accepted auth message did not present a valid token, by via, since start. J7 removes the cookie branch
+    // from extractWsToken once both stay at 0 for one full release.
+    metrics.registry.gauge({ name: 'chat_ws_cookie_reliant', help: 'WebSockets that relied on the ov_token cookie, by token kind', labelNames: ['via'],
+        collect: () => Object.entries(require('./auth/auth').wsCookieReliant()).map(([via, n]) => ({ labels: { via }, value: n })) });
 
     /** Exact allow-list only (no subdomain wildcard). */
     function isAllowedOrigin(origin) {

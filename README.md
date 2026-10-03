@@ -527,6 +527,11 @@ Reporting a vulnerability: [SECURITY.md](SECURITY.md). The rules the code keeps:
   Live; WebSocket upgrades use the session cookie or Authorization bearer (Live's legacy `token`
   cookie is ignored there); `?token=` on `/ws/chat` is deprecated (C-05), counted in
   `chat_ws_url_token_uses`, and stays until Live's bot guide and call client stop sending it.
+  The browser clients present the token in the first message of every socket (`join`,
+  `join_room`, the call's `auth-update`); J7 removes the cookie branch from `extractWsToken` once
+  `chat_ws_cookie_reliant{via="jwt"|"api_token"}` (cookie-authenticated sockets whose first
+  handled auth message lacked a valid token, or call sockets silent past the token grace period)
+  stays 0 for one full release after that ships (`chat_ws_cookie_uses` only counts the cookie seen).
   Services use client-credentials tokens for audience
   `openvibe.chat`, checked per capability (`chat.live_bridge.write`, `chat.message.send`,
   `chat.presence.read`). Staff gates ask the contracts staff map.

@@ -334,6 +334,26 @@ t('chat sockets following a room learn their new role at once, or leave', async 
     ws.close();
 });
 
+t('join_room: a token re-authenticates an anonymous socket, never switches a signed-in one (private rooms: members only)', async () => {
+    assert.strictEqual((await api('POST', '/', own, { name: 'Inner Circle', kind: 'community', visibility: 'private' })).body.room.slug, 'inner-circle');
+    // A guest socket presents the owner's token in join_room: signed in, and the private room opens.
+    const guest = await h.ws({ ip: '203.0.113.41' });
+    guest.sendJson({ type: 'join_room', room: 'inner-circle', token: own.token });
+    assert.strictEqual((await guest.next((m) => m.type === 'room_joined')).role, 'owner');
+    guest.close();
+    // An outsider's socket presents the owner's token: ignored, the room stays missing, still the outsider.
+    const ws = await h.ws({ token: out.token, ip: '203.0.113.42' });
+    ws.sendJson({ type: 'join_room', room: 'inner-circle', token: own.token });
+    assert.strictEqual((await ws.next((m) => m.type === 'room_error')).code, 'rooms.not_found');
+    ws.sendJson({ type: 'join' });
+    assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'outsider1', 'the socket keeps its identity');
+    // An invalid token is refused as in join: the guest stays a guest.
+    const anon = await h.ws({ ip: '203.0.113.43' });
+    anon.sendJson({ type: 'join_room', room: 'inner-circle', token: 'forged.or.expired' });
+    assert.strictEqual((await anon.next((m) => m.type === 'room_error')).code, 'rooms.not_found');
+    ws.close(); anon.close();
+});
+
 t('ICE servers for calls: STUN, and TURN only with credentials (short-lived with TURN_AUTH_SECRET)', async () => {
     const crypto = require('crypto');
     const turn = require('../server/net/turn');

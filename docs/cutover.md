@@ -31,8 +31,13 @@ nginx locations (`deploy/nginx/openvibe.live-chat.locations.conf`, included in L
 > session cookie or an `Authorization` bearer, and Live's legacy `token` cookie is ignored there. The
 > deprecated `?token=` query param is still honoured for Live's bot guide and call client, counted in
 > `chat_ws_url_token_uses`. C-06 — dropping the `ov_token` cookie fallback so upgrades authenticate by
-> bearer only — is gated on `chat_ws_cookie_uses` reading 0 for a full release together with the
-> browser client sending its token in the join message.
+> bearer only — is gated on `chat_ws_cookie_reliant`: the browser clients now send their token in the
+> first message of every socket (`join`, `join_room`, the call's `auth-update`), and a socket the
+> cookie signed in whose first handled auth message has no valid token counts there, once; call
+> sockets silent past the token grace period count too. J7 removes the cookie
+> branch from `extractWsToken` once `chat_ws_cookie_reliant` stays 0 for one full release after this
+> ships. `chat_ws_cookie_uses` is only the raw "cookie seen" series: browsers send the cookie on every
+> same-origin upgrade, so it never reads 0.
 
 Stay on Live (do not route): `/api/chat-ai/*` (the trailing slash in `/api/chat/` keeps it out),
 `/api/emotes/*`, `/api/channels/*` (channel moderation dashboard), `/api/mod/*`, `/api/media/*`,
@@ -294,4 +299,3 @@ written on PostgreSQL after the switch to Chat's own tables (rooms, calls, the a
 state) are not in the file — export them from PostgreSQL first if the rollback comes after real traffic.
 Keep the SQLite file read-only for the rollback window; do not delete it until the PostgreSQL deploy has
 served a full release.
-

@@ -21,6 +21,11 @@
 
   function status(text) { if (statusEl) statusEl.textContent = text || ''; }
   function send(o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); }
+  // The session token (the ov_token cookie is JS-readable), presented in the socket's first message.
+  function sessionToken() {
+    var m = /(?:^|;\s*)ov_token=([^;]+)/.exec(document.cookie || '');
+    return m ? decodeURIComponent(m[1]) : null;
+  }
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
 
   function render() {
@@ -173,6 +178,7 @@
     Promise.all([ice, mic]).then(function () {
       if (mine !== attempt) return;
       ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/call?channelId=' + encodeURIComponent(cfg.call.channel));
+      ws.onopen = function () { var t = sessionToken(); if (t) send({ type: 'auth-update', token: t }); };
       ws.onmessage = function (ev) { var m; try { m = JSON.parse(ev.data); } catch (e) { return; } onMessage(m); };
       var sock = ws;
       ws.onclose = function () { if (sock === ws && mine === attempt) teardown(joined ? 'The call was disconnected. Join again to reconnect.' : 'Could not reach the call.'); };
