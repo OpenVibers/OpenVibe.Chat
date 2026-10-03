@@ -140,12 +140,14 @@ t('an ov_token cookie that does not resolve to an account is not counted', async
 
 t('bots authenticate the upgrade with an Authorization header, no token in the URL', async () => {
     const before = require('../server/auth/auth').urlTokenUses();
+    const cookieBefore = require('../server/auth/auth').wsCookieUses();
     const ws = await h.ws({ bearer: jwt(claimsFor(carol)) });
     ws.sendJson({ type: 'join' });
     const auth = await ws.next((m) => m.type === 'auth');
     assert.deepStrictEqual([auth.authenticated, auth.core_username], [true, 'carol']);
     ws.close();
     assert.deepStrictEqual(require('../server/auth/auth').urlTokenUses(), before, 'not counted as a URL token');
+    assert.deepStrictEqual(require('../server/auth/auth').wsCookieUses(), cookieBefore, 'a bearer upgrade is not counted as a cookie use');
 });
 
 t.run(async () => { if (h && h.close) await h.close(); });
