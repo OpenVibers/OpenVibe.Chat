@@ -61,8 +61,12 @@ Live data maintained by `live-context` (never authority), `events_outbox`, `live
    capabilities as undefined (Live's CI with the patch, Chat's non-blocking contracts job).
 2. **Network.** Create the principal and grants:
    ```bash
-   sudo node server/setup/service-principal.js create chat --env-file /etc/openvibe/chat.env
+   sudo node --env-file=/etc/openvibe/network.env server/setup/service-principal.js create chat --write-env /etc/openvibe/chat.env
    ```
+   Network's env file goes **before** the script name so Node loads it as configuration;
+   `--write-env` names the file the secret is written to (Chat's). Never put `--env-file`
+   after the script name — Node consumes it as environment, which can point the script at
+   Chat's database instead of Network's (`ov_network`).
    `principal_grants` (client, capability, audience): `chat live.chat_context.read openvibe.live`,
    `chat live.chat_effects.write openvibe.live`, `chat live.chat_mirror.write openvibe.live`,
    `live chat.live_bridge.write openvibe.chat`, `live chat.message.send openvibe.chat`,
