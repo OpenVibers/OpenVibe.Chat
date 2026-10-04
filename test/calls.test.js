@@ -266,6 +266,40 @@ t('call reliance waits for auth-update and counts silent or rejected-token socke
     await bye(silent);
 });
 
+t('delayed admission: an auth-update that arrives while admission awaits still admits the socket', async () => {
+    const auth = require('../server/auth/auth');
+    const before = auth.wsCookieReliant().jwt;
+    // A private call room: anonymous admission fails, so the socket must use the auth-update buffered
+    // while admission awaited Live.
+    const room = await h.http('POST', '/api/chat/rooms', { token: streamer.token, body: { name: 'Delayed admit', slug: 'delayed-admit', kind: 'call', visibility: 'private' } });
+    assert.strictEqual(room.status, 201, room.text);
+    const add = await h.http('POST', `/api/chat/rooms/${room.body.room.slug}/members`, { token: streamer.token, body: { username: bob.username, role: 'viewer' } });
+    assert.strictEqual(add.status, 200, add.text);
+    const admission = callServer._admission;
+    callServer._admission = async (...args) => { await h.sleep(400); return admission.apply(callServer, args); };
+    let s;
+    try {
+        s = await join({ channelId: `room-${room.body.room.slug}`, ip: '198.51.100.13', onOpen: (ws) => setTimeout(() => ws.sendJson({ type: 'auth-update', token: bob.token }), 100) });
+        assert.ok(s.welcome, s.error);
+        assert.strictEqual(s.welcome.participants.find((p) => p.peerId === s.welcome.peerId).username, 'bob');
+    } finally { callServer._admission = admission; }
+    assert.strictEqual(auth.wsCookieReliant().jwt, before, 'token presented during admission: not cookie-reliant');
+    await bye(s);
+});
+
+t('a listen-only call socket that stays silent is counted as cookie-reliant', async () => {
+    const auth = require('../server/auth/auth');
+    const before = auth.wsCookieReliant().jwt;
+    const r = await h.http('POST', '/api/chat/rooms', { token: streamer.token, body: { name: 'Silent stage', slug: 'silent-stage', kind: 'call', visibility: 'public', join_role: 'viewer' } });
+    assert.strictEqual(r.status, 201, r.text);
+    const slug = r.body.room.slug;
+    const s = await join({ channelId: `room-${slug}`, cookie: `ov_token=${bob.token}`, ip: '198.51.100.14' });
+    assert.ok(s.welcome, s.error);
+    assert.strictEqual(s.welcome.canTalk, false, 'joined as viewer');
+    await until(() => auth.wsCookieReliant().jwt === before + 1, 2000);
+    await bye(s);
+});
+
 t('limits: 3 sockets per address, 8 per channel', async () => {
     const sockets = [];
     for (let i = 0; i < 3; i++) sockets.push(await join({ channelId: 'public', ip: '192.0.2.10' }));
