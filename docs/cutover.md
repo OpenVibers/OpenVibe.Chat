@@ -329,3 +329,5 @@ written on PostgreSQL after the switch to Chat's own tables (rooms, calls, the a
 state) are not in the file — export them from PostgreSQL first if the rollback comes after real traffic.
 Keep the SQLite file read-only for the rollback window; do not delete it until the PostgreSQL deploy has
 served a full release.
+
+The read-only closeout record — release/readiness, env presence, the pending checks — is `docs/cutover-evidence-t3.md`.
