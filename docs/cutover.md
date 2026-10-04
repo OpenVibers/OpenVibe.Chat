@@ -10,9 +10,19 @@ until a later wave retires them.
 
 The cutover itself ran on 2026-09-23; the rehearsal, flip and check steps below record that deploy.
 
+## Rehearsal
+
+`ov rehearse` loads this seed after main's migrations, then this branch's migrations:
+
+```rehearse
+# Chat's PostgreSQL seed; test/fixtures/live-chat-schema.sql is Live's SQLite schema for the import tests
+seed: test/rehearsal/seed.sql
+```
+
 - [What is served where](#what-is-served-where)
 - [Data authority](#data-authority)
 - [Prerequisites](#prerequisites)
+- [Rehearsal](#rehearsal)
 - [Rehearsal on a live.db snapshot](#rehearsal-on-a-livedb-snapshot)
 - [Cutover](#cutover)
 - [Rollback](#rollback)
