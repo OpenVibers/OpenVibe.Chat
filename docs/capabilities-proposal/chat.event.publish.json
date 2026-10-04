@@ -1,0 +1,13 @@
+{
+  "id": "chat.event.publish",
+  "version": "1.0",
+  "owner": "chat",
+  "status": "planned",
+  "visibility": "internal",
+  "description": "Publish validated transient chat cards, alerts, sounds, media-queue, redemption and vibe-coding frames to a typed room audience, and call invite/response frames to one user.",
+  "permissions": ["chat:write"],
+  "resourceConstraints": ["none"],
+  "quotaClass": "internal-write",
+  "events": [],
+  "implementedBy": ["POST /internal/chat/events"]
+}

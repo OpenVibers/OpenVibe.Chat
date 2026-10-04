@@ -49,9 +49,13 @@ Stay on Live (do not route): `/api/chat-ai/*` (the trailing slash in `/api/chat/
 `/ws/call` (until the calls cutover, `docs/calls-cutover.md`), `/ws/broadcast`, `/ws/control`, and
 everything else.
 
-Loopback only, never routed: Chat `/internal/live/*`, `/health`, `/ready`; Live
+Loopback only, never routed: Chat `/internal/live/*`, `/internal/chat/*`, `/health`, `/ready`; Live
 `/internal/chat-context/*`, `/internal/chat-effects/*` (both refuse anything that came through
 nginx).
+
+The additive Chat-owned ingress at `/internal/chat/{messages,events,moderation,invalidate,presence}`
+is documented in [chat-ingress.md](chat-ingress.md). Live keeps using `/internal/live/*` until its
+writers are repointed; deploy the three new capability grants before that Live release.
 
 ## Data authority
 

@@ -18,14 +18,13 @@ let db, close;
 async function all(sql, params) { return await db.prepare(sql).all(...(params || [])); }
 async function get(sql, params) { return await db.prepare(sql).get(...(params || [])); }
 
-// Every table Chat owns: 34 in schema.sql plus the seven modules created at runtime (rooms*, token
-// revocations, network blocks, account-data events) — 41, and the bookkeeping ones among them.
+// Every table Chat owns, including the Chat ingress retry ledger and runtime-created modules.
 const TABLES = [
     'chat_messages', 'dm_conversations', 'dm_participants', 'dm_messages', 'dm_blocks', 'tts_voice_overrides',
     'channel_sounds', 'relay_users', 'hidden_relay_users', 'pending_ip_messages', 'stream_first_chats', 'moderation_actions',
     'channel_moderators', 'channel_moderation_settings', 'emotes', 'user_tags', 'chat_ai_summaries', 'chat_timeline_events',
     'ctx_users', 'ctx_streams', 'ctx_managed_streams', 'ctx_channels', 'ctx_sync', 'events_outbox', 'live_mirror_outbox',
-    'bridge_applied', 'audio_requests', 'bridge_refs', 'import_hold', 'import_runs', 'chat_meta', 'deploy_releases',
+    'bridge_applied', 'chat_ingress_applied', 'audio_requests', 'bridge_refs', 'import_hold', 'import_runs', 'chat_meta', 'deploy_releases',
     'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'token_revocations',
     'network_blocks', 'account_data_events',
 ];

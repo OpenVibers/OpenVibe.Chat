@@ -19,6 +19,7 @@ const ctx = require('./live-context');
 const db = require('./db/database');
 const { extractWsToken, authenticateWs, requestUser } = require('./auth/auth');
 const { trustProxy } = require('./net/client-ip');
+const { createInternalIngress } = require('./chat/internal-ingress');
 
 function normalizeOrigin(origin) {
     if (!origin || typeof origin !== 'string') return null;
@@ -102,6 +103,7 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     // ── Internal (loopback; never routed by nginx) ─────────────
     // Alert sounds travel as base64 in broadcasts (uploads up to MAX_SOUND_SIZE_KB): room for them.
     app.use('/internal/live', express.json({ limit: '16mb' }), bridge);
+    app.use('/internal/chat', express.json({ limit: '64kb' }), createInternalIngress({ chatServer }));
     // OpenVibe.Events deliveries (live.release.deployed, network.module.updated): signature v2 over
     // the raw body, so this router reads the body itself (server/events/consumer.js).
     if (events) app.use('/internal/events', events.router);
