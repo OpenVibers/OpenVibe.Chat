@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * Send whatever is still queued in live_mirror_outbox to Live, once, without starting the service.
- * For a rollback when the service cannot run: every change Chat made reaches Live's tables before
- * Live becomes the chat authority again (docs/cutover.md). Uses the same env as the service
+ * A recovery helper when the service cannot run: Live's readers see every change Chat made
+ * (docs/cutover.md). There is no rollback to Live to drain for. Uses the same env as the service
  * (/etc/openvibe/chat.env: DATABASE_URL, DATABASE_DIRECT_URL); LIVE_MIRROR is forced on.
  *
  *   node scripts/mirror-flush.js            → { sent, pending, error }

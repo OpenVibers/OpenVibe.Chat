@@ -116,7 +116,7 @@ t('mirror: Live refusing (not yet CHAT_AUTHORITY=chat) keeps the queue; accepted
     assert.ok(h.tokenRequests.some((x) => x.audience === 'openvibe.live' && x.scope === 'live.chat_mirror.write'));
 });
 
-t('scripts/mirror-flush.js drains the queue without the service (rollback)', async () => {
+t('scripts/mirror-flush.js drains the queue without the service', async () => {
     const { spawn } = require('child_process');
     const path = require('path');
     h.live.mirrorStatus = 409;

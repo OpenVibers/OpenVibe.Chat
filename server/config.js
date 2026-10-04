@@ -80,8 +80,9 @@ module.exports = {
     live: {
         internalUrl: strip(process.env.OV_LIVE_INTERNAL_URL || 'http://127.0.0.1:3000'),
         audience: 'openvibe.live',
-        // Chat's read-mirror of its tables into Live (rollback path + Live's own readers). Only
-        // switch on at cutover; Live refuses mirror writes unless it runs with CHAT_AUTHORITY=chat.
+        // Chat's read-mirror of its tables into Live (for Live's own readers; there is no rollback
+        // path to Live any more). Switch on at cutover; Live refuses mirror writes unless it runs
+        // with CHAT_AUTHORITY=chat, so a rehearsal can never touch production.
         mirror: bool(process.env.LIVE_MIRROR, false),
         mirrorIntervalMs: int(process.env.LIVE_MIRROR_INTERVAL_MS, 1000),
         requestTimeoutMs: int(process.env.LIVE_TIMEOUT_MS, 4000),
