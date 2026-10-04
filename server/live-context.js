@@ -915,7 +915,10 @@ const effects = {
     // One call per real chat line: coins chat bonus, AI viewers, PowerChat relay (Live decides each).
     chatMessage: async (body) => await effect('chat-message', body),
     aiModCommand: (channelUserId, streamId, args, opts) => effect('ai/mod-command', { channel_user_id: channelUserId, stream_id: streamId, args, by: opts && opts.by }).then((r) => r.reply),
-    arenaCommand: (client, cmd, parts) => fire('arena-command', { client: clientHandle(client), cmd, parts }),
+    // Live runs the command (arena-chat.js). When it delivers through Chat's ingress the sender-only
+    // replies come back in this response; the caller sends them to that sender's socket. On the old
+    // bridge path the body carries none and Live's sendToConn answers the connection itself.
+    arenaCommand: (client, cmd, parts) => effect('arena-command', { client: clientHandle(client), cmd, parts }),
     mediaQueue: async (op, args) => await effect('media-queue', { op, ...args }),
     hardwareCommand: async (streamerUserId, command, fromUser) => await effect('hardware', { streamer_user_id: streamerUserId, command, from_user: fromUser }),
     createPaste: (body) => effect('paste', body).then((r) => r.paste),
