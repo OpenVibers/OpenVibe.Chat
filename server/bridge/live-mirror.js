@@ -2,9 +2,10 @@
  * OpenVibe.Chat → OpenVibe.Live read mirror.
  *
  * After the cutover Chat is the only writer of its tables, but Live still reads some of them in
- * place (home-page stats, recaps, AI chat context, VOD chat replay, /api/mod queues, analytics),
- * and rollback means Live becomes the authority again. So every change Chat makes to its tables
- * (C-02) is copied into Live's tables of the same name, same ids:
+ * place (home-page stats, recaps, AI chat context, VOD chat replay, /api/mod queues, analytics).
+ * Chat is required in every mode and Live's local chat routes are retired, so this is no longer a
+ * rollback path: it exists for Live's remaining readers until a later wave retires them. Every
+ * change Chat makes to its tables (C-02) is copied into Live's tables of the same name, same ids:
  *
  *   - PostgreSQL triggers on the twelve tables (migrations/0001_initial.sql) record each change in
  *     live_mirror_outbox in the writing transaction — skipped where the transaction set ov.mirror_skip = '1'
@@ -15,8 +16,8 @@
  *   - Live applies them idempotently (INSERT … ON CONFLICT DO UPDATE on the columns it has; it
  *     refuses unless it runs with CHAT_AUTHORITY=chat, so a rehearsal can never touch production).
  *
- * Rows leave the outbox only when Live acknowledged them; a Live outage just queues. Before a
- * rollback, `pending()` must be 0 (docs/cutover.md).
+ * Rows leave the outbox only when Live acknowledged them; a Live outage just queues. `pending()`
+ * must be 0 before Live's chat-table readers (and this mirror) are retired (docs/cutover.md).
  */
 'use strict';
 

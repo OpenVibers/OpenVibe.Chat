@@ -2,12 +2,27 @@
 
 What changes at the cutover: browsers keep calling `https://openvibe.live`, but nginx sends the chat
 socket and the chat REST prefixes to OpenVibe.Chat (127.0.0.1:4400), and Live runs with
-`CHAT_AUTHORITY=chat`. Nothing in Live's browser code changes. Everything below is reversible
-until the Live-side read mirror is retired (a later wave).
+`CHAT_AUTHORITY=chat`. Nothing in Live's browser code changes. Chat is required in every mode:
+Live's local chat routes and mounts are inert under the flag and are being removed, and the rollback
+that returned chat to Live is retired, so there is no unset-flag mode in which Live serves chat
+again (see [Rollback](#rollback)). The Live-side read mirror stays only for Live's own readers,
+until a later wave retires them.
+
+The cutover itself ran on 2026-09-23; the rehearsal, flip and check steps below record that deploy.
+
+## Rehearsal
+
+`ov rehearse` loads this seed after main's migrations, then this branch's migrations:
+
+```rehearse
+# Chat's PostgreSQL seed; test/fixtures/live-chat-schema.sql is Live's SQLite schema for the import tests
+seed: test/rehearsal/seed.sql
+```
 
 - [What is served where](#what-is-served-where)
 - [Data authority](#data-authority)
 - [Prerequisites](#prerequisites)
+- [Rehearsal](#rehearsal)
 - [Rehearsal on a live.db snapshot](#rehearsal-on-a-livedb-snapshot)
 - [Cutover](#cutover)
 - [Rollback](#rollback)
@@ -188,25 +203,29 @@ streamers; `deploy.sh --wait-idle` waits for none).
    - Live features that read chat: home page chat stats, a recap, AI viewers answering in a test
      stream, `/api/mod` chat logs and deletes (the deleted line disappears in Chat).
    - `node scripts/parity-check.js --live http://127.0.0.1:3000 --chat http://127.0.0.1:4400 …` is no
-     longer meaningful (Live's chat routes answer 503 now); compare against the mirror instead with
+     longer meaningful (Live mounts no chat routes); compare against the mirror instead with
      `sqlite3` counts: Live `chat_messages` ≈ Chat `chat_messages`.
 
 ## Rollback
 
-Live becomes the chat authority again on its own tables, which the mirror kept complete.
+There is no rollback to Live. Chat is required in every mode: Live runs with `CHAT_AUTHORITY=chat`
+and mounts no chat routes, so unsetting the flag would leave `/ws/chat` and the chat REST prefixes
+unanswered, not served by Live. The nginx include stays in place through any rollback.
 
-1. Remove the include from nginx; `sudo nginx -t && sudo systemctl reload nginx` (chat traffic goes
-   to Live, which answers 503 until step 3 — clients retry).
-2. Make sure everything Chat wrote is in Live: `curl -s 127.0.0.1:4400/ready | jq .mirror.pending`
-   → 0. If the service cannot run: `cd /opt/openvibe.chat && sudo -u ubuntu env $(sudo cat
-   /etc/openvibe/chat.env | xargs) node scripts/mirror-flush.js` (the env names Chat's database: `DATABASE_URL`)
-   (exit 0 = drained). Live accepts mirror writes only while it still has the flag, so do this
-   before step 3.
-3. Remove `CHAT_AUTHORITY` from `/etc/openvibe/live.env`, restart Live. At boot Live applies any
-   chat writes it had queued for Chat and never got acknowledged (`chat_bridge_outbox`).
-4. `sudo systemctl stop openvibe-chat`. Keep `/var/lib/openvibe-chat/chat.db` (a later cutover starts
-   from a fresh database and a fresh import; `subject_id` values are recomputed from Live's
-   `linked_accounts`).
+1. A bad Chat release is undone on Chat's side: `sudo ovhost rollback chat --to <sha>` (README,
+   "Deploys") restarts the previous release. nginx, the routing include and `/etc/openvibe/live.env`
+   are untouched, so chat keeps being served — a socket reconnects after the restart. Nothing blocks
+   this: the migrations are additive and the previous release reads the same database.
+2. If Chat cannot run at all, chat is down until it is restored: Live has no copy of the sockets,
+   the DMs, the TTS and sound queue or the moderation log to serve from. Live's own readers stay
+   correct through the read mirror. Restore `openvibe-chat.service`, then let the mirror drain
+   (`curl -s 127.0.0.1:4400/ready | jq .mirror.pending` → 0); when the service still cannot start,
+   `cd /opt/openvibe.chat && sudo -u ubuntu env $(sudo cat /etc/openvibe/chat.env | xargs) node
+   scripts/mirror-flush.js` (`DATABASE_URL` names Chat's database; exit 0 = drained).
+3. Keep the database and the sounds. `/var/lib/openvibe-chat/chat.db` (PostgreSQL after the switch
+   below) is the only copy of chat's own state — rooms, DMs and their read state, the audio queue,
+   calls — and the clips under `SOUNDS_PATH` are the only copy of the sound files; keep both for
+   any later recovery.
 
 ## Behaviour that is not byte-for-byte identical
 

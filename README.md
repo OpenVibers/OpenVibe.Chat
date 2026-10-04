@@ -3,9 +3,10 @@
 > Rooms, messages, DMs, calls, TTS and audio queues, moderation and presence — one identity, every conversation.
 
 **Status:** alpha — deployed. Since the cutover on 2026-09-23 at 02:03 UTC (`docs/cutover.md`),
-Chat is the authority for openvibe.live's chat: the service runs on `openvibe-ovh` (unit
-`openvibe-chat`, 127.0.0.1:4400), Live runs with `CHAT_AUTHORITY=chat` and keeps a read mirror, and
-chat events go to OpenVibe.Events. `openvibe.chat` is Chat's own site (global chat, messages, rooms,
+Chat is the authority for openvibe.live's chat in every mode: the service runs on `openvibe-ovh`
+(unit `openvibe-chat`, 127.0.0.1:4400), Live runs with `CHAT_AUTHORITY=chat`, mounts no local chat
+routes and keeps a read mirror, and chat events go to OpenVibe.Events. `openvibe.chat` is Chat's own
+site (global chat, messages, rooms,
 settings; the service manifest records it live since 2026-09-24).  
 **Domain:** `openvibe.chat` ([deploy/nginx/openvibe.chat.conf](deploy/nginx/openvibe.chat.conf)); Chat
 is also served on Live's origin: `https://openvibe.live/ws/chat`, `/api/chat/`, `/api/dm/`,
@@ -373,7 +374,7 @@ npm run test:pg               # the same on PostgreSQL + PgBouncer + Valkey (OV_
                               # OV_TEST_VALKEY_URL: openvibe-sdk scripts/test-services.sh up)
 node scripts/import-from-live.js --live-db /tmp/live-snapshot.db            # dry run; --apply writes
 node scripts/parity-check.js --live https://openvibe.live --chat http://127.0.0.1:4401 --before "…"
-node scripts/mirror-flush.js  # rollback helper: push queued mirror rows to Live
+node scripts/mirror-flush.js  # drain queued mirror rows to Live without the service
 node scripts/subscribe-events.js --dry-run   # Chat's Events subscriptions (boot creates missing ones)
 node scripts/parity.js        # chat parity scenarios: a dry run; --apply only on test accounts (docs/parity.md)
 N1_LIVE_REF=<live sha> npm run n-1:record   # after a deploy: the N-1 fixtures from the deployed commit
@@ -554,8 +555,9 @@ The unit is `openvibe-chat.service` on `127.0.0.1:4400`, the env file `/etc/open
 `/ready` (not `/api/ready`). nginx: [deploy/nginx/openvibe.chat.conf](deploy/nginx/openvibe.chat.conf)
 for openvibe.chat and [deploy/nginx/openvibe.live-chat.locations.conf](deploy/nginx/openvibe.live-chat.locations.conf),
 included in openvibe.live's vhost, for Live's chat paths. After a deploy, record the N-1 fixtures
-(`npm run n-1:record`). Switching chat back to Live is in `docs/cutover.md` (with
-`scripts/mirror-flush.js`).
+(`npm run n-1:record`). Chat is required in every mode and Live's chat routes are retired: a
+rollback is a Chat release rollback, not a switch back to Live (`docs/cutover.md`;
+`scripts/mirror-flush.js` drains a stuck mirror).
 
 Rollback: ovhost puts the previous sha back by itself when `/ready` does not answer 2xx after the
 restart; afterwards `sudo ovhost rollback chat --to <sha>`. Nothing blocks a rollback: the schema

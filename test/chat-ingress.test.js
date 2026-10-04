@@ -36,6 +36,12 @@ t('each route requires its own service capability and loopback', async () => {
     }
     assert.strictEqual((await h.http('GET', '/internal/chat/presence')).status, 401);
     assert.strictEqual((await h.http('GET', '/internal/chat/presence', { token: h.serviceToken(['chat.message.send']) })).status, 403);
+    // A message sender cannot publish events, moderate or invalidate, nor a bridge writer use the narrow routes.
+    for (const family of ['events', 'moderation', 'invalidate']) {
+        assert.strictEqual((await post(family, {}, h.serviceToken(['chat.message.send']))).status, 403);
+        assert.strictEqual((await post(family, {}, h.serviceToken(['chat.live_bridge.write']))).status, 403);
+    }
+    assert.strictEqual((await post('messages', {}, h.serviceToken(['chat.live_bridge.write']))).status, 403);
 });
 
 let messageId;
