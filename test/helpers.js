@@ -134,6 +134,7 @@ async function boot({ env = {} } = {}) {
         hang: false,               // Live hangs: connections are accepted and never answered
         nextAnon: 1,
         mediaState: { queue: [], now_playing: null },
+        arenaReplies: null,        // what an ingress-delivered arena-command returns as sender-only replies
         seenTokens: [],
         requests: [],              // every path Chat called, in order
     };
@@ -254,6 +255,10 @@ async function boot({ env = {} } = {}) {
                 case 'paste': return send(200, { paste: { slug: 'abc123' } });
                 case 'translate': return send(200, { translation: null });
                 case 'ai/mod-command': return send(200, { reply: `AI viewers: ${(body.args || []).join(' ')} ok` });
+                case 'arena-command': {
+                    const replies = Array.isArray(live.arenaReplies) ? live.arenaReplies : [];
+                    return send(200, replies.length ? { handled: true, replies } : { handled: true });
+                }
                 case 'media-queue':
                     if (body.op === 'add') {
                         if (!body.input) return send(400, { error: 'Give me a link to queue.' });

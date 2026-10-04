@@ -49,6 +49,8 @@ and vibe-coding producers to `events`, the call invite/response `sendDm` calls t
 `user` target, moderation writes and disconnects to
 `moderation`, cache hints to `invalidate`, and presence reads to `/internal/chat/presence`.
 Await the real message id; use one stable key per operation. Drain Live's bridge outbox before
-removing its sender. Live J4b moves arena-command replies into the Chat-effects response.
+removing its sender. Live J4b moves arena-command replies into the Chat-effects response; Chat sends
+each returned reply to the socket that ran the command (on the bridge path the response carries none
+and Live answers the connection itself).
 For deploy notices, Live publishes `live.release.deployed` through Events. If Events outbox
 initialization fails, Live must leave `deploy_last_announced` unchanged so the next boot retries.

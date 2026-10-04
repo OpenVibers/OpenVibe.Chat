@@ -1221,8 +1221,15 @@ class ChatServer {
         const cmd = parts[0].toLowerCase();
 
         // Arena: !hype / !beef / !arena (Live server/arena/arena-chat.js) — chat can only hype; the Arena
-        // is pure mic. Live runs the command and answers this socket through the bridge (sendToConn).
-        if (ctx.ARENA_COMMANDS.includes(cmd)) { ctx.effects.arenaCommand(client, cmd, parts); return; }
+        // is pure mic. Live runs the command. When Live delivers through Chat's ingress (LIVE_CHAT_INGRESS)
+        // the sender-only replies come back in the effect response and this socket sends them; on the old
+        // bridge path the body carries none and Live's sendToConn answers the connection itself.
+        if (ctx.ARENA_COMMANDS.includes(cmd)) {
+            ctx.effects.arenaCommand(client, cmd, parts).then((r) => {
+                for (const reply of (r && Array.isArray(r.replies) ? r.replies : [])) this.sendTo(ws, reply);
+            }).catch((err) => console.warn('[Chat] arena-command:', err.message));
+            return;
+        }
 
         if (cmd === '!gotti') {
             const username = client.user ? client.user.display_name : client.anonId;

@@ -304,6 +304,18 @@ t('!hype goes to Live; Live answers this socket through the bridge (sendToConn)'
     await aliceWs.next((m) => m.type === 'system' && m.message === 'Hyped!');
 });
 
+t('arena replies returned by the effect reach the sender through Chat’s ingress', async () => {
+    await h.sleep(1100);
+    h.live.arenaReplies = [{ type: 'system', message: 'Ingress hyped!' }];
+    try {
+        aliceWs.sendJson({ type: 'chat', message: '!beef' });
+        const m = await aliceWs.next((x) => x.type === 'system' && x.message === 'Ingress hyped!');
+        assert.strictEqual(m.message, 'Ingress hyped!');
+        const fx = h.live.effects.filter((e) => e.name === 'arena-command').pop();
+        assert.strictEqual(fx.body.cmd, '!beef');
+    } finally { h.live.arenaReplies = null; }
+});
+
 t('media commands go to Live’s queue with the same replies', async () => {
     await h.sleep(1100);
     aliceWs.sendJson({ type: 'chat', message: '!sr https://youtu.be/x' });
