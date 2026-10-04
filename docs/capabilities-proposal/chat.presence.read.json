@@ -14,7 +14,6 @@
   "quotaClass": "internal-read",
   "events": [],
   "implementedBy": [
-    "GET /internal/live/presence",
     "GET /internal/chat/presence"
   ]
 }

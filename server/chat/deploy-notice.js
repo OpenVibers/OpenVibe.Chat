@@ -4,16 +4,13 @@
 // (Moved from OpenVibe.Live server/chat/deploy-notice.js, W6.)
 //
 // Live still decides WHAT shipped — its git HEAD and the `deploy_last_announced` site setting — and
-// tells Chat two ways while the Chat bridge is being retired (compatibility register C-84):
-//   • the bridge op deployNotice (Live server/chat/chat-remote.js), commits newest first, so the
-//     first one is the head Live deployed → announceCommits();
-//   • the durable OpenVibe.Events event live.release.deployed (Live server/events/release-events.js),
-//     subject { type: 'release', id: <head> } → applyReleaseEvent(), from ../events/consumer.js.
-// Both claim the release by its head commit in deploy_releases, in the SAME transaction that stores
-// or folds the card: the first to arrive makes the card, the other finds the head claimed and only
-// records when it saw it. So the same head never makes two cards, whichever path comes first, and a
-// repeat of either (a bridge retry, an Events redelivery, Live re-announcing after a crash) is one
-// card. Once the event path has carried a clean deploy, the bridge op can go.
+// tells Chat through the durable OpenVibe.Events event live.release.deployed (Live
+// server/events/release-events.js), subject { type: 'release', id: <head> } → applyReleaseEvent(),
+// from ../events/consumer.js. The release is claimed by its head commit in deploy_releases, in the
+// SAME transaction that stores or folds the card, so a repeat (an Events redelivery, Live
+// re-announcing after a crash) is one card. The bridge op deployNotice that carried the same notice
+// during compatibility register C-84 is retired (T3 step 1); deploy_releases.first_via/bridge_at
+// keep what it recorded.
 //
 // Chat keeps the part that is chat:
 //   • Consecutive deploys fold into ONE stored message: while the newest chat row in ANY room is a
@@ -77,8 +74,8 @@ async function persist(db, commits) {
 }
 
 /**
- * Claim the release (its head commit) and store or fold its card, in ONE transaction. The first path
- * to arrive makes the card; the other finds the head claimed, notes when it saw it, and changes
+ * Claim the release (its head commit) and store or fold its card, in ONE transaction. The first
+ * delivery makes the card; a repeat finds the head claimed, notes when it saw it, and changes
  * nothing else. Returns { duplicate: true, id } or { duplicate: false, saved }.
  */
 async function claimRelease(db, { head, commits, via, eventId = null, now = Date.now() }) {
@@ -112,28 +109,6 @@ function broadcast({ chatServer, saved, list, log = console }) {
     ATTEMPTS_MS.forEach((ms, i) => { const t = setTimeout(() => { const n = push(); if (n) log.log(`[Deploy notice] ${list.length} commit(s) → ${n} client(s) (pass ${i + 1})`); }, ms); if (t.unref) t.unref(); });
 }
 
-/**
- * The bridge path: commits Live just shipped (Live filtered them against deploy_last_announced),
- * newest first, so the first is the head. A head already announced (by the event, or a retried
- * bridge call) announces nothing.
- * @returns {{ announced: number, id?: number, duplicate?: boolean }}
- */
-async function announceCommits({ db, chatServer, commits, log = console }) {
-    const list = cleanCommits(commits);
-    if (!list.length) return { announced: 0 };
-    const head = list[0].hash;
-
-    let r;
-    try { r = await claimRelease(db, { head, commits: list, via: 'bridge' }); }
-    catch (err) { log.warn('[Deploy notice] not saved:', err.message); return { announced: 0 }; }
-    if (r.duplicate) {
-        log.log(`[Deploy notice] ${head.slice(0, 7)} already announced (card ${r.id}); the bridge copy changes nothing`);
-        return { announced: 0, id: r.id, duplicate: true };
-    }
-    broadcast({ chatServer, saved: r.saved, list, log });
-    return { announced: list.length, id: r.saved.id };
-}
-
 /** The release a live.release.deployed envelope announces ({ head, commits }), or an 'ignored:*' outcome. No I/O. */
 function releaseFrom(event, { now = Date.now(), maxAgeMs = RELEASE_MAX_AGE_MS } = {}) {
     if (!event || event.event_type !== 'live.release.deployed') return 'ignored:type';
@@ -153,7 +128,7 @@ function releaseFrom(event, { now = Date.now(), maxAgeMs = RELEASE_MAX_AGE_MS } 
  * The Events path, called inside the consumer's inbox transaction (synchronous). Returns an
  * 'ignored:*' outcome, or { outcome, detail, after } where after() broadcasts once the transaction
  * has committed. outcome: announced (a new card) | folded (into the last card) | duplicate:release
- * (the bridge, or an earlier event with this head, made the card already).
+ * (an earlier event with this head made the card already).
  */
 async function applyReleaseEvent({ db, chatServer, event, now = Date.now(), maxAgeMs = RELEASE_MAX_AGE_MS, log = console }) {
     const rel = releaseFrom(event, { now, maxAgeMs });
@@ -176,4 +151,4 @@ function replayTo(ws) {
     return false;
 }
 
-module.exports = { replayTo, announceCommits, applyReleaseEvent, releaseFrom, claimRelease, persist, plainText, parseLog, cleanCommits, RELEASE_MAX_AGE_MS };
+module.exports = { replayTo, applyReleaseEvent, releaseFrom, claimRelease, persist, plainText, parseLog, cleanCommits, RELEASE_MAX_AGE_MS };

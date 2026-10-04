@@ -7,7 +7,7 @@
  * (A) holds an active subscription to the channel (the stub Live's GET /subscriber); the driver sets
  * network blocks itself (network.block.changed, as the Events consumer applies it).
  *
- * On top, what only a test can reach: Live's moderator paths through the bridge (the context-menu
+ * On top, what only a test can reach: Live's moderator paths on Chat's own calls (the context-menu
  * ban that disconnects, the single-message delete) and the global feed's cursor read (Live's
  * floating widget, openvibe.chat), sub-only failing closed when Live cannot be asked, slow mode as
  * the saved setting (a restart of every cache, the dashboard's value), /clear's answer, blocks
@@ -24,12 +24,7 @@ const t = suite('parity');
 let h, p, streamer, mod, alice, bob, dave, channelId, streamId;
 const IPS = { a: '198.51.100.101', b: '198.51.100.102', mod: '198.51.100.103', streamer: '198.51.100.104', anon: '198.51.100.105', dave: '198.51.100.106' };
 const results = [];
-let bridgeSeq = 0;
 let blockRev = 0;
-const bridge = (ops) => h.http('POST', '/internal/live/calls', {
-    token: h.serviceToken(['chat.live_bridge.write', 'chat.message.send']),
-    body: { boot: 'parity-live', ops: ops.map((o) => ({ seq: ++bridgeSeq, ...o })) },
-});
 
 /** 8 kHz 8-bit mono WAV of `seconds`. */
 function wav(seconds) {
@@ -111,7 +106,7 @@ t('dm: delivery keeps the participant rule (chatServer.sendDm checks dm.isPartic
     await p.closeAll();
 });
 
-t('ban from Live’s context menu (/api/mod/stream-ban → the bridge): the socket is closed, the user list drops them, they cannot talk', async () => {
+t('ban from Live’s context menu (/api/mod/stream-ban → disconnectUser): the socket is closed, the user list drops them, they cannot talk', async () => {
     const watcher = await p.join('a');
     const daveTokens = { ...p.tokens, dave: dave.token };
     const q = new parity.Parity({ driver, tokens: daveTokens, streamId });
@@ -121,8 +116,8 @@ t('ban from Live’s context menu (/api/mod/stream-ban → the bridge): the sock
     await watcher.next(listed);
     // Live writes the bans row, then asks Chat to disconnect (Live server/admin/mod-routes.js).
     h.live.addBan({ stream_id: streamId, user_id: dave.id });
-    const r = await bridge([{ op: 'disconnectUser', args: [{ userId: dave.id, ip: null, streamId }] }]);
-    assert.strictEqual(r.status, 200, r.text);
+    await h.ctx.invalidateBans();
+    h.chatServer.disconnectUser({ userId: dave.id, ip: null, streamId });
     await daveWs.next((m) => m.type === 'system' && m.message === 'You have been banned.');
     await new Promise((res) => (daveWs.readyState === 3 ? res() : daveWs.once('close', res)));
     await watcher.next((m) => m.type === 'users-list' && !m.users.logged.some((u) => u.username === 'dave'));
@@ -147,12 +142,9 @@ t('reconnect in global chat (Live’s floating widget, openvibe.chat): Live’s 
     const m1 = await p.saw(stayer, doomed); await p.saw(leaver, doomed);
     viewB.frames(leaver.all.slice(fromB));
     await p.left(leaver);
-    // Live's /api/mod/delete-message: the row through the bridge, then the frame to the global feed.
-    const r = await bridge([
-        { op: 'db', args: ['deleteChatMessage', m1.id, mod.id] },
-        { op: 'broadcastGlobal', args: [{ type: 'delete-messages', ids: [m1.id] }] },
-    ]);
-    assert.ok(r.body.results.every((x) => x.ok), r.text);
+    // Live's /api/mod/delete-message: the row, then the frame to the global feed.
+    await h.db.deleteChatMessage(m1.id, mod.id);
+    await h.chatServer.broadcastGlobal({ type: 'delete-messages', ids: [m1.id] });
     await stayer.next((m) => m.type === 'delete-messages' && m.ids.includes(m1.id));
     const later = p.text('global line while B was away');
     await p.say(stayer, later);

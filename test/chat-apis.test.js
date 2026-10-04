@@ -4,7 +4,7 @@
  *   - Live's internal read API (/internal/moderation/*, capability chat.moderation.read)
  *   - the public emote API (/api/emotes, Live's paths and shapes; bytes on OpenVibe.Media)
  *   - channel moderators & moderation settings (/api/chat/channels/:id/…)
- *   - the bridge alert-sound op (Live says "play the alert", Chat resolves the sound)
+ *   - the alert sound (playAlertSound: "play the alert", Chat resolves the sound)
  * Chat is the only writer of the six tables (C-04 done), so the writes never refuse.
  */
 const assert = require('assert');
@@ -14,7 +14,7 @@ const { validate } = require('openvibe-contracts');
 const { boot, suite } = require('./helpers');
 
 const t = suite('chat-apis');
-let h, RO, BRIDGE, streamer, other, admin, mod, stranger, channelId, streamId;
+let h, RO, OTHER, streamer, other, admin, mod, stranger, channelId, streamId;
 const deletedAssets = [];
 let assets = { upload: null, delete: null };
 
@@ -27,7 +27,7 @@ t('boot', async () => {
     // 3 emotes per channel, so both the clash check and the cap can be exercised.
     h = await boot({ env: { MAX_EMOTES_PER_CHANNEL: '3' } });
     RO = h.serviceToken(['chat.moderation.read']);
-    BRIDGE = h.serviceToken(['chat.live_bridge.write']);
+    OTHER = h.serviceToken(['chat.live_bridge.write']);
     streamer = h.addUser('streamer', { role: 'streamer' });
     other = h.addUser('otherstreamer', { role: 'streamer' });
     admin = h.addUser('adminny', { role: 'admin' });
@@ -46,9 +46,9 @@ t('boot', async () => {
 t('internal read API: loopback + service token (401 / 403 / forwarded)', async () => {
     let r = await h.http('GET', `/internal/moderation/channels/${channelId}`);
     assert.strictEqual(r.status, 401, r.text);
-    r = await h.http('GET', `/internal/moderation/channels/${channelId}`, { token: BRIDGE, headers: { 'x-forwarded-for': '203.0.113.9' } });
+    r = await h.http('GET', `/internal/moderation/channels/${channelId}`, { token: OTHER, headers: { 'x-forwarded-for': '203.0.113.9' } });
     assert.strictEqual(r.status, 403, 'a forwarded request is refused (loopback only)');
-    r = await h.http('GET', `/internal/moderation/channels/${channelId}`, { token: BRIDGE });
+    r = await h.http('GET', `/internal/moderation/channels/${channelId}`, { token: OTHER });
     assert.strictEqual(r.status, 403, 'wrong capability');
     r = await h.http('GET', `/api/internal/moderation/channels/${channelId}`, { token: RO });
     assert.strictEqual(r.status, 404, 'not a public path');
@@ -235,7 +235,7 @@ t('moderation settings: owner writes, a mod cannot change policy keys', async ()
     assert.ok(Array.isArray(search.body.messages));
 });
 
-// ── Alert-sound op ───────────────────────────────────────────
+// ── Alert sounds ───────────────────────────────────────────
 t('alert op: Chat resolves the sound from its own row and broadcasts it', async () => {
     const snd = path.join(h.tmp, 'sounds', 'donation.mp3');
     fs.writeFileSync(snd, 'ID3alert');
@@ -245,22 +245,16 @@ t('alert op: Chat resolves the sound from its own row and broadcasts it', async 
     ws.sendJson({ type: 'join', streamId, channelUserId: streamer.id, anonId: null });
     await ws.next((m) => m.type === 'auth' || m.type === 'connected');
 
-    const calls = (ops) => h.http('POST', '/internal/live/calls', { token: BRIDGE, body: { boot: 'live-boot-alerts', ops: ops.map((o, i) => ({ seq: i + 1, ...o })) } });
-    let r = await calls([{ op: 'playAlertSound', args: [streamer.id, streamId, 'donation'] }]);
-    assert.strictEqual(r.status, 200, r.text);
-    const res = r.body.results[0];
-    assert.strictEqual(res.ok, true, JSON.stringify(res));
-    assert.deepStrictEqual(res.result, { played: true, source: 'donation-alert' });
+    const { playAlertSound } = require('../server/chat/alert-sounds');
+    assert.deepStrictEqual(await playAlertSound(h.chatServer, streamer.id, streamId, 'donation'), { played: true, source: 'donation-alert' });
     const frame = await ws.next((m) => m.type === 'soundboard-audio');
     assert.strictEqual(frame.source, 'donation-alert');
     assert.strictEqual(Buffer.from(frame.audio, 'base64').toString(), 'ID3alert');
     ws.close();
 
     // No goal sound set: goal falls back to the donation sound; a channel with none does not play.
-    r = await calls([{ op: 'playAlertSound', args: [streamer.id, streamId, 'goal'] }]);
-    assert.deepStrictEqual(r.body.results[0].result, { played: true, source: 'goal-alert' });
-    r = await calls([{ op: 'playAlertSound', args: [other.id, streamId, 'donation'] }]);
-    assert.deepStrictEqual(r.body.results[0].result, { played: false, source: 'donation-alert' });
+    assert.deepStrictEqual(await playAlertSound(h.chatServer, streamer.id, streamId, 'goal'), { played: true, source: 'goal-alert' });
+    assert.deepStrictEqual(await playAlertSound(h.chatServer, other.id, streamId, 'donation'), { played: false, source: 'donation-alert' });
 });
 
 t.run(async () => { if (h) await h.close(); });

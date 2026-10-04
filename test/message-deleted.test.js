@@ -1,7 +1,7 @@
 'use strict';
 /**
  * chat.message.deleted: every way a public-room message is deleted (one message by a moderator or
- * through Live's bridge, a user's / anon's / relay user's history, a time-range purge, the
+ * through Chat's moderation ingress, a user's / anon's / relay user's history, a time-range purge, the
  * auto-delete sweep) adds one outbox envelope per 500 ids, in the same transaction, carrying only
  * ids and payload.redacts. The relay publishes it after the message's chat.message.created.
  *
@@ -78,16 +78,16 @@ t('boot (a real OpenVibe.Events on a reserved port when one is checked out next 
     }
 });
 
-t('one message deleted (a moderator, or Live’s bridge): one deletion event, ids only', async () => {
+t('one message deleted (a moderator, or Live’s /api/mod through the ingress): one deletion event, ids only', async () => {
     const id = await say(SECRET);
     const from = await outboxSeq();
     await h.db.deleteChatMessage(id, admin.id);
     const [d] = await deletions(from);
     assertDeletion(d, [id]);
     assert.ok(!JSON.stringify(d).includes('555-0199') && !JSON.stringify(d).includes('anon7'));
-    // Through the bridge, the way Live's /api/mod forwards it.
-    const id2 = await say('via the bridge');
-    const r = await h.http('POST', '/internal/live/calls', { token: h.serviceToken(['chat.live_bridge.write']), body: { boot: 'b1', ops: [{ seq: 1, op: 'db', args: ['deleteChatMessage', id2, admin.id] }] } });
+    // Through Chat's moderation ingress, the way Live's /api/mod forwards it.
+    const id2 = await say('via the ingress');
+    const r = await h.http('POST', '/internal/chat/moderation', { token: h.serviceToken(['chat.moderation.write']), body: { key: 'mod:delete:1', action: 'delete-message', id: id2, deleted_by: admin.id } });
     assert.strictEqual(r.status, 200, r.text);
     assertDeletion((await deletions(from)).at(-1), [id2]);
     const before = await outboxSeq();

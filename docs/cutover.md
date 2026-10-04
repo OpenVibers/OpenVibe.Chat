@@ -10,6 +10,12 @@ until a later wave retires them.
 
 The cutover itself ran on 2026-09-23; the rehearsal, flip and check steps below record that deploy.
 
+**The Live chat bridge is retired (T3 J3a).** Live #20/#21 route every producer through Chat's own
+ingress (`/internal/chat/*`, `docs/chat-ingress.md`) and dropped Live's bridge outbox, so Chat no
+longer mounts `POST /internal/live/calls` or `GET /internal/live/presence`, and deploy notices arrive
+only as `live.release.deployed`. Where the steps below mention the bridge, they record the cutover as
+it ran. Its tables `bridge_applied` / `bridge_refs` stay as data until a later migration (J3b).
+
 ## Rehearsal
 
 `ov rehearse` loads this seed after main's migrations, then this branch's migrations:
@@ -71,14 +77,14 @@ writers are repointed; deploy the three new capability grants before that Live r
 
 | Table (Live baseline, target OpenVibe.Chat) | W6 authority | Notes |
 | --- | --- | --- |
-| `chat_messages`, `dm_conversations`, `dm_participants`, `dm_messages`, `dm_blocks`, `tts_voice_overrides`, `channel_sounds`, `relay_users`, `hidden_relay_users`, `pending_ip_messages`, `stream_first_chats`, `moderation_actions` | **Chat** | Imported with their ids. Live keeps a read mirror (Chat → `POST /internal/chat-effects/mirror`); Live's remaining writers (AI viewers, relays, donations, `/api/mod`, `/api/channels` deletes, emote renames) forward to Chat. |
-| `channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`, `chat_ai_summaries`, `chat_timeline_events` | **Chat** (C-04 done) | Chat's own tables; Chat is their only writer. Live reads what it needs through `GET /internal/moderation/*` (`chat.moderation.read`), and Live's current release's writers call Chat over the bridge (op `db`) until Live N+1 is deployed. There is no authority switch any more. |
+| `chat_messages`, `dm_conversations`, `dm_participants`, `dm_messages`, `dm_blocks`, `tts_voice_overrides`, `channel_sounds`, `relay_users`, `hidden_relay_users`, `pending_ip_messages`, `stream_first_chats`, `moderation_actions` | **Chat** | Imported with their ids. Live keeps a read mirror (Chat → `POST /internal/chat-effects/mirror`); Live's remaining writers (AI viewers, relays, donations, `/api/mod`, `/api/channels` deletes, emote renames) forward to Chat (the bridge at the cutover; Chat's ingress since T3 J3a). |
+| `channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`, `chat_ai_summaries`, `chat_timeline_events` | **Chat** (C-04 done) | Chat's own tables; Chat is their only writer. Live reads what it needs through `GET /internal/moderation/*` (`chat.moderation.read`), and Live's writers call Chat's APIs and ingress (the bridge op `db` they used is retired, T3 J3a). There is no authority switch any more. |
 | `media_requests`, `media_request_settings` | **Live** (not moved) | Decision with evidence: every writer is `server/media/media-queue.js` / `server/media/routes.js` (`/api/media`: gold payment, yt-dlp download, playback state, the streamer's overlay and dashboard). Chat only has the `!sr/!queue/!np/!skip` entry points, which call Live (`POST /internal/chat-effects/media-queue`). Not chat-owned in practice; it moves with the queue lifecycle the charter describes, not before. The importer reports them as `not_moved`. |
 | `chat_messages_new`, `emotes_new`, `channel_sounds_new` | — | Transient tables of Live's table rebuilds; empty in a consistent snapshot. Rows found there go to `import_hold`. |
 
 Chat also keeps `ctx_users`, `ctx_streams`, `ctx_managed_streams`, `ctx_channels` — projections of
 Live data maintained by `live-context` (never authority), `events_outbox`, `live_mirror_outbox`,
-`bridge_applied`, `import_hold`, `import_runs`.
+`bridge_applied` (the retired bridge's, kept as data), `import_hold`, `import_runs`.
 
 ## Prerequisites
 
@@ -102,8 +108,9 @@ Live data maintained by `live-context` (never authority), `events_outbox`, `live
    `chat live.chat_effects.write openvibe.live`, `chat live.chat_mirror.write openvibe.live`,
    `live chat.live_bridge.write openvibe.chat`, `live chat.message.send openvibe.chat`,
    `live chat.presence.read openvibe.chat` (`chat events.event.publish openvibe.events` is already
-   a default). Without `chat.message.send`, Chat refuses the bridge ops that send a message (AI
-   viewer, relay and donation lines, deploy notices). Add them to
+   a default). Without `chat.message.send`, Chat refused the bridge ops that sent a message (AI
+   viewer, relay and donation lines, deploy notices); since T3 J3a it guards
+   `POST /internal/chat/messages`. Add them to
    `DEFAULT_GRANTS` in `server/identity/principals.js` so every boot keeps them.
    VIP member badges (after this cutover, any time): `chat vip.entitlement.check openvibe.vip`;
    without it no message carries a badge (README, "VIP member badges").
@@ -249,8 +256,8 @@ unanswered, not served by Live. The nginx include stays in place through any rol
 - **Live unreachable.** Chat keeps serving rooms from its caches; new sign-ins resolve as anonymous
   and new anonymous visitors get a temporary number (`anon9xxxxxxxx`) until Live answers; effects are
   skipped (coins, AI viewers) or answer an error (`/color`, media commands).
-- **Deploy notices** are still Live's (its commits, announced in chat through the bridge); Chat's own
-  deploys are not announced.
+- **Deploy notices** are still Live's (its commits, announced in chat through the OpenVibe.Events
+  event `live.release.deployed`; the bridge op is retired, T3 J3a); Chat's own deploys are not announced.
 - **Responses** carry the same fields as before; Chat's `*subject_id` columns are stripped from API
   answers.
 
@@ -272,8 +279,8 @@ Found while moving; deliberately not fixed in this wave (fix after the cutover, 
 
 ## PostgreSQL switch (plan T3, ADR-035)
 
-Chat's own database moves from the SQLite file to PostgreSQL; the Live read mirror and the bridge are
-unchanged in meaning. This is a runbook for that one deploy — the schema is `migrations/0001_initial.sql`
+Chat's own database moves from the SQLite file to PostgreSQL; the Live read mirror and the bridge (since
+retired, T3 J3a) were unchanged in meaning. This is a runbook for that one deploy — the schema is `migrations/0001_initial.sql`
 (applied by `openvibe-sdk/db` at boot, owner role) and the data moves once.
 
 **Prerequisites.** `DATABASE_URL` (the runtime role, through PgBouncer — DML only, no session state) and

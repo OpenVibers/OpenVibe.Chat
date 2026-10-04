@@ -1,7 +1,7 @@
 # Chat-owned internal ingress (T3 J2 prerequisite)
 
-These routes accept an RS256 service token for `openvibe.chat` on loopback only. The existing
-`/internal/live/*` bridge remains available during the Live rollout. All POST bodies require a
+These routes accept an RS256 service token for `openvibe.chat` on loopback only. They replaced the
+`/internal/live/*` bridge, which is retired (T3 J3a; Live #20/#21). All POST bodies require a
 stable `key` (1–160 letters, digits, `:._-`). A retry with the same principal, route and body
 returns the first result. Reusing the key with another body returns 409. If delivery fails after
 the database write, retry the same key: Chat retries the broadcast without writing another row.
@@ -18,7 +18,7 @@ a stream that does not exist is 404: do not retry a 4xx.
 | `POST /internal/chat/events` | `chat.event.publish` | `{key,target:{kind,id?},frame:{type,...}}`, returns `{ok:true}`. Target kinds: `stream`, `channel`, `owner-streams`, `user` (positive `id`), `global`, `all` (no `id`). Only the event frame types allowlisted in `internal-ingress.js` are accepted; `dm` and delete frames are refused, and `chat` only as the news card. |
 | `POST /internal/chat/moderation` | `chat.moderation.write` | `{key,action,...}`; actions: `delete-message`, `delete-user-messages`, `delete-anon-messages`, `delete-relay-messages`, `delete-by-range`, `review-pending-ip`, `approve-ip-messages`, `deny-ip-messages`, `relay-hide`, `relay-unhide`, `relay-record`, `tts-voice-override`, `disconnect`, `log`. Deletes return `ids` and broadcast `delete-messages` to every affected surface. |
 | `POST /internal/chat/invalidate` | `chat.cache.invalidate` | `{key,user?,user_data?,approvals?,bans?,channel?}`; a cache hint, returns `{ok:true}`. Include a typed `user_data` object when Live edited the account, so Chat updates sockets and stored message names. |
-| `GET /internal/chat/presence` | `chat.presence.read` | The same snapshot as `/internal/live/presence`. |
+| `GET /internal/chat/presence` | `chat.presence.read` | Who is connected where: counts, per-stream viewers, slow modes, users/anons with their addresses (`server/chat/presence.js`). |
 
 `/internal/chat/events` is a narrow transient event ingress, not a generic ChatServer call.
 `live.release.deployed` continues through OpenVibe.Events; there is no deploy-notice endpoint.
@@ -39,18 +39,17 @@ Before Live repoints, the separate **OpenVibe.Contracts** repository must regist
 `chat.event.publish`, `chat.moderation.write`, and `chat.cache.invalidate` and add them to
 `manifests/services/chat.json`. Network's `principal_grants` and `DEFAULT_GRANTS` must grant
 `live chat.event.publish openvibe.chat`, `live chat.moderation.write openvibe.chat`, and
-`live chat.cache.invalidate openvibe.chat`. Keep the existing Live grants for
-`chat.message.send`, `chat.presence.read`, and `chat.live_bridge.write` until Live no longer calls
-the bridge. Chat's local proposals are in `docs/capabilities-proposal/`.
+`live chat.cache.invalidate openvibe.chat`. Keep the Live grants for `chat.message.send`
+(`messages`), `chat.presence.read` (`/internal/chat/presence`) and `chat.live_bridge.write` (the call
+hooks at `/internal/calls/stream-channel`): the bridge is gone, but each still guards a route. Chat's
+local proposals are in `docs/capabilities-proposal/`.
 
-Then Live J2 replaces its bridge writer with a typed client: repoint message producers and persisted DMs
+Live J2 (done: Live #20/#21) replaced its bridge writer with a typed client: repoint message producers and persisted DMs
 to `messages` (with `role`/`profile_color` etc. in `frame`), card, sound, media-queue, redemption
 and vibe-coding producers to `events`, the call invite/response `sendDm` calls to `events` with a
 `user` target, moderation writes and disconnects to
 `moderation`, cache hints to `invalidate`, and presence reads to `/internal/chat/presence`.
-Await the real message id; use one stable key per operation. Drain Live's bridge outbox before
-removing its sender. Live J4b moves arena-command replies into the Chat-effects response; Chat sends
-each returned reply to the socket that ran the command (on the bridge path the response carries none
-and Live answers the connection itself).
+Await the real message id; use one stable key per operation. Live J4b moves arena-command replies
+into the Chat-effects response; Chat sends each returned reply to the socket that ran the command.
 For deploy notices, Live publishes `live.release.deployed` through Events. If Events outbox
 initialization fails, Live must leave `deploy_last_announced` unchanged so the next boot retries.

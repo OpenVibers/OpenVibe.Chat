@@ -9,7 +9,7 @@
  *   anyone else  ip:<address>, the visitor's own address (Cloudflare → nginx → Chat, net/client-ip.js)
  *
  * Browsers call these routes themselves (nginx sends Live's chat prefixes here), so no service ever
- * speaks for many visitors on them. Live's service calls (the bridge at /internal/live, the stream
+ * speaks for many visitors on them. Live's service calls (the ingress at /internal/chat, the stream
  * hooks at /internal/calls) carry every viewer's chat and are never limited here: a refusal there
  * would drop the whole site's chat, and the WebSocket keeps its own flood control.
  *

@@ -78,7 +78,7 @@ t('health, ready, release.json, metrics and /internal/* are never limited', asyn
         assert.strictEqual((await h.http('GET', '/release.json')).status, 200);
         assert.strictEqual((await h.http('GET', '/metrics')).status, 200);
         assert.notStrictEqual((await h.http('POST', '/internal/events', { body: {} })).status, 429);
-        assert.notStrictEqual((await h.http('POST', '/internal/live/calls', { body: { ops: [] } })).status, 429);
+        assert.notStrictEqual((await h.http('POST', '/internal/chat/messages', { body: {} })).status, 429);
     }
 });
 

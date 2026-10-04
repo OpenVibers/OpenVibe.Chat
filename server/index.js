@@ -17,7 +17,6 @@ const db = require('./db/database');
 const ctx = require('./live-context');
 const chatServer = require('./chat/chat-server');
 const callServer = require('./calls/call-server');
-const { createBridge } = require('./bridge/live-bridge');
 const { createMirror } = require('./bridge/live-mirror');
 const { createRelay } = require('./events/outbox');
 const { createEventsConsumer } = require('./events/consumer');
@@ -57,10 +56,9 @@ async function start() {
     chatServer.init(server);
     callServer.init(server);
     const mirror = createMirror({ config });
-    const bridge = createBridge({ chatServer, mirror, config });
     const relay = createRelay({ config });
     const events = createEventsConsumer({ chatServer, secrets: config.events.secrets });
-    const { app, handleUpgrade } = createApp({ chatServer, bridge, mirror, relay, events, callServer });
+    const { app, handleUpgrade } = createApp({ chatServer, mirror, relay, events, callServer });
     server.on('request', app);
     server.on('upgrade', (req, socket, head) => { handleUpgrade(req, socket, head).catch(() => { try { socket.destroy(); } catch { /* */ } }); });
     mirror.start();
@@ -105,7 +103,7 @@ async function start() {
         ],
         close: [() => db.close()],
     });
-    return { server, mirror, relay, bridge, events, callServer, subscriptions: subs, shutdown };
+    return { server, mirror, relay, events, callServer, subscriptions: subs, shutdown };
 }
 
 if (require.main === module) {

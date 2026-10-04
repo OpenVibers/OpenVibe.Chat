@@ -61,7 +61,7 @@ function getAllowedOrigins() {
     return allowed;
 }
 
-function createApp({ chatServer, bridge, mirror, relay, events = null, callServer = null }) {
+function createApp({ chatServer, mirror, relay, events = null, callServer = null }) {
     const allowedOrigins = getAllowedOrigins();
     const app = express();
     app.disable('x-powered-by');
@@ -101,8 +101,6 @@ function createApp({ chatServer, bridge, mirror, relay, events = null, callServe
     }
 
     // ── Internal (loopback; never routed by nginx) ─────────────
-    // Alert sounds travel as base64 in broadcasts (uploads up to MAX_SOUND_SIZE_KB): room for them.
-    app.use('/internal/live', express.json({ limit: '16mb' }), bridge);
     app.use('/internal/chat', express.json({ limit: '64kb' }), createInternalIngress({ chatServer }));
     // OpenVibe.Events deliveries (live.release.deployed, network.module.updated): signature v2 over
     // the raw body, so this router reads the body itself (server/events/consumer.js).
