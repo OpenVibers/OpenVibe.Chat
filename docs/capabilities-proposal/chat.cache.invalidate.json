@@ -1,0 +1,13 @@
+{
+  "id": "chat.cache.invalidate",
+  "version": "1.0",
+  "owner": "chat",
+  "status": "planned",
+  "visibility": "internal",
+  "description": "Invalidate Chat's user, channel, IP approval and ban cache entries after an external write.",
+  "permissions": ["chat:write"],
+  "resourceConstraints": ["none"],
+  "quotaClass": "internal-write",
+  "events": [],
+  "implementedBy": ["POST /internal/chat/invalidate"]
+}
