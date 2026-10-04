@@ -1,7 +1,7 @@
 'use strict';
 /**
- * The T3 closeout record must exist, keep its checks, and the README must no longer describe the
- * database as SQLite (plan T3; a silent re-draft would lose the evidence). Fails loudly if either regresses.
+ * The T3 closeout record must exist, keep its checks, and the README must keep describing the
+ * database as PostgreSQL (plan T3; a silent re-draft would lose the evidence). Fails loudly if either regresses.
  */
 const assert = require('assert');
 const fs = require('fs');
@@ -18,7 +18,9 @@ t('docs/cutover-evidence-t3.md records the T3 checks', () => {
     }
 });
 
-t('README.md no longer describes Chat as SQLite', () => {
+t('README.md describes Chat\'s database as PostgreSQL', () => {
     const readme = fs.readFileSync(path.join(ROOT, 'README.md'), 'utf8');
-    assert.ok(!readme.includes('SQLite today; PostgreSQL per plan T3'), 'README.md still says "SQLite today; PostgreSQL per plan T3"');
+    assert.ok(readme.includes('Own database on PostgreSQL'), 'README.md no longer says "Own database on PostgreSQL"');
 });
+
+t.run();
