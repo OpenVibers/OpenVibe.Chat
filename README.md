@@ -57,8 +57,9 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   waits on a network read. Live pushes invalidations when it changes cached data.
 - **Live's side** is `docs/live-patch.diff` (applies to Live `main` with `git apply`):
   `/internal/chat-context/*` and `/internal/chat-effects/*`, and `CHAT_AUTHORITY=chat`, which stops
-  Live's chat server and routes and turns `require('./chat/chat-server')` into a proxy that forwards
-  Live's own chat calls here (`POST /internal/live/calls`).
+  Live's chat server and routes. Live's own chat calls reach Chat through the Chat-owned ingress
+  (`/internal/chat/*`, `docs/chat-ingress.md`); the bridge proxy at `POST /internal/live/calls` is
+  retired (T3 J3a).
 - **Own database on PostgreSQL** (ADR-035, plan T3) with Live's tables and ids, the Network subject on new
   rows, a transactional events outbox and a read mirror back into Live. `server/db/database.js` serves
   through `openvibe-sdk/db`: production needs `DATABASE_URL` (the runtime role, DML only, through
@@ -76,8 +77,8 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   a row of Chat's tables (`import_hold`), reports counts per table.
 - **The six chat tables** (`channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`,
   `chat_ai_summaries`, `chat_timeline_events`): Chat's own since the C-04 cutover — Chat is their only
-  writer, there is no authority switch any more. Live's current release's writers still call Chat over
-  the bridge (op `db`) until Live N+1 is deployed.
+  writer, there is no authority switch any more. Live's writers go through Chat's APIs below and the
+  Chat-owned ingress (`docs/chat-ingress.md`); the Live bridge they used before is retired (T3 J3a).
 - **The features on those tables, served by Chat** (plan T3, plan step 1) — built here so Live can
   stop touching them at the flip:
   - `GET /api/emotes/global`, `/channel/:userId`, `/mine`, `/defaults`, `/sources` (GET/PUT),
@@ -95,8 +96,8 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
     `GET /internal/moderation/channels/:channelId/emote-count` — loopback + service token,
     capability `chat.moderation.read` (`chat.channel-moderation-result@1`,
     `chat.moderated-channels-result@1`, `chat.emote-count-result@1`). Live caches each answer 30 s.
-  - Alert sounds: the bridge op `playAlertSound [streamerId, streamId, kind]` makes Chat resolve the
-    channel's own settings row, read the clip and broadcast it, so Live only names the alert.
+  - Alert sounds: `playAlertSound(chatServer, streamerId, streamId, kind)` (`server/chat/alert-sounds.js`)
+    resolves the channel's own settings row, reads the clip and broadcasts it to the channel room.
   - **The chat-AI summaries** (plan T3 step 2, decision 5) — Live's `server/ai/chat-ai.js` job moved
     here: a background poller (off unless `CHAT_AI_ENABLED=1`) that folds Chat's own messages into
     rolling global/per-user/per-relay/per-anon insights and the append-only timeline, writing
@@ -112,10 +113,10 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 
 | Concern | Where it lives | How Chat reaches it |
 | --- | --- | --- |
-| Messages, DMs, channel sounds, TTS voice overrides, relay users, first chats, IP-approval queue, moderation log | **Chat** (authority from the cutover) | its own database (`CHAT_DB_PATH` SQLite today; PostgreSQL per plan T3 — `migrations/`, `scripts/import-sqlite-to-pg.js`); Live keeps a read mirror (`POST /internal/chat-effects/mirror`) |
+| Messages, DMs, channel sounds, TTS voice overrides, relay users, first chats, IP-approval queue, moderation log | **Chat** (authority from the cutover) | its own database on PostgreSQL since the 2026-09-23 cutover (`DATABASE_URL` through `openvibe-sdk/db`, `migrations/`, the one-time `scripts/import-sqlite-to-pg.js`; `CHAT_DB_PATH` is read only by that importer); Live keeps a read mirror (`POST /internal/chat-effects/mirror`) |
 | Accounts, roles, streams, channels, bans, IP approvals, follows, cosmetics, tags, site settings | **Live** (Network for identity) | `server/live-context.js` → `GET/POST /internal/chat-context/*` (service token, `live.chat_context.read`) |
 | Coins, AI viewers, arena, media queue, hardware, pastes, translation, PowerChat, notifications | **Live** | `server/live-context.js` → `POST /internal/chat-effects/*` (`live.chat_effects.write`) |
-| Live's own chat pushes and writes (AI viewers, relays, donations, `/api/mod`, recaps, calls) | **Live → Chat** | `POST /internal/live/calls` (`chat.live_bridge.write`), presence `GET /internal/live/presence` (`chat.presence.read`) |
+| Live's own chat pushes and writes (AI viewers, relays, donations, `/api/mod`, recaps, calls) | **Live → Chat** | the Chat-owned ingress `/internal/chat/*` (`docs/chat-ingress.md`), presence `GET /internal/chat/presence` (`chat.presence.read`); the bridge `/internal/live/*` is retired (T3 J3a) |
 | The six chat tables (moderators, moderation settings, emotes, tags, AI summaries, timeline) | **Chat** (C-04 done) | Chat's own database; Live reads through `GET /internal/moderation/*` (`chat.moderation.read`), 30 s cached |
 | Emote image bytes | **OpenVibe.Media** (namespace `chat`) | `server/media/client.js` (openvibe-sdk `createObjectsClient`), Chat's service token (`media.object.upload` / `.delete`); the row keeps `media_url` + `media_asset_id` |
 | Chat-AI summaries (global / per-chatter insight + timeline) | **OpenVibe.AI** (namespace `chat.*`) | `server/ai/client.js` (openvibe-sdk `createAiClient`), Chat's service token (`ai.run.create` / `ai.run.read`); workflows `chat.global` / `chat.profile`; extractive fallback when AI does not answer |
@@ -161,16 +162,15 @@ Chat subscribes (consumer `chat`) to these topics (and `network.user.token_valid
 
 | Event | From | What Chat does |
 | --- | --- | --- |
-| `live.release.deployed` | Live (`server/events/release-events.js`), subject `{ type: release, id: <head commit> }` | stores or folds the deploy card in global chat, exactly as the bridge op `deployNotice` does (`server/chat/deploy-notice.js`: one rolling card, folded while nobody has spoken in any room and within 3 hours; the broadcast carries the row id; late joiners get it once) |
+| `live.release.deployed` | Live (`server/events/release-events.js`), subject `{ type: release, id: <head commit> }` | stores or folds the deploy card in global chat (`server/chat/deploy-notice.js`: one rolling card, folded while nobody has spoken in any room and within 3 hours; the broadcast carries the row id; late joiners get it once) |
 | `network.module.updated` | Network (`server/identity/module-events.js`) | for `chat.preferences`, a revision newer than the cached copy drops it (`prefs.handleEvent()`); an older or equal revision and other namespaces change nothing |
 | `network.block.changed` | Network (`server/identity/blocks.js`, platform blocks) | keeps the newest revision per (blocker, blocked) in `network_blocks` (`server/chat/network-blocks.js`); while a block is active neither person can start a DM with the other, message them in a 1:1, add them to a group or call them, and the DM user search hides them, exactly like `dm_blocks` (same errors) |
 
-- **One card per deploy, whichever path comes first** (compatibility register C-84). Until the bridge
-  op is removed, Live sends each deploy twice: `deployNotice` over the bridge (commits newest first,
-  so the first is the head) and the event. Both claim the head commit in `deploy_releases` in the
-  transaction that stores or folds the card; the second finds it claimed and changes nothing but its
-  `bridge_at` / `event_at`. A retried bridge op, a redelivered event and Live re-announcing after a
-  crash are the same card. A redeploy of a head already announced (a rollback to it) says nothing.
+- **One card per deploy** (compatibility register C-84, closed). The event is the only path: the
+  bridge op `deployNotice` is retired (T3 J3a); `deploy_releases.first_via` / `bridge_at` keep what
+  it recorded. The event claims the head commit in `deploy_releases` in the transaction that stores
+  or folds the card; a later delivery for that head finds it claimed and changes nothing but its
+  `event_at`. A redelivered event and Live re-announcing after a crash are the same card. A redeploy of a head already announced (a rollback to it) says nothing.
   A release event older than 6 hours (an operator replay) is `ignored:stale`.
 - **Exactly once.** The openvibe-sdk inbox (`chat_event_inbox`, pruned after 35 days) claims
   `(chat, event_id)` in the same transaction as the change, and broadcasts run only after it
@@ -223,8 +223,8 @@ cutover** (`CHAT_CALLS=1`, `docs/calls-cutover.md`):
   `GET/PUT /api/streams/:id/call` (the streamer, checked through `live-context`).
 - **Live's stream hooks** (`server/calls/internal.js`, Live `CALLS_AUTHORITY=chat`):
   `POST /internal/calls/stream-channel { stream_id, mode, user_id }` and
-  `DELETE /internal/calls/stream-channel/:streamId` — the bridge's service token and capability
-  (`chat.live_bridge.write`), loopback only.
+  `DELETE /internal/calls/stream-channel/:streamId` — a Live service token with capability
+  `chat.live_bridge.write` (the name is from the retired chat bridge; Live holds the grant), loopback only.
 - **Lifecycle** (`server/calls/lifecycle.js`, table `calls`): a ring is `direct`, `pending → ringing →
   active → ended`, or `missed` (no answer within `CALL_RING_TIMEOUT_MS`, 45 s; the caller is told),
   `declined` (declined or busy) or `failed` (the invite could not be delivered, with the reason); a
@@ -404,8 +404,8 @@ rollback — is `docs/cutover.md`.
 The REST API also limits who calls it (`server/net/actor-limits.js`, openvibe-sdk/limits, roadmap
 WS-R task 4). A person counts as `user:usr_…` whether they call with their Network token or an `hbt_`
 API token (a bot counts as its owner); anyone else by their address. Browsers call these routes
-themselves, so no service speaks for many visitors here; Live's service calls (the bridge at
-`/internal/live`, the stream hooks at `/internal/calls`) carry every viewer's chat and are never
+themselves, so no service speaks for many visitors here; Live's service calls (the ingress at
+`/internal/chat`, the stream hooks at `/internal/calls`) carry every viewer's chat and are never
 limited. The per-address `/api/` limit and the chat flood controls (the socket's, DMs 10 a minute and
 5 new conversations an hour, rooms 6 every 10 s, 6 rings a minute) stay. Past a limit: `429`
 problem+json `rate_limited` with `Retry-After`, one `[Limits]` log line and
@@ -426,7 +426,7 @@ problem+json `rate_limited` with `Retry-After`, one `[Limits]` log line and
 | Calls: voice channel create and delete, stream call switch 20 / 200; ring 20 / 200; answer 30 / 300 | as listed |
 | Chat settings save (`PUT /api/chat/preferences` and the other modules) | 30 / 300 |
 
-Never limited: `/health`, `/ready`, `/release.json`, `/metrics`, `/internal/*` (the bridge, the call
+Never limited: `/health`, `/ready`, `/release.json`, `/metrics`, `/internal/*` (the ingress, the call
 hooks and the signed Events deliveries, which carry account deletions and merges), `/ws/chat` and
 `/ws/call`, the openvibe.chat pages, and the media files players fetch (`/api/tts/audio/…`,
 `/api/sounds/file/…`, `/api/emotes/file/…`), which only the per-address limit bounds. `test/actor-limits.test.js`.
@@ -439,7 +439,7 @@ server/app.js              Live's guards for these routes: CORS, /api rate limit
 server/live-context.js     the only module that talks to Live (interface in its header)
 server/chat/               moved from Live: chat-server, dm, dm-routes, routes, history-store, tts-*, sounds-*, soundboard, moderation-utils, word-filter, deploy-notice; plus the T3 APIs: emotes-routes, channel-mod-routes, internal-moderation (Live's read API), alert-sounds
 server/auth/               token resolution through Live; the chat subset of Live's permissions
-server/bridge/             Live → Chat calls + presence (live-bridge.js); Chat → Live read mirror (live-mirror.js)
+server/bridge/             Chat → Live read mirror (live-mirror.js)
 server/events/outbox.js    events.event-envelope@1 outbox and relay
 server/events/consumer.js  POST /internal/events: Chat's Events subscriptions (live.release.deployed, network.module.updated)
 server/events/subscriptions.js  creates them at boot when missing; list/disable/enable for scripts/subscribe-events.js
@@ -475,13 +475,13 @@ queue are still Live's and reached through `live-context`. Calls are ported with
 
 Introduced here and registered in `openvibe-contracts` v0.13.0:
 `chat.live_bridge.write`, `chat.presence.read` (owner chat) and `live.chat_context.read`,
-`live.chat_effects.write`, `live.chat_mirror.write` (owner live). Enforced here as well:
-`chat.message.send` — a service or app principal whose `/internal/live/calls` op sends a chat
-message (a `saveChatMessage` write, the deploy notice, or a pushed `chat`/`dm` frame) must hold it
-beside `chat.live_bridge.write`; without it that op is refused (`capability.denied`) and the rest of
-the batch runs. It is owned by `chat` and listed in the chat manifest since `openvibe-contracts`
-v0.30.2 (so is the `chat.preferences` user module since v0.32.0); the check names it literally, so
-the contracts check enforces it. Planned families:
+`live.chat_effects.write`, `live.chat_mirror.write` (owner live). `chat.live_bridge.write` now only
+guards Live's stream hooks for calls (`/internal/calls/stream-channel`) and `chat.presence.read` the
+presence snapshot (`GET /internal/chat/presence`); the bridge routes they were made for are retired
+(T3 J3a). Enforced here as well: `chat.message.send` (`POST /internal/chat/messages`). It is owned
+by `chat` and listed in the chat manifest since `openvibe-contracts` v0.30.2 (so is the
+`chat.preferences` user module since v0.32.0); the check names it literally, so the contracts check
+enforces it. Planned families:
 `chat.room.*`, `chat.message.*`, `chat.dm.*`, `chat.moderation.*`, `chat.tts.*`, `chat.call.*`.
 
 Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat.moderation.action`,
@@ -514,7 +514,7 @@ Called elsewhere, as the service principal `chat` ([server/net/service-auth.js](
 ## Acceptance (must be true before "done")
 
 - stream/global/DM histories preserved on import; old Live URLs and WS messages keep working through the adapter — *done on production data: 70,860 messages, 11 conversations and 1,522 DMs imported with 0 held (two passes, identical), 15/15 read paths identical at the cutover*
-- restart Live without losing Chat; restart Chat's delivery plane and resume persisted messages — *seen in production (Live restarted several times on 2026-09-23 while Chat stayed up; messages and a queued outbox row survived Chat restarts); `test/restart-resume.test.js` restarts Chat as a real process (SIGTERM, new process on the same database) and proves stream, global and channel readers resume from their `after_id` cursor with no gap and no duplicate, including Live bridge placeholders that straddle the restart (kept in `bridge_refs`)*
+- restart Live without losing Chat; restart Chat's delivery plane and resume persisted messages — *seen in production (Live restarted several times on 2026-09-23 while Chat stayed up; messages and a queued outbox row survived Chat restarts); `test/restart-resume.test.js` restarts Chat as a real process (SIGTERM, new process on the same database) and proves stream, global and channel readers resume from their `after_id` cursor with no gap and no duplicate, including an ingress message Live sends again with its key after the restart (one row, the first id)*
 - a call row without a working signalling/media path is not parity — *Live's `/ws/call` protocol and call routes run in Chat with a `calls` row per call (`test/calls.test.js`: two signed-in sockets exchange offer/answer/ICE, limits, kick/ban, ringing → active/declined/missed/failed, stream channels); not switched over yet (`docs/calls-cutover.md`)*
 - a paid TTS request is never duplicated by a retry — *forwarded writes are applied once per idempotency key; paid TTS does not exist yet*
 - after a reconnect, deleted and blocked state converge; browser parity (join, send, DM, `/tts`, moderation, popout) — *`scripts/parity.js` and `test/parity.test.js` (`docs/parity.md`): a reader that was away converges on what a connected reader saw (cursor reads carry `deleted_ids`); gaps: sub-only mode does not exist, public chat does not apply blocks*

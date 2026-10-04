@@ -255,7 +255,7 @@ t('CORS: no *.openvibe.tools wildcard — only exact origins get credentialed CO
     const apex = await probe('https://openvibe.tools');
     assert.strictEqual(apex.headers.get('access-control-allow-origin'), 'https://openvibe.tools', 'the listed apex keeps working');
     // The same list decides the exported check (and the WebSocket upgrade).
-    const stub = { chatServer: { getTotalConnections: () => 0 }, bridge: (q, s, n) => n() };
+    const stub = { chatServer: { getTotalConnections: () => 0 } };
     const { isAllowedOrigin, allowedOrigins } = createApp(stub);
     assert.strictEqual(isAllowedOrigin('https://pastes.openvibe.tools'), false);
     assert.strictEqual(isAllowedOrigin('https://openvibe.live'), true);

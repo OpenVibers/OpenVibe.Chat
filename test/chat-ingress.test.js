@@ -290,7 +290,7 @@ t('moderation handles bulk deletes, pending IP decisions, relay identities and v
     assert.strictEqual(await h.db.getTtsVoiceOverride('viewer'), null);
 });
 
-t('invalidate accepts typed hints; presence retains the bridge snapshot shape', async () => {
+t('invalidate accepts typed hints; presence is the connection snapshot; the retired bridge is gone', async () => {
     const hint = { key: 'ingress:hint:1', user: viewer.id, approvals: channelId, bans: true };
     assert.strictEqual((await post('invalidate', hint)).status, 200);
     assert.strictEqual((await post('invalidate', hint)).status, 200);
@@ -305,7 +305,8 @@ t('invalidate accepts typed hints; presence retains the bridge snapshot shape', 
     assert.ok(r.body.total >= 2);
     assert.strictEqual(r.body.streams[streamId], 1);
     assert.ok(r.body.users.some((u) => u.user_id === viewer.id));
-    assert.strictEqual((await h.http('GET', '/internal/live/presence', { token: h.serviceToken(['chat.presence.read']) })).status, 200);
+    assert.strictEqual((await h.http('GET', '/internal/live/presence', { token: h.serviceToken(['chat.presence.read']) })).status, 404);
+    assert.strictEqual((await h.http('POST', '/internal/live/calls', { token: h.serviceToken(['chat.live_bridge.write']), body: { boot: 'b', ops: [] } })).status, 404);
 });
 
 t('moderation disconnect closes only the selected user socket', async () => {

@@ -8,9 +8,9 @@
  * cursor Live's chat.js keeps (the highest message id they have shown, from history pages and live
  * frames) and, after the restart, reconnect, join, and read `?after_id=<cursor>`. What they end up
  * with must be exactly the room's rows in the database: nothing missing (messages written while
- * the reader was away, before and after the restart, by people and through Live's bridge) and
- * nothing twice (no row at or under the cursor comes back, and every live frame carries the row's
- * real id — including a bridge broadcast whose insert was acknowledged before the restart).
+ * the reader was away, before and after the restart, by people and through Live's ingress) and
+ * nothing twice (no row at or under the cursor comes back, every live frame carries the row's real
+ * id, and an ingress message Live sends again after the restart with its key is one row).
  */
 const assert = require('assert');
 const path = require('path');
@@ -18,12 +18,11 @@ const { boot, suite } = require('./helpers');
 
 const t = suite('restart-resume');
 let h, chat, port, streamer, posters, reader, channelId, streamId;
-const REF = -(2 ** 40) - 1;
-const BOOT = 'live-boot-restart';
-let BRIDGE;
+let SEND;
 const sockets = [];
 
-const calls = (ops) => h.http('POST', '/internal/live/calls', { token: BRIDGE, body: { boot: BOOT, ops: ops.map((o, i) => ({ seq: i + 1, ...o })) } });
+// Live's AI viewer posting through Chat's ingress (POST /internal/chat/messages), keyed like Live's.
+const ingest = (key, message) => h.http('POST', '/internal/chat/messages', { token: SEND, body: { key, stream_id: streamId, username: 'ChatBot', message, message_type: 'chat', source_platform: 'ai', mirror: true } });
 
 // What the database says the rooms hold (this process's own handle on the same database: Chat is another process).
 async function roomRows(where, params) {
@@ -82,7 +81,7 @@ const readers = {};
 
 t('boot the stubs, then Chat as its own process', async () => {
     h = await boot();
-    BRIDGE = h.serviceToken(['chat.live_bridge.write', 'chat.message.send']);
+    SEND = h.serviceToken(['chat.message.send']);
     streamer = h.addUser('streamer', { role: 'streamer' });
     reader = h.addUser('reader');
     posters = ['ann', 'ben', 'cat', 'dan', 'eve', 'fay'].map((n) => h.addUser(n));
@@ -106,16 +105,12 @@ t('readers load the rooms and follow live frames', async () => {
         page.body.messages.forEach((m) => r.show(m));
         assert.strictEqual(r.cursor, page.body.latest_id, `${r.name}: the page's latest_id is the cursor`);
     }
-    // A live message and a bridge message (Live's AI viewer) reach the connected readers.
+    // A live message and an ingress message (Live's AI viewer) reach the connected readers.
     const id2 = await post(posters[1], '198.51.100.11', 'before 2');
-    const b = await calls([
-        { op: 'db', ref: REF, key: 'live:r1', args: ['saveChatMessage', { stream_id: streamId, username: 'ChatBot', message: 'bridge before', message_type: 'chat', source_platform: 'ai' }] },
-        { op: 'broadcastToStream', args: [streamId, { type: 'chat', id: REF, username: 'ChatBot', message: 'bridge before' }] },
-        { op: 'forwardToGlobal', args: [streamId, { type: 'chat', id: REF, username: 'ChatBot', message: 'bridge before' }] },
-    ]);
-    assert.ok(b.body.results.every((x) => x.ok), b.text);
-    await readers.stream.ws.next((m) => m.type === 'chat' && m.message === 'bridge before');
-    await readers.global.ws.next((m) => m.type === 'chat' && m.message === 'bridge before');
+    const b = await ingest('live:r1', 'ingress before');
+    assert.strictEqual(b.status, 200, b.text);
+    assert.strictEqual((await readers.stream.ws.next((m) => m.type === 'chat' && m.message === 'ingress before')).id, b.body.id);
+    assert.strictEqual((await readers.global.ws.next((m) => m.type === 'chat' && m.message === 'ingress before')).id, b.body.id);
     assert.ok(readers.stream.shown.has(id2) && readers.global.shown.has(id2));
     // The channel reader is a page that polls (no socket): it read before these two.
 });
@@ -124,13 +119,10 @@ let beforeMax;
 t('the stream reader drops off; messages keep coming; Chat restarts (SIGTERM, new process)', async () => {
     readers.stream.ws.close();
     await post(posters[2], '198.51.100.12', 'missed while away');
-    // Live's bridge: an insert acknowledged before the restart whose broadcast is sent after it
-    // (Live's queue split the batch). The broadcast must still carry the real id.
-    const ins = await calls([{ op: 'db', ref: REF - 1, key: 'live:r2', args: ['saveChatMessage', { stream_id: streamId, username: 'ChatBot', message: 'bridge across restart', message_type: 'chat', source_platform: 'ai' }] }]);
-    assert.ok(ins.body.results[0].ok, ins.text);
-    // And one whose response Live never got: it will send it again after the restart.
-    const lost = await calls([{ op: 'db', ref: REF - 3, key: 'live:r4', args: ['saveChatMessage', { stream_id: streamId, username: 'ChatBot', message: 'bridge retried', message_type: 'chat', source_platform: 'ai' }] }]);
-    assert.ok(lost.body.results[0].ok, lost.text);
+    // An ingress message whose response Live never got: it will send it again after the restart.
+    const lost = await ingest('live:r4', 'ingress retried');
+    assert.strictEqual(lost.status, 200, lost.text);
+    await readers.global.ws.next((m) => m.type === 'chat' && m.message === 'ingress retried');
     beforeMax = (await roomRows('1 = 1', [])).reduce((m, x) => Math.max(m, x.id), 0);
 
     const closed = new Promise((r) => readers.global.ws.on('close', r));
@@ -142,35 +134,21 @@ t('the stream reader drops off; messages keep coming; Chat restarts (SIGTERM, ne
     chat = await h.spawnChat({ port });
 });
 
-t('after the restart: the split broadcast of an acknowledged insert, a retried insert, new messages', async () => {
+t('after the restart: a retried ingress message, new messages', async () => {
     // The global reader reconnects at once (chat.js reconnects on close); the stream reader later.
     await openReader(readers.global, { ip: '198.51.100.21' });
-    // A batch of a later flush: only the broadcast, carrying the placeholder of an insert the old
-    // process acknowledged (Live deleted it from its outbox; it is never sent again).
-    const late = await calls([{ op: 'forwardToGlobal', args: [streamId, { type: 'chat', id: REF - 1, username: 'ChatBot', message: 'bridge across restart' }] }]);
-    assert.ok(late.body.results[0].ok, late.text);
-    const frame = await readers.global.ws.next((m) => m.type === 'chat' && m.message === 'bridge across restart');
-    assert.strictEqual(frame.id, (await roomRows("message = 'bridge across restart'", []))[0].id, 'the placeholder maps to the real id after a restart');
-
-    // The insert whose answer was lost comes again with its key and its broadcast: applied once,
-    // and the broadcast carries the first insert's id.
-    const retry = await calls([
-        { op: 'db', ref: REF - 3, key: 'live:r4', args: ['saveChatMessage', { stream_id: streamId, username: 'ChatBot', message: 'bridge retried', message_type: 'chat', source_platform: 'ai' }] },
-        { op: 'forwardToGlobal', args: [streamId, { type: 'chat', id: REF - 3, username: 'ChatBot', message: 'bridge retried' }] },
-    ]);
-    assert.ok(retry.body.results.every((x) => x.ok), retry.text);
-    const once = await roomRows("message = 'bridge retried'", []);
-    assert.strictEqual(once.length, 1, 'a retried insert is applied once across the restart');
-    assert.strictEqual(retry.body.results[0].result.lastInsertRowid, once[0].id);
-    assert.strictEqual((await readers.global.ws.next((m) => m.type === 'chat' && m.message === 'bridge retried')).id, once[0].id);
+    // The message whose answer was lost comes again with its key: applied once, with the first id.
+    const retry = await ingest('live:r4', 'ingress retried');
+    assert.strictEqual(retry.status, 200, retry.text);
+    const once = await roomRows("message = 'ingress retried'", []);
+    assert.strictEqual(once.length, 1, 'a retried message is applied once across the restart');
+    assert.strictEqual(retry.body.id, once[0].id);
 
     const after1 = await post(posters[3], '198.51.100.13', 'after restart 1');
     assert.ok(after1 > beforeMax, 'ids keep increasing across the restart');
-    await calls([
-        { op: 'db', ref: REF - 2, key: 'live:r3', args: ['saveChatMessage', { stream_id: streamId, username: 'ChatBot', message: 'bridge after', message_type: 'chat', source_platform: 'ai' }] },
-        { op: 'forwardToGlobal', args: [streamId, { type: 'chat', id: REF - 2, username: 'ChatBot', message: 'bridge after' }] },
-    ]);
-    await readers.global.ws.next((m) => m.type === 'chat' && m.message === 'bridge after');
+    const after2 = await ingest('live:r3', 'ingress after');
+    assert.strictEqual(after2.status, 200, after2.text);
+    assert.strictEqual((await readers.global.ws.next((m) => m.type === 'chat' && m.message === 'ingress after')).id, after2.body.id);
 });
 
 for (const [name, room] of [['stream', streamRoom], ['global', globalRoom], ['channel', channelRoom]]) {
@@ -197,7 +175,7 @@ for (const [name, room] of [['stream', streamRoom], ['global', globalRoom], ['ch
         assert.deepStrictEqual([...r.shown.keys()].sort((a, b) => a - b), want.map((x) => x.id), `${name}: exactly the room's rows`);
         const seen = new Set();
         for (const text of r.texts) { assert.ok(!seen.has(text), `${name}: "${text}" shown twice`); seen.add(text); }
-        for (const text of ['before 1', 'before 2', 'bridge before', 'missed while away', 'bridge across restart', 'bridge retried', 'after restart 1', 'bridge after']) {
+        for (const text of ['before 1', 'before 2', 'ingress before', 'missed while away', 'ingress retried', 'after restart 1', 'ingress after']) {
             assert.ok(seen.has(text), `${name}: "${text}" missing`);
         }
         // The next read from the new cursor is empty.

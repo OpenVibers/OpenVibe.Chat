@@ -3,7 +3,7 @@
  *
  *   headers(audience, scope)  Chat → another service: cached client-credentials token from the
  *                             Network's /oauth/token for client `chat`.
- *   guard(capability)         another service → Chat: Express guard for /internal/live/* that
+ *   guard(capability)         another service → Chat: Express guard for /internal/* that
  *                             verifies an RS256 service token for audience openvibe.chat and
  *                             checks the capability in its `cap` claim.
  *

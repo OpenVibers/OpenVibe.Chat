@@ -141,11 +141,9 @@ t('only the broadcaster and moderators skip: /skiptts skips the playing clip and
 });
 
 t('the queue over REST: list, skip by id, clear — moderators yes, others 403', async () => {
-    // Fill the room: cat plays, three more wait (through Live's bridge, keyed like chat messages).
+    // Fill the room: cat plays, three more wait (an AI viewer's lines, keyed like chat messages).
     synthPlan = [5, 5, 5];
-    const BRIDGE = h.serviceToken(['chat.live_bridge.write', 'chat.message.send']);
-    const r = await h.http('POST', '/internal/live/calls', { token: BRIDGE, body: { boot: 'b', ops: [1, 2, 3].map((n) => ({ seq: n, op: 'synthesizeAndBroadcastTTS', args: [streamId, 'ChatBot', `bot line ${n}`, null, 'ai', 'ai:bot', null, `m9${n}`] })) } });
-    assert.ok(r.body.results.every((x) => x.ok), r.text);
+    for (const n of [1, 2, 3]) await h.chatServer.synthesizeAndBroadcastTTS(streamId, 'ChatBot', `bot line ${n}`, null, 'ai', 'ai:bot', null, `m9${n}`);
 
     assert.strictEqual((await h.http('GET', `/api/tts/queue?stream_id=${streamId}`, { token: viewer.token })).status, 403);
     assert.strictEqual((await h.http('GET', `/api/tts/queue?stream_id=${streamId}`)).status, 401);
@@ -177,8 +175,7 @@ t('the queue over REST: list, skip by id, clear — moderators yes, others 403',
 
 t('failures are recorded and the queue moves on', async () => {
     synthPlan = [null, new Error('voice service down'), 6];
-    const BRIDGE = h.serviceToken(['chat.live_bridge.write', 'chat.message.send']);
-    await h.http('POST', '/internal/live/calls', { token: BRIDGE, body: { boot: 'b', ops: ['no audio', 'throws', 'fine'].map((l, i) => ({ seq: i + 1, op: 'synthesizeAndBroadcastTTS', args: [streamId, 'ChatBot', l, null, 'ai', `ai:bot${i}`, null, `mf${i}`] })) } });
+    for (const [i, l] of ['no audio', 'throws', 'fine'].entries()) await h.chatServer.synthesizeAndBroadcastTTS(streamId, 'ChatBot', l, null, 'ai', `ai:bot${i}`, null, `mf${i}`);
     await listener.next((m) => m.type === 'tts-audio' && m.message === 'fine');
     assert.strictEqual((await byLabel('no audio')).state, 'failed');
     assert.strictEqual((await byLabel('no audio')).error, 'no audio');

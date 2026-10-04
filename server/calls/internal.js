@@ -1,7 +1,7 @@
 /**
  * OpenVibe.Chat — Live's stream lifecycle hooks for calls (Live CALLS_AUTHORITY=chat,
  * server/streaming/calls-authority.js). Loopback only, never routed by nginx; the same service-token
- * guard and capability as Live's other calls into Chat (bridge/live-bridge.js):
+ * guard as Live's other calls into Chat, and the capability Live already holds for them:
  *
  *   POST   /internal/calls/stream-channel             capability chat.live_bridge.write
  *       { stream_id, mode, user_id } → { ok, channel }   go-live with call mode, or the mode changed

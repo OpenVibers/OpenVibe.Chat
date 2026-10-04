@@ -4,11 +4,10 @@
  *
  *   - POST /internal/events takes signature v2 only: a bad signature, a timestamp outside ±300 s and a
  *     v1-only delivery are 401; no secret is 503; a forwarded request is 403
- *   - live.release.deployed makes the deploy card exactly as the bridge's deployNotice does; the inbox
- *     makes a redelivered event a no-op (one card)
- *   - a bridge notice and an event for the same head are one card, whichever comes first
+ *   - live.release.deployed makes the deploy card; the inbox makes a redelivered event a no-op (one
+ *     card), and a second event for a head already announced is one card too
  *   - folding as before: a later deploy folds into the last card, a message in a stream room in
- *     between starts a new card; the two paths fold into each other's cards
+ *     between starts a new card
  *   - network.module.updated drops a cached chat.preferences copy when newer, ignores an older revision
  *   - boot creates the subscriptions once (idempotent), never re-enables a disabled one, and the
  *     secret it hands Events is the one the consumer verifies
@@ -26,9 +25,8 @@ const t = suite('events-consumer');
 const SECRET = 'e'.repeat(64);
 const OTHER = 'f'.repeat(64);
 const ANN = 'usr_01J9ANN0000000000000000AAA';
-let h, BRIDGE, streamer, viewer, streamId, prefs;
+let h, streamer, viewer, streamId, prefs;
 let seq = 0;
-let n = 0;
 
 // ── Stub OpenVibe.Events: subscriptions (token-checked, 409 on a duplicate) and publishing ──
 const stubEvents = { subs: [], posts: 0 };
@@ -104,7 +102,6 @@ function deliver(event, { secret = SECRET, now = Date.now(), headers = {}, strip
     for (const k of strip) delete signed[k];
     return h.http('POST', '/internal/events', { raw, headers: { 'Content-Type': 'application/json', 'X-OpenVibe-Event-Id': event.event_id, ...signed, ...headers } });
 }
-const bridge = (commits) => h.http('POST', '/internal/live/calls', { token: BRIDGE, body: { boot: 'live-boot-1', ops: [{ seq: ++n, op: 'deployNotice', args: [commits] }] } });
 const cards = async () => (await h.db.all("SELECT id, metadata FROM chat_messages WHERE message_type = 'system' AND metadata LIKE '%\"kind\":\"deploy\"%' ORDER BY id")).map((r) => ({ id: r.id, ...JSON.parse(r.metadata) }));
 const card = async (id) => (await cards()).find((c) => c.id === id);
 const speak = async (text) => await h.db.saveChatMessage({ stream_id: streamId, user_id: viewer.id, username: viewer.username, message: text, message_type: 'chat', is_global: false });
@@ -113,7 +110,6 @@ const releaseRow = async (head) => await h.db.get('SELECT * FROM deploy_releases
 t('boot with the consumer on and a stub Events', async () => {
     const eventsPort = await new Promise((r) => eventsServer.listen(0, '127.0.0.1', () => r(eventsServer.address().port)));
     h = await boot({ env: { CHAT_EVENTS_SECRET: `${SECRET}, short-is-ignored`, EVENTS_URL: `http://127.0.0.1:${eventsPort}`, CHAT_PREFS_TTL_MS: '60000' } });
-    BRIDGE = h.serviceToken(['chat.live_bridge.write', 'chat.message.send']);
     streamer = h.addUser('streamer', { role: 'streamer' });
     viewer = h.addUser('viewer');
     streamId = h.addStream(streamer.id, h.addChannel(streamer.id));
@@ -219,7 +215,7 @@ t('live.release.deployed makes the deploy card; the same event again is one card
     assert.strictEqual(r.body.duplicate, true);
     assert.strictEqual((await cards()).length, before, 'still one card');
     assert.strictEqual((await card(id)).deploys, 1, 'not folded into itself');
-    // Late joiners get this announcement once, keyed by the row id (as with the bridge).
+    // Late joiners get this announcement once, keyed by the row id.
     const late = await h.ws({ ip: '198.51.100.70' });
     late.sendJson({ type: 'join' });
     const upd = await late.next((m) => m.type === 'update' && m.kind === 'deploy', 4000);
@@ -230,55 +226,20 @@ t('live.release.deployed makes the deploy card; the same event again is one card
     assert.deepStrictEqual([rel.first_via, rel.message_id, rel.event_id, rel.bridge_at], ['events', id, ev.event_id, null]);
 });
 
-t('bridge first, then the event for the same head: one card', async () => {
-    await speak('a stream message, so the next deploy is a new card');
-    const commits = [commit('c', 'bridge: head'), commit('d', 'bridge: parent')];
-    const b = await bridge(commits);
-    const id = b.body.results[0].result.id;
-    assert.strictEqual(b.body.results[0].result.announced, 2);
-    const before = (await cards()).length;
-    const r = await deliver(release(commits));
-    assert.deepStrictEqual([r.status, r.body.duplicate, r.body.outcome], [200, false, 'duplicate:release']);
-    assert.strictEqual(r.body.detail.message_id, id);
-    assert.strictEqual((await cards()).length, before, 'no second card');
-    assert.strictEqual((await card(id)).deploys, 1, 'the card was not folded again');
-    const rel = await releaseRow(commits[0].hash);
-    assert.strictEqual(rel.first_via, 'bridge');
-    assert.ok(rel.bridge_at && rel.event_at, 'both paths are recorded as having delivered it');
-});
-
-t('the event first, then the bridge for the same head: one card', async () => {
-    await speak('another stream message');
-    const commits = [commit('e', 'event: head')];
-    const r = await deliver(release(commits));
-    assert.strictEqual(r.body.outcome, 'announced');
-    const id = r.body.detail.message_id;
-    const before = (await cards()).length;
-    const b = await bridge(commits);
-    assert.deepStrictEqual(b.body.results[0].result, { announced: 0, id, duplicate: true });
-    // A retried bridge op (Live's durable queue after a lost response) is the same.
-    const again = await bridge(commits);
-    assert.strictEqual(again.body.results[0].result.duplicate, true);
-    assert.strictEqual((await cards()).length, before);
-    assert.strictEqual((await card(id)).deploys, 1);
-    const rel = await releaseRow(commits[0].hash);
-    assert.deepStrictEqual([rel.first_via, !!rel.event_at, !!rel.bridge_at], ['events', true, true]);
-});
-
 t('folding as before: the next deploy folds into the last card; a stream message in between starts a new card', async () => {
     await speak('new card next');
     let r = await deliver(release([commit('1', 'fold: one')]));
     const first = r.body.detail.message_id;
     assert.strictEqual(r.body.outcome, 'announced');
-    // Nobody spoke: the next deploy (from either path) folds into that card.
-    const b = await bridge([commit('2', 'fold: two')]);
-    assert.strictEqual(b.body.results[0].result.id, first, 'the bridge folds into the card the event made');
+    // Nobody spoke: the next deploy folds into that card.
+    r = await deliver(release([commit('2', 'fold: two')]));
+    assert.deepStrictEqual([r.body.outcome, r.body.detail.message_id], ['folded', first]);
     r = await deliver(release([commit('3', 'fold: three')]));
     assert.deepStrictEqual([r.body.outcome, r.body.detail.message_id], ['folded', first]);
     assert.strictEqual((await card(first)).deploys, 3);
     assert.deepStrictEqual((await card(first)).commits.map((c) => c.subject), ['fold: three', 'fold: two', 'fold: one']);
     r = await deliver(release([commit('2', 'fold: two')]));
-    assert.strictEqual(r.body.outcome, 'duplicate:release', 'the bridge already announced that head');
+    assert.strictEqual(r.body.outcome, 'duplicate:release', 'an earlier event already announced that head');
     assert.strictEqual((await card(first)).deploys, 3);
     // Someone speaks in a stream room (the global feed shows it): the next deploy is a new card.
     await speak('hello brother');

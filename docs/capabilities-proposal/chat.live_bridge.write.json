@@ -4,7 +4,7 @@
   "owner": "chat",
   "status": "planned",
   "visibility": "internal",
-  "description": "Live's remaining modules (AI viewers, chat relays, donations and alerts, /api/mod, recaps, news, calls, emotes, deploy notices) push to chat clients and write chat rows through OpenVibe.Chat: ChatServer calls in order (broadcasts, DMs with the participant check, TTS, channel sounds, disconnects, user updates, cache invalidations) and allow-listed chat-table writes, applied once per idempotency key, with placeholder ids mapped per Live boot. Transitional: shrinks as those modules move out of Live.",
+  "description": "Live's stream lifecycle hooks for calls (CALLS_AUTHORITY=chat): create, change or end a stream's voice channel. Named for the Live chat bridge (POST /internal/live/calls), retired in T3 J3a; Live already holds this grant, so the call hooks kept it.",
   "permissions": [
     "chat:write"
   ],
@@ -12,11 +12,9 @@
     "none"
   ],
   "quotaClass": "internal-write",
-  "events": [
-    "chat.message.created",
-    "chat.moderation.action"
-  ],
+  "events": [],
   "implementedBy": [
-    "POST /internal/live/calls"
+    "POST /internal/calls/stream-channel",
+    "DELETE /internal/calls/stream-channel/:streamId"
   ]
 }

@@ -5,7 +5,7 @@
  * room (delivery, global cross-feed, persistence with the Network subject, outbox, Live's
  * reactions and the coin reply), history, /w (DMs replaced whispers), the DM participant check on
  * delivery, moderation (/ban /timeout /unban /slow /clear with moderator checks), /tts, /paste,
- * !-commands routed to Live (arena reply through the bridge, media queue), and the upgrade guards
+ * !-commands routed to Live (arena reply to the sending socket, media queue), and the upgrade guards
  * (origin allow-list, IP bans, the per-address cap).
  */
 const assert = require('assert');
@@ -292,15 +292,14 @@ t('/paste creates the paste through Live and announces it', async () => {
     assert.strictEqual(fx.body.stream_id, streamId);
 });
 
-t('!hype goes to Live; Live answers this socket through the bridge (sendToConn)', async () => {
+t('!hype goes to Live with the socket’s conn_id; sendToConn answers that socket', async () => {
     await h.sleep(1100);
     aliceWs.sendJson({ type: 'chat', message: '!hype' });
     await h.sleep(200);
     const fx = h.live.effects.find((e) => e.name === 'arena-command');
     assert.strictEqual(fx.body.cmd, '!hype');
     assert.strictEqual(fx.body.client.user.id, alice.id);
-    const res = await h.http('POST', '/internal/live/calls', { token: h.serviceToken(['chat.live_bridge.write']), body: { boot: 'b1', ops: [{ seq: 1, op: 'sendToConn', args: [fx.body.client.conn_id, { type: 'system', message: 'Hyped!' }] }] } });
-    assert.strictEqual(res.status, 200);
+    h.chatServer.sendToConn(fx.body.client.conn_id, { type: 'system', message: 'Hyped!' });
     await aliceWs.next((m) => m.type === 'system' && m.message === 'Hyped!');
 });
 
