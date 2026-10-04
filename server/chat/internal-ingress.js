@@ -292,7 +292,8 @@ function validateModeration(b) {
     // chat_messages.deleted_by is text: Live sends the moderator's id or username.
     if (b.deleted_by != null && !int(b.deleted_by) && !str(b.deleted_by, 120)) bad('Invalid deleted_by');
     if (b.action === 'relay-hide' && b.reason != null && !str(b.reason, 500)) bad('Invalid reason');
-    if (b.action.startsWith('delete-') && b.action !== 'delete-by-range' && !b.id && !b.user_id && !str(b.anon_id, 80) && !str(b.username, 120)) bad('Missing delete subject');
+    const deleteSubject = { 'delete-message': () => int(b.id), 'delete-user-messages': () => int(b.user_id), 'delete-anon-messages': () => str(b.anon_id, 80), 'delete-relay-messages': () => str(b.username, 120) }[b.action];
+    if (deleteSubject && !deleteSubject()) bad('Missing delete subject');
     if (b.action === 'delete-by-range' && (!str(b.from, 40) || !str(b.to, 40) || !Number.isFinite(Date.parse(b.from)) || !Number.isFinite(Date.parse(b.to)))) bad('Invalid time range');
     if (b.action === 'review-pending-ip' && (!int(b.id) || !['approved', 'denied'].includes(b.status))) bad('Invalid review');
     if (['approve-ip-messages', 'deny-ip-messages'].includes(b.action) && (!int(b.channel_id) || !isIP(b.ip))) bad('Invalid IP review');
@@ -358,18 +359,12 @@ async function deliverInvalidate(chatServer, b) {
     if (b.bans) await ctx.invalidateBans();
 }
 
-// Until OpenVibe.Contracts registers chat.event.publish, chat.moderation.write and
-// chat.cache.invalidate (proposals in docs/capabilities-proposal/), events, moderation and cache
-// hints take chat.live_bridge.write: the capability Live already holds for the same broadcasts,
-// moderation writes and invalidations through /internal/live/calls, so the ingress grants nothing new.
-const LIVE_WRITE = 'chat.live_bridge.write';
-
 function createInternalIngress({ chatServer }) {
     const r = express.Router();
     r.post('/messages', serviceAuth.guard('chat.message.send'), endpoint('messages', validateMessage, writeMessage, (b, result) => deliverMessage(chatServer, b, result)));
-    r.post('/events', serviceAuth.guard(LIVE_WRITE), endpoint('events', validateEvent, async () => ({}), (b) => deliverEvent(chatServer, b)));
-    r.post('/moderation', serviceAuth.guard(LIVE_WRITE), endpoint('moderation', validateModeration, writeModeration, (b, result) => deliverModeration(chatServer, b, result)));
-    r.post('/invalidate', serviceAuth.guard(LIVE_WRITE), endpoint('invalidate', validateInvalidate, async () => ({}), (b) => deliverInvalidate(chatServer, b)));
+    r.post('/events', serviceAuth.guard('chat.event.publish'), endpoint('events', validateEvent, async () => ({}), (b) => deliverEvent(chatServer, b)));
+    r.post('/moderation', serviceAuth.guard('chat.moderation.write'), endpoint('moderation', validateModeration, writeModeration, (b, result) => deliverModeration(chatServer, b, result)));
+    r.post('/invalidate', serviceAuth.guard('chat.cache.invalidate'), endpoint('invalidate', validateInvalidate, async () => ({}), (b) => deliverInvalidate(chatServer, b)));
     r.get('/presence', serviceAuth.guard('chat.presence.read'), async (req, res) => {
         res.json(await require('./presence').snapshot(chatServer));
     });

@@ -15,9 +15,9 @@ a stream that does not exist is 404: do not retry a 4xx.
 | Route | Capability | Body and result |
 | --- | --- | --- |
 | `POST /internal/chat/messages` | `chat.message.send` | Chat message fields (`stream_id`, `channel_user_id`, `user_id`, `anon_id`, `username`, `message`, `message_type`, `is_global`, `reply_to_id`, `source_platform`, `metadata`), optional `mirror`, `tts:{voice,identity_key,key}`, `auto_delete_at`, and typed chat-frame fields in `frame` (`role`: `admin`/`global_mod`/`streamer`/`user`/`anon`/`external`, `profile_color`: hex, `avatar_url`, `is_ai`/`is_bot`/`filtered`: booleans, `core_username`, `display_name`); the broadcast carries `reply_to_id`, `is_global`, `auto_delete_at` and `metadata` from the body. Returns `{ok,id}`. With no TTS key, Chat uses `m<real message id>`. `dm:{to_user_id}` with `user_id` persists and delivers a direct message (the same `dm` frame as `POST /api/dm`, with the sender looked up by id), returning `{ok,id,conversation_id,to_user_id}`; a blank message is 400. Chat records the first chat in the channel (the welcome check) under `first_chat_key` when given (`user:<id>`, `anon:<anonId>` or `ext:<prefixed username>`), otherwise for a `chat` line only: `ext:<username>` with `source_platform`, else `user:<user_id>`, else `anon:<anon_id>`. |
-| `POST /internal/chat/events` | `chat.live_bridge.write` | `{key,target:{kind,id?},frame:{type,...}}`, returns `{ok:true}`. Target kinds: `stream`, `channel`, `owner-streams`, `user` (positive `id`), `global`, `all` (no `id`). Only the event frame types allowlisted in `internal-ingress.js` are accepted; `dm` and delete frames are refused, and `chat` only as the news card. |
-| `POST /internal/chat/moderation` | `chat.live_bridge.write` | `{key,action,...}`; actions: `delete-message`, `delete-user-messages`, `delete-anon-messages`, `delete-relay-messages`, `delete-by-range`, `review-pending-ip`, `approve-ip-messages`, `deny-ip-messages`, `relay-hide`, `relay-unhide`, `relay-record`, `tts-voice-override`, `disconnect`, `log`. Deletes return `ids` and broadcast `delete-messages` to every affected surface. |
-| `POST /internal/chat/invalidate` | `chat.live_bridge.write` | `{key,user?,user_data?,approvals?,bans?,channel?}`; a cache hint, returns `{ok:true}`. Include a typed `user_data` object when Live edited the account, so Chat updates sockets and stored message names. |
+| `POST /internal/chat/events` | `chat.event.publish` | `{key,target:{kind,id?},frame:{type,...}}`, returns `{ok:true}`. Target kinds: `stream`, `channel`, `owner-streams`, `user` (positive `id`), `global`, `all` (no `id`). Only the event frame types allowlisted in `internal-ingress.js` are accepted; `dm` and delete frames are refused, and `chat` only as the news card. |
+| `POST /internal/chat/moderation` | `chat.moderation.write` | `{key,action,...}`; actions: `delete-message`, `delete-user-messages`, `delete-anon-messages`, `delete-relay-messages`, `delete-by-range`, `review-pending-ip`, `approve-ip-messages`, `deny-ip-messages`, `relay-hide`, `relay-unhide`, `relay-record`, `tts-voice-override`, `disconnect`, `log`. Deletes return `ids` and broadcast `delete-messages` to every affected surface. |
+| `POST /internal/chat/invalidate` | `chat.cache.invalidate` | `{key,user?,user_data?,approvals?,bans?,channel?}`; a cache hint, returns `{ok:true}`. Include a typed `user_data` object when Live edited the account, so Chat updates sockets and stored message names. |
 | `GET /internal/chat/presence` | `chat.presence.read` | The same snapshot as `/internal/live/presence`. |
 
 `/internal/chat/events` is a narrow transient event ingress, not a generic ChatServer call.
@@ -35,16 +35,13 @@ that target a `user`; Chat sends them to that user's sockets and persists nothin
 `source_platform: 'news'` and `system` (boolean); it targets a `stream` and is never
 saved.
 
-`events`, `moderation` and `invalidate` take `chat.live_bridge.write`, the capability Live
-already holds for the same broadcasts, moderation writes and cache hints through
-`/internal/live/calls`, so Live repoints with the grants it has today (`chat.message.send`,
-`chat.presence.read`, `chat.live_bridge.write`). Narrower capabilities (`chat.event.publish`,
-`chat.moderation.write`, `chat.cache.invalidate`; proposals in `docs/capabilities-proposal/`)
-need the separate **OpenVibe.Contracts** repository to register them and add them to
-`manifests/services/chat.json` first: Chat's CI `contracts` step (`openvibe-contracts-check`) refuses a guard on
-a capability Contracts does not define. Then Chat switches the three guards, and Network grants
-`live chat.event.publish openvibe.chat`, `live chat.moderation.write openvibe.chat` and
-`live chat.cache.invalidate openvibe.chat` before that Chat release deploys.
+Before Live repoints, the separate **OpenVibe.Contracts** repository must register
+`chat.event.publish`, `chat.moderation.write`, and `chat.cache.invalidate` and add them to
+`manifests/services/chat.json`. Network's `principal_grants` and `DEFAULT_GRANTS` must grant
+`live chat.event.publish openvibe.chat`, `live chat.moderation.write openvibe.chat`, and
+`live chat.cache.invalidate openvibe.chat`. Keep the existing Live grants for
+`chat.message.send`, `chat.presence.read`, and `chat.live_bridge.write` until Live no longer calls
+the bridge. Chat's local proposals are in `docs/capabilities-proposal/`.
 
 Then Live J2 replaces its bridge writer with a typed client: repoint message producers and persisted DMs
 to `messages` (with `role`/`profile_color` etc. in `frame`), card, sound, media-queue, redemption

@@ -6,8 +6,8 @@ const { boot, suite } = require('./helpers');
 const t = suite('chat-ingress');
 let h, streamer, viewer, streamId, channelId, room, globalRoom;
 const CAPS = {
-    messages: 'chat.message.send', events: 'chat.live_bridge.write', moderation: 'chat.live_bridge.write',
-    invalidate: 'chat.live_bridge.write', presence: 'chat.presence.read',
+    messages: 'chat.message.send', events: 'chat.event.publish', moderation: 'chat.moderation.write',
+    invalidate: 'chat.cache.invalidate', presence: 'chat.presence.read',
 };
 const post = (family, body, token = h.serviceToken([CAPS[family]]), headers) =>
     h.http('POST', `/internal/chat/${family}`, { body, token, headers });
@@ -36,9 +36,10 @@ t('each route requires its own service capability and loopback', async () => {
     }
     assert.strictEqual((await h.http('GET', '/internal/chat/presence')).status, 401);
     assert.strictEqual((await h.http('GET', '/internal/chat/presence', { token: h.serviceToken(['chat.message.send']) })).status, 403);
-    // A message sender cannot publish events, moderate or invalidate, nor a bridge writer send lines.
+    // A message sender cannot publish events, moderate or invalidate, nor a bridge writer use the narrow routes.
     for (const family of ['events', 'moderation', 'invalidate']) {
         assert.strictEqual((await post(family, {}, h.serviceToken(['chat.message.send']))).status, 403);
+        assert.strictEqual((await post(family, {}, h.serviceToken(['chat.live_bridge.write']))).status, 403);
     }
     assert.strictEqual((await post('messages', {}, h.serviceToken(['chat.live_bridge.write']))).status, 403);
 });
@@ -185,6 +186,8 @@ t('bad input and missing rows are refused with a 4xx, never a retryable 503', as
     assert.strictEqual((await post('events', { key: 'ingress:4xx:alert', target: { kind: 'channel', id: streamer.id }, frame: { type: 'alert', streamerId: streamer.id, streamId: 'x', kind: 'goal' } })).status, 400);
     assert.strictEqual((await post('messages', { key: 'ingress:4xx:line', stream_id: 987654, username: 'Bot', message: 'nowhere' })).status, 404);
     assert.strictEqual((await post('moderation', { key: 'ingress:4xx:by', action: 'delete-message', id: 1, deleted_by: { id: 1 } })).status, 400);
+    assert.strictEqual((await post('moderation', { key: 'ingress:4xx:noid', action: 'delete-message', deleted_by: 'mod' })).status, 400);
+    assert.strictEqual((await post('moderation', { key: 'ingress:4xx:nouser', action: 'delete-user-messages', stream_id: streamId })).status, 400);
     assert.strictEqual((await post('moderation', { key: 'ingress:4xx:reason', action: 'relay-hide', channel_id: channelId, platform: 'twitch', external_username: 'x', reason: 5 })).status, 400);
     const dmBody = { key: 'ingress:4xx:dm', user_id: streamer.id, dm: { to_user_id: viewer.id }, username: streamer.username, message: 'soon gone' };
     const sent = await post('messages', dmBody);
