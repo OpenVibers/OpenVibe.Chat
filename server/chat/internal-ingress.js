@@ -292,7 +292,8 @@ function validateModeration(b) {
     // chat_messages.deleted_by is text: Live sends the moderator's id or username.
     if (b.deleted_by != null && !int(b.deleted_by) && !str(b.deleted_by, 120)) bad('Invalid deleted_by');
     if (b.action === 'relay-hide' && b.reason != null && !str(b.reason, 500)) bad('Invalid reason');
-    if (b.action.startsWith('delete-') && b.action !== 'delete-by-range' && !b.id && !b.user_id && !str(b.anon_id, 80) && !str(b.username, 120)) bad('Missing delete subject');
+    const deleteSubject = { 'delete-message': () => int(b.id), 'delete-user-messages': () => int(b.user_id), 'delete-anon-messages': () => str(b.anon_id, 80), 'delete-relay-messages': () => str(b.username, 120) }[b.action];
+    if (deleteSubject && !deleteSubject()) bad('Missing delete subject');
     if (b.action === 'delete-by-range' && (!str(b.from, 40) || !str(b.to, 40) || !Number.isFinite(Date.parse(b.from)) || !Number.isFinite(Date.parse(b.to)))) bad('Invalid time range');
     if (b.action === 'review-pending-ip' && (!int(b.id) || !['approved', 'denied'].includes(b.status))) bad('Invalid review');
     if (['approve-ip-messages', 'deny-ip-messages'].includes(b.action) && (!int(b.channel_id) || !isIP(b.ip))) bad('Invalid IP review');

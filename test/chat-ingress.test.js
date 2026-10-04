@@ -180,6 +180,8 @@ t('bad input and missing rows are refused with a 4xx, never a retryable 503', as
     assert.strictEqual((await post('events', { key: 'ingress:4xx:alert', target: { kind: 'channel', id: streamer.id }, frame: { type: 'alert', streamerId: streamer.id, streamId: 'x', kind: 'goal' } })).status, 400);
     assert.strictEqual((await post('messages', { key: 'ingress:4xx:line', stream_id: 987654, username: 'Bot', message: 'nowhere' })).status, 404);
     assert.strictEqual((await post('moderation', { key: 'ingress:4xx:by', action: 'delete-message', id: 1, deleted_by: { id: 1 } })).status, 400);
+    assert.strictEqual((await post('moderation', { key: 'ingress:4xx:noid', action: 'delete-message', deleted_by: 'mod' })).status, 400);
+    assert.strictEqual((await post('moderation', { key: 'ingress:4xx:nouser', action: 'delete-user-messages', stream_id: streamId })).status, 400);
     assert.strictEqual((await post('moderation', { key: 'ingress:4xx:reason', action: 'relay-hide', channel_id: channelId, platform: 'twitch', external_username: 'x', reason: 5 })).status, 400);
     const dmBody = { key: 'ingress:4xx:dm', user_id: streamer.id, dm: { to_user_id: viewer.id }, username: streamer.username, message: 'soon gone' };
     const sent = await post('messages', dmBody);
