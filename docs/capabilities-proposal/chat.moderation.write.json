@@ -1,0 +1,13 @@
+{
+  "id": "chat.moderation.write",
+  "version": "1.0",
+  "owner": "chat",
+  "status": "planned",
+  "visibility": "internal",
+  "description": "Write typed Chat-owned moderation actions and broadcast their results.",
+  "permissions": ["chat:write"],
+  "resourceConstraints": ["none"],
+  "quotaClass": "internal-write",
+  "events": ["chat.message.deleted", "chat.moderation.action"],
+  "implementedBy": ["POST /internal/chat/moderation"]
+}

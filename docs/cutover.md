@@ -10,9 +10,19 @@ until a later wave retires them.
 
 The cutover itself ran on 2026-09-23; the rehearsal, flip and check steps below record that deploy.
 
+## Rehearsal
+
+`ov rehearse` loads this seed after main's migrations, then this branch's migrations:
+
+```rehearse
+# Chat's PostgreSQL seed; test/fixtures/live-chat-schema.sql is Live's SQLite schema for the import tests
+seed: test/rehearsal/seed.sql
+```
+
 - [What is served where](#what-is-served-where)
 - [Data authority](#data-authority)
 - [Prerequisites](#prerequisites)
+- [Rehearsal](#rehearsal)
 - [Rehearsal on a live.db snapshot](#rehearsal-on-a-livedb-snapshot)
 - [Cutover](#cutover)
 - [Rollback](#rollback)
@@ -49,9 +59,13 @@ Stay on Live (do not route): `/api/chat-ai/*` (the trailing slash in `/api/chat/
 `/ws/call` (until the calls cutover, `docs/calls-cutover.md`), `/ws/broadcast`, `/ws/control`, and
 everything else.
 
-Loopback only, never routed: Chat `/internal/live/*`, `/health`, `/ready`; Live
+Loopback only, never routed: Chat `/internal/live/*`, `/internal/chat/*`, `/health`, `/ready`; Live
 `/internal/chat-context/*`, `/internal/chat-effects/*` (both refuse anything that came through
 nginx).
+
+The additive Chat-owned ingress at `/internal/chat/{messages,events,moderation,invalidate,presence}`
+is documented in [chat-ingress.md](chat-ingress.md). Live keeps using `/internal/live/*` until its
+writers are repointed; deploy the three new capability grants before that Live release.
 
 ## Data authority
 
