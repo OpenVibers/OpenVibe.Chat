@@ -362,14 +362,20 @@ class CallServer {
         // that message.
         user = await this._presentedUser(early, user);
         let admission = await this._admission(channel, resolvedId, user);
-        if (admission.error && !user) {
-            // Admission itself may have awaited Live while auth-update arrived in the buffer.
-            user = await this._presentedUser(early, user);
-            if (!user) {
-                await this._firstAuthMessage(ws, FIRST_TOKEN_WAIT_MS);
-                if (ws.readyState !== WebSocket.OPEN) return;
-                user = await this._presentedUser(early, user);
+        if (admission.error) {
+            // Admission may have awaited Live while an auth-update arrived in the buffer. A newly
+            // presented identity (anonymous upgrade only: auth-update cannot switch an already
+            // signed-in socket to another account) gets a second admission attempt.
+            const presented = await this._presentedUser(early, user);
+            if (presented && presented.id !== (user && user.id)) {
+                user = presented;
+                admission = await this._admission(channel, resolvedId, user);
             }
+        }
+        if (admission.error && !user) {
+            await this._firstAuthMessage(ws, FIRST_TOKEN_WAIT_MS);
+            if (ws.readyState !== WebSocket.OPEN) return;
+            user = await this._presentedUser(early, user);
             if (user) admission = await this._admission(channel, resolvedId, user);
         }
         if (admission.error) { ws.send(JSON.stringify({ type: 'error', message: admission.error })); ws.close(); return; }
