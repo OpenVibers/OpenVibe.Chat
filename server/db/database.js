@@ -637,12 +637,14 @@ async function isFirstChatInChannel(chatterKey, channelUserId) {
 
 /**
  * Record that a chatter has chatted in a streamer's channel.
+ * @returns {boolean} true when this was their first time (the row is new)
  */
 async function recordFirstChat(chatterKey, channelUserId) {
-    await run(
+    const r = await run(
         'INSERT INTO stream_first_chats (chatter_key, channel_user_id) VALUES (?, ?) ON CONFLICT DO NOTHING',
         [chatterKey, channelUserId]
     );
+    return r.changes > 0;
 }
 
 // ── Moderation log ───────────────────────────────────────────

@@ -104,6 +104,19 @@ t('mirror: every change to Chat’s tables reaches Live, newest state per row', 
     assert.deepStrictEqual(h.live.mirror.at(-1), { table: 'dm_messages', op: 'delete', pk: { id: dmId } });
 });
 
+t('mirror: a channel sound without a Media asset leaves Live’s asset columns alone', async () => {
+    const soundId = Number((await h.db.run(`INSERT INTO channel_sounds (channel_owner_id, command, url) VALUES (?, 'mirrorhonk', '/sounds/m.mp3')`, [streamer.id])).lastInsertRowid);
+    await h.mirrorRelay.flush();
+    const sent = h.live.mirror.filter((c) => c.table === 'channel_sounds' && c.row && c.row.id === soundId);
+    assert.strictEqual(sent.length, 1);
+    assert.ok(!('media_url' in sent[0].row) && !('media_asset_id' in sent[0].row), JSON.stringify(sent[0].row));
+    await h.db.run('UPDATE channel_sounds SET media_url = ?, media_asset_id = ? WHERE id = ?', ['https://media.test/s/9', 9, soundId]);
+    await h.mirrorRelay.flush();
+    const row = h.live.mirror.filter((c) => c.table === 'channel_sounds' && c.row && c.row.id === soundId).at(-1).row;
+    assert.strictEqual(row.media_url, 'https://media.test/s/9');
+    assert.strictEqual(Number(row.media_asset_id), 9);
+});
+
 t('mirror: Live refusing (not yet CHAT_AUTHORITY=chat) keeps the queue; accepted later', async () => {
     h.live.mirrorStatus = 409;
     await h.db.recordRelayUser('twitch', 'Zed');
