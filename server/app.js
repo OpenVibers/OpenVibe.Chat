@@ -102,6 +102,8 @@ function createApp({ chatServer, mirror, relay, events = null, callServer = null
 
     // ── Internal (loopback; never routed by nginx) ─────────────
     app.use('/internal/chat', express.json({ limit: '64kb' }), createInternalIngress({ chatServer }));
+    // Live's reads of the chat tables Chat owns, in place of its mirrored copy (plan T3 J4b, server/chat/internal-reads.js).
+    app.use('/internal/chat', express.json({ limit: '64kb' }), require('./chat/internal-reads'));
     // OpenVibe.Events deliveries (live.release.deployed, network.module.updated): signature v2 over
     // the raw body, so this router reads the body itself (server/events/consumer.js).
     if (events) app.use('/internal/events', events.router);

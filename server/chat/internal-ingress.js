@@ -154,8 +154,9 @@ async function writeMessage(b) {
     const id = Number(saved.lastInsertRowid);
     const channelUserId = b.channel_user_id || (b.stream_id ? (await ctx.getStreamById(b.stream_id))?.user_id : null) || null;
     const chatterKey = firstChatKey(b);
-    if (channelUserId && chatterKey) await db.recordFirstChat(chatterKey, channelUserId);
-    return { id, stream_id: b.stream_id || null, channel_user_id: channelUserId };
+    // first_chat (chat.send-result 1.2.0): this line used up the chatter's welcome in the channel.
+    const first_chat = !!(channelUserId && chatterKey) && await db.recordFirstChat(chatterKey, channelUserId);
+    return { id, stream_id: b.stream_id || null, channel_user_id: channelUserId, first_chat };
 }
 
 async function deliverMessage(chatServer, b, result) {

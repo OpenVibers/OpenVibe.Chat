@@ -96,6 +96,10 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
     `GET /internal/moderation/channels/:channelId/emote-count` — loopback + service token,
     capability `chat.moderation.read` (`chat.channel-moderation-result@1`,
     `chat.moderated-channels-result@1`, `chat.emote-count-result@1`). Live caches each answer 30 s.
+  - Live's reads of Chat's message, moderation-queue and sound tables (plan T3 J4b):
+    `POST /internal/chat/stats`, `GET /internal/chat/messages`, `/timeline`, `/moderation/*`,
+    `/sounds` and `POST /internal/chat/sounds/asset` (`server/chat/internal-reads.js`; routes and
+    capabilities in `docs/chat-ingress.md`).
   - Alert sounds: `playAlertSound(chatServer, streamerId, streamId, kind)` (`server/chat/alert-sounds.js`)
     resolves the channel's own settings row, reads the clip and broadcasts it to the channel room.
   - **The chat-AI summaries** (plan T3 step 2, decision 5) — Live's `server/ai/chat-ai.js` job moved

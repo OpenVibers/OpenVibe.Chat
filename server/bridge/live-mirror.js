@@ -44,6 +44,13 @@ const ROW_SQL = {
     moderation_actions: 'SELECT * FROM moderation_actions WHERE id = ?',
 };
 
+// Live's asset sync still writes media_url/media_asset_id on its own copy until it moves to
+// POST /internal/chat/sounds/asset: a sound Chat has no asset for must not blank Live's.
+function soundRow(row) {
+    const { media_url, media_asset_id, ...rest } = row;
+    return media_asset_id == null ? rest : row;
+}
+
 function createMirror({ config, fetchImpl = (...a) => globalThis.fetch(...a), log = console } = {}) {
     let timer = null;
     let busy = false;
@@ -63,7 +70,7 @@ function createMirror({ config, fetchImpl = (...a) => globalThis.fetch(...a), lo
             try { pk = JSON.parse(r.pk); } catch { continue; }
             if (r.op === 'delete') { changes.push({ table: r.tbl, op: 'delete', pk }); continue; }
             const row = await db.get(ROW_SQL[r.tbl], cols.map((c) => pk[c]));
-            changes.push(row ? { table: r.tbl, op: 'upsert', row: r.tbl === 'moderation_actions' ? db.moderationRow(row) : r.tbl === 'chat_messages' ? db.chatMessageRow(row) : row } : { table: r.tbl, op: 'delete', pk });
+            changes.push(row ? { table: r.tbl, op: 'upsert', row: r.tbl === 'moderation_actions' ? db.moderationRow(row) : r.tbl === 'chat_messages' ? db.chatMessageRow(row) : r.tbl === 'channel_sounds' ? soundRow(row) : row } : { table: r.tbl, op: 'delete', pk });
         }
         return changes;
     }

@@ -7,8 +7,8 @@
   "runtime": "node 22, express, ws, PostgreSQL through openvibe-sdk/db (DATABASE_URL via PgBouncer, DATABASE_DIRECT_URL for migrations/; embedded PGlite outside production), Valkey for the per-actor limits (VALKEY_URL); better-sqlite3 gone (plan T3)",
   "port": 4400,
   "domain": "openvibe.chat (Chat's own site: global chat, messages, rooms, settings; the service manifest records it live since 2026-09-24) and openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via an nginx include in openvibe.live's vhost)",
-  "contracts": "openvibe-contracts v0.91.0",
-  "capabilities": ["chat.message.send", "chat.event.publish", "chat.moderation.write", "chat.cache.invalidate", "chat.presence.read", "chat.live_bridge.write"],
+  "contracts": "openvibe-contracts v0.96.0",
+  "capabilities": ["chat.message.send", "chat.event.publish", "chat.moderation.write", "chat.cache.invalidate", "chat.presence.read", "chat.live_bridge.write", "chat.stats.read", "chat.messages.read", "chat.analysis.read", "chat.moderation.queue.read", "chat.sounds.read", "chat.sounds.write"],
   "capabilitiesUsed": [
     "live.chat_context.read",
     "live.chat_effects.write",
