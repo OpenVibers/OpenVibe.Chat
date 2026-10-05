@@ -57,6 +57,14 @@ t('every table exists', async () => {
     assert.strictEqual(have.size, TABLES.length + 1, 'exactly the Chat tables plus ov_migrations');
 });
 
+// 0005 (contract) drops the retired Live chat bridge: the tables exist on an N-1 database, but
+// this release migrates them away (ADR-028).
+t('the retired bridge tables are gone', async () => {
+    for (const name of ['bridge_applied', 'bridge_refs']) {
+        assert.strictEqual((await get(`SELECT to_regclass('${name}') AS t`)).t, null, `${name} is dropped`);
+    }
+});
+
 t('every index exists', async () => {
     const rows = await all(`SELECT indexname FROM pg_indexes WHERE schemaname = current_schema()`);
     const have = new Set(rows.map((r) => r.indexname));
