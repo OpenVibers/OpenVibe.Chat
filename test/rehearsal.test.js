@@ -42,8 +42,11 @@ t('the seed applies after 0001–0002 and before 0003', async () => {
     }
     assert.strictEqual((await db.prepare(`SELECT to_regclass('chat_ingress_applied') AS t`).get()).t, null, '0003 has not run yet');
     const second = await db.migrate({ dir: MIGRATIONS, log: { log() {} } });
-    assert.strictEqual(second.held.length, 0, 'the branch migration is not held');
-    assert.deepStrictEqual(second.applied.map((a) => a.id), ['0003'], 'only the branch\'s migration applies after the seed');
+    const later = fs.readdirSync(MIGRATIONS).filter((f) => /^\d{4}_.*\.sql$/.test(f)).map((f) => f.slice(0, 4))
+        .filter((id) => id > '0002').sort();
+    assert.ok(later.includes('0003'), 'migrations/0003 exists');
+    assert.strictEqual(second.held.length, 0, 'no later migration is held');
+    assert.deepStrictEqual(second.applied.map((a) => a.id), later, 'every migration after 0002 applies on top of the seed');
 });
 
 t('cleanup', async () => { await db.close(); });
