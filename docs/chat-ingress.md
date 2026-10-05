@@ -40,6 +40,24 @@ deleted messages are never read; `since`/`until` are epoch ms (`until` exclusive
 | `GET /internal/chat/sounds/by-command?channel_id&command` | `chat.sounds.read` | `{sound}`: the approved (`is_approved=1`) channel sound `command` plays, one at random when several match, or 404 — Live's `getChannelSoundByCommand`. `command` is trimmed, lowercased and has leading `!` stripped (≤ 120); `channel_id` is the channel owner's Live user id (`channel_sounds.channel_owner_id`); same projection as `/sounds`. |
 | `POST /internal/chat/sounds/asset` | `chat.sounds.write` | `{id,media_url,media_asset_id}` records Live's upload (`migrations/0004_channel_sound_media.sql`); repeating it is a 200 no-op; an unknown sound is 404. For a sound Chat has no Media asset for, Live's own asset columns stay as its asset sync left them (the read mirror that used to preserve them was retired on 2026-10-05). |
 
+### Per-ticket conversation (OpenVibe.Help)
+
+OpenVibe.Help reads and answers a ticket through one conversation per (ticket id, calling
+service), guarded by `chat.ticket.write` (`server/chat/internal-tickets.js`,
+`chat.ticket-conversation@1`, openvibe-contracts 0.103.0; the tables are
+`migrations/0007_ticket_conversations.sql`). The calling service is the service token's principal
+(`svc:help` → `help`): two services on one ticket get two conversations and a service can only
+ever read or write its own — an app, node or agent token is refused. Bodies are the author's plain
+text (1–6000 characters, not blank), stored and answered as sent and never rendered as HTML. The
+contract has no idempotency key, so a retried POST appends another message; `created_at` is the
+author's clock and Chat orders by its own message id (newest first by default, `after_id` pages
+oldest first).
+
+| Route | Capability | Request and result |
+| --- | --- | --- |
+| `POST /internal/chat/tickets/:ticket_id/messages` | `chat.ticket.write` | `{author_kind:'person'\|'agent'\|'staff', author, body, created_at}` with `author` the author's subject (≤ 200) and `created_at` an RFC 3339 date-time; creates the (ticket, service) conversation on first use and appends the message. Returns `{ok:true, ticket_id, service, message:{author_kind, author, body, created_at}}` (the contract's conversation shape). |
+| `GET /internal/chat/tickets/:ticket_id` | `chat.ticket.write` | The calling service's own conversation, paged: `{ok:true, ticket_id, service, created_at, messages:[{id, author_kind, author, body, created_at}], max_id}`; `after_id` (oldest first), `before_id` (newest first, the default), `limit` ≤ 500 (default 100); `max_id` is the conversation's newest message id. A service with no conversation for the ticket gets 404 — another service's is never readable. |
+
 `/internal/chat/events` is a narrow transient event ingress, not a generic ChatServer call.
 `live.release.deployed` continues through OpenVibe.Events; there is no deploy-notice endpoint.
 An `alert` targets its `streamerId` channel; a `channel-sound` targets its `streamId` stream.
@@ -69,8 +87,7 @@ the read API above, Network's `DEFAULT_GRANTS` must add `live chat.stats.read op
 local proposals are in `docs/capabilities-proposal/`. The three plan-T3 reads added for Live's home
 series, its welcome check and its robot channel sounds use those same capabilities but add result
 schemas `chat.site-daily-result@1`, `chat.first-chat-result@1` and `chat.sound-result@1`, which
-land in openvibe-contracts 0.103.0 (the Contracts change is separate; Live codes against the
-shapes here until that version is pinned).
+land in openvibe-contracts 0.103.0, now pinned.
 
 Live J2 (done: Live #20/#21) replaced its bridge writer with a typed client: repoint message producers and persisted DMs
 to `messages` (with `role`/`profile_color` etc. in `frame`), card, sound, media-queue, redemption

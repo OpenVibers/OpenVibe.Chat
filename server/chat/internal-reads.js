@@ -1,7 +1,7 @@
 /**
  * OpenVibe.Chat — the internal read API Live calls instead of reading its mirrored copy of Chat's
  * tables (plan T3 J4b, design §1d N1–N5). Loopback only, a service token for audience
- * openvibe.chat, one capability per route (openvibe-contracts 0.95.0):
+ * openvibe.chat, one capability per route (openvibe-contracts 0.103.0):
  *
  *   POST /internal/chat/stats                         chat.stats.read             chat.stats-request@1 → chat.stats-result@1
  *                                                                                   kind site-daily → chat.site-daily-result@1 { days }
@@ -17,9 +17,8 @@
  *   POST /internal/chat/sounds/asset                  chat.sounds.write           chat.sound-asset-request@1 → chat.ingress-ack@1
  *
  * The three plan-T3 reads added for Live's home series, its welcome check and its robot channel
- * sounds (chat.site-daily-result@1, chat.first-chat-result@1, chat.sound-result@1) land in
- * openvibe-contracts 0.103.0 (a separate Contracts change); until it is pinned, Live's next PR
- * codes against the shapes documented in docs/chat-ingress.md.
+ * sounds (chat.site-daily-result@1, chat.first-chat-result@1, chat.sound-result@1) are in
+ * openvibe-contracts 0.103.0, now pinned.
  * In first-chat and sounds/by-command, `channel_id` is the channel owner's Live user id — the value
  * Live passes as channelUserId to isFirstChatInChannel and channel_owner_id to
  * getChannelSoundByCommand (both stream.user_id), not Chat's ctx_channels.id.
