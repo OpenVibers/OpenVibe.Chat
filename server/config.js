@@ -197,5 +197,4 @@ module.exports = {
     },
     // Where Chat keeps its own caches (101soundboards clips, TTS preview clips).
     cacheDir: process.env.CHAT_CACHE_DIR || path.join(path.dirname(process.env.CHAT_DB_PATH || './data/chat.db'), 'cache'),
-    // (SITE_URL — the public origin in /paste links — is read where Live read it, as in Live.)
 };

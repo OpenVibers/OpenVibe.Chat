@@ -300,7 +300,7 @@ async function boot({ env = {} } = {}) {
         OV_LIVE_INTERNAL_URL: `http://127.0.0.1:${livePort}`,
         LIVE_MIRROR: '0',
         EVENTS_URL: '',
-        SITE_URL: 'https://openvibe.live',
+        OV_COMMUNITY_URL: 'https://community.test',
         ...env,
     });
 

@@ -21,6 +21,7 @@ const WebSocket = require('ws');
 const fs = require('fs');
 const crypto = require('crypto');
 const db = require('../db/database');
+const config = require('../config');
 const ctx = require('../live-context');
 const { extractWsTokenFrom, countWsCookieUse, wsCookieReliance, authenticateWs } = require('../auth/auth');
 const session = require('../auth/network-session');
@@ -1813,8 +1814,12 @@ class ChatServer {
                         user_id: userId || undefined,
                         stream_id: client.streamId || undefined,
                     }).then(async (paste) => {
-                        const siteUrl = process.env.SITE_URL || '';
-                        const pasteUrl = `${siteUrl}/p/${paste.slug}`;
+                        // Pastes live on OpenVibe.Community; link there, not at a Live-origin
+                        // SITE_URL (which only 301s). The paste service may return an absolute
+                        // https url; otherwise build it from Chat's configured Community base.
+                        const pasteUrl = /^https:\/\//i.test(paste && paste.url || '')
+                            ? paste.url
+                            : `${config.web.communityUrl}/p/${encodeURIComponent(paste.slug)}`;
                         // Show link to everyone in stream
                         await this._broadcastToRoom(client, {
                             type: 'system',

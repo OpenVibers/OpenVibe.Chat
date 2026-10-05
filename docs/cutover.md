@@ -121,7 +121,7 @@ Live data maintained by `live-context` (never authority), `events_outbox`, `live
    `/etc/openvibe/live.env`.
 4. **Chat.** `git clone … /opt/openvibe.chat && cd /opt/openvibe.chat && npm ci --omit=dev`;
    `/etc/openvibe/chat.env` from `.env.example` (0600): `OV_LIVE_INTERNAL_URL`, Network URLs,
-   `SITE_URL=https://openvibe.live`, `BASE_URL=https://openvibe.live`, `LIVE_MIRROR=1`, and
+   `BASE_URL=https://openvibe.live`, `LIVE_MIRROR=1`, and
    `EVENTS_URL` if OpenVibe.Events is deployed. The unit sets `CHAT_DB_PATH`, `CHAT_CACHE_DIR`,
    `SOUNDS_PATH=/opt/openvibe.live/data/sounds` and allows writes there. ffmpeg/ffprobe and
    espeak-ng are the host's (Live uses the same).
