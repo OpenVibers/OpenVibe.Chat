@@ -136,6 +136,8 @@ t('validation: author_kind, author, body bounds, created_at, ticket id and query
         msg('person', 'user:usr_01', ''),
         msg('person', 'user:usr_01', '   '),
         msg('person', 'user:usr_01', 'x'.repeat(6001)),
+        msg('person', 'user:usr_01', 'nul \u0000 byte'),
+        msg('person', 'user:\u0000', 'nul in author'),
         { ...msg('person', 'user:usr_01', 'x'), extra: 1 },
         { author_kind: 'person', author: 'user:usr_01', body: 'x' },
         { ...msg('person', 'user:usr_01', 'x'), created_at: 'yesterday' },

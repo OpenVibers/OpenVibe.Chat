@@ -27,14 +27,14 @@ const MAX_MESSAGES = 500;
 const AUTHOR_KINDS = ['person', 'agent', 'staff'];
 const SERVICE = /^svc:([a-z][a-z0-9-]{1,39})$/;
 const DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
-const TICKET_ID = /^[^\s/]{1,200}$/;
+const TICKET_ID = /^[^\s/\u0000]{1,200}$/;  // PostgreSQL text refuses NUL: a 400 here, not a 503 later
 
 const bad = (message) => { const e = new Error(message); e.status = 400; throw e; };
 const notFound = (message) => { const e = new Error(message); e.status = 404; throw e; };
 const denied = (message) => { const e = new Error(message); e.status = 403; throw e; };
 const obj = (v) => !!v && typeof v === 'object' && !Array.isArray(v);
 const int = (v) => Number.isSafeInteger(v) && v > 0;
-const plain = (v, max) => typeof v === 'string' && v.length >= 1 && v.length <= max;
+const plain = (v, max) => typeof v === 'string' && v.length >= 1 && v.length <= max && !v.includes('\u0000');
 
 function fields(v, allowed) {
     if (!obj(v) || Object.keys(v).some((k) => !allowed.includes(k))) bad('Invalid fields');
