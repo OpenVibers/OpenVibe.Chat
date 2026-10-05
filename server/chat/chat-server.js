@@ -1814,12 +1814,9 @@ class ChatServer {
                         user_id: userId || undefined,
                         stream_id: client.streamId || undefined,
                     }).then(async (paste) => {
-                        // Pastes live on OpenVibe.Community; link there, not at a Live-origin
-                        // SITE_URL (which only 301s). The paste service may return an absolute
-                        // https url; otherwise build it from Chat's configured Community base.
-                        const pasteUrl = /^https:\/\//i.test(paste && paste.url || '')
-                            ? paste.url
-                            : `${config.web.communityUrl}/p/${encodeURIComponent(paste.slug)}`;
+                        // Pastes live on OpenVibe.Community; link there (Chat's configured Community
+                        // base), not at a Live-origin SITE_URL that only 301s.
+                        const pasteUrl = `${config.web.communityUrl}/p/${encodeURIComponent(paste.slug)}`;
                         // Show link to everyone in stream
                         await this._broadcastToRoom(client, {
                             type: 'system',
