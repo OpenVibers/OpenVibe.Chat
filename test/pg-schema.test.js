@@ -9,10 +9,12 @@
 const assert = require('assert');
 const path = require('path');
 const { createTestDb } = require('openvibe-sdk/testing');
+const { createDb } = require('openvibe-sdk/db');
 const { suite } = require('./helpers');
 
 const t = suite('pg-schema');
 const MIGRATIONS = path.join(__dirname, '..', 'migrations');
+const quiet = { log() {}, info() {}, warn() {}, error() {} };
 
 let db, close;
 async function all(sql, params) { return await db.prepare(sql).all(...(params || [])); }
@@ -24,7 +26,7 @@ const TABLES = [
     'channel_sounds', 'relay_users', 'hidden_relay_users', 'pending_ip_messages', 'stream_first_chats', 'moderation_actions',
     'channel_moderators', 'channel_moderation_settings', 'emotes', 'user_tags', 'chat_ai_summaries', 'chat_timeline_events',
     'ctx_users', 'ctx_streams', 'ctx_managed_streams', 'ctx_channels', 'ctx_sync', 'events_outbox', 'live_mirror_outbox',
-    'bridge_applied', 'chat_ingress_applied', 'audio_requests', 'bridge_refs', 'import_hold', 'import_runs', 'chat_meta', 'deploy_releases',
+    'chat_ingress_applied', 'audio_requests', 'import_hold', 'import_runs', 'chat_meta', 'deploy_releases',
     'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'token_revocations',
     'network_blocks', 'account_data_events',
 ];
@@ -39,6 +41,12 @@ const MIRRORED = ['chat_messages', 'dm_conversations', 'dm_participants', 'dm_me
 t('migrate', async () => {
     const tst = await createTestDb({ migrations: MIGRATIONS, service: 'chat' });
     db = tst.db; close = tst.close;
+    // createTestDb migrates the production way, so a contract migration (ADR-028) stays held for its
+    // N-1 window. This test wants the final schema: apply it now, windowDays 0, on the owner under
+    // store 'pg' (the handle createTestDb returns is DML only) or on the handle itself on PGlite.
+    const owner = tst.directUrl ? createDb({ url: tst.directUrl, service: 'chat-test-migrate', max: 1, log: quiet }) : db;
+    try { await owner.migrate({ dir: MIGRATIONS, windowDays: 0, log: quiet }); }
+    finally { if (owner !== db) await owner.close(); }
     assert.ok(db, 'a database handle');
 });
 
