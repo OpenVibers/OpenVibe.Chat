@@ -17,8 +17,9 @@
  *   POST /internal/chat/sounds/asset                  chat.sounds.write           chat.sound-asset-request@1 → chat.ingress-ack@1
  *
  * The three plan-T3 reads added for Live's home series, its welcome check and its robot channel
- * sounds (chat.site-daily-result@1, chat.first-chat-result@1, chat.sound-result@1) are not yet in
- * openvibe-contracts; Live's next PR codes against the shapes documented in docs/chat-ingress.md.
+ * sounds (chat.site-daily-result@1, chat.first-chat-result@1, chat.sound-result@1) land in
+ * openvibe-contracts 0.103.0 (a separate Contracts change); until it is pinned, Live's next PR
+ * codes against the shapes documented in docs/chat-ingress.md.
  * In first-chat and sounds/by-command, `channel_id` is the channel owner's Live user id — the value
  * Live passes as channelUserId to isFirstChatInChannel and channel_owner_id to
  * getChannelSoundByCommand (both stream.user_id), not Chat's ctx_channels.id.
@@ -93,8 +94,8 @@ function route(name, fn) {
 const CHATTER = `COALESCE('u:' || user_id, 'a:' || anon_id, source_platform || ':' || username)`;
 const STATS_FIELDS = ['kind', 'user_id', 'stream_id', 'channel_user_id', 'since', 'until', 'limit'];
 
-function statsFilter(b) {
-    const where = ['is_deleted = 0'];
+function statsFilter(b, deleted = 'is_deleted = 0') {
+    const where = [deleted];
     const params = [];
     for (const k of ['user_id', 'stream_id', 'channel_user_id']) if (b[k] != null) { where.push(`${k} = ?`); params.push(b[k]); }
     if (b.since != null) { where.push('timestamp >= ?'); params.push(sqlTime(b.since)); }
@@ -118,7 +119,9 @@ async function stats(req) {
         if (b.until <= b.since) bad('until must be after since');
         if (dayCount(b.since, b.until) > MAX_SERIES_DAYS) bad('Invalid window');
     }
-    const { where, params } = statsFilter(b);
+    // Live's series reader counts a NULL is_deleted as live (COALESCE(is_deleted,0)=0); the
+    // other kinds keep Chat's is_deleted = 0.
+    const { where, params } = statsFilter(b, b.kind === 'site-daily' ? 'COALESCE(is_deleted, 0) = 0' : 'is_deleted = 0');
     if (b.kind === 'site-daily') {
         // Live's home series (HOME_SERIES messages/active): every non-deleted row counts, whatever
         // its type; a chatter is a distinct user, anon or relayed name. One row per UTC day in

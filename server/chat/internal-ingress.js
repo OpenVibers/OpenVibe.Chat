@@ -130,16 +130,6 @@ function validateMessage(b) {
     }
 }
 
-// The keys chat-server's welcome check reads (`user:`/`anon:`) and Live's relay saves (`ext:` +
-// the prefixed username it stores relay lines under). Only chat lines use up a welcome.
-function firstChatKey(b) {
-    if (b.first_chat_key) return b.first_chat_key;
-    if ((b.message_type || 'chat') !== 'chat') return null;
-    if (b.source_platform) return `ext:${b.username}`;
-    if (b.user_id) return `user:${b.user_id}`;
-    return b.anon_id ? `anon:${b.anon_id}` : null;
-}
-
 async function writeMessage(b) {
     if (b.dm) {
         if (await dm.isBlockedEither(b.user_id, b.dm.to_user_id)) { const e = new Error('DM participants are blocked'); e.status = 403; throw e; }
@@ -153,10 +143,9 @@ async function writeMessage(b) {
     const saved = await db.saveChatMessage({ ...b, is_global: b.is_global ?? (!b.stream_id && !b.channel_user_id) });
     const id = Number(saved.lastInsertRowid);
     const channelUserId = b.channel_user_id || (b.stream_id ? (await ctx.getStreamById(b.stream_id))?.user_id : null) || null;
-    const chatterKey = firstChatKey(b);
-    // first_chat (chat.send-result 1.2.0): this line used up the chatter's welcome in the channel.
-    const first_chat = !!(channelUserId && chatterKey) && await db.recordFirstChat(chatterKey, channelUserId);
-    return { id, stream_id: b.stream_id || null, channel_user_id: channelUserId, first_chat };
+    // first_chat (chat.send-result 1.2.0): the save records the welcome in the resolved
+    // channel, so its answer already says whether this line used it up.
+    return { id, stream_id: b.stream_id || null, channel_user_id: channelUserId, first_chat: !!saved.first_chat };
 }
 
 async function deliverMessage(chatServer, b, result) {

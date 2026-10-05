@@ -168,7 +168,17 @@ async function _announceDeleted(ids) {
 
 // ── Chat messages ─────────────────────────────────────────────
 
-async function saveChatMessage({ stream_id, channel_user_id, user_id, anon_id, username, message, message_type, is_global, reply_to_id, source_platform, auto_delete_at, metadata }) {
+// The welcome identity a save records, keyed the way the first-chat read checks it: an explicit
+// ingress key wins, only chat lines otherwise count, and relayed lines live under ext:<username>.
+function firstChatKey({ message_type, source_platform, user_id, anon_id, username, first_chat_key }) {
+    if (first_chat_key) return first_chat_key;
+    if ((message_type || 'chat') !== 'chat') return null;
+    if (source_platform) return `ext:${username}`;
+    if (user_id) return `user:${user_id}`;
+    return anon_id ? `anon:${anon_id}` : null;
+}
+
+async function saveChatMessage({ stream_id, channel_user_id, user_id, anon_id, username, message, message_type, is_global, reply_to_id, source_platform, auto_delete_at, metadata, first_chat_key }) {
     // channel_user_id = the broadcaster's user id — set for all channel/stream
     // messages so a streamer's chat history survives across sessions AND offline
     // periods (independent of the live-session stream row's lifetime).
@@ -176,12 +186,17 @@ async function saveChatMessage({ stream_id, channel_user_id, user_id, anon_id, u
     if (!chanUid && stream_id) { try { chanUid = (await _ctx().getStreamById(stream_id))?.user_id || null; } catch { /* ignore */ } }
     const metaStr = metadata == null ? null : (typeof metadata === 'string' ? metadata : JSON.stringify(metadata));
     const subject = await subjectFor(user_id);
+    // Every save path records the chatter's first chat in the resolved channel here, so a
+    // channel-only line (a PowerChat or offline room with no stream) counts too. Only chat lines
+    // take a welcome (see firstChatKey); the record joins the row's transaction.
+    const chatterKey = firstChatKey({ message_type, source_platform, user_id, anon_id, username, first_chat_key });
     return await transaction(async () => {
         const res = await run(
             `INSERT INTO chat_messages (stream_id, channel_user_id, user_id, anon_id, username, message, message_type, is_global, reply_to_id, source_platform, auto_delete_at, metadata, subject_id)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             [stream_id, chanUid, user_id || null, anon_id || null, username, message, message_type || 'chat', is_global ? 1 : 0, reply_to_id || null, source_platform || null, auto_delete_at || null, metaStr, subject]
         );
+        res.first_chat = !!(chatterKey && chanUid) && await recordFirstChat(chatterKey, chanUid);
         await _outbox().enqueue({
             event_type: 'chat.message.created',
             visibility: 'public',
