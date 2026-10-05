@@ -4,14 +4,24 @@
  * openvibe.chat, one capability per route (openvibe-contracts 0.95.0):
  *
  *   POST /internal/chat/stats                         chat.stats.read             chat.stats-request@1 → chat.stats-result@1
+ *                                                                                   kind site-daily → chat.site-daily-result@1 { days }
  *   GET  /internal/chat/messages                      chat.messages.read          → chat.messages-page@1
  *   GET  /internal/chat/timeline                      chat.analysis.read          → chat.timeline-result@1
+ *   GET  /internal/chat/first-chat                    chat.analysis.read          → chat.first-chat-result@1 { first }
  *   GET  /internal/chat/moderation/pending-ip         chat.moderation.queue.read  → chat.moderation-queue-result@1 { pending_ip }
  *   GET  /internal/chat/moderation/relay-users        chat.moderation.queue.read  → { relay_users }
  *   GET  /internal/chat/moderation/relay-users/:id    chat.moderation.queue.read  → { relay_user }
  *   GET  /internal/chat/moderation/tts-override       chat.moderation.queue.read  → { tts_override }
  *   GET  /internal/chat/sounds(/count)                chat.sounds.read            → chat.sounds-result@1 { count } | { sounds }
+ *   GET  /internal/chat/sounds/by-command             chat.sounds.read            → chat.sound-result@1 { sound }
  *   POST /internal/chat/sounds/asset                  chat.sounds.write           chat.sound-asset-request@1 → chat.ingress-ack@1
+ *
+ * The three plan-T3 reads added for Live's home series, its welcome check and its robot channel
+ * sounds (chat.site-daily-result@1, chat.first-chat-result@1, chat.sound-result@1) are not yet in
+ * openvibe-contracts; Live's next PR codes against the shapes documented in docs/chat-ingress.md.
+ * In first-chat and sounds/by-command, `channel_id` is the channel owner's Live user id — the value
+ * Live passes as channelUserId to isFirstChatInChannel and channel_owner_id to
+ * getChannelSoundByCommand (both stream.user_id), not Chat's ctx_channels.id.
  *
  * Every parameter is validated (unknown ones are 400) and bound; deleted messages are never read.
  * Times in requests are epoch ms; chat_messages.timestamp is UTC 'YYYY-MM-DD HH:MM:SS' text, so a
@@ -27,6 +37,8 @@ const MESSAGE_TYPES = ['chat', 'system', 'donation', 'command', 'tts', 'channel-
 const MAX_MESSAGES = 500;
 const MAX_ROWS = 500;
 const MAX_BUCKETS = 10_000;
+const MAX_SERIES_DAYS = 400;
+const DAY_MS = 86_400_000;
 
 const bad = (message) => { const e = new Error(message); e.status = 400; throw e; };
 const id = (v) => Number.isSafeInteger(v) && v > 0;
@@ -62,6 +74,9 @@ function query(req, spec) {
 
 function limit(v, dflt, max) { return v == null ? dflt : Math.min(v, max); }
 
+const dayStart = (t) => Math.floor(t / DAY_MS) * DAY_MS;
+const dayCount = (since, until) => (dayStart(until - 1) - dayStart(since)) / DAY_MS + 1;
+
 function route(name, fn) {
     return async (req, res) => {
         try {
@@ -90,14 +105,36 @@ function statsFilter(b) {
 async function stats(req) {
     const b = req.body;
     if (!b || typeof b !== 'object' || Array.isArray(b) || Object.keys(b).some((k) => !STATS_FIELDS.includes(k))) bad('Invalid fields');
-    if (!['site', 'user', 'stream', 'channel-top'].includes(b.kind)) bad('Invalid kind');
+    if (!['site', 'user', 'stream', 'channel-top', 'site-daily'].includes(b.kind)) bad('Invalid kind');
     for (const k of ['user_id', 'stream_id', 'channel_user_id']) if (b[k] != null && !id(b[k])) bad(`Invalid ${k}`);
     for (const k of ['since', 'until']) if (b[k] != null && !ms(b[k])) bad(`Invalid ${k}`);
     if (b.limit != null && !(Number.isSafeInteger(b.limit) && b.limit >= 1 && b.limit <= 50)) bad('Invalid limit');
     if (b.kind === 'user' && b.user_id == null) bad('kind user needs user_id');
     if (b.kind === 'stream' && b.stream_id == null) bad('kind stream needs stream_id');
     if (b.kind === 'channel-top' && b.user_id != null) bad('kind channel-top takes stream_id or channel_user_id');
+    if (b.kind === 'site-daily') {
+        if (b.since == null || b.until == null) bad('kind site-daily needs since and until');
+        if (b.user_id != null || b.stream_id != null || b.channel_user_id != null || b.limit != null) bad('kind site-daily takes since and until only');
+        if (b.until <= b.since) bad('until must be after since');
+        if (dayCount(b.since, b.until) > MAX_SERIES_DAYS) bad('Invalid window');
+    }
     const { where, params } = statsFilter(b);
+    if (b.kind === 'site-daily') {
+        // Live's home series (HOME_SERIES messages/active): every non-deleted row counts, whatever
+        // its type; a chatter is a distinct user, anon or relayed name. One row per UTC day in
+        // [since, until), zeros filled, so the chart never skips a day.
+        const rows = await db.all(
+            `SELECT substr(timestamp, 1, 10) AS day, COUNT(*) AS messages, COUNT(DISTINCT ${CHATTER}) AS chatters
+             FROM chat_messages WHERE ${where} GROUP BY day`, params);
+        const by = new Map(rows.map((r) => [String(r.day), r]));
+        const days = [];
+        for (let t = dayStart(b.since), last = dayStart(b.until - 1); t <= last; t += DAY_MS) {
+            const day = new Date(t).toISOString().slice(0, 10);
+            const r = by.get(day);
+            days.push({ day, messages: r ? Number(r.messages) : 0, chatters: r ? Number(r.chatters) : 0 });
+        }
+        return { days };
+    }
     if (b.kind !== 'channel-top') {
         const r = await db.get(
             `SELECT COUNT(*) AS messages, COUNT(DISTINCT ${CHATTER}) AS chatters,
@@ -180,6 +217,17 @@ async function timeline(req) {
         buckets: rows.map((r) => ({ t: q.since + Number(r.n) * q.bucket_ms, count: Number(r.count) })),
         max_id: rows.length ? Math.max(...rows.map((r) => Number(r.max_id))) : null,
     };
+}
+
+/** Live's welcome check: has this identity ever chatted in this channel (stream_first_chats)? */
+async function firstChat(req) {
+    const q = query(req, { channel_id: 'id', identity: 160 });
+    if (q.channel_id == null) bad('channel_id is required');
+    // Same key shapes internal-ingress records: user:<id>, anon:<anonId>, ext:<prefixed username>.
+    if (!/^(?:user|anon|ext):./.test(String(q.identity || ''))) bad('Invalid identity');
+    const row = await db.get('SELECT 1 AS present FROM stream_first_chats WHERE chatter_key = ? AND channel_user_id = ?',
+        [q.identity, q.channel_id]);
+    return { first: !row };
 }
 
 // ── N4: moderation queues ──
@@ -281,10 +329,24 @@ async function soundAsset(req) {
     return {};
 }
 
+/** Live's getChannelSoundByCommand: the approved sound a !command plays, picked at random, or 404. */
+async function soundByCommand(req) {
+    const q = query(req, { channel_id: 'id', command: 120 });
+    if (q.channel_id == null) bad('channel_id is required');
+    const command = String(q.command || '').trim().toLowerCase().replace(/^!+/, '');
+    if (!command) bad('command is required');
+    const row = await db.get(
+        'SELECT * FROM channel_sounds WHERE channel_owner_id = ? AND command = ? AND is_approved = 1 ORDER BY RANDOM() LIMIT 1',
+        [q.channel_id, command]);
+    if (!row) { const e = new Error('Sound not found'); e.status = 404; throw e; }
+    return { sound: soundRow(row) };
+}
+
 const router = express.Router();
 router.post('/stats', serviceAuth.guard('chat.stats.read'), route('stats', stats));
 router.get('/messages', serviceAuth.guard('chat.messages.read'), route('messages', messages));
 router.get('/timeline', serviceAuth.guard('chat.analysis.read'), route('timeline', timeline));
+router.get('/first-chat', serviceAuth.guard('chat.analysis.read'), route('first-chat', firstChat));
 const queue = serviceAuth.guard('chat.moderation.queue.read');
 router.get('/moderation/pending-ip', queue, route('pending-ip', pendingIp));
 router.get('/moderation/relay-users', queue, route('relay-users', relayUsers));
@@ -292,6 +354,7 @@ router.get('/moderation/relay-users/:id', queue, route('relay-user', relayUser))
 router.get('/moderation/tts-override', queue, route('tts-override', ttsOverride));
 router.get('/sounds', serviceAuth.guard('chat.sounds.read'), route('sounds', sounds));
 router.get('/sounds/count', serviceAuth.guard('chat.sounds.read'), route('sound-count', soundCount));
+router.get('/sounds/by-command', serviceAuth.guard('chat.sounds.read'), route('sound-by-command', soundByCommand));
 router.post('/sounds/asset', serviceAuth.guard('chat.sounds.write'), route('sound-asset', soundAsset));
 
 module.exports = router;

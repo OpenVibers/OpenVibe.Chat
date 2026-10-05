@@ -81,6 +81,7 @@ t('each route needs its own capability, a service token for Chat and loopback', 
         ['POST', '/stats', 'chat.stats.read', { kind: 'site' }],
         ['GET', `/messages?stream_id=${streamId}`, 'chat.messages.read'],
         ['GET', `/timeline?stream_id=${streamId}&since=${T}&until=${T + 600e3}&bucket_ms=60000`, 'chat.analysis.read'],
+        ['GET', `/first-chat?channel_id=${streamer.id}&identity=user:${viewer.id}`, 'chat.analysis.read'],
         ['GET', `/moderation/pending-ip?channel_id=${channelId}`, 'chat.moderation.queue.read'],
         ['GET', `/moderation/relay-users?channel_id=${channelId}`, 'chat.moderation.queue.read'],
         ['GET', '/moderation/relay-users/1', 'chat.moderation.queue.read'],
@@ -88,6 +89,7 @@ t('each route needs its own capability, a service token for Chat and loopback', 
         ['GET', `/sounds?channel_owner_id=${streamer.id}`, 'chat.sounds.read'],
         ['GET', `/sounds/count?channel_owner_id=${streamer.id}`, 'chat.sounds.read'],
         ['GET', '/sounds?pending_asset=1', 'chat.sounds.read'],
+        ['GET', `/sounds/by-command?channel_id=${streamer.id}&command=honk`, 'chat.sounds.read', undefined, 404],
         ['POST', '/sounds/asset', 'chat.sounds.write', { id: 999999, media_url: 'https://media.test/x', media_asset_id: 1 }, 404],
     ];
     for (const [method, path, cap, body, ok = 200] of routes) {
@@ -123,6 +125,26 @@ t('N1 stats: site, user, stream and channel-top over non-deleted lines in the wi
     for (const body of [{}, { kind: 'everything' }, { kind: 'user' }, { kind: 'stream' }, { kind: 'site', extra: 1 },
         { kind: 'site', since: -1 }, { kind: 'site', since: '1' }, { kind: 'stream', stream_id: 1.5 }, { kind: 'channel-top', limit: 51 },
         { kind: 'channel-top', user_id: viewer.id }]) await stats(body, 400);
+});
+
+t('N1b stats site-daily: one row per UTC day over every channel, zeros filled', async () => {
+    const series = async (body, status = 200) => {
+        const r = await h.http('POST', '/internal/chat/stats', { body, token: token('chat.stats.read') });
+        assert.strictEqual(r.status, status, `${JSON.stringify(body)}: ${r.text}`);
+        return r.body;
+    };
+    assert.deepStrictEqual(await series({ kind: 'site-daily', since: T, until: T + 600e3 }),
+        { ok: true, days: [{ day: '2026-01-01', messages: 9, chatters: 4 }] });
+    // [2025-12-31, 2026-01-02): two UTC days; the empty first day is a zero row, not skipped.
+    assert.deepStrictEqual(await series({ kind: 'site-daily', since: Date.UTC(2025, 11, 31), until: Date.UTC(2026, 0, 2) }), {
+        ok: true, days: [{ day: '2025-12-31', messages: 0, chatters: 0 }, { day: '2026-01-01', messages: 9, chatters: 4 }],
+    });
+    assert.strictEqual((await series({ kind: 'site-daily', since: T, until: T + 399 * 86400000 })).days.length, 400);
+    for (const body of [{ kind: 'site-daily' }, { kind: 'site-daily', since: T }, { kind: 'site-daily', until: T },
+        { kind: 'site-daily', since: T, until: T }, { kind: 'site-daily', since: T + 1, until: T },
+        { kind: 'site-daily', since: T, until: T + 400 * 86400000 }, { kind: 'site-daily', since: T, until: T + 600e3, user_id: viewer.id },
+        { kind: 'site-daily', since: T, until: T + 600e3, limit: 5 }, { kind: 'site-daily', since: T, until: T + 600e3, extra: 1 }])
+        await series(body, 400);
 });
 
 t('N2 messages: one filter, a cursor on id, tail → max_id', async () => {
@@ -163,6 +185,24 @@ t('N3 timeline: buckets from since, oldest first, empty ones left out', async ()
         `stream_id=${streamId}&bucket_ms=60000`, `stream_id=${streamId}&since=${T}`, `stream_id=${streamId}&since=${T}&until=${T + 600e3}&bucket_ms=500`,
         `stream_id=${streamId}&since=${T}&until=${T}&bucket_ms=60000`, `stream_id=${streamId}&since=0&until=${T}&bucket_ms=1000`])
         check('chat.timeline-result@1', await tl(q, 400));
+});
+
+t('N1c first chat: whether this identity has ever chatted in the channel', async () => {
+    await h.db.run(`INSERT INTO stream_first_chats (chatter_key, channel_user_id) VALUES ('user:123', ?), ('anon:anonX', ?), ('ext:[Twitch] foo', ?)`,
+        [streamer.id, streamer.id, streamer.id]);
+    const fc = async (q, status = 200) => {
+        const r = await h.http('GET', `/internal/chat/first-chat?${q}`, { token: token('chat.analysis.read') });
+        assert.strictEqual(r.status, status, `${q}: ${r.text}`);
+        return r.body;
+    };
+    assert.deepStrictEqual(await fc(`channel_id=${streamer.id}&identity=user:123`), { ok: true, first: false });
+    assert.deepStrictEqual(await fc(`channel_id=${streamer.id}&identity=anon:anonX`), { ok: true, first: false });
+    assert.deepStrictEqual(await fc(`channel_id=${streamer.id}&identity=${encodeURIComponent('ext:[Twitch] foo')}`), { ok: true, first: false });
+    assert.deepStrictEqual(await fc(`channel_id=${streamer.id}&identity=user:999`), { ok: true, first: true });
+    assert.deepStrictEqual(await fc(`channel_id=${other.id}&identity=user:123`), { ok: true, first: true }, 'a channel is its owner');
+    for (const q of ['', `channel_id=${streamer.id}`, 'identity=user:1', `channel_id=abc&identity=user:1`, `channel_id=0&identity=user:1`,
+        `channel_id=${streamer.id}&identity=123`, `channel_id=${streamer.id}&identity=user:`, `channel_id=${streamer.id}&identity=user:${'a'.repeat(200)}`,
+        `channel_id=${streamer.id}&identity=user:1&extra=1`]) await fc(q, 400);
 });
 
 t('N4 moderation queues: pending IP messages, hidden relay users, TTS overrides', async () => {
@@ -238,6 +278,33 @@ t('N5 sounds: count, pending assets, and an idempotent asset write-back', async 
         check('chat.ingress-ack@1', r.body);
     }
     for (const path of ['', '?channel_owner_id=abc', '?pending_asset=2', `?channel_owner_id=${streamer.id}&limit=5`]) await s(path, 400);
+});
+
+t('N5b sounds by command: the approved sound Live plays, or 404', async () => {
+    const sound = async (owner, command, approved = 1, asset = null) => Number((await h.db.run(
+        `INSERT INTO channel_sounds (channel_owner_id, command, url, duration_seconds, created_by, created_by_name, is_approved, media_url, media_asset_id) VALUES (?, ?, ?, 2, ?, 'uploader', ?, ?, ?)`,
+        [owner, command, `/sounds/${command}.mp3`, owner, approved, asset && `https://media.test/a/${asset}`, asset])).lastInsertRowid);
+    const a = await sound(host.id, 'honk', 1, 3);
+    const b = await sound(host.id, 'honk');
+    await sound(host.id, 'quiet', 0);
+    const get = async (q, status = 200) => {
+        const r = await h.http('GET', `/internal/chat/sounds/by-command?${q}`, { token: token('chat.sounds.read') });
+        assert.strictEqual(r.status, status, `${q}: ${r.text}`);
+        return r.body;
+    };
+    const found = (await get(`channel_id=${host.id}&command=HONK`)).sound;
+    assert.ok([a, b].includes(found.id), 'one of the channel\'s approved honks');
+    assert.deepStrictEqual(found, {
+        id: found.id, channel_owner_id: host.id, command: 'honk', url: '/sounds/honk.mp3', mime: 'audio/mpeg',
+        duration_seconds: 2, created_by: host.id, created_by_name: 'uploader',
+        media_url: found.id === a ? 'https://media.test/a/3' : null, media_asset_id: found.id === a ? 3 : null,
+    });
+    assert.ok([a, b].includes((await get(`channel_id=${host.id}&command=%20!HONK%20`)).sound.id), 'trimmed, lowercased, ! stripped');
+    assert.deepStrictEqual(await get(`channel_id=${other.id}&command=honk`, 404), { ok: false, error: 'Sound not found' }, 'another owner\'s command');
+    assert.deepStrictEqual(await get(`channel_id=${host.id}&command=quiet`, 404), { ok: false, error: 'Sound not found' }, 'unapproved');
+    for (const q of ['', `channel_id=${host.id}`, 'command=honk', `channel_id=abc&command=honk`, `channel_id=0&command=honk`,
+        `channel_id=${host.id}&command=%20`, `channel_id=${host.id}&command=${'x'.repeat(121)}`, `channel_id=${host.id}&command=honk&extra=1`])
+        await get(q, 400);
 });
 
 t('the message ingress answers first_chat: true once per chatter and channel', async () => {
