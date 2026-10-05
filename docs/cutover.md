@@ -125,8 +125,7 @@ it since 2026-10-05; the table stays until a later contract migration drops it),
    `/etc/openvibe/live.env`.
 4. **Chat.** `git clone … /opt/openvibe.chat && cd /opt/openvibe.chat && npm ci --omit=dev`;
    `/etc/openvibe/chat.env` from `.env.example` (0600): `OV_LIVE_INTERNAL_URL`, Network URLs,
-   `BASE_URL=https://openvibe.live` and `EVENTS_URL` if OpenVibe.Events is deployed. `LIVE_MIRROR`
-   is retired (2026-10-05): the setting no longer exists. The unit sets `CHAT_DB_PATH`, `CHAT_CACHE_DIR`,
+   `BASE_URL=https://openvibe.live` and `EVENTS_URL` if OpenVibe.Events is deployed. The unit sets `CHAT_DB_PATH`, `CHAT_CACHE_DIR`,
    `SOUNDS_PATH=/opt/openvibe.live/data/sounds` and allows writes there. ffmpeg/ffprobe and
    espeak-ng are the host's (Live uses the same).
    ```bash

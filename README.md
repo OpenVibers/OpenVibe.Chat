@@ -69,9 +69,8 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   PgBouncer) and `DATABASE_DIRECT_URL` (the owner, which applies `migrations/` at boot); without
   `DATABASE_URL` outside production it runs on an embedded PGlite in `data/pglite` (`CHAT_PGLITE_DIR`).
   `migrations/0001_initial.sql` is the whole schema (timestamps stay SQLite-format text through
-  `ov_now()`/`datetime()`); its triggers on the twelve Chat tables still fill `live_mirror_outbox`,
-  skipped where a transaction sets `ov.mirror_skip = '1'` (the importers), until a later contract
-  migration drops the retired table (no code path enqueues or drains it any more).
+  `ov_now()`/`datetime()`); `0006_stop_live_mirror_triggers.sql` dropped the twelve read-mirror capture
+  triggers, and `live_mirror_outbox` stays, idle, until a contract migration drops it.
   `scripts/import-sqlite-to-pg.js` moves the SQLite data over once, with a per-table count and checksum
   report (`docs/cutover.md`). `VALKEY_URL`/`VALKEY_PREFIX` put the per-actor rate-limit counters on
   Valkey instead of this process. No part of the service reads SQLite; the one-time tools that read a

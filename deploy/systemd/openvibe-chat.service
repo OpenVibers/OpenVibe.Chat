@@ -1,7 +1,7 @@
 [Unit]
 Description=OpenVibe.Chat — rooms, messages, DMs, TTS and sounds, moderation (/ws/chat and the chat API of openvibe.live)
 # Live and Network should be up first; Chat serves from its caches if they are slow, and queues
-# its writes to Live (mirror, effects) until Live answers.
+# its side effects to Live until Live answers.
 After=network.target
 Wants=openvibe-live.service openvibe-network.service
 
@@ -16,7 +16,7 @@ Environment=PORT=4400
 Environment=HOST=127.0.0.1
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/env node /opt/openvibe.chat/server/index.js
-# Tells clients the chat restarts, flushes the Live mirror, closes sockets.
+# Tells clients the chat restarts and closes sockets.
 KillSignal=SIGTERM
 TimeoutStopSec=15
 Restart=always
