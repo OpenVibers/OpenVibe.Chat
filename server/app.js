@@ -104,6 +104,8 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     app.use('/internal/chat', express.json({ limit: '64kb' }), createInternalIngress({ chatServer }));
     // Live's reads of the chat tables Chat owns, in place of its mirrored copy (plan T3 J4b, server/chat/internal-reads.js).
     app.use('/internal/chat', express.json({ limit: '64kb' }), require('./chat/internal-reads'));
+    // OpenVibe.Help's per-ticket conversation (capability chat.ticket.write, server/chat/internal-tickets.js).
+    app.use('/internal/chat', express.json({ limit: '64kb' }), require('./chat/internal-tickets'));
     // OpenVibe.Events deliveries (live.release.deployed, network.module.updated): signature v2 over
     // the raw body, so this router reads the body itself (server/events/consumer.js).
     if (events) app.use('/internal/events', events.router);
