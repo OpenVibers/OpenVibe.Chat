@@ -919,7 +919,9 @@ class ChatServer {
             } catch { /* no badge */ }
         }
 
-        // Save to database
+        // Save to database. The save also records the first chat in the resolved channel
+        // (channel_user_id, or the stream owner), so a channel-only line counts too.
+        let firstChat = false;
         try {
             const result = await db.saveChatMessage({
                 stream_id: client.streamId || null,
@@ -935,6 +937,7 @@ class ChatServer {
                 metadata: chatMsg.vip_badge ? { vip_badge: chatMsg.vip_badge } : undefined,
             });
             if (result.lastInsertRowid) chatMsg.id = Number(result.lastInsertRowid);
+            firstChat = !!result.first_chat;
         } catch (err) {
             // Not saved means not sent: a line everyone saw but history, moderation and replays never
             // have would be a ghost. Tell the sender and stop here.
@@ -957,22 +960,16 @@ class ChatServer {
             powerchat: !!client.channelUserId,
         };
 
-        // Welcome first-time chatters in this streamer's channel
-        if (client.streamId) {
+        // Welcome first-time chatters in this streamer's channel. The save answered firstChat
+        // (it recorded it for the resolved channel), so there is nothing left to check here.
+        if (client.streamId && firstChat) {
             try {
-                const stream = await ctx.getStreamById(client.streamId);
-                if (stream?.user_id) {
-                    const chatterKey = client.user ? `user:${client.user.id}` : `anon:${client.anonId}`;
-                    if (await db.isFirstChatInChannel(chatterKey, stream.user_id)) {
-                        await db.recordFirstChat(chatterKey, stream.user_id);
-                        const welcomeName = client.user?.display_name || client.user?.username || client.anonId || 'stranger';
-                        await this.broadcastToStream(client.streamId, {
-                            type: 'system',
-                            message: `Welcome ${welcomeName} to the chat! 👋`,
-                            timestamp: new Date().toISOString(),
-                        });
-                    }
-                }
+                const welcomeName = client.user?.display_name || client.user?.username || client.anonId || 'stranger';
+                await this.broadcastToStream(client.streamId, {
+                    type: 'system',
+                    message: `Welcome ${welcomeName} to the chat! 👋`,
+                    timestamp: new Date().toISOString(),
+                });
             } catch { /* non-critical */ }
         }
 

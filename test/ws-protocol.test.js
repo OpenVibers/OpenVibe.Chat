@@ -355,4 +355,20 @@ t('messages sent before the connection is ready are handled in order', async () 
     ws.close();
 });
 
+t('a channel-only WebSocket line records the first chat for that channel', async () => {
+    // An offline/PowerChat channel room has no streamId, only channelUserId. The save itself must
+    // record the welcome there too, or Live's first-chat read would answer true forever.
+    const carol = h.addUser('carol');
+    await h.ctx.sync();
+    const ws = await h.ws({ ip: '198.51.100.61', token: carol.token });
+    ws.sendJson({ type: 'join', channelUserId: streamer.id, token: carol.token });
+    await ws.next((m) => m.type === 'auth');
+    const identity = `user:${carol.id}`;
+    assert.strictEqual(await h.db.isFirstChatInChannel(identity, streamer.id), true, 'carol has not chatted in the channel');
+    ws.sendJson({ type: 'chat', message: 'offline channel line' });
+    await ws.next((m) => m.type === 'chat' && m.message === 'offline channel line');
+    assert.strictEqual(await h.db.isFirstChatInChannel(identity, streamer.id), false, 'the channel-only save recorded it');
+    ws.close();
+});
+
 t.run(async () => { for (const w of [aliceWs, bobWs, globalWs]) { try { w.close(); } catch { /* */ } } if (h) await h.close(); });
