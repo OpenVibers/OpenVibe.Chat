@@ -281,11 +281,11 @@ t('/tts broadcasts the line to the room', async () => {
     assert.strictEqual(m.core_username, 'alice');
 });
 
-t('/paste creates the paste through Live and announces it', async () => {
+t('/paste creates the paste through Live and announces the Community link', async () => {
     await h.sleep(1100);
     aliceWs.sendJson({ type: 'chat', message: '/paste const x = 1;' });
     const m = await bobWs.next((x) => x.type === 'system' && /shared a paste/.test(x.message));
-    assert.strictEqual(m.message, '📋 Anonymous shared a paste: https://openvibe.live/p/abc123');
+    assert.strictEqual(m.message, `📋 Anonymous shared a paste: ${require('../server/config').web.communityUrl}/p/abc123`);
     const fx = h.live.effects.find((e) => e.name === 'paste');
     assert.strictEqual(fx.body.content, 'const x = 1;');
     assert.strictEqual(fx.body.user_id, alice.id);
