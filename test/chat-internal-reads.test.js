@@ -80,6 +80,7 @@ t('each route needs its own capability, a service token for Chat and loopback', 
     const routes = [
         ['POST', '/stats', 'chat.stats.read', { kind: 'site' }],
         ['GET', `/messages?stream_id=${streamId}`, 'chat.messages.read'],
+        ['GET', `/dm/block-state?a=${viewer.id}&b=${other.id}`, 'chat.messages.read'],
         ['GET', `/timeline?stream_id=${streamId}&since=${T}&until=${T + 600e3}&bucket_ms=60000`, 'chat.analysis.read'],
         ['GET', `/first-chat?channel_id=${streamer.id}&identity=user:${viewer.id}`, 'chat.analysis.read'],
         ['GET', `/moderation/pending-ip?channel_id=${channelId}`, 'chat.moderation.queue.read'],
@@ -170,6 +171,22 @@ t('N2 messages: one filter, a cursor on id, tail → max_id', async () => {
     for (const q of ['', `stream_id=${streamId}&user_id=${viewer.id}`, 'stream_id=abc', 'stream_id=0', `stream_id=${streamId}&limit=-1`,
         `stream_id=${streamId}&tail=yes`, `stream_id=${streamId}&types=chat,nope`, `stream_id=${streamId}&order=asc`, `stream_id=${streamId}&stream_id=1`])
         check('chat.messages-page@1', await page(q, 400));
+});
+
+t('N2b dm block state: whether either user blocked the other', async () => {
+    const state = async (q, status = 200) => {
+        const r = await h.http('GET', `/internal/chat/dm/block-state?${q}`, { token: token('chat.messages.read') });
+        assert.strictEqual(r.status, status, `${q}: ${r.text}`);
+        return r.body;
+    };
+    assert.deepStrictEqual(await state(`a=${host.id}&b=${streamer.id}`), { ok: true, blocked: false });
+    await h.db.run(`INSERT INTO dm_blocks (blocker_id, blocked_id, blocker_subject_id) VALUES (?, ?, ?)`,
+        [host.id, streamer.id, await h.db.subjectFor(host.id)]);
+    assert.deepStrictEqual(await state(`a=${host.id}&b=${streamer.id}`), { ok: true, blocked: true }, 'a blocked b');
+    assert.deepStrictEqual(await state(`a=${streamer.id}&b=${host.id}`), { ok: true, blocked: true }, 'b blocked a');
+    assert.deepStrictEqual(await state(`a=${viewer.id}&b=${other.id}`), { ok: true, blocked: false }, 'an unblocked pair');
+    for (const q of ['', `a=${viewer.id}`, `b=${viewer.id}`, `a=abc&b=${viewer.id}`, `a=0&b=${viewer.id}`, `a=-1&b=${viewer.id}`,
+        `a=${viewer.id}&b=${viewer.id}`, `a=${viewer.id}&b=${other.id}&extra=1`]) await state(q, 400);
 });
 
 t('N3 timeline: buckets from since, oldest first, empty ones left out', async () => {

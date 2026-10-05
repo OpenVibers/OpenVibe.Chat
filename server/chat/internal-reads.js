@@ -6,6 +6,7 @@
  *   POST /internal/chat/stats                         chat.stats.read             chat.stats-request@1 → chat.stats-result@1
  *                                                                                   kind site-daily → chat.site-daily-result@1 { days }
  *   GET  /internal/chat/messages                      chat.messages.read          → chat.messages-page@1
+ *   GET  /internal/chat/dm/block-state                chat.messages.read          → { blocked }
  *   GET  /internal/chat/timeline                      chat.analysis.read          → chat.timeline-result@1
  *   GET  /internal/chat/first-chat                    chat.analysis.read          → chat.first-chat-result@1 { first }
  *   GET  /internal/chat/moderation/pending-ip         chat.moderation.queue.read  → chat.moderation-queue-result@1 { pending_ip }
@@ -32,6 +33,7 @@
 
 const express = require('express');
 const db = require('../db/database');
+const dm = require('./dm');
 const serviceAuth = require('../net/service-auth');
 
 const MESSAGE_TYPES = ['chat', 'system', 'donation', 'command', 'tts', 'channel-sound', 'soundboard', 'clip'];
@@ -199,6 +201,15 @@ async function messages(req) {
     return { messages: rows.map(messageRow), max_id };
 }
 
+// ── N2b: DM block state ──
+/** Live's call-invite check: has either user blocked the other, in Chat or on the network? */
+async function dmBlockState(req) {
+    const q = query(req, { a: 'id', b: 'id' });
+    if (q.a == null || q.b == null) bad('a and b are required');
+    if (q.a === q.b) bad('a and b must differ');
+    return { blocked: await dm.isBlockedEither(q.a, q.b) };
+}
+
 // ── N3: timeline ──
 async function timeline(req) {
     const q = query(req, { channel_user_id: 'id', stream_id: 'id', since: 'ms', until: 'ms', bucket_ms: 'id' });
@@ -348,6 +359,7 @@ async function soundByCommand(req) {
 const router = express.Router();
 router.post('/stats', serviceAuth.guard('chat.stats.read'), route('stats', stats));
 router.get('/messages', serviceAuth.guard('chat.messages.read'), route('messages', messages));
+router.get('/dm/block-state', serviceAuth.guard('chat.messages.read'), route('dm-block-state', dmBlockState));
 router.get('/timeline', serviceAuth.guard('chat.analysis.read'), route('timeline', timeline));
 router.get('/first-chat', serviceAuth.guard('chat.analysis.read'), route('first-chat', firstChat));
 const queue = serviceAuth.guard('chat.moderation.queue.read');
