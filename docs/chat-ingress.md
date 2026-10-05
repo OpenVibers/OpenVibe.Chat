@@ -29,6 +29,7 @@ deleted messages are never read; `since`/`until` are epoch ms (`until` exclusive
 | --- | --- | --- |
 | `POST /internal/chat/stats` | `chat.stats.read` | `{kind:'site'\|'user'\|'stream'\|'channel-top'\|'site-daily', user_id?, stream_id?, channel_user_id?, since?, until?, limit?}`. `site`/`user`(`user_id`)/`stream`(`stream_id`) → `{messages,chatters}` (+ `sounds`, soundboard plays, for `stream`); `channel-top` (by `stream_id`, `channel_user_id` or all chat; `limit` ≤ 50, default 10) → `{top_chatters:[{user_id,username,display_name,avatar_url,profile_color,count}]}`; `site-daily` (`since` and `until` required, epoch ms, at most 400 UTC days) → `{days:[{day,messages,chatters}]}`, one row per UTC day in `[since,until)` with zero-filled gaps: every non-deleted message across all channels (Live's home `messages` series) and distinct chatters (Live's `active`: `COALESCE(user_id,anon_id,source_platform‖username)`). |
 | `GET /internal/chat/messages` | `chat.messages.read` | Exactly one of `channel_user_id`, `stream_id`, `user_id`, `anon_id`, `username`, `id`; `after_id` (oldest first), `before_id` (newest first; the default), `limit` ≤ 500 (default 100), `types=chat,donation,…`, `tail=1` (no rows) → `{messages,max_id}`; `max_id` is the newest matching id. |
+| `GET /internal/chat/dm/block-state?a&b` | `chat.messages.read` | `{blocked}`: true when either user blocked the other, in Chat's `dm_blocks` or as a Network platform block (`server/chat/dm.js` `isBlockedEither`, the check the DM and call routes use). `a` and `b` are positive Live user ids and must differ; Live asks this before sending a call invite. |
 | `GET /internal/chat/timeline` | `chat.analysis.read` | `channel_user_id` or `stream_id`, `since`, `until` (default now), `bucket_ms` ≥ 1000 (≤ 10 000 buckets) → `{buckets:[{t,count}],max_id}`; buckets start at `since`, oldest first, empty ones left out. |
 | `GET /internal/chat/first-chat?channel_id&identity` | `chat.analysis.read` | `{first}`: true when `identity` (`user:<user_id>`, `anon:<anonId>`, `ext:<prefixed username>`; ≤ 160) has never chatted in the channel — Live's `isFirstChatInChannel`, from `stream_first_chats`. `channel_id` is the channel owner's Live user id (`stream_first_chats.channel_user_id`), not `ctx_channels.id`. A registered identity is `user:<user_id>`, the numeric Live user id and **never** the username: Live's own `user:${line.username}` key would read `first:true` forever, so its welcome check must pass `user:${line.user_id}`. |
 | `GET /internal/chat/moderation/pending-ip?channel_id` | `chat.moderation.queue.read` | `{pending_ip}`: the channel's pending rows, oldest first (`limit` ≤ 500, default 50). |
@@ -65,8 +66,10 @@ hooks at `/internal/calls/stream-channel`): the bridge is gone, but each still g
 the read API above, Network's `DEFAULT_GRANTS` must add `live chat.stats.read openvibe.chat`,
 `live chat.messages.read openvibe.chat`, `live chat.analysis.read openvibe.chat`,
 `live chat.moderation.queue.read openvibe.chat`, `live chat.sounds.read openvibe.chat` and
-`live chat.sounds.write openvibe.chat`. Chat's
-local proposals are in `docs/capabilities-proposal/`. The three plan-T3 reads added for Live's home
+`live chat.sounds.write openvibe.chat`. The
+`GET /internal/chat/dm/block-state` route must also be added to `chat.messages.read`'s `implementedBy`
+route list in OpenVibe.Contracts (a Contracts follow-up; the capability and Live's grant are already in
+place). Chat's local proposals are in `docs/capabilities-proposal/`. The three plan-T3 reads added for Live's home
 series, its welcome check and its robot channel sounds use those same capabilities but add result
 schemas `chat.site-daily-result@1`, `chat.first-chat-result@1` and `chat.sound-result@1`, which
 land in openvibe-contracts 0.103.0 (the Contracts change is separate; Live codes against the
