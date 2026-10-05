@@ -2,9 +2,8 @@
 /**
  * The PostgreSQL schema (plan T3, decision 1). migrations/0001_initial.sql opens a real PostgreSQL
  * (PGlite in-process, or the containers with OV_TEST_STORE=pg) and is checked here: every Chat table
- * exists, the keys/indexes the queries rely on are present, and the Live read-mirror triggers on the
- * twelve mirrored tables queue a change for every Chat write but never for one that sets
- * ov.mirror_skip = '1' (the bridge applying Live's writes, and the importer).
+ * exists, the keys/indexes the queries rely on are present, and the retired Live read mirror captures
+ * nothing any more (0006 dropped its twelve triggers; live_mirror_outbox stays until a contract migration).
  */
 const assert = require('assert');
 const path = require('path');
@@ -83,24 +82,12 @@ t('relay_users has a real identity id', async () => {
     assert.strictEqual(r.is_identity, 'YES', 'id is an identity column');
 });
 
-t('a Chat write is captured by the mirror', async () => {
+t('the retired Live mirror captures nothing (0006 dropped its triggers)', async () => {
+    const triggers = await all("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE 'mirror\\_%'");
+    assert.deepStrictEqual(triggers, [], 'no mirror_* capture trigger remains');
     const before = (await get('SELECT COUNT(*) AS n FROM live_mirror_outbox')).n;
     await db.prepare('INSERT INTO chat_messages (message) VALUES (?)').run('hello');
-    const rows = await all('SELECT tbl, op, pk FROM live_mirror_outbox ORDER BY seq');
-    assert.strictEqual(rows.length, before + 1, 'one queued change');
-    const last = rows[rows.length - 1];
-    assert.strictEqual(last.tbl, 'chat_messages');
-    assert.strictEqual(last.op, 'upsert');
-    assert.ok(JSON.parse(last.pk).id >= 1, 'the pk carries the id');
-});
-
-t("a Live write (ov.mirror_skip) never comes back", async () => {
-    const before = (await get('SELECT COUNT(*) AS n FROM live_mirror_outbox')).n;
-    await db.tx(async (tx) => {
-        await tx.query(`SET LOCAL ov.mirror_skip = '1'`);
-        await tx.query(`INSERT INTO chat_messages (message) VALUES ('from Live')`);
-    });
-    assert.strictEqual((await get('SELECT COUNT(*) AS n FROM live_mirror_outbox')).n, before, 'nothing queued');
+    assert.strictEqual((await get('SELECT COUNT(*) AS n FROM live_mirror_outbox')).n, before, 'a Chat write queues nothing');
 });
 
 t('cleanup', async () => { await close(); });

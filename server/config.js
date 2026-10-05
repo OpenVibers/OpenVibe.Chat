@@ -80,11 +80,6 @@ module.exports = {
     live: {
         internalUrl: strip(process.env.OV_LIVE_INTERNAL_URL || 'http://127.0.0.1:3000'),
         audience: 'openvibe.live',
-        // Chat's read-mirror of its tables into Live (for Live's own readers; there is no rollback
-        // path to Live any more). Switch on at cutover; Live refuses mirror writes unless it runs
-        // with CHAT_AUTHORITY=chat, so a rehearsal can never touch production.
-        mirror: bool(process.env.LIVE_MIRROR, false),
-        mirrorIntervalMs: int(process.env.LIVE_MIRROR_INTERVAL_MS, 1000),
         requestTimeoutMs: int(process.env.LIVE_TIMEOUT_MS, 4000),
         // /ready reports the Live sync degraded once its last clean pass is older than this.
         // The loop ticks every 2 s and the bans and stream projections are due every 10 s, so a
@@ -177,7 +172,7 @@ module.exports = {
     // itself and calls AI with its OWN service token (client `chat`, audience openvibe.ai, network
     // grants ai.run.create/ai.run.read on namespace chat.*). `enabled` is the job's switch: off in
     // development and the test harness, on in production through CHAT_AI_ENABLED=1 (its other jobs
-    // are gated the same way — LIVE_MIRROR, EVENTS_URL).
+    // are gated the same way — EVENTS_URL).
     ai: {
         enabled: bool(process.env.CHAT_AI_ENABLED, false),
         internalUrl: strip(process.env.OV_AI_INTERNAL_URL || 'http://127.0.0.1:4700'),

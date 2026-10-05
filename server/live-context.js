@@ -11,7 +11,6 @@
  * openvibe.live —
  *     GET/POST /internal/chat-context/*   capability live.chat_context.read
  *     POST     /internal/chat-effects/*   capability live.chat_effects.write
- *     POST     /internal/chat-effects/mirror  capability live.chat_mirror.write (bridge/live-mirror.js)
  *
  * Hot path rule: nothing a chat message touches makes a network call. Reads are answered from
  *   - SQLite projections (ctx_users, ctx_streams, ctx_managed_streams, ctx_channels), kept

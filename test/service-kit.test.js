@@ -19,11 +19,10 @@ const t = suite('service-kit');
 
 const src = fs.readFileSync(path.join(__dirname, '..', 'server', 'index.js'), 'utf8');
 
-t('server/index.js imports gracefulStop and within from openvibe-sdk/service', () => {
+t('server/index.js imports gracefulStop from openvibe-sdk/service', () => {
     const m = src.match(/const\s*\{([^}]*)\}\s*=\s*require\(['"]openvibe-sdk\/service['"]\)/);
     assert.ok(m, "require('openvibe-sdk/service')'s exports are not destructured");
     assert.ok(/\bgracefulStop\b/.test(m[1]), 'gracefulStop is not imported');
-    assert.ok(/\bwithin\b/.test(m[1]), 'within is not imported');
 });
 
 t('server/index.js leaves the signal handlers to the kit', () => {
@@ -59,11 +58,9 @@ t('the returned shutdown runs the stop steps in order and closes the database', 
     wrap(chatServer, 'broadcastAll', 'broadcastAll');
     wrap(h.ctx, 'stop', 'ctx.stop');
     wrap(h.eventsRelay, 'stop', 'relay.stop');
-    wrap(h.mirrorRelay, 'stop', 'mirror.stop');
     wrap(h.eventsConsumer, 'stop', 'events.stop');
     wrap(chatAi, 'stop', 'chatAi.stop');
     wrap(h.subscriptions, 'stop', 'subs.stop');
-    wrap(h.mirrorRelay, 'flush', 'mirror.flush');
     wrap(chatServer, 'close', 'chatServer.close');
     wrap(callServer, 'close', 'callServer.close');
     wrap(db, 'close', 'db.close');
@@ -84,11 +81,9 @@ t('the returned shutdown runs the stop steps in order and closes the database', 
         'broadcastAll',
         'ctx.stop',
         'relay.stop',
-        'mirror.stop',
         'events.stop',
         'chatAi.stop',
         'subs.stop',
-        'mirror.flush',
         'chatServer.close',
         'callServer.close',
         'db.close',
@@ -97,7 +92,7 @@ t('the returned shutdown runs the stop steps in order and closes the database', 
     // The kit starts the stop once: a second call is the same promise, no step runs again.
     const again = await h.shutdown();
     assert.strictEqual(again, 0, 'a second stop resolves with the same code');
-    assert.strictEqual(order.length, 11, 'a second stop runs no step again');
+    assert.strictEqual(order.length, 9, 'a second stop runs no step again');
 });
 
 // The shutdown step above already stopped the process; detach is a no-op then (and a fallback if a

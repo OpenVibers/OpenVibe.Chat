@@ -24,7 +24,7 @@ let db = null;
 let _idTables = null;   // tables with an `id` column: an INSERT into one returns it (lastInsertRowid)
 const _stmts = new Map();
 
-// Tables Chat writes from the cutover on; Live keeps a read mirror of each (server/bridge/live-mirror.js).
+// Tables Chat writes from the cutover on; Live reads them through Chat's internal read API.
 const CHAT_TABLES = {
     chat_messages: ['id'],
     dm_conversations: ['id'],

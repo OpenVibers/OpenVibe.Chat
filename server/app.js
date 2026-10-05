@@ -61,7 +61,7 @@ function getAllowedOrigins() {
     return allowed;
 }
 
-function createApp({ chatServer, mirror, relay, events = null, callServer = null }) {
+function createApp({ chatServer, relay, events = null, callServer = null }) {
     const allowedOrigins = getAllowedOrigins();
     const app = express();
     app.disable('x-powered-by');
@@ -162,8 +162,6 @@ function createApp({ chatServer, mirror, relay, events = null, callServer = null
         const failed = Object.keys(checks).filter((k) => checks[k].required && checks[k].status !== 'ok');
         const degraded = Object.keys(checks).filter((k) => !checks[k].required && checks[k].status !== 'ok');
         const ready = failed.length === 0;
-        let pending = null;
-        if (mirror && checks.db.status === 'ok') { try { pending = await mirror.pending(); } catch { /* reported by db */ } }
         res.set('Cache-Control', 'no-store');
         res.status(ready ? 200 : 503).json({
             ready,
@@ -175,7 +173,6 @@ function createApp({ chatServer, mirror, relay, events = null, callServer = null
             checks,
             connections: chatServer.getTotalConnections(),
             live: { last_sync_at: ctx.stats.lastSyncAt, last_success_at: ctx.stats.lastSuccessAt, failures: ctx.stats.failures, last_error: ctx.stats.lastError },
-            mirror: mirror ? { enabled: config.live.mirror, pending, last_error: mirror.lastError() } : null,
             events: {
                 enabled: !!config.events.url,
                 consumer: events ? { enabled: events.enabled, ...events.stats } : null,
