@@ -20,7 +20,7 @@ a stream that does not exist is 404: do not retry a 4xx.
 | `POST /internal/chat/invalidate` | `chat.cache.invalidate` | `{key,user?,user_data?,approvals?,bans?,channel?}`; a cache hint, returns `{ok:true}`. Include a typed `user_data` object when Live edited the account, so Chat updates sockets and stored message names. |
 | `GET /internal/chat/presence` | `chat.presence.read` | Who is connected where: counts, per-stream viewers, slow modes, users/anons with their addresses (`server/chat/presence.js`). |
 
-Live's reads of Chat's tables, in place of its mirrored copy (`server/chat/internal-reads.js`, plan
+Live's reads of Chat's tables, in place of the read mirror retired on 2026-10-05 (`server/chat/internal-reads.js`, plan
 T3 J4b N1–N5, contracts in `openvibe-contracts` 0.95.0). Unknown or malformed parameters are 400;
 deleted messages are never read; `since`/`until` are epoch ms (`until` exclusive). Every answer is
 `{ok:true,...}` or `{ok:false,error}`.
@@ -38,7 +38,7 @@ deleted messages are never read; `since`/`until` are epoch ms (`until` exclusive
 | `GET /internal/chat/sounds?channel_owner_id` (also `/sounds/count`) | `chat.sounds.read` | `{count}` of the channel's sounds. |
 | `GET /internal/chat/sounds?pending_asset=1` | `chat.sounds.read` | `{sounds}` not yet on Media (`media_asset_id` null), by id; optional `channel_owner_id`, `after_id`, `limit` ≤ 500 (default 100). |
 | `GET /internal/chat/sounds/by-command?channel_id&command` | `chat.sounds.read` | `{sound}`: the approved (`is_approved=1`) channel sound `command` plays, one at random when several match, or 404 — Live's `getChannelSoundByCommand`. `command` is trimmed, lowercased and has leading `!` stripped (≤ 120); `channel_id` is the channel owner's Live user id (`channel_sounds.channel_owner_id`); same projection as `/sounds`. |
-| `POST /internal/chat/sounds/asset` | `chat.sounds.write` | `{id,media_url,media_asset_id}` records Live's upload (`migrations/0004_channel_sound_media.sql`); repeating it is a 200 no-op; an unknown sound is 404. Until Live writes here, the read mirror leaves Live's own asset columns alone for a sound Chat has no asset for. |
+| `POST /internal/chat/sounds/asset` | `chat.sounds.write` | `{id,media_url,media_asset_id}` records Live's upload (`migrations/0004_channel_sound_media.sql`); repeating it is a 200 no-op; an unknown sound is 404. For a sound Chat has no Media asset for, Live's own asset columns stay as its asset sync left them (the read mirror that used to preserve them was retired on 2026-10-05). |
 
 `/internal/chat/events` is a narrow transient event ingress, not a generic ChatServer call.
 `live.release.deployed` continues through OpenVibe.Events; there is no deploy-notice endpoint.

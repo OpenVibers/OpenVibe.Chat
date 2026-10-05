@@ -5,8 +5,10 @@ socket and the chat REST prefixes to OpenVibe.Chat (127.0.0.1:4400), and Live ru
 `CHAT_AUTHORITY=chat`. Nothing in Live's browser code changes. Chat is required in every mode:
 Live's local chat routes and mounts are inert under the flag and are being removed, and the rollback
 that returned chat to Live is retired, so there is no unset-flag mode in which Live serves chat
-again (see [Rollback](#rollback)). The Live-side read mirror stays only for Live's own readers,
-until a later wave retires them.
+again (see [Rollback](#rollback)). The Live-side read mirror was retired on 2026-10-05: since
+Live #31 nothing in Live reads its mirror-filled chat tables in chat mode — every read goes to
+Chat's internal read API — so Chat no longer copies its writes into Live, and the cutover rollback
+through the mirror no longer exists (see [Rollback](#rollback)).
 
 The cutover itself ran on 2026-09-23; the rehearsal, flip and check steps below record that deploy.
 
@@ -78,22 +80,22 @@ writers are repointed; deploy the three new capability grants before that Live r
 
 | Table (Live baseline, target OpenVibe.Chat) | W6 authority | Notes |
 | --- | --- | --- |
-| `chat_messages`, `dm_conversations`, `dm_participants`, `dm_messages`, `dm_blocks`, `tts_voice_overrides`, `channel_sounds`, `relay_users`, `hidden_relay_users`, `pending_ip_messages`, `stream_first_chats`, `moderation_actions` | **Chat** | Imported with their ids. Live keeps a read mirror (Chat → `POST /internal/chat-effects/mirror`); Live's remaining writers (AI viewers, relays, donations, `/api/mod`, `/api/channels` deletes, emote renames) forward to Chat (the bridge at the cutover; Chat's ingress since T3 J3a). |
+| `chat_messages`, `dm_conversations`, `dm_participants`, `dm_messages`, `dm_blocks`, `tts_voice_overrides`, `channel_sounds`, `relay_users`, `hidden_relay_users`, `pending_ip_messages`, `stream_first_chats`, `moderation_actions` | **Chat** | Imported with their ids. Live read a mirror of them (Chat → `POST /internal/chat-effects/mirror`) until 2026-10-05, when it moved to Chat's internal read API (`server/chat/internal-reads.js`); Live's remaining writers (AI viewers, relays, donations, `/api/mod`, `/api/channels` deletes, emote renames) forward to Chat (the bridge at the cutover; Chat's ingress since T3 J3a). |
 | `channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`, `chat_ai_summaries`, `chat_timeline_events` | **Chat** (C-04 done) | Chat's own tables; Chat is their only writer. Live reads what it needs through `GET /internal/moderation/*` (`chat.moderation.read`), and Live's writers call Chat's APIs and ingress (the bridge op `db` they used is retired, T3 J3a). There is no authority switch any more. |
 | `media_requests`, `media_request_settings` | **Live** (not moved) | Decision with evidence: every writer is `server/media/media-queue.js` / `server/media/routes.js` (`/api/media`: gold payment, yt-dlp download, playback state, the streamer's overlay and dashboard). Chat only has the `!sr/!queue/!np/!skip` entry points, which call Live (`POST /internal/chat-effects/media-queue`). Not chat-owned in practice; it moves with the queue lifecycle the charter describes, not before. The importer reports them as `not_moved`. |
 | `chat_messages_new`, `emotes_new`, `channel_sounds_new` | — | Transient tables of Live's table rebuilds; empty in a consistent snapshot. Rows found there go to `import_hold`. |
 
 Chat also keeps `ctx_users`, `ctx_streams`, `ctx_managed_streams`, `ctx_channels` — projections of
-Live data maintained by `live-context` (never authority), `events_outbox`, `live_mirror_outbox`,
-`import_hold`, `import_runs`. The retired bridge's `bridge_applied` / `bridge_refs` are dropped
+Live data maintained by `live-context` (never authority), `events_outbox`, `live_mirror_outbox` (the retired read mirror's queue: no code path writes or drains
+it since 2026-10-05; the table stays until a later contract migration drops it), `import_hold`,
+`import_runs`. The retired bridge's `bridge_applied` / `bridge_refs` are dropped
 (`migrations/0005_drop_bridge_tables.sql`).
 
 ## Prerequisites
 
 1. **Contracts.** Register `docs/capabilities-proposal/*.json` in OpenVibe.Contracts (a new
    `openvibe-contracts` release): `live.chat_context.read`, `live.chat_effects.write`,
-   `live.chat_mirror.write` (owner live), `chat.live_bridge.write`, `chat.presence.read` (owner
-   chat). Add the live ones to `manifests/services/live.json`; set `manifests/services/chat.json` to
+   `chat.live_bridge.write`, `chat.presence.read` (owner chat). Add the live ones to `manifests/services/live.json`; set `manifests/services/chat.json` to
    alpha with `capabilities: ["chat.live_bridge.write", "chat.presence.read"]`,
    `eventsProduced: ["chat.message.created", "chat.dm.created", "chat.moderation.action"]` and a
    `contractRanges` that includes the release. Until then `openvibe-contracts-check` reports these
@@ -107,7 +109,7 @@ Live data maintained by `live-context` (never authority), `events_outbox`, `live
    after the script name — Node consumes it as environment, which can point the script at
    Chat's database instead of Network's (`ov_network`).
    `principal_grants` (client, capability, audience): `chat live.chat_context.read openvibe.live`,
-   `chat live.chat_effects.write openvibe.live`, `chat live.chat_mirror.write openvibe.live`,
+   `chat live.chat_effects.write openvibe.live`,
    `live chat.live_bridge.write openvibe.chat`, `live chat.message.send openvibe.chat`,
    `live chat.presence.read openvibe.chat` (`chat events.event.publish openvibe.events` is already
    a default). Without `chat.message.send`, Chat refused the bridge ops that sent a message (AI
@@ -123,8 +125,8 @@ Live data maintained by `live-context` (never authority), `events_outbox`, `live
    `/etc/openvibe/live.env`.
 4. **Chat.** `git clone … /opt/openvibe.chat && cd /opt/openvibe.chat && npm ci --omit=dev`;
    `/etc/openvibe/chat.env` from `.env.example` (0600): `OV_LIVE_INTERNAL_URL`, Network URLs,
-   `BASE_URL=https://openvibe.live`, `LIVE_MIRROR=1`, and
-   `EVENTS_URL` if OpenVibe.Events is deployed. The unit sets `CHAT_DB_PATH`, `CHAT_CACHE_DIR`,
+   `BASE_URL=https://openvibe.live` and `EVENTS_URL` if OpenVibe.Events is deployed. `LIVE_MIRROR`
+   is retired (2026-10-05): the setting no longer exists. The unit sets `CHAT_DB_PATH`, `CHAT_CACHE_DIR`,
    `SOUNDS_PATH=/opt/openvibe.live/data/sounds` and allows writes there. ffmpeg/ffprobe and
    espeak-ng are the host's (Live uses the same).
    ```bash
@@ -155,9 +157,10 @@ Cross-check: `sqlite3 /tmp/live-rehearsal.db "select count(*) from chat_messages
 report. Run the import again: every `inserted` must be 0 (idempotent).
 
 ```bash
-# 3. a rehearsal Chat on 4401 against production Live, mirror OFF
+# 3. a rehearsal Chat on 4401 against production Live (the mirror is retired: reads go to Chat's
+#    internal read API)
 sudo -u ubuntu env $(sudo cat /etc/openvibe/chat.env | xargs) PORT=4401 CHAT_DB_PATH=/tmp/chat-rehearsal.db \
-     CHAT_CACHE_DIR=/tmp/chat-rehearsal-cache LIVE_MIRROR=0 EVENTS_URL= node server/index.js &
+     CHAT_CACHE_DIR=/tmp/chat-rehearsal-cache EVENTS_URL= node server/index.js &
 curl -s http://127.0.0.1:4401/ready | jq     # status: "ready" once a Live sync pass succeeded
 
 # 4. parity: the same reads answer the same (history pinned before the snapshot)
@@ -199,11 +202,10 @@ streamers; `deploy.sh --wait-idle` waits for none).
    sqlite3 /opt/openvibe.live/data/live.db ".backup /tmp/live-cutover-2.db"
    sudo -u ubuntu node scripts/import-from-live.js --live-db /tmp/live-cutover-2.db --chat-db /var/lib/openvibe-chat/chat.db --apply
    ```
-   Chat's own new rows are already in Live (mirror) and count as `identical`; `chat_kept` counts rows
+   Chat's own new rows were already in Live through the mirror at the cutover and count as `identical`; `chat_kept` counts rows
    Chat edited since pass 1 (Chat wins); `held` must be 0.
 4. **Checks.**
-   - `curl -s 127.0.0.1:4400/ready | jq` — `status` "ready" (`live.last_success_at` recent), `mirror.pending` near 0,
-     `mirror.last_error` null.
+   - `curl -s 127.0.0.1:4400/ready | jq` — `status` "ready" (`live.last_success_at` recent).
    - Live: `sqlite3 …/live.db "select count(*) from chat_bridge_outbox"` stays near 0 (its forwarded
      writes are acknowledged); `journalctl -u openvibe-live | grep ChatRemote` shows no refusals.
    - Browser: join a stream chat, send a message (it appears for others and in history after a
@@ -212,8 +214,8 @@ streamers; `deploy.sh --wait-idle` waits for none).
    - Live features that read chat: home page chat stats, a recap, AI viewers answering in a test
      stream, `/api/mod` chat logs and deletes (the deleted line disappears in Chat).
    - `node scripts/parity-check.js --live http://127.0.0.1:3000 --chat http://127.0.0.1:4400 …` is no
-     longer meaningful (Live mounts no chat routes); compare against the mirror instead with
-     `sqlite3` counts: Live `chat_messages` ≈ Chat `chat_messages`.
+     longer meaningful (Live mounts no chat routes); Live's readers now use Chat's internal read API
+     (`server/chat/internal-reads.js`).
 
 ## Rollback
 
@@ -226,11 +228,10 @@ unanswered, not served by Live. The nginx include stays in place through any rol
    are untouched, so chat keeps being served — a socket reconnects after the restart. Nothing blocks
    this: the migrations are additive and the previous release reads the same database.
 2. If Chat cannot run at all, chat is down until it is restored: Live has no copy of the sockets,
-   the DMs, the TTS and sound queue or the moderation log to serve from. Live's own readers stay
-   correct through the read mirror. Restore `openvibe-chat.service`, then let the mirror drain
-   (`curl -s 127.0.0.1:4400/ready | jq .mirror.pending` → 0); when the service still cannot start,
-   `cd /opt/openvibe.chat && sudo -u ubuntu env $(sudo cat /etc/openvibe/chat.env | xargs) node
-   scripts/mirror-flush.js` (`DATABASE_URL` names Chat's database; exit 0 = drained).
+   the DMs, the TTS and sound queue or the moderation log to serve from. There is no rollback
+   through the read mirror any more (retired 2026-10-05): Live's readers call Chat's internal read
+   API, so while Chat is down those reads fail too. Restore `openvibe-chat.service` and confirm
+   `/ready`; there is no mirror queue to drain and no `scripts/mirror-flush.js`.
 3. Keep the database and the sounds. `/var/lib/openvibe-chat/chat.db` (PostgreSQL after the switch
    below) is the only copy of chat's own state — rooms, DMs and their read state, the audio queue,
    calls — and the clips under `SOUNDS_PATH` are the only copy of the sound files; keep both for
@@ -281,8 +282,8 @@ Found while moving; deliberately not fixed in this wave (fix after the cutover, 
 
 ## PostgreSQL switch (plan T3, ADR-035)
 
-Chat's own database moves from the SQLite file to PostgreSQL; the Live read mirror and the bridge (since
-retired, T3 J3a) were unchanged in meaning. This is a runbook for that one deploy — the schema is `migrations/0001_initial.sql`
+Chat's own database moves from the SQLite file to PostgreSQL; the Live read mirror (retired
+2026-10-05) and the bridge (retired, T3 J3a) were unchanged in meaning. This is a runbook for that one deploy — the schema is `migrations/0001_initial.sql`
 (applied by `openvibe-sdk/db` at boot, owner role) and the data moves once.
 
 **Prerequisites.** `DATABASE_URL` (the runtime role, through PgBouncer — DML only, no session state) and
@@ -301,13 +302,14 @@ migration has, parents first, ids kept; identity sequences are `setval`'d past t
 table is verified (row count + a checksum walked in primary-key order) and printed as one line
 (`[import] <table> <rows> rows checksum <16 hex> (<ms> ms)`), then the tail
 (`[import] <n> tables, <rows> rows, ok|FAILED`); the whole report is recorded in `import_runs`. It runs with
-`ov.mirror_skip = '1'`, so the imported rows are never queued into Live's read mirror, and ends with
+`ov.mirror_skip = '1'`, so the imported rows are never queued into the (retired) Live read mirror's
+outbox, and ends with
 `ANALYZE` as the owner (the runtime role's ANALYZE is a no-op; without statistics the history page plans a
 Sort). A problem (a source column with no target, a verification mismatch) makes it exit 1.
 
 **Switch.**
-1. On the old release: `curl -s 127.0.0.1:4400/ready | jq .mirror.pending` → 0 (Live has every change), then
-   stop the unit (drained: nothing writes the file any more).
+1. On the old release: stop the unit (drained: nothing writes the file any more). Before 2026-10-05
+   this also waited for `.mirror.pending` → 0; the mirror is retired, so `/ready` reports no mirror.
 2. Keep the file as it is (`cp -a /var/lib/openvibe-chat/chat.db /var/lib/openvibe-chat/chat.db.pre-pg`) and
    import it as the owner (the script applies `migrations/` first, then copies):
 
@@ -319,14 +321,14 @@ Sort). A problem (a source column with no target, a verification mismatch) makes
 4. Set `DATABASE_URL` and `DATABASE_DIRECT_URL` (and `VALKEY_URL`, `VALKEY_PREFIX`) in
    `/etc/openvibe/chat.env`; deploy and start the new release (it applies `migrations/` as the owner at boot:
    nothing to do, the import's schema is current). `GET /ready`: `db` ok with `max_message_id` equal to the
-   file's `select max(id) from chat_messages`, `valkey` ok (skipped without `VALKEY_URL`), `mirror.pending`
-   back to 0 once the relay has flushed the first writes.
+   file's `select max(id) from chat_messages`, `valkey` ok (skipped without `VALKEY_URL`). (`/ready` no
+   longer reports a mirror queue: it was retired on 2026-10-05.)
 5. From the deployed commit, `npm run n-1:record` and commit `test/fixtures/n-1`: the N-1 test then replays
    this release's PostgreSQL statements again (it reports itself skipped until then).
 
 **Rollback** is the previous release plus the retained SQLite file: stop Chat, unset `DATABASE_URL` /
 `DATABASE_DIRECT_URL` (the old release reads `CHAT_DB_PATH`, which the unit still sets), and start the old
-release on `chat.db.pre-pg`. The twelve chat tables Live mirrors lose nothing Live has already seen; rows
+release on `chat.db.pre-pg`. The twelve chat tables Live once mirrored lose nothing Live has already seen; rows
 written on PostgreSQL after the switch to Chat's own tables (rooms, calls, the audio queue, DMs' read
 state) are not in the file — export them from PostgreSQL first if the rollback comes after real traffic.
 Keep the SQLite file read-only for the rollback window; do not delete it until the PostgreSQL deploy has

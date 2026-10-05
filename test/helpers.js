@@ -105,7 +105,7 @@ async function boot({ env = {} } = {}) {
             const f = new URLSearchParams(raw);
             tokenRequests.push({ audience: f.get('audience'), scope: f.get('scope'), client: f.get('client_id') });
             const cap = String(f.get('scope') || '').split(/\s+/).filter(Boolean);
-            return res.end(JSON.stringify({ access_token: serviceToken(cap.length ? cap : ['live.chat_context.read', 'live.chat_effects.write', 'live.chat_mirror.write'], { aud: f.get('audience'), sub: 'svc:chat' }), expires_in: 300 }));
+            return res.end(JSON.stringify({ access_token: serviceToken(cap.length ? cap : ['live.chat_context.read', 'live.chat_effects.write'], { aud: f.get('audience'), sub: 'svc:chat' }), expires_in: 300 }));
         }
         if (req.url === '/api/.well-known/jwks') return res.end(JSON.stringify({ public_key: keys.publicKey }));
         res.statusCode = 404; res.end('{}');
@@ -128,8 +128,6 @@ async function boot({ env = {} } = {}) {
         decor: new Map(),          // userId → { cosmetic, tag }
         anon: new Map(),           // ip → { num, first_seen }
         effects: [],               // { name, body }
-        mirror: [],                // changes
-        mirrorStatus: 200,
         down: false,               // Live refuses: every connection is dropped at once
         hang: false,               // Live hangs: connections are accepted and never answered
         nextAnon: 1,
@@ -228,13 +226,8 @@ async function boot({ env = {} } = {}) {
         }
         if (p.startsWith('/internal/chat-effects/')) {
             const name = p.slice('/internal/chat-effects/'.length);
-            const bad = verify(req, name === 'mirror' ? 'live.chat_mirror.write' : 'live.chat_effects.write');
+            const bad = verify(req, 'live.chat_effects.write');
             if (bad) return send(401, { error: bad });
-            if (name === 'mirror') {
-                if (live.mirrorStatus !== 200) return send(live.mirrorStatus, { error: 'refused' });
-                live.mirror.push(...(body.changes || []));
-                return send(200, { ok: true, applied: (body.changes || []).length, skipped: [] });
-            }
             live.effects.push({ name, body });
             switch (name) {
                 case 'anon': {
@@ -298,7 +291,6 @@ async function boot({ env = {} } = {}) {
         OV_OAUTH_CLIENT_ID: 'chat',
         OV_OAUTH_CLIENT_SECRET: 'chat-secret',
         OV_LIVE_INTERNAL_URL: `http://127.0.0.1:${livePort}`,
-        LIVE_MIRROR: '0',
         EVENTS_URL: '',
         ...env,
     });
@@ -342,7 +334,6 @@ async function boot({ env = {} } = {}) {
     const index = require('../server/index');
     const started = await index.start();
     h.server = started.server;
-    h.mirrorRelay = started.mirror;
     h.eventsRelay = started.relay;
     h.eventsConsumer = started.events;
     h.subscriptions = started.subscriptions;
@@ -404,7 +395,7 @@ async function boot({ env = {} } = {}) {
      */
     h.detach = async () => {
         try { await h.chatServer.close(); } catch { /* */ }
-        try { h.ctx.stop(); h.mirrorRelay.stop(); h.eventsRelay.stop(); } catch { /* */ }
+        try { h.ctx.stop(); h.eventsRelay.stop(); } catch { /* */ }
         await new Promise((r) => h.server.close(() => r()));
         try { await h.db.close(); } catch { /* */ }
         h.children = [];
@@ -447,7 +438,7 @@ async function boot({ env = {} } = {}) {
     h.close = async () => {
         for (const c of h.children || []) { if (c.exitCode == null && c.signalCode == null) { c.kill('SIGKILL'); await c.exited; } }
         try { await h.chatServer.close(); } catch { /* */ }
-        try { h.ctx.stop(); h.mirrorRelay.stop(); h.eventsRelay.stop(); h.eventsConsumer.stop(); h.subscriptions.stop(); } catch { /* */ }
+        try { h.ctx.stop(); h.eventsRelay.stop(); h.eventsConsumer.stop(); h.subscriptions.stop(); } catch { /* */ }
         await new Promise((r) => h.server.close(() => r()));
         network.close(); liveServer.close(); if (liveServer.closeAllConnections) liveServer.closeAllConnections();
         try { await h.db.close(); } catch { /* */ }
