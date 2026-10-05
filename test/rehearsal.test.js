@@ -41,7 +41,8 @@ t('the seed applies after 0001–0002 and before 0003', async () => {
         assert.strictEqual(row.n, n, `${table} has ${n} seeded row(s)`);
     }
     assert.strictEqual((await db.prepare(`SELECT to_regclass('chat_ingress_applied') AS t`).get()).t, null, '0003 has not run yet');
-    const second = await db.migrate({ dir: MIGRATIONS, log: { log() {} } });
+    // windowDays 0: a test wants the final schema, not a contract held for its N-1 window (ADR-028).
+    const second = await db.migrate({ dir: MIGRATIONS, log: { log() {} }, windowDays: 0 });
     const later = fs.readdirSync(MIGRATIONS).filter((f) => /^\d{4}_.*\.sql$/.test(f)).map((f) => f.slice(0, 4))
         .filter((id) => id > '0002').sort();
     assert.ok(later.includes('0003'), 'migrations/0003 exists');

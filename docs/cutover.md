@@ -14,7 +14,8 @@ The cutover itself ran on 2026-09-23; the rehearsal, flip and check steps below 
 ingress (`/internal/chat/*`, `docs/chat-ingress.md`) and dropped Live's bridge outbox, so Chat no
 longer mounts `POST /internal/live/calls` or `GET /internal/live/presence`, and deploy notices arrive
 only as `live.release.deployed`. Where the steps below mention the bridge, they record the cutover as
-it ran. Its tables `bridge_applied` / `bridge_refs` stay as data until a later migration (J3b).
+it ran. Its tables `bridge_applied` / `bridge_refs` stayed as data until J3b dropped them
+(`migrations/0005_drop_bridge_tables.sql`).
 
 ## Rehearsal
 
@@ -84,7 +85,8 @@ writers are repointed; deploy the three new capability grants before that Live r
 
 Chat also keeps `ctx_users`, `ctx_streams`, `ctx_managed_streams`, `ctx_channels` — projections of
 Live data maintained by `live-context` (never authority), `events_outbox`, `live_mirror_outbox`,
-`bridge_applied` (the retired bridge's, kept as data), `import_hold`, `import_runs`.
+`import_hold`, `import_runs`. The retired bridge's `bridge_applied` / `bridge_refs` are dropped
+(`migrations/0005_drop_bridge_tables.sql`).
 
 ## Prerequisites
 

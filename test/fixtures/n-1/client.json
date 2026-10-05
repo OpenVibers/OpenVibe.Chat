@@ -1,32 +1,32 @@
 {
  "service": "chat",
- "release": "04d2625d98d26fc3b7a55f7a3996e42a1ad6e4d4",
- "recorded_at": "2026-09-29T17:34:13.359Z",
+ "release": "360bb4ebcaa8906d47187623d447effd18bade95",
+ "recorded_at": "2026-10-05T18:52:56.885Z",
  "note": "N-1 fixture: written by `npm run n-1:record`, replayed by test/n-1.test.js",
  "clients": {
   "live": "ee2ad948a4c25b9af9c27be16e731025afa6c2d3"
  },
  "manifest": {
   "service": "chat",
-  "release": "04d2625d98d2",
-  "released_at": "2026-09-29T16:52:43.000Z",
-  "booted_at": "2026-09-29T17:34:08.214Z",
-  "contracts_version": "0.80.0",
+  "release": "360bb4ebcaa8",
+  "released_at": "2026-10-05T18:18:22.000Z",
+  "booted_at": "2026-10-05T18:52:51.633Z",
+  "contracts_version": "0.96.0",
   "packages": {
-   "openvibe-shared": "2.0.0",
-   "openvibe-sdk": "0.23.1",
-   "openvibe-contracts": "0.80.0"
+   "openvibe-shared": "2.5.0",
+   "openvibe-sdk": "0.26.0",
+   "openvibe-contracts": "0.96.0"
   },
   "min_client_release": null,
   "mixed_version_window_hours": 24,
   "components": {
    "shell": {
     "kind": "script",
-    "version": "04d2625d98d2"
+    "version": "360bb4ebcaa8"
    },
    "server": {
     "kind": "server",
-    "version": "04d2625d98d2"
+    "version": "360bb4ebcaa8"
    }
   },
   "assets": {},
@@ -1387,7 +1387,7 @@
   },
   {
    "method": "GET",
-   "path": "/shared/navbar.js?v=b8089ee3bd11",
+   "path": "/shared/navbar.js?v=017a740747b4",
    "auth": "anon",
    "accept": "html",
    "status": 200,
@@ -1409,7 +1409,7 @@
   },
   {
    "method": "GET",
-   "path": "/web/chat.js?v=aedc88ef89",
+   "path": "/web/chat.js?v=64ef4815d2",
    "auth": "anon",
    "accept": "html",
    "status": 200,
@@ -1783,7 +1783,8 @@
    {
     "type": "join_room",
     "keys": [
-     "room"
+     "room",
+     "token"
     ]
    },
    {
