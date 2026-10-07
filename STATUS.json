@@ -7,8 +7,23 @@
   "runtime": "node 22, express, ws, PostgreSQL through openvibe-sdk/db (DATABASE_URL via PgBouncer, DATABASE_DIRECT_URL for migrations/; embedded PGlite outside production), Valkey for the per-actor limits (VALKEY_URL); better-sqlite3 gone (plan T3)",
   "port": 4400,
   "domain": "openvibe.chat (Chat's own site: global chat, messages, rooms, settings; the service manifest records it live since 2026-09-24) and openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via an nginx include in openvibe.live's vhost)",
-  "contracts": "openvibe-contracts v0.103.0",
-  "capabilities": ["chat.message.send", "chat.event.publish", "chat.moderation.write", "chat.cache.invalidate", "chat.presence.read", "chat.live_bridge.write", "chat.stats.read", "chat.messages.read", "chat.analysis.read", "chat.moderation.queue.read", "chat.sounds.read", "chat.sounds.write"],
+  "contracts": "openvibe-contracts v0.112.0",
+  "sdk": "openvibe-sdk v0.26.0",
+  "shared": "openvibe-shared v2.13.0",
+  "capabilities": [
+    "chat.message.send",
+    "chat.event.publish",
+    "chat.moderation.write",
+    "chat.cache.invalidate",
+    "chat.presence.read",
+    "chat.live_bridge.write",
+    "chat.stats.read",
+    "chat.messages.read",
+    "chat.analysis.read",
+    "chat.moderation.queue.read",
+    "chat.sounds.read",
+    "chat.sounds.write"
+  ],
   "capabilitiesUsed": [
     "live.chat_context.read",
     "live.chat_effects.write",
@@ -21,7 +36,14 @@
     "tools.job.read"
   ],
   "capabilitiesRegistered": true,
-  "events": ["chat.message.created", "chat.message.deleted", "chat.dm.created", "chat.moderation.action", "chat.room.message.created", "chat.room.message.deleted"],
+  "events": [
+    "chat.message.created",
+    "chat.message.deleted",
+    "chat.dm.created",
+    "chat.moderation.action",
+    "chat.room.message.created",
+    "chat.room.message.deleted"
+  ],
   "eventsConsumed": "live.release.deployed, network.module.updated, network.user.token_valid_after, vip.membership.changed, network.block.changed, network.subject.merged, network.account.export_requested and network.account.deleted at POST /internal/events (signature v2, openvibe-sdk inbox); subscriptions created at boot when missing (CHAT_EVENTS_SECRET and the Network grant chat events.subscription.manage openvibe.events)",
   "liveAuthorityFlag": "CHAT_AUTHORITY=chat is required in every mode since the cutover (2026-09-23 02:03 UTC): Live mounts no local chat routes and there is no rollback to Live; Live reads Chat's chat tables through Chat's internal read API (the read mirror was retired on 2026-10-05, so the cutover rollback through it no longer exists)",
   "vip": "Member badges from OpenVibe.VIP (server/vip/badges.js: entitlements/check with product chat, cached 60 s, never blocks sending, fails closed; vip.membership.changed drops the cache). Needs the Network grant chat vip.entitlement.check openvibe.vip",
@@ -29,7 +51,6 @@
   "calls": "Live's call server, call routes and stream hooks ported to server/calls/ with a calls lifecycle table (WS-I task 1). Off unless CHAT_CALLS=1; the switch is CHAT_CALLS=1, Live CALLS_AUTHORITY=chat and the nginx include deploy/nginx/calls/openvibe.live-calls.locations.conf (docs/calls-cutover.md)",
   "deployed": true,
   "deployment": "Deployed with `sudo ovhost deploy chat`: /opt/openvibe.chat, unit openvibe-chat, 127.0.0.1:4400 (loopback); public through the openvibe.chat vhost and openvibe.live's nginx include for the chat paths; EVENTS_URL set (chat.message.created reaches OpenVibe.Events); restore drill passed 2026-09-23",
-  "updated": "2026-10-07",
   "features": [
     "Live's global, stream and channel chat (authority since 2026-09-23; Live reads Chat's internal read API)",
     "DMs and group DMs, participants only",
@@ -44,5 +65,6 @@
     "outbox events and chat.room.message.* on the realtime plane",
     "N-1 compatibility tests",
     "per-actor limits (openvibe-sdk/limits)"
-  ]
+  ],
+  "updated": "2026-10-07"
 }
