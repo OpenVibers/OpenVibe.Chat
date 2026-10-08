@@ -9,7 +9,7 @@
   "domain": "openvibe.chat (Chat's own site: global chat, messages, rooms, settings; the service manifest records it live since 2026-09-24) and openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via an nginx include in openvibe.live's vhost)",
   "contracts": "openvibe-contracts v0.112.0",
   "sdk": "openvibe-sdk v0.35.0",
-  "shared": "openvibe-shared v2.13.0",
+  "shared": "openvibe-shared v2.13.2",
   "capabilities": [
     "chat.message.send",
     "chat.event.publish",
@@ -66,5 +66,5 @@
     "N-1 compatibility tests",
     "per-actor limits (openvibe-sdk/limits)"
   ],
-  "updated": "2026-10-07"
+  "updated": "2026-10-08"
 }
