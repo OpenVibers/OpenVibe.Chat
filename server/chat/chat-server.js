@@ -897,6 +897,7 @@ class ChatServer {
                 if (cosmeticProfile.nameFX) chatMsg.nameFX = cosmeticProfile.nameFX;
                 if (cosmeticProfile.particleFX) chatMsg.particleFX = cosmeticProfile.particleFX;
                 if (cosmeticProfile.hatFX) chatMsg.hatFX = cosmeticProfile.hatFX;
+                if (cosmeticProfile.badgeFX) chatMsg.badgeFX = cosmeticProfile.badgeFX;
                 if (cosmeticProfile.voiceFX) chatMsg.voiceFX = cosmeticProfile.voiceFX;
             } catch { /* non-critical */ }
 
@@ -1256,6 +1257,7 @@ class ChatServer {
                     if (cosmeticProfile.nameFX) gottiMsg.nameFX = cosmeticProfile.nameFX;
                     if (cosmeticProfile.particleFX) gottiMsg.particleFX = cosmeticProfile.particleFX;
                     if (cosmeticProfile.hatFX) gottiMsg.hatFX = cosmeticProfile.hatFX;
+                    if (cosmeticProfile.badgeFX) gottiMsg.badgeFX = cosmeticProfile.badgeFX;
                 } catch { /* non-critical */ }
 
                 try {
@@ -1540,6 +1542,7 @@ class ChatServer {
                     if (cp.nameFX) soundMsg.nameFX = cp.nameFX;
                     if (cp.particleFX) soundMsg.particleFX = cp.particleFX;
                     if (cp.hatFX) soundMsg.hatFX = cp.hatFX;
+                    if (cp.badgeFX) soundMsg.badgeFX = cp.badgeFX;
                 } catch { /* non-critical */ }
                 try {
                     const tagProfile = tags.getTagProfile(client.user.id);

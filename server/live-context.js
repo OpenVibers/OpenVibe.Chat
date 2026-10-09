@@ -577,7 +577,7 @@ async function ensureDecor(ids) {
         } catch (err) { console.warn('[LiveContext] decor:', err.message); break; }
     }
 }
-/** cosmetics.getCosmeticProfile(userId): { nameFX, particleFX, hatFX, voiceFX } (empty until warm). */
+/** cosmetics.getCosmeticProfile(userId): { nameFX, particleFX, hatFX, badgeFX, voiceFX } (empty until warm). */
 function getCosmeticProfile(userId) { const d = _decor.peek(Number(userId)); return (d && d.cosmetic) || {}; }
 /** tags.getTagProfile(userId): the equipped tag or null. */
 function getTagProfile(userId) { const d = _decor.peek(Number(userId)); return (d && d.tag) || null; }
