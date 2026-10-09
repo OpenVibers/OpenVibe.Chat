@@ -57,9 +57,19 @@
   }
 
   // A name with the effect its person wears (m.nameFX from Live's decor; openvibe-shared items.css draws it).
+  // Their hat (m.hatFX) goes just before the name, outside the effect so a gradient cannot hide it.
   function wearing(m, text) {
+    var frag = document.createDocumentFragment();
+    var h = m && m.hatFX;
+    var glyph = h && typeof h.hatChar === 'string' ? h.hatChar.slice(0, 8) : '';
+    if (glyph) {
+      var hat = el('span', 'ov-hat' + (['float', 'pulse', 'warp'].indexOf(h.animated) >= 0 ? ' ov-hat-' + h.animated : ''), glyph);
+      hat.setAttribute('aria-hidden', 'true');
+      frag.appendChild(hat);
+    }
     var cls = m && m.nameFX && /^name-fx-[a-z]{2,24}$/.test(String(m.nameFX.cssClass || '')) ? m.nameFX.cssClass : null;
-    return cls ? el('span', 'ov-fx ' + cls, text) : document.createTextNode(text);
+    frag.appendChild(cls ? el('span', 'ov-fx ' + cls, text) : document.createTextNode(text));
+    return frag;
   }
 
   // ── Global chat ──
