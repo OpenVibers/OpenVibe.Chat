@@ -56,6 +56,12 @@
     clearTimeout(showError.t); showError.t = setTimeout(function () { p.remove(); }, 6000);
   }
 
+  // A name with the effect its person wears (m.nameFX from Live's decor; openvibe-shared items.css draws it).
+  function wearing(m, text) {
+    var cls = m && m.nameFX && /^name-fx-[a-z]{2,24}$/.test(String(m.nameFX.cssClass || '')) ? m.nameFX.cssClass : null;
+    return cls ? el('span', 'ov-fx ' + cls, text) : document.createTextNode(text);
+  }
+
   // ── Global chat ──
   function globalItem(m) {
     var li = el('li', 'oc-msg'); li.dataset.id = m.id || '';
@@ -63,7 +69,7 @@
     var handle = m.core_username || (m.user_id ? m.username : null);
     var name = m.display_name || m.username || m.anon_id || 'someone';
     var who;
-    if (handle) { who = el('a', 'oc-name', name); who.href = LIVE + '/@' + encodeURIComponent(handle); if (/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '')) who.style.setProperty('--nc', m.profile_color); }
+    if (handle) { who = el('a', 'oc-name'); who.appendChild(wearing(m, name)); who.href = LIVE + '/@' + encodeURIComponent(handle); if (/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '')) who.style.setProperty('--nc', m.profile_color); }
     else who = el('span', 'oc-name oc-anon', name);
     li.appendChild(who);
     var b = badge(m.role); if (b) li.appendChild(b);
@@ -176,7 +182,7 @@
   function roomItem(m) {
     var li = el('li', 'oc-msg'); li.dataset.id = m.id || ''; li.dataset.user = m.user_id || '';
     li.appendChild(clock(m.created_at)); li.appendChild(document.createTextNode(' '));
-    var who = el('a', 'oc-name', m.display_name || m.username || 'someone');
+    var who = el('a', 'oc-name'); who.appendChild(wearing(m, m.display_name || m.username || 'someone'));
     who.href = LIVE + '/@' + encodeURIComponent(m.username || '');
     if (/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '')) who.style.setProperty('--nc', m.profile_color);
     li.appendChild(who);

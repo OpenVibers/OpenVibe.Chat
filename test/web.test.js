@@ -218,4 +218,24 @@ t('the page scripts present the session token in the first message of every sock
     }
 });
 
+t('what people wear: a name effect from Live\'s decor is drawn on the name, with the shared stylesheet; a bad token never is', async () => {
+    // Two people this suite has not seen yet, so nothing of theirs is in the decor cache.
+    const dave = h.addUser('dave', { subject: ids.newId('user') });
+    const erin = h.addUser('erin', { subject: ids.newId('user') });
+    for (const u of [dave, erin]) { await h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); }
+    h.live.decor.set(Number(dave.id), { cosmetic: { nameFX: { itemId: 'fx_rainbow', cssClass: 'name-fx-rainbow' } }, tag: null });
+    h.live.decor.set(Number(erin.id), { cosmetic: { nameFX: { itemId: 'x', cssClass: 'evil" onload="x' } }, tag: null });
+    assert.strictEqual((await req('POST', '/send', form(dave, { message: 'wearing my rainbow' }))).status, 303);
+    assert.strictEqual((await req('POST', '/send', form(erin, { message: 'and mine' }))).status, 303);
+    const r = await req('GET', '/');
+    assert.match(r.text, /<span class="ov-fx name-fx-rainbow">Dave<\/span>/, 'dave\'s name wears its effect');
+    assert.ok(!/onload=/.test(r.text) && !/ov-fx[^"]*">Erin/i.test(r.text) && /Erin/.test(r.text), 'a token of the wrong shape is never a class');
+    assert.match(r.text, /<link rel="stylesheet" href="\/shared\/items\.css\?v=[A-Za-z0-9_-]+">/);
+    assert.strictEqual((await req('GET', '/shared/items.css')).status, 200);
+    const { nameFxClass } = require('../server/web/pages');
+    assert.strictEqual(nameFxClass({ nameFX: { cssClass: 'name-fx-galaxy' } }), 'name-fx-galaxy');
+    assert.strictEqual(nameFxClass({ nameFX: { cssClass: 'NAME-fx-x' } }), null);
+    assert.strictEqual(nameFxClass({}), null);
+});
+
 t.run(async () => { if (h && h.close) await h.close(); });

@@ -87,6 +87,7 @@ function renderPage(o) {
 ${head}
 ${appIcon.headTags({ site: 'network' })}
 <link rel="stylesheet" href="${asset('chat.css')}">
+<link rel="stylesheet" href="${ovServe.url('items.css')}">
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>
 <script src="${ovServe.url('footer.js')}" defer></script>

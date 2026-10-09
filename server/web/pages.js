@@ -76,10 +76,14 @@ function roleBadge(role) {
     if (permissions.can(who, 'staff.moderation.chat')) return '<span class="oc-badge oc-badge-mod" title="Moderator">mod</span>';
     return '';
 }
+// The name effect a person wears (OpenVibe.Inventory through Live's decor): a class openvibe-shared items.css draws.
+const NAME_FX_RE = /^name-fx-[a-z]{2,24}$/;
+const nameFxClass = (m) => (m && m.nameFX && NAME_FX_RE.test(String(m.nameFX.cssClass || '')) ? m.nameFX.cssClass : null);
 function globalMessage(m) {
     const t = hhmm(m.timestamp);
     const handle = m.core_username || (m.user_id ? m.username : null);
-    const name = esc(m.display_name || m.username || m.anon_id || 'someone');
+    const fx = nameFxClass(m);
+    const name = fx ? `<span class="ov-fx ${fx}">${esc(m.display_name || m.username || m.anon_id || 'someone')}</span>` : esc(m.display_name || m.username || m.anon_id || 'someone');
     const who = handle ? `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(handle)}" style="--nc:${esc(/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? m.profile_color : 'inherit')}">${name}</a>` : `<span class="oc-name oc-anon">${name}</span>`;
     const where = m.stream_channel ? ` <a class="oc-where" href="${LIVE}/@${encodeURIComponent(m.stream_channel)}" title="Sent from ${esc(m.stream_channel)}'s channel">@${esc(m.stream_channel)}</a>` : '';
     return `<li class="oc-msg" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who}${roleBadge(m.role)}${where} <span class="oc-text">${linkify(m.message)}</span></li>`;
@@ -158,6 +162,14 @@ function createWebRoutes({ config }) {
         // Not the lines of people this reader blocked on the network (chat/network-blocks.js).
         const hidden = actor.kind === 'user' ? await require('../chat/network-blocks').blockedUserIds(actor.user) : new Set();
         const shown = messages.filter((m) => !m.is_deleted && (m.message_type || 'chat') === 'chat' && !(m.user_id && hidden.has(Number(m.user_id))));
+        // What people wear: their name effects, from the decor cache (one Live read per 200 people, kept a minute). The
+        // page waits for that read a quarter of a second at most: Live slow or down never holds the page, the names just
+        // stay plain until the cache is warm.
+        try {
+            const warm = ctx.ensureDecor(shown.map((m) => m.user_id).filter(Boolean)).catch(() => {});
+            await Promise.race([warm, new Promise((r) => { const tm = setTimeout(r, 250); if (tm.unref) tm.unref(); })]);
+            for (const m of shown) if (m.user_id && !m.nameFX) { const fx = ctx.getCosmeticProfile(m.user_id).nameFX; if (fx) m.nameFX = fx; }
+        } catch { /* the names stay plain */ }
         const composer = actor.kind === 'user'
             ? (actor.user.is_banned ? notice('error', 'Your account is banned from chat.') : `<form class="oc-compose" method="post" action="/send" id="oc-compose">
 <label for="oc-input" class="oc-sr">Message to everyone</label>
@@ -626,4 +638,4 @@ ${attachList}`,
     return router;
 }
 
-module.exports = { createWebRoutes, apiBridge, globalMessage, linkify };
+module.exports = { createWebRoutes, apiBridge, globalMessage, linkify, nameFxClass };
