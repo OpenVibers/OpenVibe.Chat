@@ -223,12 +223,13 @@ t('what people wear: a name effect from Live\'s decor is drawn on the name, with
     const dave = h.addUser('dave', { subject: ids.newId('user') });
     const erin = h.addUser('erin', { subject: ids.newId('user') });
     for (const u of [dave, erin]) { await h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); }
-    h.live.decor.set(Number(dave.id), { cosmetic: { nameFX: { itemId: 'fx_rainbow', cssClass: 'name-fx-rainbow' } }, tag: null });
-    h.live.decor.set(Number(erin.id), { cosmetic: { nameFX: { itemId: 'x', cssClass: 'evil" onload="x' } }, tag: null });
+    h.live.decor.set(Number(dave.id), { cosmetic: { nameFX: { itemId: 'fx_rainbow', cssClass: 'name-fx-rainbow' }, hatFX: { itemId: 'hat_crown', hatChar: '👑', animated: 'pulse' } }, tag: null });
+    h.live.decor.set(Number(erin.id), { cosmetic: { nameFX: { itemId: 'x', cssClass: 'evil" onload="x' }, hatFX: { itemId: 'y', hatChar: '<b>', animated: 'spin" x="' } }, tag: null });
     assert.strictEqual((await req('POST', '/send', form(dave, { message: 'wearing my rainbow' }))).status, 303);
     assert.strictEqual((await req('POST', '/send', form(erin, { message: 'and mine' }))).status, 303);
     const r = await req('GET', '/');
-    assert.match(r.text, /<span class="ov-fx name-fx-rainbow">Dave<\/span>/, 'dave\'s name wears its effect');
+    assert.match(r.text, /<span class="ov-hat ov-hat-pulse" aria-hidden="true">👑<\/span><span class="ov-fx name-fx-rainbow">Dave<\/span>/, 'dave\'s crown, then his name in its effect');
+    assert.match(r.text, /<span class="ov-hat" aria-hidden="true">&lt;b&gt;<\/span>Erin/, 'a hat is text, and an unknown motion is no class');
     assert.ok(!/onload=/.test(r.text) && !/ov-fx[^"]*">Erin/i.test(r.text) && /Erin/.test(r.text), 'a token of the wrong shape is never a class');
     assert.match(r.text, /<link rel="stylesheet" href="\/shared\/items\.css\?v=[A-Za-z0-9_-]+">/);
     assert.strictEqual((await req('GET', '/shared/items.css')).status, 200);

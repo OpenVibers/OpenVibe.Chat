@@ -79,12 +79,20 @@ function roleBadge(role) {
 // The name effect a person wears (OpenVibe.Inventory through Live's decor): a class openvibe-shared items.css draws.
 const NAME_FX_RE = /^name-fx-[a-z]{2,24}$/;
 const nameFxClass = (m) => (m && m.nameFX && NAME_FX_RE.test(String(m.nameFX.cssClass || '')) ? m.nameFX.cssClass : null);
+// The hat they wear (m.hatFX: its emoji and Live's float/pulse/warp motion), just before the name (items.css .ov-hat).
+const HAT_MOTION = ['float', 'pulse', 'warp'];
+function hatHtml(m) {
+    const h = m && m.hatFX;
+    const glyph = h && typeof h.hatChar === 'string' ? h.hatChar.slice(0, 8) : '';
+    if (!glyph) return '';
+    return `<span class="ov-hat${HAT_MOTION.includes(h.animated) ? ` ov-hat-${h.animated}` : ''}" aria-hidden="true">${esc(glyph)}</span>`;
+}
 function globalMessage(m) {
     const t = hhmm(m.timestamp);
     const handle = m.core_username || (m.user_id ? m.username : null);
     const fx = nameFxClass(m);
     const name = fx ? `<span class="ov-fx ${fx}">${esc(m.display_name || m.username || m.anon_id || 'someone')}</span>` : esc(m.display_name || m.username || m.anon_id || 'someone');
-    const who = handle ? `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(handle)}" style="--nc:${esc(/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? m.profile_color : 'inherit')}">${name}</a>` : `<span class="oc-name oc-anon">${name}</span>`;
+    const who = handle ? `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(handle)}" style="--nc:${esc(/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? m.profile_color : 'inherit')}">${hatHtml(m)}${name}</a>` : `<span class="oc-name oc-anon">${name}</span>`;
     const where = m.stream_channel ? ` <a class="oc-where" href="${LIVE}/@${encodeURIComponent(m.stream_channel)}" title="Sent from ${esc(m.stream_channel)}'s channel">@${esc(m.stream_channel)}</a>` : '';
     return `<li class="oc-msg" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who}${roleBadge(m.role)}${where} <span class="oc-text">${linkify(m.message)}</span></li>`;
 }
@@ -168,7 +176,12 @@ function createWebRoutes({ config }) {
         try {
             const warm = ctx.ensureDecor(shown.map((m) => m.user_id).filter(Boolean)).catch(() => {});
             await Promise.race([warm, new Promise((r) => { const tm = setTimeout(r, 250); if (tm.unref) tm.unref(); })]);
-            for (const m of shown) if (m.user_id && !m.nameFX) { const fx = ctx.getCosmeticProfile(m.user_id).nameFX; if (fx) m.nameFX = fx; }
+            for (const m of shown) {
+                if (!m.user_id) continue;
+                const prof = ctx.getCosmeticProfile(m.user_id);
+                if (!m.nameFX && prof.nameFX) m.nameFX = prof.nameFX;
+                if (!m.hatFX && prof.hatFX) m.hatFX = prof.hatFX;
+            }
         } catch { /* the names stay plain */ }
         const composer = actor.kind === 'user'
             ? (actor.user.is_banned ? notice('error', 'Your account is banned from chat.') : `<form class="oc-compose" method="post" action="/send" id="oc-compose">
@@ -638,4 +651,4 @@ ${attachList}`,
     return router;
 }
 
-module.exports = { createWebRoutes, apiBridge, globalMessage, linkify, nameFxClass };
+module.exports = { createWebRoutes, apiBridge, globalMessage, linkify, nameFxClass, hatHtml };
