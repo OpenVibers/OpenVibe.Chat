@@ -60,6 +60,13 @@
   // Their hat (m.hatFX) goes just before the name, outside the effect so a gradient cannot hide it.
   function wearing(m, text) {
     var frag = document.createDocumentFragment();
+    var bf = m && m.badgeFX;
+    if (bf && /^med_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(bf.mediaId || ''))) {
+      var img = document.createElement('img');
+      img.className = 'ov-badge'; img.src = 'https://openvibe.media/o/' + bf.mediaId; img.alt = ''; img.width = 16; img.height = 16;
+      img.setAttribute('loading', 'lazy'); img.setAttribute('aria-hidden', 'true');
+      frag.appendChild(img);
+    }
     var h = m && m.hatFX;
     var glyph = h && typeof h.hatChar === 'string' ? h.hatChar.slice(0, 8) : '';
     if (glyph) {

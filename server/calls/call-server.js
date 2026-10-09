@@ -292,7 +292,7 @@ class CallServer {
             muted: info.muted, cameraOff: info.cameraOff,
             forceMuted: info.forceMuted || false, forceCameraOff: info.forceCameraOff || false,
             speaking: info.speaking || false,
-            nameFX: cosmeticProfile.nameFX || null, particleFX: cosmeticProfile.particleFX || null, hatFX: cosmeticProfile.hatFX || null,
+            nameFX: cosmeticProfile.nameFX || null, particleFX: cosmeticProfile.particleFX || null, hatFX: cosmeticProfile.hatFX || null, badgeFX: cosmeticProfile.badgeFX || null,
             ...(info.inRoom ? { roomRole: info.roomRole || null, canTalk: !info.listenOnly } : {}),
         };
     }

@@ -82,6 +82,11 @@ const nameFxClass = (m) => (m && m.nameFX && NAME_FX_RE.test(String(m.nameFX.css
 // The hat they wear (m.hatFX: its emoji and Live's float/pulse/warp motion), just before the name (items.css .ov-hat).
 const HAT_MOTION = ['float', 'pulse', 'warp'];
 function hatHtml(m) {
+    // A community badge (the Workshop, m.badgeFX): its reviewed image on OpenVibe.Media, first.
+    const b = m && m.badgeFX && /^med_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(m.badgeFX.mediaId || '')) ? `<img class="ov-badge" src="https://openvibe.media/o/${m.badgeFX.mediaId}" alt="" width="16" height="16" loading="lazy" aria-hidden="true">` : '';
+    return b + hatOnly(m);
+}
+function hatOnly(m) {
     const h = m && m.hatFX;
     const glyph = h && typeof h.hatChar === 'string' ? h.hatChar.slice(0, 8) : '';
     if (!glyph) return '';
@@ -181,6 +186,7 @@ function createWebRoutes({ config }) {
                 const prof = ctx.getCosmeticProfile(m.user_id);
                 if (!m.nameFX && prof.nameFX) m.nameFX = prof.nameFX;
                 if (!m.hatFX && prof.hatFX) m.hatFX = prof.hatFX;
+                if (!m.badgeFX && prof.badgeFX) m.badgeFX = prof.badgeFX;
             }
         } catch { /* the names stay plain */ }
         const composer = actor.kind === 'user'

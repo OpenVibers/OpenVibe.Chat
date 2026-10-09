@@ -106,6 +106,7 @@ function enrichMessagesWithCosmetics(messages) {
         if (prof.nameFX) m.nameFX = prof.nameFX;
         if (prof.particleFX) m.particleFX = prof.particleFX;
         if (prof.hatFX) m.hatFX = prof.hatFX;
+        if (prof.badgeFX) m.badgeFX = prof.badgeFX;   // a community badge (the Workshop): its Media image
         if (prof.tag) m.tag = prof.tag;
     }
     return messages;
