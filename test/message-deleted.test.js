@@ -209,7 +209,7 @@ t('e2e: the relay publishes the message, then its deletion; replay serves only t
     if (!haveEvents) return;
     await h.db.run('UPDATE service_outbox SET sent_at = ? WHERE sent_at IS NULL', [Date.now()]);   // earlier tests' rows
     msgId = await say(SECRET, { user_id: alice.id, anon_id: null, username: 'alice' });
-    assert.strictEqual((await h.eventsRelay.flush()).sent, 1);
+    assert.strictEqual((await h.eventsRelay.outbox.flush()).sent, 1);
     firstSeq = await events.store.lastSeq();
     const before = await sse(`/realtime/stream?topics=chat.message.*&last_event_id=${firstSeq - 1}`);
     await before.waitFor((c) => c.events().length === 1);
@@ -217,7 +217,7 @@ t('e2e: the relay publishes the message, then its deletion; replay serves only t
     before.close();
 
     await h.db.deleteChatMessage(msgId, admin.id);
-    assert.strictEqual((await h.eventsRelay.flush()).sent, 1);
+    assert.strictEqual((await h.eventsRelay.outbox.flush()).sent, 1);
     const views = [
         ['anonymous', {}],
         ['signed in (cookie)', { Cookie: `ov_token=${userJwt('usr_01J9AAAAAAAAAAAAAAAAAAAAAA')}` }],
@@ -246,7 +246,7 @@ t('e2e: the relay publishes the message, then its deletion; replay serves only t
 t('e2e: only svc:chat can redact Chat’s events', async () => {
     if (!haveEvents) return;
     const id = await say('not yours to delete');
-    await h.eventsRelay.flush();
+    await h.eventsRelay.outbox.flush();
     const created = (await events.store.scan(0, { patterns: ['chat.message.created'], limit: 1000 })).rows.find((r) => r.subject_id === String(id));
     const env = (await deletions(0)).at(-1);   // a well-formed deletion, re-sourced by another service
     const post = (sub, body) => fetch(`http://127.0.0.1:${eventsPort}/api/v1/events`, {
@@ -260,7 +260,7 @@ t('e2e: only svc:chat can redact Chat’s events', async () => {
     assert.strictEqual(r.status, 403, 'svc:live cannot publish as chat');
     assert.ok((await events.store.getEvent(created.id)).payload.includes('not yours to delete'), 'still intact');
     await h.db.deleteChatMessage(id, admin.id);
-    await h.eventsRelay.flush();
+    await h.eventsRelay.outbox.flush();
     assert.ok((await events.store.getEvent(created.id)).redacted_at, 'Chat itself can');
 });
 
