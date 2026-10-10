@@ -20,7 +20,7 @@ const { boot, suite } = require('./helpers');
 
 const t = suite('message-deleted');
 const EVENTS_DIR = process.env.OPENVIBE_EVENTS_DIR || path.join(__dirname, '..', '..', 'OpenVibe.Events');
-const haveEvents = ['server/index.js', 'server/redaction.js', 'node_modules/better-sqlite3'].every((f) => fs.existsSync(path.join(EVENTS_DIR, f)));
+const haveEvents = ['server/index.js', 'server/redaction.js', 'package.json'].every((f) => fs.existsSync(path.join(EVENTS_DIR, f)));
 const SECRET = 'my number is 555-0199';
 let h, events, eventsDb, eventsPort, admin, alice, streamer, streamId;
 
@@ -64,12 +64,11 @@ t('boot (a real OpenVibe.Events on a reserved port when one is checked out next 
         const { load } = require(path.join(EVENTS_DIR, 'server', 'config'));
         const { start } = require(path.join(EVENTS_DIR, 'server', 'index'));
         const quiet = { log() {}, warn() {}, error() {} };
-        // Events is on PostgreSQL (ADR-035): its own test/db.js hands out a migrated database (PGlite, or the
-        // containers under EVENTS_TEST_STORE=pg); an older SQLite checkout ignores the handle and uses the path.
+        // Events' own test/db.js hands out a migrated database when available.
         const dbHelper = path.join(EVENTS_DIR, 'test', 'db.js');
         eventsDb = fs.existsSync(dbHelper) ? await require(dbHelper).testDb() : null;
         events = await start({
-            config: load({ NODE_ENV: 'test', PORT: String(eventsPort), EVENTS_DB_PATH: path.join(h.tmp, 'events.db'), OV_NETWORK_PUBLIC_KEY: h.keys.publicKey, EVENTS_WORKER: 'off' }),
+            config: load({ NODE_ENV: 'test', PORT: String(eventsPort), OV_NETWORK_PUBLIC_KEY: h.keys.publicKey, EVENTS_WORKER: 'off' }),
             db: eventsDb ? eventsDb.db : null,
             log: quiet,
         });

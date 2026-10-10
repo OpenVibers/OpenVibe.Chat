@@ -122,8 +122,7 @@ after this long and the caller is told (see below).
 - `curl -s https://openvibe.live/api/streams/voice-channels | jq '.channels[].id'` → `"public"` and
   whatever users created since the flip.
 - Two test accounts in the Chat tab: join the Public voice channel, hear and see each other, mute
-  shows on the other side, leave. `sqlite3 /var/lib/openvibe-chat/chat.db "select id, kind, state,
-  channel_id, end_reason from calls order by id desc limit 5"` shows the `channel` session `active`,
+  shows on the other side, leave. `psql "$DATABASE_DIRECT_URL" -c "select id, kind, state, channel_id, end_reason from calls order by id desc limit 5"` shows the `channel` session `active`,
   then `ended` / `empty`.
 - Call one test account from the other (user menu → Call): the callee rings (and gets the
   notification), accept → connected; the row is `direct`, `ringing` → `active` → `ended`. Decline →

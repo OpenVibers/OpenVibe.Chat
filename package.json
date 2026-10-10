@@ -9,7 +9,6 @@
     "dev": "NODE_ENV=development node server/index.js",
     "test": "node test/run.js",
     "test:pg": "OV_TEST_STORE=pg node test/run.js",
-    "import-from-live": "node scripts/import-from-live.js",
     "n-1:record": "node scripts/n-1-record.js"
   },
   "keywords": [

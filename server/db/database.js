@@ -85,8 +85,7 @@ function getDb() {
 /** Tests and tools: use this handle as the process-wide database (null forgets it). */
 function setDb(handle) { db = handle; _stmts.clear(); }
 
-// An INSERT into a table with an `id` column returns it, so run() answers { changes, lastInsertRowid } as
-// better-sqlite3 did and no caller changes shape (decision: RETURNING in place of lastInsertRowid).
+// An INSERT into a table with an `id` column returns it, preserving the run() result shape.
 const INSERT_INTO = /^\s*INSERT\s+INTO\s+([a-z_]+)/i;
 function withReturning(sql) {
     if (/\bRETURNING\b/i.test(sql)) return sql;
@@ -104,7 +103,7 @@ function stmt(sql) {
     return s;
 }
 
-/** → { changes, lastInsertRowid }, better-sqlite3's shape (callers pass it on, some into answers). */
+/** → { changes, lastInsertRowid } (callers pass it on, some into answers). */
 async function run(sql, params = []) {
     const r = await stmt(sql).run(...(Array.isArray(params) ? params : [params]));
     return { changes: r.changes, lastInsertRowid: r.lastInsertRowid };
