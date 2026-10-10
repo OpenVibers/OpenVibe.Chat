@@ -4,8 +4,14 @@
  *   headers(audience, scope)  Chat → another service: cached client-credentials token from the
  *                             Network's /oauth/token for client `chat`.
  *   guard(capability)         another service → Chat: Express guard for /internal/* that
- *                             verifies an RS256 service token for audience openvibe.chat and
- *                             checks the capability in its `cap` claim.
+ *                             verifies an RS256 service token for audience openvibe.chat
+ *                             (openvibe-sdk/auth verifyServiceToken: the pinned contracts rules, the
+ *                             key the token's kid names) and checks the capability in its `cap` claim.
+ *   keys()                    Network's signing keys (openvibe-sdk/auth createNetworkKeys), read by this
+ *                             guard and by auth/network-session.js: the PEM file OV_NETWORK_PUBLIC_KEY
+ *                             names when it is readable, else Network's JWKS (a rotation honoured on an
+ *                             unknown kid, the last good keys kept through an outage). Created on first
+ *                             use, so nothing is fetched at module load.
  *
  * The capabilities Chat introduces (docs/capabilities-proposal/) are not in the contracts
  * registry yet, so requireCapability() — which refuses unknown ids — can't be used for them;
@@ -16,13 +22,14 @@
 'use strict';
 
 const fs = require('fs');
-const { serviceAuth, capabilities, http } = require('openvibe-contracts');
+const contracts = require('openvibe-contracts');
+const { createNetworkKeys, verifyServiceToken } = require('openvibe-sdk/auth');
 const config = require('../config');
 
+const { serviceAuth, capabilities, http } = contracts;
 const AUDIENCE = 'openvibe.chat';
 
-let _publicKey = null;
-let _keyLoading = null;
+let _keys = null;
 
 function loadKeyFromFile() {
     const p = config.networkPublicKeyPath;
@@ -30,26 +37,11 @@ function loadKeyFromFile() {
     try { return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : null; } catch { return null; }
 }
 
-/** The Network's RS256 public key: the PEM file when configured, else the Network's JWKS endpoint. */
-async function ensureKey() {
-    if (_publicKey) return _publicKey;
-    const fromFile = loadKeyFromFile();
-    if (fromFile) { _publicKey = fromFile; return _publicKey; }
-    if (!_keyLoading) {
-        _keyLoading = (async () => {
-            try {
-                const res = await fetch(`${config.networkInternalUrl}/api/.well-known/jwks`, { signal: AbortSignal.timeout(5000) });
-                const jwks = await res.json().catch(() => null);
-                if (jwks && jwks.public_key) { _publicKey = jwks.public_key; console.log('[Auth] Network public key loaded from JWKS'); }
-            } catch (err) {
-                console.warn('[Auth] Network public key unavailable:', err.message);
-            } finally { _keyLoading = null; }
-            return _publicKey;
-        })();
-    }
-    return _keyLoading;
+/** Network's signing keys: the PEM file when configured and readable, else Network's JWKS. */
+function keys() {
+    if (!_keys) _keys = createNetworkKeys({ network: config.networkInternalUrl, publicKey: loadKeyFromFile(), log: console });
+    return _keys;
 }
-function setPublicKey(pem) { _publicKey = pem || null; }
 
 const _clients = new Map();
 function clientFor(audience, scope) {
@@ -82,14 +74,16 @@ function viaProxy(req) {
 /** Express guard for one capability on an /internal route. */
 function guard(capability) {
     const registered = !!capabilities.get(capability);
-    return async function serviceGuard(req, res, next) {
+    return function serviceGuard(req, res, next) {
+        check(req, res, next).catch(next);
+    };
+    async function check(req, res, next) {
         const ctx = http.requestContext(req.headers);
         if (viaProxy(req)) return http.sendProblem(res, 403, 'capability.denied', { detail: 'internal routes are loopback-only', ctx });
         const auth = String(req.headers.authorization || '');
         if (!auth.startsWith('Bearer ')) return http.sendProblem(res, 401, 'token.missing', { detail: 'no service token', ctx });
-        const publicKey = await ensureKey();
-        if (!publicKey) return http.sendProblem(res, 503, 'identity.unavailable', { detail: 'the Network signing key is not loaded', ctx });
-        const r = serviceAuth.verifyServiceToken(auth.slice(7).trim(), { publicKey, issuer: config.networkUrl, audience: AUDIENCE });
+        const r = await verifyServiceToken(auth.slice(7).trim(), { ...keys().verifyOptions, issuer: config.networkUrl, audience: AUDIENCE, contracts });
+        if (!r.ok && r.code === 'token.unavailable') return http.sendProblem(res, 503, 'identity.unavailable', { detail: 'the Network signing key is not loaded', ctx });
         if (!r.ok) return http.sendProblem(res, 401, r.code, { detail: r.reason, ctx });
         const c = registered
             ? capabilities.check(r.claims, capability)
@@ -97,7 +91,7 @@ function guard(capability) {
         if (!c.allowed) return http.sendProblem(res, 403, c.code || 'capability.denied', { detail: c.reason, ctx });
         req.principal = { sub: r.claims.sub, cap: r.claims.cap, jti: r.claims.jti };
         next();
-    };
+    }
 }
 
-module.exports = { AUDIENCE, ensureKey, setPublicKey, headers, invalidate, guard, viaProxy };
+module.exports = { AUDIENCE, keys, headers, invalidate, guard, viaProxy };

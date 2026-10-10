@@ -48,10 +48,12 @@ t('staff_caps come from the token; its role only raises the projection\'s', asyn
 t('expired, wrong-issuer, not-yet-valid and service tokens are refused here', async () => {
     const before = h.live.requests.filter((p) => p.endsWith('/auth')).length;
     for (const bad of [
-        claimsFor(alice, { exp: now() - 5 }),
+        claimsFor(alice, { exp: now() - 60 }),          // past the 30 s clock skew every OpenVibe verifier allows
         claimsFor(alice, { iss: 'https://evil.example' }),
         claimsFor(alice, { nbf: now() + 600 }),
         claimsFor(alice, { typ: 'service' }),
+        claimsFor(alice, { typ: 'realtime', purpose: 'realtime' }),
+        claimsFor(alice, { typ: 'fedcm' }),
         claimsFor(alice, { actor_type: 'service' }),
         (() => { const c = claimsFor(alice); delete c.exp; return c; })(),
     ]) {
@@ -59,8 +61,9 @@ t('expired, wrong-issuer, not-yet-valid and service tokens are refused here', as
         assert.strictEqual(await session.authenticate(tok), null, JSON.stringify(bad));
         assert.strictEqual(session.failureReason(tok), 'invalid');
     }
-    assert.strictEqual(session.verify(jwt(claimsFor(alice), h.keys.privateKey, { alg: 'none' }), h.keys.publicKey).ok, false, 'alg none');
-    assert.strictEqual(session.verify(jwt(claimsFor(alice), h.keys.privateKey, { alg: 'HS256' }), h.keys.publicKey).ok, false, 'RS256 only');
+    assert.strictEqual((await session.verify(jwt(claimsFor(alice), h.keys.privateKey, { alg: 'none' }), { publicKey: h.keys.publicKey })).ok, false, 'alg none');
+    assert.strictEqual((await session.verify(jwt(claimsFor(alice), h.keys.privateKey, { alg: 'HS256' }), { publicKey: h.keys.publicKey })).ok, false, 'RS256 only');
+    assert.strictEqual((await session.verify(jwt(claimsFor(alice)), { publicKey: h.keys.publicKey })).ok, true, 'and the token itself verifies');
     assert.strictEqual(h.live.requests.filter((p) => p.endsWith('/auth')).length, before, 'no Live call for a token we can judge');
 });
 
@@ -91,7 +94,7 @@ t('REST and the WebSocket keep working for a Network token while Live is down', 
         const auth = await ws.next((m) => m.type === 'auth');
         assert.deepStrictEqual([auth.authenticated, auth.core_username, auth.user_id], [true, 'alice', alice.id]);
         ws.close();
-        assert.strictEqual((await h.http('GET', '/api/chat/search?q=hello', { token: jwt(claimsFor(alice, { exp: now() - 1 })) })).status, 401);
+        assert.strictEqual((await h.http('GET', '/api/chat/search?q=hello', { token: jwt(claimsFor(alice, { exp: now() - 60 })) })).status, 401);
     } finally { h.live.down = false; }
 });
 
