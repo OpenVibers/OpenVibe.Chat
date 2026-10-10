@@ -22,7 +22,8 @@
     "chat.analysis.read",
     "chat.moderation.queue.read",
     "chat.sounds.read",
-    "chat.sounds.write"
+    "chat.sounds.write",
+    "chat.resource.read"
   ],
   "capabilitiesUsed": [
     "live.chat_context.read",
