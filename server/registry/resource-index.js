@@ -1,6 +1,7 @@
 /**
  * Chat's authority resource index (ADR-048, plan T13 step 8). Rooms are person-owned,
- * so their summaries have no project or OVRN. This router is mounted on the loopback API.
+ * so their summaries have no project or OVRN. GET /api/v1/resources accepts project,
+ * kind, owner, cursor, and limit query parameters. This router is mounted on the loopback API.
  */
 'use strict';
 
@@ -14,6 +15,7 @@ const ROOM_KIND = 'chat.room';
 const DEFAULT_LIMIT = 100;
 const MAX_LIMIT = 1000;
 const PROJECT_ID_RE = /^prj_[0-9A-HJKMNP-TV-Z]{26}$/;
+const OWNER_SUBJECT_RE = /^(usr|agt)_[0-9A-HJKMNP-TV-Z]{26}$/;
 const USER_SUBJECT_RE = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 /** The room fields allowed by common.resource-summary@1. */
@@ -45,6 +47,8 @@ function decodeCursor(raw) {
 function filtersOf(query) {
     const project = typeof query.project === 'string' && query.project !== '' ? query.project : null;
     if (project && !PROJECT_ID_RE.test(project)) return { error: 'project must be a prj_ id' };
+    const owner = query.owner === undefined || query.owner === '' ? null : query.owner;
+    if (owner !== null && (typeof owner !== 'string' || !OWNER_SUBJECT_RE.test(owner))) return { error: 'owner must be a usr_ or agt_ id' };
     const kind = typeof query.kind === 'string' && query.kind !== '' ? query.kind : null;
     let limit = DEFAULT_LIMIT;
     if (typeof query.limit === 'string' && query.limit !== '') {
@@ -56,19 +60,20 @@ function filtersOf(query) {
         cursor = decodeCursor(query.cursor);
         if (cursor === null) return { error: 'cursor is not one this index issued' };
     }
-    return { project, kind, limit, cursor };
+    return { project, owner, kind, limit, cursor };
 }
 
 async function page(req, res, next) {
     try {
         const filters = filtersOf(req.query);
         if (filters.error) return contracts.http.sendProblem(res, 400, 'resources.bad_query', { detail: filters.error });
-        if (filters.project || (filters.kind && filters.kind !== ROOM_KIND)) {
+        if (filters.project || (filters.owner && !USER_SUBJECT_RE.test(filters.owner)) || (filters.kind && filters.kind !== ROOM_KIND)) {
             return res.set('Cache-Control', 'private, max-age=60').json({ resources: [], next_cursor: null });
         }
+        const ownerClause = filters.owner ? ' AND owner_subject = ?' : '';
+        const params = [filters.cursor || '', ...(filters.owner ? [filters.owner] : []), filters.limit + 1];
         const rows = await db.all(`SELECT slug, name, visibility, owner_subject, created_at FROM rooms
-            WHERE archived_at IS NULL AND slug > ? COLLATE "C" ORDER BY slug COLLATE "C" LIMIT ?`,
-        [filters.cursor || '', filters.limit + 1]);
+            WHERE archived_at IS NULL AND slug > ? COLLATE "C"${ownerClause} ORDER BY slug COLLATE "C" LIMIT ?`, params);
         const resources = rows.slice(0, filters.limit).map(roomSummary);
         const next_cursor = rows.length > filters.limit ? encodeCursor(resources[resources.length - 1]) : null;
         return res.set('Cache-Control', 'private, max-age=60').json({ resources, next_cursor });
