@@ -5,19 +5,24 @@ const contracts = require('openvibe-contracts');
 const { boot, suite } = require('./helpers');
 
 const t = suite('resource-index');
-let h, token, user;
+let h, token, user, otherUser;
 const get = (path, opts = {}) => h.http('GET', `/api/v1/resources${path}`, { token, ...opts });
 
 t('boot and seed rooms', async () => {
     h = await boot();
     token = h.serviceToken(['chat.resource.read']);
     user = h.addUser('index-owner', { subject: contracts.ids.newId('user') });
+    otherUser = h.addUser('other-index-owner', { subject: contracts.ids.newId('user') });
     for (const [slug, visibility, archived] of [
         ['index-alpha', 'public', false], ['index-beta', 'private', false],
         ['index-gamma', 'public', false], ['index-archived', 'public', true],
     ]) {
         await h.db.run('INSERT INTO rooms (slug, name, visibility, owner_id, owner_subject, archived_at) VALUES (?, ?, ?, ?, ?, ?)',
             [slug, `Name ${slug}`, visibility, user.id, user.subject_id, archived ? '2026-10-01 00:00:00' : null]);
+    }
+    for (const slug of ['second-alpha', 'second-beta']) {
+        await h.db.run('INSERT INTO rooms (slug, name, visibility, owner_id, owner_subject) VALUES (?, ?, ?, ?, ?)',
+            [slug, `Name ${slug}`, 'public', otherUser.id, otherUser.subject_id]);
     }
 });
 
@@ -52,12 +57,40 @@ t('limit-one cursor walks each active room exactly once', async () => {
     assert.strictEqual(new Set(seen).size, seen.length);
 });
 
+t('owner filters exact subjects and combines with kind and cursor', async () => {
+    const owner = encodeURIComponent(user.subject_id);
+    const response = await get(`/?owner=${owner}`);
+    assert.strictEqual(response.status, 200, response.text);
+    const result = contracts.validate('common.resource-list-result@1', response.body);
+    assert.ok(result.valid, JSON.stringify(result.errors));
+    assert.deepStrictEqual(response.body.resources.map((r) => r.id), ['index-alpha', 'index-beta', 'index-gamma']);
+    assert.ok(response.body.resources.every((r) => r.owner.id === user.subject_id));
+    assert.deepStrictEqual((await get(`/?owner=${owner}&kind=chat.room`)).body.resources, response.body.resources);
+    assert.deepStrictEqual((await get(`/?owner=${owner}&kind=other.kind`)).body.resources, []);
+    assert.deepStrictEqual((await get(`/?owner=${owner}&project=prj_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3`)).body.resources, []);
+    assert.deepStrictEqual((await get(`/?owner=${encodeURIComponent(otherUser.subject_id)}`)).body.resources.map((r) => r.id), ['second-alpha', 'second-beta']);
+    assert.deepStrictEqual((await get('/?owner=agt_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3')).body.resources, []);
+    assert.deepStrictEqual((await get('/?owner=')).body.resources, (await get('/')).body.resources);
+
+    const seen = [];
+    let cursor = null;
+    do {
+        const page = await get(`/?owner=${owner}&limit=1${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+        assert.strictEqual(page.status, 200, page.text);
+        assert.ok(contracts.validate('common.resource-list-result@1', page.body).valid);
+        seen.push(...page.body.resources.map((r) => r.id));
+        cursor = page.body.next_cursor;
+    } while (cursor);
+    assert.deepStrictEqual(seen, response.body.resources.map((r) => r.id));
+    assert.strictEqual(new Set(seen).size, seen.length);
+});
+
 t('project and kind filters, and bad queries', async () => {
     const project = 'prj_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3';
     assert.deepStrictEqual((await get(`/?project=${project}`)).body.resources, []);
     assert.deepStrictEqual((await get('/?kind=other.kind')).body.resources, []);
     assert.deepStrictEqual((await get('/?kind=chat.room')).body.resources, (await get('/')).body.resources);
-    for (const query of ['project=bad', 'limit=0', 'limit=1001', 'cursor=bad']) {
+    for (const query of ['project=bad', 'owner=svc:live', 'owner=usr_short', 'owner=usr_short&owner=usr_short', 'limit=0', 'limit=1001', 'cursor=bad']) {
         const response = await get(`/?${query}`);
         assert.strictEqual(response.status, 400, response.text);
         assert.strictEqual(response.body.code, 'resources.bad_query');
