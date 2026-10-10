@@ -46,6 +46,10 @@ t('healthy: 200 ready with a db and a live_sync check', async () => {
     assert.strictEqual(body.checks.live_sync.detail.threshold_ms, STALE_MS);
     assert.ok(body.live.last_success_at, 'last successful sync reported');
     assert.strictEqual(body.service, 'chat');
+    assert.deepStrictEqual(body.events.enabled, false);
+    assert.strictEqual(Number(body.events.pending), 0);
+    assert.strictEqual(Number(body.events.rejected), 0);
+    assert.strictEqual(body.events.last_error, null);
 });
 
 t('Live failing: passes keep running but do not count; degraded (still 200) after the threshold', async () => {

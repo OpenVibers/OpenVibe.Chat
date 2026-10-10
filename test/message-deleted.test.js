@@ -26,10 +26,10 @@ let h, events, eventsDb, eventsPort, admin, alice, streamer, streamId;
 
 /** Outbox chat.message.deleted envelopes after `afterSeq`. */
 async function deletions(afterSeq = 0) {
-    return (await h.db.all("SELECT seq, event FROM events_outbox WHERE event_type = 'chat.message.deleted' AND seq > ? ORDER BY seq", [afterSeq]))
-        .map((r) => JSON.parse(r.event));
+    return (await h.db.all("SELECT id, envelope FROM service_outbox WHERE envelope->>'event_type' = 'chat.message.deleted' AND id > ? ORDER BY id", [afterSeq]))
+        .map((r) => r.envelope);
 }
-const outboxSeq = async () => (await h.db.get('SELECT COALESCE(MAX(seq), 0) AS s FROM events_outbox')).s;
+const outboxSeq = async () => (await h.db.get('SELECT COALESCE(MAX(id), 0) AS s FROM service_outbox')).s;
 async function say(message, over = {}) {
     return Number((await h.db.saveChatMessage({ stream_id: null, user_id: null, anon_id: 'anon7', username: 'anon7', message, message_type: 'chat', is_global: 1, ...over })).lastInsertRowid);
 }
@@ -207,7 +207,7 @@ const userJwt = (subjectId) => serviceAuth.signServiceToken({
 let firstSeq, msgId;
 t('e2e: the relay publishes the message, then its deletion; replay serves only the tombstone', async () => {
     if (!haveEvents) return;
-    await h.db.run('UPDATE events_outbox SET sent_at = ? WHERE sent_at IS NULL', [new Date().toISOString()]);   // earlier tests' rows
+    await h.db.run('UPDATE service_outbox SET sent_at = ? WHERE sent_at IS NULL', [Date.now()]);   // earlier tests' rows
     msgId = await say(SECRET, { user_id: alice.id, anon_id: null, username: 'alice' });
     assert.strictEqual((await h.eventsRelay.flush()).sent, 1);
     firstSeq = await events.store.lastSeq();

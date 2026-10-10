@@ -122,7 +122,7 @@ t('WebSocket: a stranger cannot join the private room, and hears nothing posted 
 
 t('events outbox: nothing about a private room or a DM leaves Chat', async () => {
     // (The staff member's own log searches above are audited with the words they typed: their query, not the room's content.)
-    const rows = JSON.stringify((await h.db.all('SELECT * FROM events_outbox')).filter((r) => !/"action_type":"chat_log_search"/.test(r.event)));
+    const rows = JSON.stringify((await h.db.all('SELECT * FROM service_outbox')).filter((r) => !/"action_type":"chat_log_search"/.test(JSON.stringify(r.envelope))));
     for (const w of ['live-private-words', 'live-dm-words', SECRET.roomWords, SECRET.callWords, SECRET.dmWords, SECRET.roomName, SECRET.topic]) assert.ok(!rows.includes(w), `outbox carries "${w}"`);
 });
 

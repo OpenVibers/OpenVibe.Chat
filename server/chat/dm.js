@@ -17,7 +17,7 @@
  * isBlockedEither is asked: new conversations, group invites, 1:1 messages, calls.
  */
 const db = require('../db/database');
-const outbox = require('../events/outbox');
+const outbox = require('../events/service-outbox');
 const networkBlocks = require('./network-blocks');
 
 // ── Schema & Migrations ──────────────────────────────────────
@@ -176,7 +176,7 @@ async function sendMessage(conversationId, senderId, text) {
         await markRead(conversationId, senderId);
         // The event names who is in the conversation, never what was said.
         const participants = await db.all('SELECT user_id, subject_id FROM dm_participants WHERE conversation_id = ?', [conversationId]);
-        await outbox.enqueue({
+        await outbox.emit({
             event_type: 'chat.dm.created',
             visibility: 'subject',
             actorSubject: senderSubject,

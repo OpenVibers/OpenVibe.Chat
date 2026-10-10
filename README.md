@@ -68,7 +68,8 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   `DATABASE_URL` outside production it runs on an embedded PGlite in `data/pglite` (`CHAT_PGLITE_DIR`).
   `migrations/0001_initial.sql` is the whole schema (timestamps stay SQLite-format text through
   `ov_now()`/`datetime()`); `0006_stop_live_mirror_triggers.sql` dropped the twelve read-mirror capture
-  triggers, and migration 0008 dropped the idle `live_mirror_outbox` table.
+  triggers, and `live_mirror_outbox` stays, idle, until a contract migration drops it (after 0008's
+  SDK outbox: a held contract would hold every migration after it).
   `VALKEY_URL`/`VALKEY_PREFIX` put the per-actor rate-limit counters on Valkey instead of this process.
 - **The six chat tables** (`channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`,
   `chat_ai_summaries`, `chat_timeline_events`): Chat's own since the C-04 cutover — Chat is their only
@@ -120,7 +121,9 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 | Emote image bytes | **OpenVibe.Media** (namespace `chat`) | `server/media/client.js` (openvibe-sdk `createObjectsClient`), Chat's service token (`media.object.upload` / `.delete`); the row keeps `media_url` + `media_asset_id` |
 | Chat-AI summaries (global / per-chatter insight + timeline) | **OpenVibe.AI** (namespace `chat.*`) | `server/ai/client.js` (openvibe-sdk `createAiClient`), Chat's service token (`ai.run.create` / `ai.run.read`); workflows `chat.global` / `chat.profile`; extractive fallback when AI does not answer |
 | Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |
-| Events | **OpenVibe.Events** | `events_outbox` → `POST /api/v1/events` when `EVENTS_URL` is set (`events.event.publish`); Chat's subscriptions deliver to `POST /internal/events` (`server/events/consumer.js`, `events.subscription.manage`) |
+| Events | **OpenVibe.Events** | `service_outbox` (openvibe-sdk outbox) → `POST /api/v1/events` when `EVENTS_URL` and `OV_OAUTH_CLIENT_SECRET` are set (`events.event.publish`); Chat's subscriptions deliver to `POST /internal/events` (`server/events/consumer.js`, `events.subscription.manage`) |
+
+Migration 0008 copies pending `events_outbox` rows into `service_outbox`. The old table stays through the N-1 rollback window; a later contract migration removes it.
 | A person's chat preferences | **OpenVibe.Network** user module `chat.preferences` (Chat owns the namespace) | `server/prefs/` → `GET/PUT/DELETE /internal/modules/chat.preferences/:subject` (`network.modules.read` / `.write`), cached per person |
 | Member badges | **OpenVibe.VIP** (Billing holds the entitlement) | `server/vip/badges.js` → `POST /api/v1/entitlements/check` with `product: 'chat'` (`vip.entitlement.check`), behind the shared product cache |
 
@@ -427,7 +430,7 @@ server/app.js              Live's guards for these routes: CORS, /api rate limit
 server/live-context.js     the only module that talks to Live (interface in its header)
 server/chat/               moved from Live: chat-server, dm, dm-routes, routes, history-store, tts-*, sounds-*, soundboard, moderation-utils, word-filter, deploy-notice; plus the T3 APIs: emotes-routes, channel-mod-routes, internal-moderation (Live's read API), alert-sounds
 server/auth/               token resolution through Live; the chat subset of Live's permissions
-server/events/outbox.js    events.event-envelope@1 outbox and relay
+server/events/service-outbox.js    Chat envelopes and openvibe-sdk outbox wiring
 server/events/consumer.js  POST /internal/events: Chat's Events subscriptions (live.release.deployed, network.module.updated)
 server/events/subscriptions.js  creates them at boot when missing; list/disable/enable for scripts/subscribe-events.js
 server/net/service-auth.js service tokens: client (Chat → others) and guard (others → Chat)
@@ -572,6 +575,6 @@ Part of the [OpenVibe network](https://openvibe.network). Built in the open by [
 
 <!-- versions:start -->
 - openvibe-contracts: v0.129.0
-- openvibe-sdk: v0.38.0
+- openvibe-sdk: v0.38.1
 - openvibe-shared: v3.0.0
 <!-- versions:end -->

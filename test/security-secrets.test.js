@@ -113,7 +113,7 @@ t('internal routes with a wrong, missing or other-audience service token, and th
 });
 
 t('the events outbox and the log lines carry no secret', async () => {
-    const rows = JSON.stringify(await h.db.all('SELECT * FROM events_outbox'));
+    const rows = JSON.stringify(await h.db.all('SELECT * FROM service_outbox'));
     for (const [k, v] of Object.entries({ ...ENV, ...SETTINGS })) {
         assert.ok(!rows.includes(v), `outbox carries ${k}`);
         const line = logs.find((l) => l.includes(v));

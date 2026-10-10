@@ -167,7 +167,7 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
             connections: chatServer.getTotalConnections(),
             live: { last_sync_at: ctx.stats.lastSyncAt, last_success_at: ctx.stats.lastSuccessAt, failures: ctx.stats.failures, last_error: ctx.stats.lastError },
             events: {
-                enabled: !!config.events.url,
+                ...(relay ? await relay.status().catch((err) => ({ enabled: relay.enabled, pending: null, rejected: null, last_error: err.message })) : { enabled: false, pending: 0, rejected: 0, last_error: null }),
                 consumer: events ? { enabled: events.enabled, ...events.stats } : null,
             },
         });
