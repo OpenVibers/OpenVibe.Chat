@@ -21,7 +21,7 @@ nginx locations (`deploy/nginx/calls/openvibe.live-calls.locations.conf`, includ
 
 | nginx location | Chat serves (`server/calls/`) |
 | --- | --- |
-| `^~ /ws/call` | the call WebSocket (`?channelId=` — or the legacy `?streamId=` / a bare stream number — with session cookie or Authorization bearer, or the deprecated `?token=`; every message type unchanged) |
+| `^~ /ws/call` | the call WebSocket (`?channelId=` — or the legacy `?streamId=` / a bare stream number — signed in by the first `auth-update` message, or the Authorization bearer for bots (the cookie and `?token=` no longer authenticate it since 2026-10-10); every message type unchanged) |
 | `^~ /api/streams/voice-channels` | `GET/POST /api/streams/voice-channels`, `GET/DELETE /api/streams/voice-channels/:channelId`, `POST /api/streams/voice-channels/call-user`, `POST /api/streams/voice-channels/call-user/respond` |
 | `~ ^/api/streams/[0-9]+/call$` | `GET/PUT /api/streams/:id/call` |
 

@@ -1,7 +1,8 @@
 /**
  * OpenVibe.Chat — request authentication.
  *
- * The same tokens Live accepts (a Network RS256 JWT in Authorization / ov_token cookie / Live's legacy token cookie (not on WebSockets),
+ * The same tokens Live accepts (a Network RS256 JWT in Authorization / ov_token cookie / Live's legacy token cookie;
+ * a WebSocket takes only the Authorization bearer or the token its first message presents),
  * or an hbt_ API token) with the same rules, resolved by Live through live-context.authenticate()
  * — Live owns the account links, auto-creates first-time accounts and knows API-token scopes.
  * Moved from OpenVibe.Live server/auth/auth.js; the middleware are async now because resolution
@@ -35,8 +36,7 @@ function apiTokenAllows(req, scopes) {
 
 /**
  * Extract the token and where it came from (Bearer header, the Network `ov_token` cookie, or Live's
- * legacy `token` cookie). Internal: extractToken returns the token alone, while extractWsToken also
- * needs the source so it can count the cookie fallback (C-06).
+ * legacy `token` cookie). Internal: extractToken returns the token alone.
  */
 function extractTokenFrom(req, { legacyCookie = true } = {}) {
     const authHeader = req.headers.authorization;
@@ -79,57 +79,25 @@ function extractToken(req, opts) {
 }
 
 /**
- * Extract the token for a WebSocket upgrade request, and where it came from ('url', 'header',
- * 'ov_token_cookie' or null)
+ * The token a WebSocket upgrade authenticates with: the Authorization bearer only (bots). A browser
+ * cannot set headers on an upgrade, so its socket starts anonymous and presents the token in its first
+ * message (chat `join`/`join_room`, the call's `auth-update`). Neither the URL (`?token=`, C-05: URLs
+ * end up in proxy logs) nor a cookie (C-06: the socket would ride whatever session the browser holds)
+ * authenticates a socket.
  */
-const urlTokenUses = { jwt: 0, api_token: 0 };
-// /ws/chat upgrades authenticated from the Network `ov_token` cookie. This is the raw
-// "cookie seen" series; browsers send the cookie on every same-origin upgrade, so it cannot gate J7.
-const wsCookieUses = { jwt: 0, api_token: 0 };
-// /ws/chat and /ws/call sockets that the ov_token cookie authenticated and that did not present the
-// token themselves in an accepted auth message (wsCookieReliance), by token kind: J7 removes the cookie
-// branch from extractWsToken once both stay at 0 for one full release.
-const wsCookieReliant = { jwt: 0, api_token: 0 };
-const tokenKind = (token) => (token.startsWith('hbt_') ? 'api_token' : 'jwt');
-function extractWsTokenFrom(req) {
-    // DEPRECATED (C-05): a ?token= query param. Browsers send the token in their first join message
-    // and bots should use the Authorization header; URLs end up in proxy logs. Still honoured (and
-    // counted, /metrics chat_ws_url_token_uses) while Live's bot guide and call client still send it.
-    try {
-        const url = new URL(req.url || '/', 'http://localhost');
-        const queryToken = url.searchParams.get('token');
-        if (queryToken && queryToken !== 'null' && queryToken !== 'undefined') {
-            urlTokenUses[queryToken.startsWith('hbt_') ? 'api_token' : 'jwt']++;
-            return { token: queryToken, from: 'url' };
-        }
-    } catch { /* fall through */ }
-
-    // Live's legacy `token` cookie rides along with ov_token on every browser upgrade: ignored.
-    return extractTokenFrom(req, { legacyCookie: false });
-}
-
 function extractWsToken(req) {
-    return extractWsTokenFrom(req).token;
-}
-
-/** Count a /ws/chat upgrade that the ov_token cookie authenticated (call once the user resolved). */
-function countWsCookieUse(token) {
-    wsCookieUses[tokenKind(token)]++;
+    const authHeader = req.headers.authorization;
+    return authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null;
 }
 
 /**
- * Track one socket whose upgrade the ov_token cookie authenticated (call once the user resolved).
- * Returns settle(accepted), called for the first auth message this endpoint handles, or with no
- * argument after a bounded grace period for a silent call socket. A rejected, missing, or mismatched
- * token leaves the socket dependent on its cookie. Later calls do nothing.
+ * The token that may exempt an upgrade from a network (IP) ban: the bearer or the Network `ov_token`
+ * cookie. Staff share home networks with banned people, and a browser cannot present its token before
+ * the ban check runs. It only lets the upgrade through; the socket's identity still comes from
+ * extractWsToken or its first message.
  */
-function wsCookieReliance(token) {
-    let settled = false;
-    return (accepted = false) => {
-        if (settled) return;
-        settled = true;
-        if (!accepted) wsCookieReliant[tokenKind(token)]++;
-    };
+function banExemptionToken(req) {
+    return extractTokenFrom(req, { legacyCookie: false }).token;
 }
 
 /**
@@ -232,14 +200,9 @@ module.exports = {
     extractToken,
     requestUser,
     extractWsToken,
-    extractWsTokenFrom,
-    countWsCookieUse,
-    wsCookieReliance,
+    banExemptionToken,
     authenticateWs,
     requireAuth,
     optionalAuth,
     requireAdmin,
-    urlTokenUses: () => ({ ...urlTokenUses }),
-    wsCookieUses: () => ({ ...wsCookieUses }),
-    wsCookieReliant: () => ({ ...wsCookieReliant }),
 };

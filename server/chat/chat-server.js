@@ -23,7 +23,7 @@ const crypto = require('crypto');
 const db = require('../db/database');
 const config = require('../config');
 const ctx = require('../live-context');
-const { extractWsTokenFrom, countWsCookieUse, wsCookieReliance, authenticateWs } = require('../auth/auth');
+const { extractWsToken, authenticateWs } = require('../auth/auth');
 const session = require('../auth/network-session');
 const { clientIpOf } = require('../net/client-ip');
 const permissions = require('../auth/permissions');
@@ -270,7 +270,8 @@ class ChatServer {
         }
 
         const urlParams = new URL(req.url, 'http://localhost').searchParams;
-        const { token, from: tokenFrom } = extractWsTokenFrom(req);
+        // A bot's bearer; a browser's socket starts anonymous and signs in with its join.
+        const token = extractWsToken(req);
         const streamId = parseInt(urlParams.get('stream')) || null;
 
         ws.isAlive = true;
@@ -291,15 +292,13 @@ class ChatServer {
         (async () => {
             // Authenticate (optional — anon if no token)
             const user = await authenticateWs(token).catch(() => null);
-            if (user && tokenFrom === 'ov_token_cookie') countWsCookieUse(token);
             if (!user) await this._resolveUnifiedAnonNum(this.normalizeIp(ip)).catch(() => {});
             await ctx.warm({ user, streamId, ip }).catch(() => {});
             ws.off('message', onEarlyMessage);
             ws.off('close', onEarlyClose);
             ws.off('error', onEarlyClose);
             if (closedEarly || ws.readyState !== WebSocket.OPEN) return;
-            this._registerConnection(ws, req, { ip, streamId, user, early, tokenIat: user ? session.tokenIat(token) : null,
-                cookieReliance: user && tokenFrom === 'ov_token_cookie' ? wsCookieReliance(token) : null });
+            this._registerConnection(ws, req, { ip, streamId, user, early, tokenIat: user ? session.tokenIat(token) : null });
         })().catch((err) => {
             console.warn('[Chat] connection setup failed:', err.message);
             try { ws.close(1011, 'setup failed'); } catch {}
@@ -307,7 +306,7 @@ class ChatServer {
     }
 
     /** The rest of Live's handleConnection, once the socket's identity is known. */
-    _registerConnection(ws, req, { ip, streamId, user, early, tokenIat = null, cookieReliance = null }) {
+    _registerConnection(ws, req, { ip, streamId, user, early, tokenIat = null }) {
         const perIp = this._ipSockets.get(ip) || 0;
         if (ip && ip !== 'unknown' && perIp >= MAX_CHAT_SOCKETS_PER_IP && !permissions.can(user, 'staff.limits.exempt')) {
             ws.close(4029, 'Too many connections');
@@ -362,7 +361,7 @@ class ChatServer {
                 console.warn('[Chat] Malformed message from', ws._clientIp || 'unknown', ':', err.message);
                 return;
             }
-            chain = chain.then(async () => await this.handleMessage(ws, msg, cookieReliance)).catch((err) => {
+            chain = chain.then(async () => await this.handleMessage(ws, msg)).catch((err) => {
                 console.warn('[Chat] message handling failed:', err.message);
             });
         };
@@ -396,17 +395,24 @@ class ChatServer {
             console.warn(`[Chat] Ignoring token identity mismatch for ${client.user.username} -> ${user.username}`);
             return false;
         }
+        const wasAnonymous = !client.user;
         client.user = user;
         await this._hiddenFromUserList(user);   // warm chat.presence_prefs before the next user list
         client.tokenIat = session.tokenIat(msg.token);
         client.anonId = null; // no longer anonymous
+        if (wasAnonymous) {
+            // A browser's socket arrives anonymous (the upgrade carries no token): the IP log names the
+            // account and the room's list shows the member as soon as the join signs it in.
+            try { ctx.effects.logIp({ userId: user.id, anonId: null, ip: client.ip, action: 'chat' }); } catch { /* non-critical */ }
+            this.broadcastUsersList(client.streamId);
+        }
         return true;
     }
 
     /**
      * Handle incoming chat message
      */
-    async handleMessage(ws, msg, cookieReliance = null) {
+    async handleMessage(ws, msg) {
         const client = this.clients.get(ws);
         if (!client) return;
 
@@ -441,8 +447,7 @@ class ChatServer {
             case 'join':
             case 'join_stream': {
                 // (Re-)authenticate if a token is provided
-                const acceptedToken = await this._applyJoinToken(client, msg);
-                if (cookieReliance) cookieReliance(acceptedToken);
+                await this._applyJoinToken(client, msg);
                 const oldStream = client.streamId;
                 const nextStreamId = parseInt(msg.streamId || msg.stream_id) || null;
                 const requestedChannel = parseInt(msg.channelUserId || msg.channel_user_id) || null;
@@ -525,8 +530,7 @@ class ChatServer {
             case 'join_room': {
                 // A room socket can still arrive anonymous or as a guest: authenticate a token the
                 // same way as join, so room access is resolved with the member's identity.
-                const acceptedToken = await this._applyJoinToken(client, msg);
-                if (cookieReliance) cookieReliance(acceptedToken);
+                await this._applyJoinToken(client, msg);
                 const rooms = require('../rooms/rooms');
                 const room = await rooms.bySlug(msg.room);
                 const a = room ? await rooms.access(room, client.user) : null;

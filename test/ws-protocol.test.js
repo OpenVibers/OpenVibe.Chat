@@ -338,6 +338,9 @@ t('upgrade guards: foreign origin refused, banned address refused (admins exempt
     await h.ctx.invalidateBans();
     assert.strictEqual(await h.wsRefused({ ip: '192.0.2.55' }), true, 'CIDR network ban');
     assert.strictEqual(await h.wsRefused({ ip: '192.0.2.56', token: admin.token }), false, 'admin passes');
+    // A browser cannot show its token before this check: the session cookie exempts it (identity still comes from the join).
+    assert.strictEqual(await h.wsRefused({ ip: '192.0.2.57', cookie: `ov_token=${admin.token}` }), false, 'admin passes with the session cookie');
+    assert.strictEqual(await h.wsRefused({ ip: '192.0.2.58', cookie: `token=${admin.token}` }), true, "Live's legacy cookie does not exempt");
     // And REST from a banned network (through Cloudflare: the hop before nginx is a Cloudflare edge).
     const r = await h.http('GET', '/api/chat/global/history', { headers: { 'X-Forwarded-For': '192.0.2.9, 104.16.0.1' } });
     assert.strictEqual(r.status, 403);

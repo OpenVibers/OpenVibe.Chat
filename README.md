@@ -506,14 +506,12 @@ Reporting a vulnerability: [SECURITY.md](SECURITY.md). The rules the code keeps:
 
 - **Auth.** People sign in with a Network session JWT, verified here with the Network's key (tokens
   issued before a subject's `token_valid_after` are refused), or an `hbt_` API token resolved through
-  Live; WebSocket upgrades use the session cookie or Authorization bearer (Live's legacy `token`
-  cookie is ignored there); `?token=` on `/ws/chat` is deprecated (C-05), counted in
-  `chat_ws_url_token_uses`, and stays until Live's bot guide and call client stop sending it.
-  The browser clients present the token in the first message of every socket (`join`,
-  `join_room`, the call's `auth-update`); J7 removes the cookie branch from `extractWsToken` once
-  `chat_ws_cookie_reliant{via="jwt"|"api_token"}` (cookie-authenticated sockets whose first
-  handled auth message lacked a valid token, or call sockets silent past the token grace period)
-  stays 0 for one full release after that ships (`chat_ws_cookie_uses` only counts the cookie seen).
+  Live. A WebSocket upgrade authenticates with the Authorization bearer only (bots); a browser's
+  socket starts anonymous and presents the token in its first message (`join`, `join_room`, the
+  call's `auth-update`). Neither a cookie nor `?token=` in the URL signs a socket in (C-05/C-06
+  removed 2026-10-10, after 14 days with no socket relying on either). The `ov_token` cookie only
+  exempts staff from a network (IP) ban at the upgrade, because staff share home networks with
+  banned people.
   Services use client-credentials tokens for audience
   `openvibe.chat`, checked per capability (`chat.live_bridge.write`, `chat.message.send`,
   `chat.presence.read`). Staff gates ask the contracts staff map.
