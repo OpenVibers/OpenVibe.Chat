@@ -277,8 +277,7 @@ async function hydrateReplies(messages) {
 }
 
 // ── Post to global chat over REST (bots; the browser never falls back to it: C-06) ──
-// The browser posts over /ws/chat and presents its token in the join; J7 removes the cookie branch
-// from extractWsToken once chat_ws_cookie_reliant{via} stays 0 for one full release after that shipped.
+// The browser posts over /ws/chat and presents its token in the join (the upgrade itself carries none).
 // Every line reaches every global chat socket: a bot posts at most one every 3 s (20 a minute, 300
 // an hour), refusals included; the word and spam filters below still decide each line.
 router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour: 300 }), async (req, res) => {

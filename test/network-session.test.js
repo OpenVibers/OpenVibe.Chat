@@ -100,108 +100,42 @@ t('/metrics counts where sign-ins were decided', async () => {
     for (const via of ['local', 'live', 'rejected']) assert.match(m, new RegExp(`chat_auth_resolutions\\{[^}]*via="${via}"[^}]*\\} [1-9]`), via);
 });
 
-t('a token in the WebSocket URL still works (deprecated, C-05) and is counted', async () => {
-    const before = require('../server/auth/auth').urlTokenUses().jwt;
+t('a token in the WebSocket URL does not authenticate the socket (C-05 removed)', async () => {
     const ws = await h.ws({ query: `?token=${encodeURIComponent(jwt(claimsFor(alice)))}` });
-    ws.sendJson({ type: 'join' });
-    assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'alice');
-    ws.close();
-    assert.strictEqual(require('../server/auth/auth').urlTokenUses().jwt, before + 1);
-    assert.match((await h.http('GET', '/metrics')).text, /chat_ws_url_token_uses\{[^}]*kind="jwt"[^}]*\} [1-9]/);
-});
-
-t('WebSocket upgrades ignore the legacy token cookie', async () => {
-    const token = jwt(claimsFor(alice));
-    // Live sets the legacy `token` cookie beside ov_token on every sign-in: ignored, not refused.
-    const ws = await h.ws({ cookie: `token=${token}; ov_token=${token}` });
-    ws.sendJson({ type: 'join' });
-    assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'alice');
-    ws.close();
-});
-
-t('an upgrade from the ov_token cookie is counted (C-06 gate)', async () => {
-    const before = require('../server/auth/auth').wsCookieUses().jwt;
-    const ws = await h.ws({ cookie: `ov_token=${jwt(claimsFor(alice))}` });
-    ws.sendJson({ type: 'join' });
-    assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'alice');
-    ws.close();
-    assert.strictEqual(require('../server/auth/auth').wsCookieUses().jwt, before + 1);
-    assert.match((await h.http('GET', '/metrics')).text, /chat_ws_cookie_uses\{[^}]*kind="jwt"[^}]*\} [1-9]/);
-});
-
-t('an ov_token cookie that does not resolve to an account is not counted', async () => {
-    const before = require('../server/auth/auth').wsCookieUses().jwt;
-    const ws = await h.ws({ cookie: `ov_token=${jwt(claimsFor(alice), crypto.generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey)}` });
     ws.sendJson({ type: 'join' });
     assert.strictEqual((await ws.next((m) => m.type === 'auth')).authenticated, false);
     ws.close();
-    assert.strictEqual(require('../server/auth/auth').wsCookieUses().jwt, before);
+    assert.doesNotMatch((await h.http('GET', '/metrics')).text, /chat_ws_url_token_uses|chat_ws_cookie_(uses|reliant)/);
 });
 
-t('bots authenticate the upgrade with an Authorization header, no token in the URL', async () => {
-    const before = require('../server/auth/auth').urlTokenUses();
-    const cookieBefore = require('../server/auth/auth').wsCookieUses();
+t('a cookie does not authenticate a socket (C-06): the token in its join does', async () => {
+    const token = jwt(claimsFor(alice));
+    // The Network ov_token and Live's legacy `token` cookie both ride along on a browser's upgrade.
+    const ws = await h.ws({ cookie: `token=${token}; ov_token=${token}` });
+    ws.sendJson({ type: 'join' });
+    assert.strictEqual((await ws.next((m) => m.type === 'auth')).authenticated, false, 'anonymous until it presents the token');
+    ws.sendJson({ type: 'join', token });
+    const auth = await ws.next((m) => m.type === 'auth');
+    assert.deepStrictEqual([auth.authenticated, auth.core_username], [true, 'alice']);
+    ws.close();
+});
+
+t('a socket that signs in with its join is listed under its account', async () => {
+    const token = jwt(claimsFor(carol));
+    const ws = await h.ws({ ip: '198.51.100.77' });
+    await ws.next((m) => m.type === 'users-list');
+    ws.sendJson({ type: 'join', token });
+    await ws.next((m) => m.type === 'auth' && m.authenticated);
+    await ws.next((m) => m.type === 'users-list' && m.users.logged.some((u) => u.username === 'carol'));
+    ws.close();
+});
+
+t('bots authenticate the upgrade with an Authorization header', async () => {
     const ws = await h.ws({ bearer: jwt(claimsFor(carol)) });
     ws.sendJson({ type: 'join' });
     const auth = await ws.next((m) => m.type === 'auth');
     assert.deepStrictEqual([auth.authenticated, auth.core_username], [true, 'carol']);
     ws.close();
-    assert.deepStrictEqual(require('../server/auth/auth').urlTokenUses(), before, 'not counted as a URL token');
-    assert.deepStrictEqual(require('../server/auth/auth').wsCookieUses(), cookieBefore, 'a bearer upgrade is not counted as a cookie use');
-});
-
-t('a cookie socket that presents its token in the join is not cookie-reliant (the J7 gate)', async () => {
-    const auth = require('../server/auth/auth');
-    const token = jwt(claimsFor(alice));
-    const before = auth.wsCookieReliant();
-    const ws = await h.ws({ cookie: `ov_token=${token}` });
-    ws.sendJson({ type: 'join', token });
-    assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'alice');
-    ws.sendJson({ type: 'join' });                // later messages never count: the first one settled it
-    await ws.next((m) => m.type === 'auth');
-    ws.close();
-    assert.deepStrictEqual(auth.wsCookieReliant(), before);
-});
-
-t('a cookie socket whose first join presents no token is counted once (the J7 gate)', async () => {
-    const auth = require('../server/auth/auth');
-    const before = auth.wsCookieReliant();
-    const usesBefore = auth.wsCookieUses().jwt;
-    const ws = await h.ws({ cookie: `ov_token=${jwt(claimsFor(alice))}` });
-    ws.sendJson({ type: 'join' });
-    assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'alice');
-    ws.sendJson({ type: 'join' });
-    await ws.next((m) => m.type === 'auth');
-    ws.sendJson({ type: 'join_room', room: 'nowhere' });
-    await ws.next((m) => m.type === 'room_error');
-    ws.close();
-    assert.deepStrictEqual(auth.wsCookieReliant(), { ...before, jwt: before.jwt + 1 }, 'once per socket');
-    assert.strictEqual(auth.wsCookieUses().jwt, usesBefore + 1, 'the raw series still counts the cookie seen');
-    assert.match((await h.http('GET', '/metrics')).text, /chat_ws_cookie_reliant\{[^}]*via="jwt"[^}]*\} [1-9]/);
-    // A bearer upgrade without a token in the join did not rely on the cookie.
-    const bot = await h.ws({ bearer: jwt(claimsFor(carol)) });
-    bot.sendJson({ type: 'join' });
-    await bot.next((m) => m.type === 'auth');
-    bot.close();
-    assert.deepStrictEqual(auth.wsCookieReliant(), { ...before, jwt: before.jwt + 1 });
-});
-
-t('cookie reliance ignores unrelated frames but counts a rejected join token', async () => {
-    const auth = require('../server/auth/auth');
-    const token = jwt(claimsFor(alice));
-    const before = auth.wsCookieReliant().jwt;
-    const ws = await h.ws({ cookie: `ov_token=${token}` });
-    ws.sendJson({ type: 'ignored', token });
-    ws.sendJson({ type: 'join', token });
-    assert.strictEqual((await ws.next((m) => m.type === 'auth')).core_username, 'alice');
-    assert.strictEqual(auth.wsCookieReliant().jwt, before);
-    ws.close();
-
-    const rejected = await h.ws({ cookie: `ov_token=${token}` });
-    rejected.sendJson({ type: 'join', token: 'invalid-token' });
-    assert.strictEqual((await rejected.next((m) => m.type === 'auth')).core_username, 'alice');
-    rejected.close();
-    assert.strictEqual(auth.wsCookieReliant().jwt, before + 1);
 });
 
 t.run(async () => { if (h && h.close) await h.close(); });

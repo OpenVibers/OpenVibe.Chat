@@ -42,7 +42,7 @@
 const WebSocket = require('ws');
 const config = require('../config');
 const ctx = require('../live-context');
-const { extractWsTokenFrom, wsCookieReliance, authenticateWs } = require('../auth/auth');
+const { extractWsToken, authenticateWs } = require('../auth/auth');
 const permissions = require('../auth/permissions');
 const chatServer = require('../chat/chat-server');
 const lifecycle = require('./lifecycle');
@@ -300,7 +300,8 @@ class CallServer {
     async _handleConnection(ws, req) {
         const url = new URL(req.url, 'http://localhost');
         const channelId = url.searchParams.get('channelId') || url.searchParams.get('streamId');
-        const { token, from: tokenFrom } = extractWsTokenFrom(req);
+        // A bot's bearer; a browser's socket is anonymous until its auth-update (admission counts it).
+        const token = extractWsToken(req);
         // CF-Connecting-IP / X-Forwarded-For only when nginx's peer is Cloudflare (net/client-ip.js), as on /ws/chat.
         const ip = chatServer.getClientIp(req);
 
@@ -336,8 +337,7 @@ class CallServer {
             ws.off('error', onEarlyClose);
             if (closedEarly || ws.readyState !== WebSocket.OPEN) return;
             // Messages keep buffering until _admit attaches the socket's handler: none falls in between.
-            await this._admit(ws, { resolvedId, ip, user, stream, early, stopBuffering: () => ws.off('message', onEarlyMessage),
-                cookieReliance: user && tokenFrom === 'ov_token_cookie' ? wsCookieReliance(token) : null });
+            await this._admit(ws, { resolvedId, ip, user, stream, early, stopBuffering: () => ws.off('message', onEarlyMessage) });
         })().catch((err) => {
             console.warn('[Call] connection setup failed:', err.message);
             try { ws.close(1011, 'setup failed'); } catch {}
@@ -345,7 +345,7 @@ class CallServer {
     }
 
     /** The rest of Live's _handleConnection, once the socket's identity is known. */
-    async _admit(ws, { resolvedId, ip, user, stream, early, stopBuffering, cookieReliance = null }) {
+    async _admit(ws, { resolvedId, ip, user, stream, early, stopBuffering }) {
         // The channel may have gone while the socket signed in.
         const channel = this.channels.get(resolvedId);
         if (!channel) { ws.send(JSON.stringify({ type: 'error', message: 'Voice channel not found' })); ws.close(); return; }
@@ -356,10 +356,9 @@ class CallServer {
             if (!stream || !stream.is_live) { ws.send(JSON.stringify({ type: 'error', message: 'Stream not live' })); ws.close(); return; }
         }
 
-        // Admission counts the token the client presents in its first message (auth-update) too: once
-        // J7 drops the cookie fallback a browser's upgrade is anonymous, and a private call or a
-        // members-only room must still let it in. A socket refused while anonymous waits briefly for
-        // that message.
+        // Admission counts the token the client presents in its first message (auth-update) too: a
+        // browser's upgrade is anonymous, and a private call or a members-only room must still let it
+        // in. A socket refused while anonymous waits briefly for that message.
         user = await this._presentedUser(early, user);
         let admission = await this._admission(channel, resolvedId, user);
         if (admission.error) {
@@ -466,11 +465,6 @@ class CallServer {
 
         // One message at a time per socket, in arrival order (auth-update resolves a token first).
         let queue = Promise.resolve();
-        const relianceTimer = cookieReliance ? setTimeout(() => {
-            // Give an auth-update already queued for processing a chance to resolve first.
-            queue.finally(() => cookieReliance());
-        }, FIRST_TOKEN_WAIT_MS) : null;
-        if (relianceTimer) ws.once('close', () => { clearTimeout(relianceTimer); queue.finally(() => cookieReliance()); });
         const onMessage = (data) => {
             // Rate limit: 200/s. A newcomer to a full room sends seven offers and their candidates in
             // a burst; the old 50/s silently dropped some of them and the join stalled.
@@ -479,10 +473,7 @@ class CallServer {
             if (++clientInfo._msgCount > 200) return;
             let msg;
             try { msg = JSON.parse(data); } catch (err) { console.warn('[Call] Message error for peer', peerId, ':', err.message); return; }
-            queue = queue.then(async () => {
-                const accepted = await this._handleMessage(ws, msg, resolvedId, peerId);
-                if (cookieReliance && msg.type === 'auth-update') cookieReliance(accepted);
-            })
+            queue = queue.then(async () => { await this._handleMessage(ws, msg, resolvedId, peerId); })
                 .catch((err) => { console.warn('[Call] Message error for peer', peerId, ':', err.message); });
         };
         stopBuffering();

@@ -213,62 +213,16 @@ t('the pre-admission buffer is capped: 201 early messages close the socket (1008
     } finally { h.ctx.warm = warm; }
 });
 
-t('a cookie call socket is cookie-reliant unless its first message is auth-update with the token (the J7 gate)', async () => {
-    const auth = require('../server/auth/auth');
-    const before = auth.wsCookieReliant();
-    // The page's client: auth-update with the token first. Not counted.
-    const s = await callWs({ channelId: 'public', cookie: `ov_token=${cat.token}`, ip: '198.51.100.5', onOpen: (ws) => ws.sendJson({ type: 'auth-update', token: cat.token }) });
+t('a cookie does not sign a call socket in: its auth-update does', async () => {
+    const s = await callWs({ channelId: 'public', cookie: `ov_token=${cat.token}`, ip: '198.51.100.5' });
+    const welcome = await s.next((m) => m.type === 'welcome');
+    assert.notStrictEqual(welcome.participants.find((p) => p.peerId === welcome.peerId).username, 'cat', 'anonymous on the cookie alone');
+    s.sendJson({ type: 'auth-update', token: cat.token });
     assert.strictEqual((await s.next((m) => m.type === 'self-updated')).participant.username, 'cat');
-    assert.deepStrictEqual(auth.wsCookieReliant(), before);
-    // A client that never presents its token: its first auth-update counts it, once.
-    const old = await callWs({ channelId: 'public', cookie: `ov_token=${dan.token}`, ip: '198.51.100.6' });
-    await old.next((m) => m.type === 'welcome');
-    old.sendJson({ type: 'mute', muted: true });
-    old.sendJson({ type: 'auth-update' });
-    old.sendJson({ type: 'mute', muted: false });
-    await old.next((m) => m.type === 'self-updated');
-    assert.deepStrictEqual(auth.wsCookieReliant(), { ...before, jwt: before.jwt + 1 });
-    // A slow admission: the auth-update that arrives while the socket is being admitted still counts.
-    const canModerate = callServer._canModerate;
-    callServer._canModerate = async (...a) => { await h.sleep(300); return canModerate.apply(callServer, a); };
-    let slow;
-    try {
-        slow = await callWs({ channelId: 'public', cookie: `ov_token=${eve.token}`, ip: '198.51.100.7', onOpen: (ws) => setTimeout(() => ws.sendJson({ type: 'auth-update', token: eve.token }), 100) });
-        await slow.next((m) => m.type === 'welcome');
-        assert.strictEqual((await slow.next((m) => m.type === 'self-updated')).participant.username, 'eve');
-    } finally { callServer._canModerate = canModerate; }
-    assert.deepStrictEqual(auth.wsCookieReliant(), { ...before, jwt: before.jwt + 1 });
-    await bye(s, old, slow);
-});
-
-t('call reliance waits for auth-update and counts silent or rejected-token sockets', async () => {
-    const auth = require('../server/auth/auth');
-    const before = auth.wsCookieReliant().jwt;
-    const wrongType = await callWs({ channelId: 'public', cookie: `ov_token=${cat.token}`, ip: '198.51.100.10', onOpen: (ws) => {
-        ws.sendJson({ type: 'join', token: cat.token });
-        ws.sendJson({ type: 'auth-update', token: cat.token });
-    } });
-    await wrongType.next((m) => m.type === 'self-updated');
-    assert.strictEqual(auth.wsCookieReliant().jwt, before, 'a join frame cannot settle call auth');
-    await bye(wrongType);
-
-    const rejected = await callWs({ channelId: 'public', cookie: `ov_token=${dan.token}`, ip: '198.51.100.11', onOpen: (ws) => ws.sendJson({ type: 'auth-update', token: 'invalid-token' }) });
-    assert.strictEqual((await rejected.next((m) => m.type === 'self-updated')).participant.username, 'dan');
-    assert.strictEqual(auth.wsCookieReliant().jwt, before + 1);
-    await bye(rejected);
-
-    const silent = await callWs({ channelId: 'public', cookie: `ov_token=${eve.token}`, ip: '198.51.100.12' });
-    await silent.next((m) => m.type === 'welcome');
-    await until(() => auth.wsCookieReliant().jwt === before + 2, 2000);
-    silent.sendJson({ type: 'auth-update', token: eve.token });
-    await silent.next((m) => m.type === 'self-updated');
-    assert.strictEqual(auth.wsCookieReliant().jwt, before + 2, 'a later message does not double count');
-    await bye(silent);
+    await bye(s);
 });
 
 t('delayed admission: an auth-update that arrives while admission awaits still admits the socket', async () => {
-    const auth = require('../server/auth/auth');
-    const before = auth.wsCookieReliant().jwt;
     // A private call room: anonymous admission fails, so the socket must use the auth-update buffered
     // while admission awaited Live.
     const room = await h.http('POST', '/api/chat/rooms', { token: streamer.token, body: { name: 'Delayed admit', slug: 'delayed-admit', kind: 'call', visibility: 'private' } });
@@ -283,20 +237,6 @@ t('delayed admission: an auth-update that arrives while admission awaits still a
         assert.ok(s.welcome, s.error);
         assert.strictEqual(s.welcome.participants.find((p) => p.peerId === s.welcome.peerId).username, 'bob');
     } finally { callServer._admission = admission; }
-    assert.strictEqual(auth.wsCookieReliant().jwt, before, 'token presented during admission: not cookie-reliant');
-    await bye(s);
-});
-
-t('a listen-only call socket that stays silent is counted as cookie-reliant', async () => {
-    const auth = require('../server/auth/auth');
-    const before = auth.wsCookieReliant().jwt;
-    const r = await h.http('POST', '/api/chat/rooms', { token: streamer.token, body: { name: 'Silent stage', slug: 'silent-stage', kind: 'call', visibility: 'public', join_role: 'viewer' } });
-    assert.strictEqual(r.status, 201, r.text);
-    const slug = r.body.room.slug;
-    const s = await join({ channelId: `room-${slug}`, cookie: `ov_token=${bob.token}`, ip: '198.51.100.14' });
-    assert.ok(s.welcome, s.error);
-    assert.strictEqual(s.welcome.canTalk, false, 'joined as viewer');
-    await until(() => auth.wsCookieReliant().jwt === before + 1, 2000);
     await bye(s);
 });
 
