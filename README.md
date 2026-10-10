@@ -232,6 +232,12 @@ cutover** (`CHAT_CALLS=1`, `docs/calls-cutover.md`):
 
 ### Rooms (openvibe.chat)
 
+Chat's authority resource index serves `GET /api/v1/resources` (with `project`, `kind`, `cursor`,
+and `limit` filters) and `GET /api/v1/resources/:ovrn` to first-party service tokens carrying
+`chat.resource.read`. It lists active rooms as `chat.room` summaries. Rooms belong to people,
+so they have no project ID or OVRN; the named-resource route always answers 404. The index is
+loopback only and is not forwarded by the public nginx vhosts.
+
 Rooms people create on openvibe.chat (roadmap WS-I task 4, `server/rooms/`), beside the global room and
 Live's stream and channel rooms: `/api/chat/rooms` (REST), `join_room` / `room_message` on `/ws/chat`,
 and the pages `/rooms`, `/r/:slug`, `/r/:slug/settings`. Public rooms: anyone reads, signed-in people

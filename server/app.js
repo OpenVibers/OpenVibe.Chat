@@ -101,6 +101,9 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     app.use('/internal/calls', express.json({ limit: '64kb' }), require('./calls/internal').createInternalRouter());
     // Live's read API for the chat tables Chat owns (plan T3; capability chat.moderation.read).
     app.use('/internal/moderation', express.json({ limit: '64kb' }), require('./chat/internal-moderation'));
+    // OpenVibe.Services reads Chat's room summaries on loopback (ADR-048); the service guard
+    // checks chat.resource.read and refuses requests that came through a public proxy.
+    app.use('/api/v1/resources', require('./registry/resource-index').router());
     app.get('/health', (req, res) => res.json({ ok: true, service: 'chat' }));
     // Readiness in the openvibe-shared/ready shape (status ready/degraded/not_ready, named checks):
     // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
