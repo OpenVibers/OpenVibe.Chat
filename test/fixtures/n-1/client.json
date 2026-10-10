@@ -1,32 +1,32 @@
 {
  "service": "chat",
- "release": "360bb4ebcaa8906d47187623d447effd18bade95",
- "recorded_at": "2026-10-05T18:52:56.885Z",
+ "release": "143e52e371b2a659c0a407635f60fd256a4e619a",
+ "recorded_at": "2026-10-10T16:02:05.083Z",
  "note": "N-1 fixture: written by `npm run n-1:record`, replayed by test/n-1.test.js",
  "clients": {
-  "live": "ee2ad948a4c25b9af9c27be16e731025afa6c2d3"
+  "live": "92f003c2a75833950b875e8c314a59b55e9d9502"
  },
  "manifest": {
   "service": "chat",
-  "release": "360bb4ebcaa8",
-  "released_at": "2026-10-05T18:18:22.000Z",
-  "booted_at": "2026-10-05T18:52:51.633Z",
-  "contracts_version": "0.96.0",
+  "release": "143e52e371b2",
+  "released_at": "2026-10-10T13:50:03.000Z",
+  "booted_at": "2026-10-10T16:01:59.563Z",
+  "contracts_version": "0.129.0",
   "packages": {
-   "openvibe-shared": "2.5.0",
-   "openvibe-sdk": "0.26.0",
-   "openvibe-contracts": "0.96.0"
+   "openvibe-shared": "3.0.0",
+   "openvibe-sdk": "0.38.1",
+   "openvibe-contracts": "0.129.0"
   },
   "min_client_release": null,
   "mixed_version_window_hours": 24,
   "components": {
    "shell": {
     "kind": "script",
-    "version": "360bb4ebcaa8"
+    "version": "143e52e371b2"
    },
    "server": {
     "kind": "server",
-    "version": "360bb4ebcaa8"
+    "version": "143e52e371b2"
    }
   },
   "assets": {},
@@ -69,6 +69,60 @@
   },
   {
    "method": "GET",
+   "path": "/api/chat/ai/global",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "insight": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/app-chatpage.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/ai/global",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "insight": "null"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/app-chatpage.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/ai/timeline",
+   "auth": "anon",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "events": "array",
+    "hasMore": "boolean"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/app-chatpage.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/ai/timeline",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "events": "array",
+    "hasMore": "boolean"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/app-chatpage.js"
+   ]
+  },
+  {
+   "method": "GET",
    "path": "/api/chat/anon/n1fan",
    "auth": "anon",
    "status": 400,
@@ -171,6 +225,117 @@
    },
    "from": [
     "OpenVibe.Live:public/js/chat.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/channels/moderation/mine",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/app-channel.js",
+    "OpenVibe.Live:public/js/channel-uploads.js",
+    "OpenVibe.Live:public/js/dashboard-moderation.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/channels/moderation/mine",
+   "auth": "user",
+   "status": 200,
+   "kind": "json",
+   "reads": {
+    "channels": "array",
+    "channels[]": "object",
+    "channels[].id": "number",
+    "channels[].user_id": "number",
+    "channels[].title": "string",
+    "channels[].moderation_settings": "object",
+    "channels[].moderation_settings.channel_id": "number",
+    "channels[].moderation_settings.slow_mode_seconds": "number",
+    "channels[].moderation_settings.followers_only": "number",
+    "channels[].moderation_settings.allow_anonymous": "number",
+    "channels[].moderation_settings.links_allowed": "number",
+    "channels[].moderation_settings.gifs_enabled": "number",
+    "channels[].moderation_settings.account_age_gate_hours": "number",
+    "channels[].moderation_settings.caps_percentage_limit": "number",
+    "channels[].moderation_settings.aggressive_filter": "number",
+    "channels[].moderation_settings.max_message_length": "number",
+    "channels[].moderation_settings.tts_max_length": "number",
+    "channels[].moderation_settings.slur_filter_enabled": "number",
+    "channels[].moderation_settings.slur_filter_use_builtin": "number",
+    "channels[].moderation_settings.slur_filter_terms": "string",
+    "channels[].moderation_settings.slur_filter_regexes": "string",
+    "channels[].moderation_settings.slur_filter_nudge_message": "string",
+    "channels[].moderation_settings.slur_filter_disabled_categories": "string",
+    "channels[].moderation_settings.ip_approval_mode": "number",
+    "channels[].moderation_settings.soundboard_enabled": "number",
+    "channels[].moderation_settings.soundboard_allow_pitch": "number",
+    "channels[].moderation_settings.soundboard_allow_speed": "number",
+    "channels[].moderation_settings.soundboard_banned_ids": "string",
+    "channels[].moderation_settings.viewer_auto_delete_enabled": "number",
+    "channels[].moderation_settings.viewer_delete_all_enabled": "number",
+    "channels[].moderation_settings.custom_emotes_enabled": "number",
+    "channels[].moderation_settings.custom_sounds_enabled": "number",
+    "channels[].moderation_settings.max_sound_seconds": "number",
+    "channels[].moderation_settings.uploads_mods_only": "number",
+    "channels[].moderation_settings.mods_can_edit_about": "number",
+    "channels[].moderation_settings.emote_scale": "number",
+    "channels[].moderation_settings.emote_size_min": "number",
+    "channels[].moderation_settings.emote_size_max": "number",
+    "channels[].moderation_settings.sounds_mods_only": "number",
+    "channels[].moderation_settings.sound_min_speed": "number",
+    "channels[].moderation_settings.sound_max_speed": "number",
+    "channels[].moderation_settings.sound_min_pitch_cents": "number",
+    "channels[].moderation_settings.sound_max_pitch_cents": "number",
+    "channels[].moderation_settings.sub_only": "number",
+    "channels[].moderators": "array"
+   },
+   "from": [
+    "OpenVibe.Live:public/js/app-channel.js",
+    "OpenVibe.Live:public/js/channel-uploads.js",
+    "OpenVibe.Live:public/js/dashboard-moderation.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/channels/1/moderation/chat-search",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/dashboard-moderation.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/channels/1/moderation/chat-search",
+   "auth": "user",
+   "status": 404,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/dashboard-moderation.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/channels/1/moderation/logs?limit=12",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/dashboard-moderation.js"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/api/chat/channels/1/moderation/logs?limit=12",
+   "auth": "user",
+   "status": 404,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/dashboard-moderation.js"
    ]
   },
   {
@@ -1376,6 +1541,17 @@
   },
   {
    "method": "GET",
+   "path": "/shared/items.css?v=0705cd3fd62e",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "text",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
    "path": "/shared/theme-loader.js?v=ee4a6754d0f7",
    "auth": "anon",
    "accept": "html",
@@ -1387,7 +1563,7 @@
   },
   {
    "method": "GET",
-   "path": "/shared/navbar.js?v=017a740747b4",
+   "path": "/shared/navbar.js?v=8a1438c1d7b3",
    "auth": "anon",
    "accept": "html",
    "status": 200,
@@ -1398,7 +1574,7 @@
   },
   {
    "method": "GET",
-   "path": "/shared/footer.js?v=a85ab893be88",
+   "path": "/shared/footer.js?v=0eafb8254aa5",
    "auth": "anon",
    "accept": "html",
    "status": 200,
@@ -1409,7 +1585,7 @@
   },
   {
    "method": "GET",
-   "path": "/web/chat.js?v=64ef4815d2",
+   "path": "/web/chat.js?v=ea6b3ee678",
    "auth": "anon",
    "accept": "html",
    "status": 200,
@@ -1547,7 +1723,7 @@
   },
   {
    "method": "GET",
-   "path": "/shared/shipped.js?v=18e4e7ae4ec3",
+   "path": "/shared/shipped.js?v=bed628bacc75",
    "auth": "anon",
    "accept": "html",
    "status": 200,
@@ -1574,6 +1750,46 @@
    "kind": "json",
    "from": [
     "OpenVibe.Live:public/js/dashboard.js"
+   ]
+  },
+  {
+   "method": "PUT",
+   "path": "/api/chat/channels/1/moderation",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/app-channel.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/channels/1/moderation/messages/1/delete",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/dashboard-moderation.js"
+   ]
+  },
+  {
+   "method": "POST",
+   "path": "/api/chat/channels/1/mods",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/dashboard-moderation.js"
+   ]
+  },
+  {
+   "method": "DELETE",
+   "path": "/api/chat/channels/1/mods/1002",
+   "auth": "anon",
+   "status": 401,
+   "kind": "json",
+   "from": [
+    "OpenVibe.Live:public/js/dashboard-moderation.js"
    ]
   },
   {
