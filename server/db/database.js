@@ -8,7 +8,7 @@
  *     server/live-context.js maintains, never from Live's database.
  *   - New rows record the author's Network subject (subject_id columns) next to the Live id.
  *   - Writes that are events (a chat message, a DM, a moderation action) add their envelope to
- *     events_outbox in the same transaction (server/events/outbox.js).
+ *     service_outbox in the same transaction (server/events/service-outbox.js).
  */
 'use strict';
 
@@ -137,7 +137,7 @@ async function subjectFor(userId) {
     try { return (await get('SELECT subject_id FROM ctx_users WHERE id = ?', [userId]))?.subject_id || null; } catch { return null; }
 }
 
-function _outbox() { return require('../events/outbox'); }
+function _outbox() { return require('../events/service-outbox'); }
 function _ctx() { return require('../live-context'); }
 
 // Ids per chat.message.deleted event (OpenVibe.Events takes up to 1000 per redaction directive).
@@ -153,7 +153,7 @@ async function _announceDeleted(ids) {
     const list = [...new Set((ids || []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
     for (let i = 0; i < list.length; i += DELETED_EVENT_IDS) {
         const part = list.slice(i, i + DELETED_EVENT_IDS);
-        await _outbox().enqueue({
+        await _outbox().emit({
             event_type: 'chat.message.deleted',
             visibility: 'public',
             subject: { type: 'chat_message', id: String(part[0]) },
@@ -196,7 +196,7 @@ async function saveChatMessage({ stream_id, channel_user_id, user_id, anon_id, u
             [stream_id, chanUid, user_id || null, anon_id || null, username, message, message_type || 'chat', is_global ? 1 : 0, reply_to_id || null, source_platform || null, auto_delete_at || null, metaStr, subject]
         );
         res.first_chat = !!(chatterKey && chanUid) && await recordFirstChat(chatterKey, chanUid);
-        await _outbox().enqueue({
+        await _outbox().emit({
             event_type: 'chat.message.created',
             visibility: 'public',
             actorSubject: subject,
@@ -674,7 +674,7 @@ async function logModerationAction({ scope_type, scope_id, actor_user_id, target
             INSERT INTO moderation_actions (scope_type, scope_id, actor_user_id, target_user_id, action_type, details, actor_subject_id)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         `, [scope_type || 'site', scope_id || null, actor_user_id || null, target_user_id || null, action_type, JSON.stringify(details || {}), actorSubject]);
-        await _outbox().enqueue({
+        await _outbox().emit({
             event_type: 'chat.moderation.action',
             visibility: 'internal',
             actorSubject,

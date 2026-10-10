@@ -213,7 +213,7 @@ function rateOk(key, now = Date.now()) {
 const REDACT_CHUNK = 500;
 async function announceMessage(room, user, id, message, now) {
     if (room.visibility !== 'public') return;
-    await require('../events/outbox').enqueue({
+    await require('../events/service-outbox').emit({
         event_type: 'chat.room.message.created',
         visibility: 'public',
         actorSubject: user.subject_id || null,
@@ -233,7 +233,7 @@ async function announceDeleted(room, ids) {
     const list = [...new Set(ids.map(Number).filter((n) => Number.isInteger(n) && n > 0))];
     for (let i = 0; i < list.length; i += REDACT_CHUNK) {
         const part = list.slice(i, i + REDACT_CHUNK);
-        await require('../events/outbox').enqueue({
+        await require('../events/service-outbox').emit({
             event_type: 'chat.room.message.deleted',
             visibility: 'public',
             subject: { type: 'chat_room_message', id: String(part[0]) },

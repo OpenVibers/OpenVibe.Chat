@@ -17,7 +17,7 @@ const db = require('./db/database');
 const ctx = require('./live-context');
 const chatServer = require('./chat/chat-server');
 const callServer = require('./calls/call-server');
-const { createRelay } = require('./events/outbox');
+const serviceOutbox = require('./events/service-outbox');
 const { createEventsConsumer } = require('./events/consumer');
 const subscriptions = require('./events/subscriptions');
 const chatAi = require('./ai/chat-ai');
@@ -53,7 +53,7 @@ async function start() {
     const server = http.createServer();
     chatServer.init(server);
     callServer.init(server);
-    const relay = createRelay({ config });
+    const relay = serviceOutbox.configure({ config });
     const events = createEventsConsumer({ chatServer, secrets: config.events.secrets });
     const { app, handleUpgrade } = createApp({ chatServer, relay, events, callServer });
     server.on('request', app);
@@ -86,7 +86,7 @@ async function start() {
                 timestamp: new Date().toISOString(),
             }),
             () => ctx.stop(),
-            () => relay.stop(),
+            async () => { await relay.stop(); serviceOutbox.reset(); },
             () => events.stop(),
             () => chatAi.stop(),
             () => subs.stop(),

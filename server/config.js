@@ -120,7 +120,7 @@ module.exports = {
         maxEntries: int(process.env.CHAT_PREFS_CACHE_MAX, 5000),
     },
 
-    // OpenVibe.Events — the outbox relays only when EVENTS_URL is set.
+    // OpenVibe.Events — the SDK outbox relays only with EVENTS_URL and the OAuth client secret.
     events: {
         url: strip(process.env.EVENTS_URL || ''),
         intervalMs: int(process.env.EVENTS_RELAY_INTERVAL_MS, 5000),

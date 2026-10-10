@@ -125,7 +125,7 @@ t('chat into a stream room: room delivery, global cross-feed, persistence, outbo
     assert.strictEqual(row.channel_user_id, streamer.id);
     assert.strictEqual(row.subject_id, 'usr_01J9AAAAAAAAAAAAAAAAAAAAAA');
     // Outbox envelope in the same transaction.
-    const ev = (await h.db.all("SELECT event FROM events_outbox WHERE event_type = 'chat.message.created'")).map((r) => JSON.parse(r.event)).find((e) => e.payload.message_id === msgId);
+    const ev = (await h.db.all("SELECT envelope FROM service_outbox WHERE envelope->>'event_type' = 'chat.message.created'")).map((r) => r.envelope).find((e) => e.payload.message_id === msgId);
     assert.ok(ev, 'chat.message.created in the outbox');
     assert.strictEqual(ev.visibility, 'public');
     assert.deepStrictEqual(ev.actor, { type: 'user', id: 'usr_01J9AAAAAAAAAAAAAAAAAAAAAA' });
@@ -202,7 +202,7 @@ t('DM delivery keeps the participant check (REST send → live socket; a non-par
     assert.strictEqual((await h.http('GET', `/api/dm/conversations/${convId}/messages`, { token: eve.token })).status, 403);
     // Offline notification went to Live; the DM event is subject-scoped and carries no text.
     assert.ok(h.live.effects.some((e) => e.name === 'notify/dm' && e.body.recipient_ids.includes(bob.id)));
-    const ev = (await h.db.all("SELECT event FROM events_outbox WHERE event_type = 'chat.dm.created'")).map((r) => JSON.parse(r.event)).pop();
+    const ev = (await h.db.all("SELECT envelope FROM service_outbox WHERE envelope->>'event_type' = 'chat.dm.created'")).map((r) => r.envelope).pop();
     assert.strictEqual(ev.visibility, 'subject');
     assert.ok(!JSON.stringify(ev).includes('secret hello'), 'no DM text in the event');
     eveWs.close();
@@ -259,7 +259,7 @@ t('moderation: only moderators; /ban goes to Live and takes effect at once', asy
     // Every action is logged (and announced as an internal moderation event).
     const actions = (await h.db.all('SELECT action_type FROM moderation_actions ORDER BY id')).map((r) => r.action_type);
     for (const a of ['channel_ban', 'channel_unban', 'channel_timeout', 'slowmode_update', 'clear_chat']) assert.ok(actions.includes(a), a);
-    const modEv = (await h.db.all("SELECT event FROM events_outbox WHERE event_type = 'chat.moderation.action'")).map((r) => JSON.parse(r.event));
+    const modEv = (await h.db.all("SELECT envelope FROM service_outbox WHERE envelope->>'event_type' = 'chat.moderation.action'")).map((r) => r.envelope);
     assert.ok(modEv.length >= 5 && modEv.every((e) => e.visibility === 'internal'));
     aliceWs.sendJson({ type: 'chat', message: 'slow one' });
     await bobWs.next((m) => m.type === 'chat' && m.message === 'slow one');

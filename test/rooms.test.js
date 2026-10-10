@@ -127,8 +127,8 @@ t('realtime plane (WS-I task 9): public rooms announce messages and redactions, 
     const dan = h.addUser('dan', { subject: ids.newId('user') });
     await h.ctx.upsertUser(h.live.users.get(dan.id));
     const db = require('../server/db/database');
-    const since = (await db.get('SELECT MAX(seq) AS n FROM events_outbox') || {}).n || 0;
-    const newEvents = async () => (await db.all('SELECT event FROM events_outbox WHERE seq > ? ORDER BY seq', [since])).map((r) => JSON.parse(r.event)).filter((e) => /^chat\.room\./.test(e.event_type));
+    const since = (await db.get('SELECT MAX(id) AS n FROM service_outbox') || {}).n || 0;
+    const newEvents = async () => (await db.all('SELECT envelope FROM service_outbox WHERE id > ? ORDER BY id', [since])).map((r) => r.envelope).filter((e) => /^chat\.room\./.test(e.event_type));
     let r = await api('POST', '/', dan, { name: 'Open Plaza' });
     assert.strictEqual(r.status, 201, r.text);
     r = await api('POST', '/open-plaza/messages', dan, { message: 'hello plaza' });
