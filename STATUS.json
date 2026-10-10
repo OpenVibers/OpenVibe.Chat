@@ -8,7 +8,7 @@
   "port": 4400,
   "domain": "openvibe.chat (Chat's own site: global chat, messages, rooms, settings; the service manifest records it live since 2026-09-24) and openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via an nginx include in openvibe.live's vhost)",
   "contracts": "openvibe-contracts v0.127.0",
-  "sdk": "openvibe-sdk v0.37.2",
+  "sdk": "openvibe-sdk v0.38.0",
   "shared": "openvibe-shared v3.0.0",
   "capabilities": [
     "chat.message.send",
