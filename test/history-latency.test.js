@@ -46,7 +46,7 @@ let db, close, ownerUrl;
 
 // On the real containers the serving role is DML-only and its ANALYZE is silently skipped (no column
 // statistics, so the planner picked a bitmap scan + Sort); the owner runs it here, as autovacuum and
-// scripts/import-sqlite-to-pg.js do in production. On PGlite the one role owns everything.
+// On PGlite the one role owns everything.
 async function analyze() {
     if (!ownerUrl) { await db.query('ANALYZE chat_messages'); return; }
     const owner = createDb({ url: ownerUrl, service: 'chat-latency-owner', max: 1 });

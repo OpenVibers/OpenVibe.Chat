@@ -270,15 +270,4 @@ t('CORS: no *.openvibe.tools wildcard — only exact origins get credentialed CO
     } finally { config.extraOrigins = saved; }
 });
 
-t('scripts/parity-check.js: two identical services answer the same', async () => {
-    const { spawn } = require('child_process');
-    const path = require('path');
-    const r = await new Promise((resolve) => {
-        const c = spawn(process.execPath, [path.join(__dirname, '..', 'scripts', 'parity-check.js'), '--live', h.base, '--chat', h.base, '--stream', String(streamId), '--channel', String(streamer.id), '--token', alice.token]);
-        let out = ''; c.stdout.on('data', (d) => { out += d; }); c.on('close', (code) => resolve({ code, out }));
-    });
-    assert.strictEqual(r.code, 0, r.out);
-    assert.match(r.out, /all paths answer the same/);
-});
-
 t.run(async () => { if (h) await h.close(); });

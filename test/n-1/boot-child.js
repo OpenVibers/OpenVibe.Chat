@@ -1,8 +1,7 @@
 'use strict';
 /**
  * Runs inside a Chat release (its directory is the cwd): boots it with that release's own
- * test/helpers.js (a stub Network and a stub Live, Chat in-process) on the database in N1_DB (a SQLite file for a
- * release on SQLite, a PGlite directory for one on PostgreSQL), seeds it,
+ * test/helpers.js (a stub Network and a stub Live, Chat in-process) on the database in N1_DB (a PGlite directory), seeds it,
  * and prints one line `{"n1": { url, token, ids }}`. SIGTERM stops it (Chat's own shutdown).
  */
 const path = require('path');
@@ -12,7 +11,7 @@ const path = require('path');
     const quiet = () => {};
     console.warn = quiet;
     const helpers = require(path.join(dir, 'test', 'helpers'));
-    const h = await helpers.boot({ env: { CHAT_DB_PATH: process.env.N1_DB, CHAT_PGLITE_DIR: process.env.N1_DB } });
+    const h = await helpers.boot({ env: { CHAT_PGLITE_DIR: process.env.N1_DB } });
     process.on('exit', () => { try { require('fs').rmSync(h.tmp, { recursive: true, force: true }); } catch { /* */ } });
     const star = h.addUser('n1star', { role: 'streamer' });
     const fan = h.addUser('n1fan');

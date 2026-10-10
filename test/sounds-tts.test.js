@@ -112,7 +112,7 @@ t('TTS admin settings: admins only; credentials only the owner; written by Live'
     const view = await h.http('GET', '/api/tts/admin/settings', { token: admin.token });
     assert.strictEqual(view.body.settings.googleApiKey, '••••••••', 'admins see credentials masked');
     // (Live masks the engine's cached settings object in place, so for up to 30s after an admin
-    // looks, the owner — and Google synthesis — see the mask too. Moved as it is; see docs/cutover.md.)
+    // looks, the owner — and Google synthesis — see the mask too.)
 });
 
 t.run(async () => { if (h) await h.close(); });

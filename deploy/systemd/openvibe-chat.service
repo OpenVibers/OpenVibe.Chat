@@ -36,7 +36,6 @@ RestrictRealtime=true
 
 # Chat's own database and caches. The code tree stays read-only.
 StateDirectory=openvibe-chat
-Environment=CHAT_DB_PATH=/var/lib/openvibe-chat/chat.db
 Environment=CHAT_CACHE_DIR=/var/lib/openvibe-chat/cache
 # Channel sounds stay in Live's sounds directory (rows hold absolute paths into it; Live's
 # donation alerts read alert sounds there). Legacy layout and release layout (shared/data).

@@ -36,16 +36,7 @@ const FIX = path.join(__dirname, 'fixtures', 'n-1');
 const client = JSON.parse(fs.readFileSync(path.join(FIX, 'client.json'), 'utf8'));
 const worker = JSON.parse(fs.readFileSync(path.join(FIX, 'worker.json'), 'utf8'));
 
-// ── Skipped for the engine-switch release only: SQLite → PostgreSQL (plan T3, decision 6) ─────────
-// This release serves from PostgreSQL (/ready says pglite or postgresql, never a SQLite file), so an N-1 fixture
-// recorded from a release on *SQLite* — its statements in SQLite's dialect, its schema from sqlite_master — cannot be
-// prepared or replayed here. After this release deploys, `npm run n-1:record` records it (engine 'postgresql': the
-// migrations it applied and its statements as PostgreSQL received them) and the replay below resumes on its own.
-// Until then the run reports itself skipped (the ○ convention: neither green nor a failure). Keep the harness.
-if (worker.engine !== 'postgresql') {
-    console.log('n-1: skipped (engine switch to PostgreSQL: N-1 re-recorded after this release deploys)');
-    process.exit(0);
-}
+if (worker.engine !== 'postgresql') throw new Error('N-1 fixture must use PostgreSQL');
 const { createDb } = require('openvibe-sdk/db');
 const quiet = { log() {}, info() {}, warn() {}, error: (...a) => console.error(...a) };
 

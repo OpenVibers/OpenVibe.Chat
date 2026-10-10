@@ -19,7 +19,7 @@
  * their types).
  *
  * SQL is every statement N-1 prepared while it served those calls, plus every literal SQL string in its
- * server code that prepares on its own schema. The N-1 schema is its sqlite_master after the replay.
+ * server code that prepares on its own schema.
  */
 const fs = require('fs');
 const os = require('os');
@@ -722,33 +722,6 @@ function normalizeSql(sql) {
     return stripSqlComments(sql).replace(/\s+/g, ' ').trim();
 }
 
-/**
- * The DDL N-1 runs itself when it first needs a table or column (a module's CREATE TABLE IF NOT EXISTS,
- * a boot-time ALTER TABLE … ADD COLUMN) that `db` does not have yet. Each statement is applied to `db`
- * as it is found to apply; → the applied statements, tables first, in order.
- */
-function lazyDDL(files, db) {
-    const tables = () => new Set(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((r) => r.name));
-    const columns = (t) => { try { return new Set(db.prepare(`PRAGMA table_xinfo("${t}")`).all().map((c) => c.name.toLowerCase())); } catch { return new Set(); } };
-    const lits = stringLiterals(files).map(stripSqlComments);
-    const applied = [];
-    const apply = (ddl) => { try { db.exec(ddl); applied.push(ddl); return true; } catch { return false; } };
-    for (const text of lits) {
-        for (const m of text.matchAll(/CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+["`]?(\w+)["`]?\s*\(/gi)) {
-            // A rebuild's scratch table (x_new) is the migration's own business, not a table N-1 uses.
-            if (tables().has(m[1]) || /_(new|old|tmp|backup)$/i.test(m[1])) continue;
-            const end = skipBalanced(text, m.index + m[0].length - 1, '(', ')');
-            if (end >= 0) apply(normalizeSql(text.slice(m.index, end + 1)));
-        }
-    }
-    for (const text of lits) {
-        const m = /^\s*ALTER\s+TABLE\s+["`]?(\w+)["`]?\s+ADD\s+(?:COLUMN\s+)?["`]?(\w+)["`]?[^;]*$/i.exec(text.trim().replace(/;$/, ''));
-        if (!m || !tables().has(m[1]) || columns(m[1]).has(m[2].toLowerCase())) continue;
-        apply(normalizeSql(text).replace(/;$/, ''));
-    }
-    return applied;
-}
-
 /** Every file under dir with one of the extensions, as { name (relative to root), text }. */
 function readTree(root, dirs, exts = ['.js']) {
     const out = [];
@@ -766,50 +739,6 @@ function readTree(root, dirs, exts = ['.js']) {
         else walk(abs);
     }
     return out.sort((a, b) => (a.name < b.name ? -1 : 1));
-}
-
-/** The schema as DDL, tables first (no internal or FTS shadow tables), then indexes, triggers and views. */
-function schemaDDL(db) {
-    const shadow = new Set(db.prepare('PRAGMA table_list').all().filter((t) => t.type === 'shadow').map((t) => t.name));
-    const rows = db.prepare("SELECT type, name, sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%'").all()
-        .filter((r) => !shadow.has(r.name));
-    const order = { table: 0, index: 1, view: 2, trigger: 3 };
-    return rows.sort((a, b) => order[a.type] - order[b.type] || (a.name < b.name ? -1 : 1)).map((r) => r.sql);
-}
-
-/** Prepares every statement on db (a missing table or column fails the prepare). → [{ sql, error }] */
-function prepareProblems(db, statements) {
-    const problems = [];
-    for (const sql of statements) {
-        try { db.prepare(sql); } catch (e) { problems.push({ sql, error: e.message }); }
-    }
-    return problems;
-}
-
-/**
- * INSERTs of N-1 that N would refuse: a column N made NOT NULL without a default that the INSERT does
- * not name. → [{ sql, error }]
- */
-function insertProblems(db, statements) {
-    const problems = [];
-    const cols = new Map();
-    const required = (table) => {
-        if (!cols.has(table)) {
-            let info = [];
-            try { info = db.prepare(`PRAGMA table_xinfo("${table.replace(/"/g, '""')}")`).all(); } catch { info = []; }
-            const pkInt = info.filter((c) => c.pk).length === 1 && info.find((c) => c.pk && /^INTEGER$/i.test(c.type));
-            cols.set(table, info.filter((c) => c.notnull && c.dflt_value == null && !c.hidden && !(pkInt && c.pk)).map((c) => c.name));
-        }
-        return cols.get(table);
-    };
-    for (const sql of statements) {
-        const m = /^\s*(?:INSERT|REPLACE)(?:\s+OR\s+\w+)?\s+INTO\s+["`]?(\w+)["`]?\s*\(([^)]*)\)\s*(VALUES|SELECT)/i.exec(sql);
-        if (!m) continue;
-        const named = new Set(m[2].split(',').map((c) => c.trim().replace(/^["`]|["`]$/g, '').toLowerCase()));
-        const missing = required(m[1]).filter((c) => !named.has(c.toLowerCase()));
-        if (missing.length) problems.push({ sql, error: `${m[1]}.${missing.join(', ')} is NOT NULL without a default, and N-1 does not set it` });
-    }
-    return problems;
 }
 
 // ── PostgreSQL (a release on openvibe-sdk/db, plan T3) ─────────
@@ -899,7 +828,7 @@ module.exports = {
     flatten, readsOf, readProblems, statusCompatible,
     send, requestsFor, notFoundProbe, isNoRoute, callProblems,
     wsSends, wsHandled, wsSession, wsMessages, wsReads, wsProblems,
-    stringLiterals, sqlLiterals, stripSqlComments, normalizeSql, lazyDDL, readTree, schemaDDL, prepareProblems, insertProblems,
+    stringLiterals, sqlLiterals, stripSqlComments, normalizeSql, readTree,
     worktree, gitFiles, summarize,
     pgMigrations, pgPrepareProblems, pgInsertProblems,
 };

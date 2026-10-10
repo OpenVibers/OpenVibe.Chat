@@ -191,5 +191,5 @@ module.exports = {
         maxPerUploaderPerChannel: int(process.env.MAX_SOUNDS_PER_UPLOADER_PER_CHANNEL, 10),
     },
     // Where Chat keeps its own caches (101soundboards clips, TTS preview clips).
-    cacheDir: process.env.CHAT_CACHE_DIR || path.join(path.dirname(process.env.CHAT_DB_PATH || './data/chat.db'), 'cache'),
+    cacheDir: process.env.CHAT_CACHE_DIR || path.join('data', 'cache'),
 };

@@ -2,7 +2,7 @@
 
 > Rooms, messages, DMs, calls, TTS and audio queues, moderation and presence — one identity, every conversation.
 
-**Status:** alpha — deployed. Since the cutover on 2026-09-23 at 02:03 UTC (`docs/cutover.md`),
+**Status:** alpha — deployed. Since the cutover on 2026-09-23 at 02:03 UTC,
 Chat is the authority for openvibe.live's chat in every mode: the service runs on `openvibe-ovh`
 (unit `openvibe-chat`, 127.0.0.1:4400), Live runs with `CHAT_AUTHORITY=chat`, mounts no local chat
 routes, reads Chat's internal read API for the chat data it needs, and chat events go to OpenVibe.Events. `openvibe.chat` is Chat's own
@@ -55,11 +55,9 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   Live for. Reads are cached projections (`ctx_*` tables kept complete by paged syncs; TTL
   caches that serve stale while refreshing) warmed when a socket joins, so a chat message never
   waits on a network read. Live pushes invalidations when it changes cached data.
-- **Live's side** is `docs/live-patch.diff` (applies to Live `main` with `git apply`):
-  `/internal/chat-context/*` and `/internal/chat-effects/*`, and `CHAT_AUTHORITY=chat`, which stops
-  Live's chat server and routes. Live's own chat calls reach Chat through the Chat-owned ingress
-  (`/internal/chat/*`, `docs/chat-ingress.md`); the bridge proxy at `POST /internal/live/calls` is
-  retired (T3 J3a).
+- **Live integration.** Live serves `/internal/chat-context/*` and `/internal/chat-effects/*` and
+  runs with `CHAT_AUTHORITY=chat`. Its chat calls reach Chat through `/internal/chat/*`
+  (`docs/chat-ingress.md`).
 - **Own database on PostgreSQL** (ADR-035, plan T3) with Live's tables and ids, the Network subject on new
   rows, and a transactional events outbox. Chat's changes were copied into Live's tables by a read
   mirror until 2026-10-05: since Live #31 nothing in Live reads its mirror-filled chat tables in chat
@@ -71,13 +69,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   `migrations/0001_initial.sql` is the whole schema (timestamps stay SQLite-format text through
   `ov_now()`/`datetime()`); `0006_stop_live_mirror_triggers.sql` dropped the twelve read-mirror capture
   triggers, and `live_mirror_outbox` stays, idle, until a contract migration drops it.
-  `scripts/import-sqlite-to-pg.js` moves the SQLite data over once, with a per-table count and checksum
-  report (`docs/cutover.md`). `VALKEY_URL`/`VALKEY_PREFIX` put the per-actor rate-limit counters on
-  Valkey instead of this process. No part of the service reads SQLite; the one-time tools that read a
-  SQLite file (Live's snapshot, the import) use `node:sqlite` through `scripts/lib/sqlite.js`.
-- **Import:** `scripts/import-from-live.js --live-db <snapshot> [--apply]` — a dry run unless
-  `--apply` (which first copies the rows of the tables it writes to a JSON file), idempotent, never drops
-  a row of Chat's tables (`import_hold`), reports counts per table.
+  `VALKEY_URL`/`VALKEY_PREFIX` put the per-actor rate-limit counters on Valkey instead of this process.
 - **The six chat tables** (`channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`,
   `chat_ai_summaries`, `chat_timeline_events`): Chat's own since the C-04 cutover — Chat is their only
   writer, there is no authority switch any more. Live's writers go through Chat's APIs below and the
@@ -120,7 +112,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 
 | Concern | Where it lives | How Chat reaches it |
 | --- | --- | --- |
-| Messages, DMs, channel sounds, TTS voice overrides, relay users, first chats, IP-approval queue, moderation log | **Chat** (authority from the cutover) | its own database on PostgreSQL since the 2026-09-23 cutover (`DATABASE_URL` through `openvibe-sdk/db`, `migrations/`, the one-time `scripts/import-sqlite-to-pg.js`; `CHAT_DB_PATH` is read only by that importer); Live reads them through Chat's internal read API (the read mirror was retired on 2026-10-05 and the rollback through it is gone) |
+| Messages, DMs, channel sounds, TTS voice overrides, relay users, first chats, IP-approval queue, moderation log | **Chat** (authority from the cutover) | its own database on PostgreSQL (`DATABASE_URL` through `openvibe-sdk/db`; `migrations/` applies at boot); Live reads them through Chat's internal read API |
 | Accounts, roles, streams, channels, bans, IP approvals, follows, cosmetics, tags, site settings | **Live** (Network for identity) | `server/live-context.js` → `GET/POST /internal/chat-context/*` (service token, `live.chat_context.read`) |
 | Coins, AI viewers, arena, media queue, hardware, pastes, translation, PowerChat, notifications | **Live** | `server/live-context.js` → `POST /internal/chat-effects/*` (`live.chat_effects.write`) |
 | Live's own chat pushes and writes (AI viewers, relays, donations, `/api/mod`, recaps, calls) | **Live → Chat** | the Chat-owned ingress `/internal/chat/*` (`docs/chat-ingress.md`), presence `GET /internal/chat/presence` (`chat.presence.read`); the bridge `/internal/live/*` is retired (T3 J3a) |
@@ -142,9 +134,9 @@ Chat owns (from the cutover): `chat_messages`, `dm_conversations`, `dm_participa
 
 Chat owns too (C-04 done; there is no authority switch any more): `channel_moderators`,
 `channel_moderation_settings`, `emotes`, `user_tags`, `chat_ai_summaries`, `chat_timeline_events`.
-The importer no longer copies them; Live reads them through `GET /internal/moderation/*`.
+Live reads them through `GET /internal/moderation/*`.
 
-Stays in Live (decided with evidence, `docs/cutover.md`): `media_requests`, `media_request_settings`.
+Stays in Live: `media_requests`, `media_request_settings`.
 
 ### Events
 
@@ -357,19 +349,6 @@ openvibe.chat's Settings page edits all four. When Network cannot answer, an enf
   when the revision is newer (without the subscription, within the TTL). Network down: the cached copy
   with `stale: true`, else 503; writes 503.
 - API tokens read only. A person Live knows without a Network subject gets 409 `prefs.subject_unknown`.
-- **Migration** of what Live kept server-side (`user_preferences.chat_settings`, the browser's whole
-  `chatSettings`): `scripts/migrate-chat-preferences.js`. Only choices move (`showTimestamps` →
-  `timestamps`, `compactMode` → `compact`, `fontSize` small/large → `font_scale` 0.88/1.18, `showBadges`
-  false → `show_badges`); a person with defaults only gets no record, and an existing record is never
-  overwritten (create-only, `If-Match: 0`), so it is safe to re-run. The rest of `chatSettings` (TTS,
-  volumes, cross-feed, notifications, …) has no field in schema v1 and stays in Live for now.
-
-```bash
-node scripts/migrate-chat-preferences.js --live-db /tmp/live-snapshot.db                              # dry run
-node scripts/migrate-chat-preferences.js --live-db /tmp/live-snapshot.db --apply --backup /root/chat-prefs-$(date +%F).json
-node scripts/migrate-chat-preferences.js --rollback /root/chat-prefs-<date>.json [--apply]            # undo that run
-```
-
 ## Running it
 
 ```bash
@@ -379,8 +358,6 @@ npm start                     # 127.0.0.1:4400 — /ws/chat, /api/{chat,dm,tts,s
 npm test                      # Node 22; stub Live and Network in-process
 npm run test:pg               # the same on PostgreSQL + PgBouncer + Valkey (OV_TEST_PG_URL, OV_TEST_PG_DIRECT_URL,
                               # OV_TEST_VALKEY_URL: openvibe-sdk scripts/test-services.sh up)
-node scripts/import-from-live.js --live-db /tmp/live-snapshot.db            # dry run; --apply writes
-node scripts/parity-check.js --live https://openvibe.live --chat http://127.0.0.1:4401 --before "…"
 node scripts/subscribe-events.js --dry-run   # Chat's Events subscriptions (boot creates missing ones)
 node scripts/parity.js        # chat parity scenarios: a dry run; --apply only on test accounts (docs/parity.md)
 N1_LIVE_REF=<live sha> npm run n-1:record   # after a deploy: the N-1 fixtures from the deployed commit
@@ -402,8 +379,7 @@ the last clean Live sync is older than `LIVE_SYNC_STALE_MS` (default 60 s) or a 
 its own interval by that much. It also reports whether events are relayed and the Events consumer's
 counters.
 Production: `deploy/systemd/openvibe-chat.service`, `deploy/nginx/openvibe.live-chat.locations.conf`,
-`/etc/openvibe/chat.env`. The whole switch-over — rehearsal, import, parity checks, nginx, the flag,
-rollback — is `docs/cutover.md`.
+`/etc/openvibe/chat.env`.
 
 ### Per-actor limits
 
@@ -454,8 +430,8 @@ server/calls/              moved from Live: the call server (/ws/call), its REST
 server/media/client.js     OpenVibe.Media objects (namespace chat): emote image bytes, with Chat's own service token
 server/ai/                 moved from Live: chat-ai.js (the rolling insight job, off unless CHAT_AI_ENABLED), client.js (OpenVibe.AI runs, namespace chat.*), extractive.js (the fallback summary)
 server/db/                 database.js (Live's chat functions, same names and arguments; PostgreSQL, migrations/)
-scripts/                   import-from-live, parity-check, parity, migrate-chat-preferences, subscribe-events, n-1-record
-docs/                      cutover.md, calls-cutover.md, parity.md, live-patch.diff, capabilities-proposal/
+scripts/                   parity, subscribe-events, n-1-record
+docs/                      calls-cutover.md, parity.md, chat-ingress.md, capabilities-proposal/
 ```
 
 ## Owns
@@ -561,7 +537,7 @@ The unit is `openvibe-chat.service` on `127.0.0.1:4400`, the env file `/etc/open
 for openvibe.chat and [deploy/nginx/openvibe.live-chat.locations.conf](deploy/nginx/openvibe.live-chat.locations.conf),
 included in openvibe.live's vhost, for Live's chat paths. After a deploy, record the N-1 fixtures
 (`npm run n-1:record`). Chat is required in every mode and Live's chat routes are retired: a
-rollback is a Chat release rollback, not a switch back to Live (`docs/cutover.md`).
+rollback is a Chat release rollback, not a switch back to Live.
 
 Rollback: ovhost puts the previous sha back by itself when `/ready` does not answer 2xx after the
 restart; afterwards `sudo ovhost rollback chat --to <sha>`. Nothing blocks a rollback: the schema

@@ -1,9 +1,5 @@
 'use strict';
-/**
- * Chat serves from PostgreSQL only (plan T3, decision 11): better-sqlite3 is not a dependency, and nothing the
- * service loads opens SQLite. Reading a SQLite file is left to the one-time tools under scripts/ (Live's snapshot,
- * the production import), through node:sqlite in scripts/lib/sqlite.js.
- */
+/** PostgreSQL is the serving store; completed SQLite tooling and file settings are gone. */
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -11,36 +7,61 @@ const { suite } = require('./helpers');
 
 const t = suite('no-sqlite');
 const ROOT = path.join(__dirname, '..');
+const at = (name) => path.join(ROOT, name);
+const source = (name) => fs.readFileSync(at(name), 'utf8');
 
 function files(dir) {
-    const out = [];
-    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        const p = path.join(dir, e.name);
-        if (e.isDirectory()) out.push(...files(p));
-        else if (/\.(js|mjs|cjs)$/.test(e.name)) out.push(p);
-    }
-    return out;
+    if (!fs.existsSync(dir)) return [];
+    return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+        const file = path.join(dir, entry.name);
+        return entry.isDirectory() ? files(file) : [file];
+    });
 }
 
-t('package.json: better-sqlite3 is neither a dependency nor a dev dependency', () => {
-    const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-    for (const k of ['dependencies', 'devDependencies', 'optionalDependencies']) assert.ok(!(pkg[k] || {})['better-sqlite3'], `${k} lists better-sqlite3`);
-    assert.ok(pkg.dependencies.pg && pkg.dependencies['openvibe-sdk'], 'pg and openvibe-sdk serve');
+t('package dependencies use PostgreSQL and do not include SQLite drivers', () => {
+    const pkg = JSON.parse(source('package.json'));
+    for (const group of ['dependencies', 'devDependencies', 'optionalDependencies']) {
+        for (const name of ['better-sqlite3', 'sqlite3']) assert.ok(!(pkg[group] || {})[name], `${group} lists ${name}`);
+    }
+    assert.ok(pkg.dependencies.pg && pkg.dependencies['openvibe-sdk']);
+    assert.ok(pkg.devDependencies['@electric-sql/pglite']);
+    assert.ok(!pkg.scripts['import-from-live']);
 });
 
-t('nothing under server/ requires better-sqlite3 or node:sqlite', () => {
-    const offenders = files(path.join(ROOT, 'server'))
-        .filter((f) => /require\(\s*['"](better-sqlite3|node:sqlite|sqlite3)['"]\s*\)|from\s+['"](better-sqlite3|node:sqlite)['"]/.test(fs.readFileSync(f, 'utf8')))
-        .map((f) => path.relative(ROOT, f));
-    assert.deepStrictEqual(offenders, []);
+t('removed tools, tests, and runbooks are absent', () => {
+    for (const name of [
+        'scripts/import-from-live.js', 'scripts/import-sqlite-to-pg.js', 'scripts/migrate-chat-preferences.js',
+        'scripts/parity-check.js', 'scripts/lib/sqlite.js', 'server/prefs/from-live.js',
+        'test/import.test.js', 'test/import-pg.test.js', 'test/migrate-preferences.test.js',
+        'test/rehearsal.test.js', 'test/cutover-evidence.test.js', 'docs/cutover.md',
+        'docs/cutover-evidence-t3.md', 'docs/pg-port',
+    ]) assert.ok(!fs.existsSync(at(name)), `${name} still exists`);
 });
 
-t('scripts read SQLite only through scripts/lib/sqlite.js', () => {
-    const offenders = files(path.join(ROOT, 'scripts'))
-        .filter((f) => path.relative(ROOT, f) !== path.join('scripts', 'lib', 'sqlite.js'))
-        .filter((f) => /require\(\s*['"](node:sqlite|sqlite3)['"]\s*\)/.test(fs.readFileSync(f, 'utf8')))
-        .map((f) => path.relative(ROOT, f));
-    assert.deepStrictEqual(offenders, []);
+t('service and configuration do not open SQLite files', () => {
+    for (const file of files(at('server')).filter((f) => /\.js$/.test(f))) {
+        assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /require\(['"](?:better-sqlite3|sqlite3|node:sqlite|openvibe-sdk\/sqlite-import|openvibe-sdk\/sqlite-cli)['"]\)/, file);
+        assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /\b(?:[A-Z_]*DB_PATH)\b/, file);
+    }
+    for (const name of ['.env.example', 'deploy/systemd/openvibe-chat.service', 'README.md']) {
+        assert.doesNotMatch(source(name), /\b(?:[A-Z_]*DB_PATH)\b/, name);
+    }
+    for (const file of files(at('scripts')).filter((f) => /\.js$/.test(f))) {
+        assert.doesNotMatch(fs.readFileSync(file, 'utf8'), /require\(['"](?:better-sqlite3|sqlite3|node:sqlite)['"]\)/, file);
+    }
+});
+
+t('current docs and deployment files do not refer to retired tools or the Chat file setting', () => {
+    const retired = /CHAT_DB_PATH|scripts\/(?:import-from-live|import-sqlite-to-pg|migrate-chat-preferences|parity-check)\.js|docs\/(?:cutover(?:-evidence-t3)?\.md|pg-port\/|live-patch\.diff)/;
+    for (const name of ['README.md', 'STATUS.json', '.env.example', 'deploy/systemd/openvibe-chat.service']) {
+        assert.doesNotMatch(source(name), retired, name);
+    }
+    for (const file of files(at('docs'))) assert.doesNotMatch(fs.readFileSync(file, 'utf8'), retired, file);
+});
+
+t('production without DATABASE_URL fails before opening PGlite', async () => {
+    const { openDb } = require('../server/db/database');
+    await assert.rejects(openDb({ db: { url: '' }, nodeEnv: 'production' }), /DATABASE_URL is not set/);
 });
 
 t.run();

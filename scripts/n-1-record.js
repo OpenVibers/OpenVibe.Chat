@@ -13,17 +13,13 @@
  * them) is replayed against it; a service with sockets also replays the messages its clients send.
  * Writes test/fixtures/n-1/client.json and worker.json; commit them.
  *
- * A release on PostgreSQL (plan T3: migrations/, openvibe-sdk/db) boots on a PGlite directory of its own; its
- * schema is recorded as the migrations it applied (name and text: append-only, so the test rebuilds exactly that
- * database), and its statements as PostgreSQL received them. A release on SQLite is recorded as before (that needs
- * better-sqlite3 in node_modules, which this checkout no longer installs).
+ * The release boots on PGlite; the recorder stores its migrations and PostgreSQL statements.
  */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const h = require('../test/n-1/harness');
 const svc = require('../test/n-1/service');
-const { onPostgres } = require('../test/n-1/engine');
 
 const ROOT = path.join(__dirname, '..');
 const OUT = path.join(ROOT, 'test', 'fixtures', 'n-1');
@@ -32,15 +28,14 @@ const OUT = path.join(ROOT, 'test', 'fixtures', 'n-1');
     const ref = process.argv[2] || 'HEAD';
     const wt = h.worktree(ROOT, ref);
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ov-n-1-record-'));
-    const pg = onPostgres(wt.dir);
-    const dbPath = pg ? path.join(tmp, 'db', 'pglite') : path.join(tmp, 'db', `${svc.service}.db`);
+    const dbPath = path.join(tmp, 'db', 'pglite');
     const dataDir = path.join(tmp, 'data');
     const sqlOut = path.join(tmp, 'sql.json');
     fs.mkdirSync(path.dirname(dbPath), { recursive: true });
     fs.mkdirSync(dataDir, { recursive: true });
     let server = null;
     try {
-        console.log(`n-1:record: ${svc.service} at ${wt.sha.slice(0, 12)} (${ref}), on ${pg ? 'PostgreSQL' : 'SQLite'}`);
+        console.log(`n-1:record: ${svc.service} at ${wt.sha.slice(0, 12)} (${ref}), on PostgreSQL`);
 
         // 1. The client: its calls, and the names it reads.
         const files = svc.clientFiles(wt.dir);
@@ -108,7 +103,7 @@ const OUT = path.join(ROOT, 'test', 'fixtures', 'n-1');
         const head = { service: svc.service, release: wt.sha, recorded_at: new Date().toISOString(), note: 'N-1 fixture: written by `npm run n-1:record`, replayed by test/n-1.test.js' };
         const clients = svc.clientReleases ? svc.clientReleases() : null;
         const writeClient = () => fs.writeFileSync(path.join(OUT, 'client.json'), `${JSON.stringify({ ...head, ...(clients ? { clients } : {}), manifest, dynamic_calls: dynamic, calls: recorded, ...(ws ? { ws } : {}) }, null, 1)}\n`);
-        if (pg) {
+        {
             const { createDb } = require('openvibe-sdk/db');
             const db = createDb({ pglite: dbPath, service: 'n-1-record', log: { warn() {}, error: console.error } });
             try {
@@ -131,28 +126,6 @@ const OUT = path.join(ROOT, 'test', 'fixtures', 'n-1');
             } finally { await db.close().catch(() => {}); }
             return;
         }
-        const Database = require('better-sqlite3');
-        const db = new Database(dbPath);
-        const schema = h.schemaDDL(db);
-        const ledger = {};
-        for (const t of svc.ledgerTables || []) {
-            try { ledger[t] = db.prepare(`SELECT * FROM "${t}"`).all(); } catch { /* not there */ }
-        }
-        const userVersion = db.pragma('user_version', { simple: true });
-        const serverFiles = h.readTree(wt.dir, svc.sqlDirs);
-        // What N-1 creates itself on first use or at a full boot: in production it exists before N deploys.
-        const lazy = h.lazyDDL(serverFiles, db);
-        const ran = fs.existsSync(sqlOut) ? JSON.parse(fs.readFileSync(sqlOut, 'utf8')) : [];
-        const candidates = [...new Set([...ran.map(h.normalizeSql).filter((s) => /^\s*(SELECT|INSERT|UPDATE|DELETE|REPLACE|WITH)\b/i.test(s)), ...h.sqlLiterals(serverFiles)])].sort();
-        const failing = new Set(h.prepareProblems(db, candidates).map((p) => p.sql));
-        const statements = candidates.filter((s) => !failing.has(s));
-        db.close();
-        console.log(`  sql: ${statements.length} statements (${ran.length} ran, ${failing.size} candidates that do not prepare on N-1's own schema left out), ${schema.length} schema objects, ${lazy.length} created on first use`);
-
-        fs.mkdirSync(OUT, { recursive: true });
-        writeClient();
-        fs.writeFileSync(path.join(OUT, 'worker.json'), `${JSON.stringify({ ...head, user_version: userVersion, schema, ledger, lazy, statements }, null, 1)}\n`);
-        console.log(`  wrote ${path.relative(ROOT, OUT)}/client.json and worker.json`);
     } finally {
         if (server) await server.close();
         wt.remove();

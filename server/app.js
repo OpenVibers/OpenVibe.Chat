@@ -2,7 +2,7 @@
  * OpenVibe.Chat — HTTP app and WebSocket upgrade handling.
  *
  * Browsers reach Chat on Live's origin: nginx sends /ws/chat and the chat REST prefixes
- * (/api/chat/, /api/dm/, /api/tts/, /api/sounds) here (docs/cutover.md), and at the calls cutover
+ * (/api/chat/, /api/dm/, /api/tts/, /api/sounds) here, and at the calls cutover
  * /ws/call and the call routes under /api/streams (docs/calls-cutover.md), so the guards Live ran
  * in front of those routes run here too, with Live's values: credentialed CORS for an explicit
  * list of origins (never a wildcard), the /api rate limit, IP/network bans (admins exempt) and the ov_banned cookie, the
