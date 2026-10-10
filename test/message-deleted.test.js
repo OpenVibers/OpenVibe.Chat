@@ -205,13 +205,15 @@ const userJwt = (subjectId) => serviceAuth.signServiceToken({
 }, h.keys.privateKey);
 
 let firstSeq, msgId;
+/** Events' opaque cursor for a position (its own encoder): a position goes over the wire only as a cursor. */
+const cursorAt = async (seq) => require(path.join(EVENTS_DIR, 'server', 'cursor')).encode(seq, await events.store.epoch());
 t('e2e: the relay publishes the message, then its deletion; replay serves only the tombstone', async () => {
     if (!haveEvents) return;
     await h.db.run('UPDATE service_outbox SET sent_at = ? WHERE sent_at IS NULL', [Date.now()]);   // earlier tests' rows
     msgId = await say(SECRET, { user_id: alice.id, anon_id: null, username: 'alice' });
     assert.strictEqual((await h.eventsRelay.outbox.flush()).sent, 1);
     firstSeq = await events.store.lastSeq();
-    const before = await sse(`/realtime/stream?topics=chat.message.*&last_event_id=${firstSeq - 1}`);
+    const before = await sse(`/realtime/stream?topics=chat.message.*&last_event_id=${await cursorAt(firstSeq - 1)}`);
     await before.waitFor((c) => c.events().length === 1);
     assert.ok(before.body().includes('555-0199'), 'before the deletion the text is there (the leak)');
     before.close();
@@ -225,7 +227,7 @@ t('e2e: the relay publishes the message, then its deletion; replay serves only t
         ['service', { Authorization: `Bearer ${h.serviceToken(['events.event.read'], { aud: 'openvibe.events', sub: 'svc:search' })}` }],
     ];
     for (const [who, headers] of views) {
-        const c = await sse(`/realtime/stream?topics=chat.message.*&last_event_id=${firstSeq - 1}`, headers);
+        const c = await sse(`/realtime/stream?topics=chat.message.*&last_event_id=${await cursorAt(firstSeq - 1)}`, headers);
         await c.waitFor((x) => x.events().length === 2);
         const [created, deleted] = c.events();
         assert.deepStrictEqual([created.seq, deleted.seq], [firstSeq, firstSeq + 1], `${who}: sequence intact`);
@@ -236,7 +238,7 @@ t('e2e: the relay publishes the message, then its deletion; replay serves only t
         assert.ok(!c.body().includes('555-0199') && !c.body().includes('usr_01J9AAAAAAAAAAAAAAAAAAAAAA'), `${who}: no text, no author`);
         c.close();
     }
-    const pull = await fetch(`http://127.0.0.1:${eventsPort}/api/v1/events?topic=chat.message.*&after_seq=${firstSeq - 1}`, {
+    const pull = await fetch(`http://127.0.0.1:${eventsPort}/api/v1/events?topic=chat.message.*&after=${await cursorAt(firstSeq - 1)}`, {
         headers: { Authorization: `Bearer ${h.serviceToken(['events.event.read'], { aud: 'openvibe.events', sub: 'svc:search' })}` },
     }).then((r) => r.json());
     assert.deepStrictEqual(pull.events.map((e) => e.seq), [firstSeq, firstSeq + 1]);
