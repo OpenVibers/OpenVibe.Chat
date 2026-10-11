@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const ovServe = require('openvibe-shared/serve');
 const sharedSeo = require('openvibe-shared/seo');
+const social = require('openvibe-shared/social');
 const appIcon = require('openvibe-shared/app-icon');
 const frame = require('openvibe-shared/frame');
 
@@ -71,6 +72,8 @@ function renderPage(o) {
     const head = sharedSeo.headTags({
         title, description: o.description || DEFAULT_DESCRIPTION, canonical: `${config.web.baseUrl}${o.path || '/'}`,
         robots: o.robots, siteName: SITE_NAME, type: 'website', jsonLd: o.jsonLd,
+        // Indexable pages share the site's card (openvibe-shared/social); private ones advertise nothing.
+        image: /^index/.test(o.robots) ? social.url('chat') : undefined, imageAlt: /^index/.test(o.robots) ? SITE_NAME : undefined,
     });
     const actor = o.actor || { kind: 'anonymous' };
     const who = actor.kind === 'user'
