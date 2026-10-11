@@ -35,6 +35,11 @@ t('global chat reads without JavaScript; signing in shows the composer', async (
     assert.match(r.text, /Sign in with OpenVibe/);
     assert.match(r.text, /<meta name="robots" content="index, follow">/);
     assert.match(r.text, /\/shared\/navbar\.js\?v=/, 'the Frame from this site\'s own /shared/');
+    const card = /<meta property="og:image" content="([^"]+)">/.exec(r.text);
+    assert.ok(card && /\/shared\/social\/chat\.jpg\?v=/.test(card[1]), 'global chat shares the site card');
+    const img = await req('GET', new URL(card[1]).pathname + new URL(card[1]).search);
+    assert.strictEqual(img.status, 200);
+    assert.strictEqual(img.headers.get('content-type'), 'image/jpeg');
     assert.ok(!/id="oc-compose"/.test(r.text), 'no composer for a guest');
     const me = await req('GET', '/', { headers: cookie(alice) });
     assert.match(me.text, /id="oc-compose"/);
@@ -167,6 +172,7 @@ t('unknown pages: a browser gets the site\'s HTML 404 page, the API and other cl
     assert.match(r.text, /<h1>Page not found<\/h1>/);
     assert.match(r.text, /<meta name="robots" content="noindex">/);
     assert.match(r.text, /<code>\/__ovcheck-404<\/code>/);
+    assert.ok(!/og:image/.test(r.text), 'a noindex page advertises no card');
     assert.match(r.text, /\/shared\/navbar\.js\?v=/, 'inside the Frame, like every page');
     const x = await req('GET', '/%3Cscript%3Ex', { headers: html });
     assert.strictEqual(x.status, 404);
