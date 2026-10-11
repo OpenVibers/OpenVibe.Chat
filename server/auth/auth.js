@@ -35,20 +35,19 @@ function apiTokenAllows(req, scopes) {
 }
 
 /**
- * Extract the token and where it came from (Bearer header, the Network `ov_token` cookie, or Live's
- * legacy `token` cookie). Internal: extractToken returns the token alone.
+ * Extract the token and where it came from: the Bearer header or the Network `ov_token` cookie. Live's legacy
+ * `token` cookie is not read (Live no longer sets it; compatibility register C-05). Internal: extractToken returns
+ * the token alone.
  */
-function extractTokenFrom(req, { legacyCookie = true } = {}) {
+function extractTokenFrom(req) {
     const authHeader = req.headers.authorization;
     if (authHeader && authHeader.startsWith('Bearer ')) {
         return { token: authHeader.slice(7), from: 'header' };
     }
 
-    // The Network session cookie is shared with the browser. REST still accepts Live's legacy
-    // 'token' cookie (as Live does); WebSocket upgrades ignore it (legacyCookie: false).
+    // The Network session cookie is shared with the browser.
     if (req.cookies) {
         if (req.cookies.ov_token) return { token: req.cookies.ov_token, from: 'ov_token_cookie' };
-        if (legacyCookie && req.cookies.token) return { token: req.cookies.token, from: 'legacy_cookie' };
     }
 
     // Raw Node/WebSocket upgrade requests do not go through cookie-parser,
@@ -65,7 +64,6 @@ function extractTokenFrom(req, { legacyCookie = true } = {}) {
             try { parsed[key] = decodeURIComponent(value); } catch { parsed[key] = value; }
         }
         if (parsed.ov_token) return { token: parsed.ov_token, from: 'ov_token_cookie' };
-        if (legacyCookie && parsed.token) return { token: parsed.token, from: 'legacy_cookie' };
     }
 
     return { token: null, from: null };
@@ -97,7 +95,7 @@ function extractWsToken(req) {
  * extractWsToken or its first message.
  */
 function banExemptionToken(req) {
-    return extractTokenFrom(req, { legacyCookie: false }).token;
+    return extractTokenFrom(req).token;
 }
 
 /**
