@@ -1809,7 +1809,7 @@ class ChatServer {
                 {
                     const title = `Chat paste by ${client.username || client.displayName || 'anon'}`;
                     const userId = client.userId || client.user?.id || null;
-                    // Pastes: Live's pastes-client posts them (OpenVibe.Community / Media per PASTES_AUTHORITY).
+                    // Pastes: Live's pastes-client posts them to OpenVibe.Community, which owns pastes.
                     ctx.effects.createPaste({
                         title,
                         content: args.trim(),
