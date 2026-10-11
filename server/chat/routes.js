@@ -550,20 +550,20 @@ router.get('/:streamId/replay', optionalAuth, async (req, res) => {
 // broadcaster's stream sessions (not just the one slot/session being viewed),
 // so viewers keep context when a stream restarts or the streamer runs multiple
 // slots. Each message carries its source stream (title/slug/live) so the client
-// can label it and let viewers hop between the streamer's live slots.
-// Pass ?scope=stream to restrict to the single session (legacy behavior).
+// can label it and let viewers hop between the streamer's live slots. A stream whose broadcaster is
+// unknown reads its own session only. (The legacy ?scope=stream opt-in is gone: compatibility register
+// C-06, unused since at least 2026-08-04.)
 router.get('/:streamId/history', optionalAuth, async (req, res) => {
     try {
         const streamId = positiveInt(req.params.streamId);
         if (streamId === null) return res.status(400).json({ error: 'Invalid stream ID' });
         const limit = Math.min(parseInt(req.query.limit || '500'), 500);
         const before = req.query.before; // ISO timestamp for pagination
-        const scope = req.query.scope || 'streamer';
 
         // Resolve which broadcaster this stream belongs to.
         const stream = await ctx.ensureStream(streamId);
         const broadcasterId = stream ? stream.user_id : null;
-        const spanStreamer = scope !== 'stream' && broadcasterId;
+        const spanStreamer = !!broadcasterId;
 
         // COALESCE the channel name from the source stream's owner (live rows) OR the
         // message's channel_user_id (offline rows) so the streamer/channel tag renders
