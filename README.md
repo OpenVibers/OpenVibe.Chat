@@ -4,8 +4,8 @@
 
 **Status:** alpha — deployed. Since the cutover on 2026-09-23 at 02:03 UTC,
 Chat is the authority for openvibe.live's chat in every mode: the service runs on `openvibe-ovh`
-(unit `openvibe-chat`, 127.0.0.1:4400), Live runs with `CHAT_AUTHORITY=chat`, mounts no local chat
-routes, reads Chat's internal read API for the chat data it needs, and chat events go to OpenVibe.Events. `openvibe.chat` is Chat's own
+(unit `openvibe-chat`, 127.0.0.1:4400), Live runs no chat of its own (its `CHAT_AUTHORITY` switch was retired
+on 2026-10-11), mounts no local chat routes, reads Chat's internal read API for the chat data it needs, and chat events go to OpenVibe.Events. `openvibe.chat` is Chat's own
 site (global chat, messages, rooms,
 settings; the service manifest records it live since 2026-09-24).  
 **Domain:** `openvibe.chat` ([deploy/nginx/openvibe.chat.conf](deploy/nginx/openvibe.chat.conf)); Chat
@@ -56,7 +56,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   caches that serve stale while refreshing) warmed when a socket joins, so a chat message never
   waits on a network read. Live pushes invalidations when it changes cached data.
 - **Live integration.** Live serves `/internal/chat-context/*` and `/internal/chat-effects/*` and
-  runs with `CHAT_AUTHORITY=chat`. Its chat calls reach Chat through `/internal/chat/*`
+  has no chat switch. Its chat calls reach Chat through `/internal/chat/*`
   (`docs/chat-ingress.md`).
 - **Own database on PostgreSQL** (ADR-035, plan T3) with Live's tables and ids, the Network subject on new
   rows, and a transactional events outbox. Chat's changes were copied into Live's tables by a read
