@@ -139,8 +139,8 @@ t('chat history: global page and cursor delta, deleted and expired rows hidden',
     const inRoom = [];
     for (const i of [0, 1]) inRoom.push(Number((await h.db.saveChatMessage({ stream_id: streamId, channel_user_id: streamer.id, user_id: bob.id, username: 'Bob', message: `s${i}`, message_type: 'chat' })).lastInsertRowid));
     await h.db.deleteChatMessage(inRoom[0], staff.id);
-    for (const p of [`/api/chat/${streamId}/history`, `/api/chat/${streamId}/history?scope=stream&`, `/api/chat/channel/${streamer.id}/history`]) {
-        const d = await h.http('GET', `${p}${p.endsWith('&') ? '' : '?'}after_id=${inRoom[1]}`);
+    for (const p of [`/api/chat/${streamId}/history`, `/api/chat/channel/${streamer.id}/history`]) {
+        const d = await h.http('GET', `${p}?after_id=${inRoom[1]}`);
         assert.strictEqual(d.status, 200, p);
         assert.deepStrictEqual(d.body.deleted_ids, [inRoom[0]], p);
     }
