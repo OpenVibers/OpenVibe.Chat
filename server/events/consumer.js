@@ -160,7 +160,7 @@ function createEventsConsumer({ chatServer, secrets = [], now = () => Date.now()
         const event = delivery.event;
         if (!event || typeof event !== 'object' || typeof event.event_id !== 'string' || !EVENT_ID_RE.test(event.event_id) || typeof event.event_type !== 'string') {
             stats.refused++;
-            return problem(400, 'chat.bad_delivery', 'body must be { event: <envelope>, seq }');
+            return problem(400, 'chat.bad_delivery', 'body must be { event: <envelope> }');
         }
         stats.received++;
         stats.last_at = new Date(now()).toISOString();
