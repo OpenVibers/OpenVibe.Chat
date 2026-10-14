@@ -329,7 +329,9 @@ t('media commands go to Live’s queue with the same replies', async () => {
     await aliceWs.next((x) => x.type === 'system' && x.message === 'Only the streamer or a moderator can skip media.');
     await h.sleep(1100);
     aliceWs.sendJson({ type: 'chat', message: '!forward' });
-    await aliceWs.next((x) => x.type === 'system' && x.message === 'No hardware client connected.');
+    // The robot command goes to Live with the viewer's Network subject (Live forwards it to OpenVibe.Bot as them),
+    // and Live's refusal is shown to the viewer as it said it.
+    await aliceWs.next((x) => x.type === 'system' && x.message === `No robot here (asked as usr_01J9AAAAAAAAAAAAAAAAAAAAAA, user ${alice.id}).`);
 });
 
 t('upgrade guards: foreign origin refused, banned address refused (admins exempt)', async () => {
