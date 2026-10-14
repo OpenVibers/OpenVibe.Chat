@@ -2,8 +2,8 @@
 /**
  * The Live read mirror is retired (plan T3, 2026-10-05): Live #31 reads Chat's internal read API
  * (server/chat/internal-reads.js) instead of its mirror-filled copies of Chat's tables, so no Chat
- * code path enqueues into live_mirror_outbox or drains it. The table itself stays until a later
- * contract migration drops it, and migrations/0001_initial.sql still has the per-table triggers
+ * code path enqueues into live_mirror_outbox or drains it. Migration 0009_drop_live_mirror_outbox.sql
+ * drops the table, and migrations/0001_initial.sql still has the per-table triggers
  * that fill it (schema SQL, not an application code path); this guard is about the sender, its
  * config and its enqueue/relay call sites never coming back.
  */
