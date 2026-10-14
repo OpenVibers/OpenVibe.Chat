@@ -919,7 +919,9 @@ const effects = {
     // bridge path the body carries none and Live's sendToConn answers the connection itself.
     arenaCommand: (client, cmd, parts) => effect('arena-command', { client: clientHandle(client), cmd, parts }),
     mediaQueue: async (op, args) => await effect('media-queue', { op, ...args }),
-    hardwareCommand: async (streamerUserId, command, fromUser) => await effect('hardware', { streamer_user_id: streamerUserId, command, from_user: fromUser }),
+    hardwareCommand: async (streamerUserId, command, fromUser, { subject = null, userId = null } = {}) => await effect('hardware', {
+        streamer_user_id: streamerUserId, command, from_user: fromUser, ...(subject ? { from_subject: subject } : {}), ...(userId ? { from_user_id: userId } : {}),
+    }),
     createPaste: (body) => effect('paste', body).then((r) => r.paste),
     translate: (text, channelUserId) => effect('translate', { text, channel_user_id: channelUserId }).then((r) => r.translation || null),
     notifyDm: (body) => fire('notify/dm', body),

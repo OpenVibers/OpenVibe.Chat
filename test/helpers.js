@@ -260,7 +260,8 @@ async function boot({ env = {} } = {}) {
                     if (body.op === 'state') return send(200, { state: live.mediaState });
                     if (body.op === 'skip') return send(200, { ended: live.mediaState.now_playing, next: live.mediaState.queue[0] || null });
                     return send(400, { error: 'unknown op' });
-                case 'hardware': return send(200, { ok: false, reason: 'no_hardware' });
+                // Live forwards a robot command to the channel's OpenVibe.Bot robot as the viewer: the stub says who it was asked as.
+                case 'hardware': return send(200, { ok: false, reason: 'no_robot', message: `No robot here (asked as ${body.from_subject || 'nobody'}, user ${body.from_user_id || '-'}).` });
                 case 'ensure-channel': {
                     let ch = [...live.channels.values()].find((c) => c.user_id === body.user_id);
                     if (!ch) { ch = { id: 100 + live.channels.size, user_id: body.user_id, title: 'New Channel' }; live.channels.set(ch.id, ch); }

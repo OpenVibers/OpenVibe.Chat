@@ -1449,14 +1449,20 @@ class ChatServer {
         }
     }
 
-    /** Send a command to the streamer's hardware client (Live). Silent when the streamer is unknown. */
-    _hardwareCommand(ws, stream, command, client) {
-        ctx.effects.hardwareCommand(stream.user_id, command, client.user?.display_name || `anon${client.anonId || ''}`).then((r) => {
-            if (r && r.ok) return;
-            if (r && r.reason === 'no_hardware') this.sendTo(ws, { type: 'system', message: 'No hardware client connected.' });
-        }).catch((err) => {
-            this.sendTo(ws, { type: 'system', message: err.message || 'Media command failed.' });
-        });
+    /**
+     * A robot command for the channel's OpenVibe.Bot robot, through Live (it forwards to Bot as this viewer, plan T15).
+     * The viewer is named by Network subject (none when not signed in: Bot only takes commands from people). Live's
+     * refusal comes back as a sentence for this viewer alone; a quiet refusal (a cooldown) says nothing.
+     */
+    async _hardwareCommand(ws, stream, command, client) {
+        try {
+            const subject = client.user ? await this._subjectOfUser(client.user) : null;
+            const r = await ctx.effects.hardwareCommand(stream.user_id, command, client.user?.display_name || `anon${client.anonId || ''}`,
+                { subject, userId: client.user?.id || null });
+            if (r && !r.ok && r.message) this.sendTo(ws, { type: 'system', message: r.message });
+        } catch (err) {
+            this.sendTo(ws, { type: 'system', message: err.message || 'The robot command failed.' });
+        }
     }
 
     /**
