@@ -68,8 +68,8 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   `DATABASE_URL` outside production it runs on an embedded PGlite in `data/pglite` (`CHAT_PGLITE_DIR`).
   `migrations/0001_initial.sql` is the whole schema (timestamps stay SQLite-format text through
   `ov_now()`/`datetime()`); `0006_stop_live_mirror_triggers.sql` dropped the twelve read-mirror capture
-  triggers, and `live_mirror_outbox` stays, idle, until a contract migration drops it (after 0008's
-  SDK outbox: a held contract would hold every migration after it).
+  triggers, and `0009_drop_live_mirror_outbox.sql` drops `live_mirror_outbox` (a contract migration,
+  after 0008's SDK outbox: a held contract would hold every migration after it).
   `VALKEY_URL`/`VALKEY_PREFIX` put the per-actor rate-limit counters on Valkey instead of this process.
 - **The six chat tables** (`channel_moderators`, `channel_moderation_settings`, `emotes`, `user_tags`,
   `chat_ai_summaries`, `chat_timeline_events`): Chat's own since the C-04 cutover — Chat is their only
@@ -574,7 +574,7 @@ left OpenVibe.Sites, and this repository's vhost serves it.
 Part of the [OpenVibe network](https://openvibe.network). Built in the open by [OpenVibers](https://github.com/OpenVibers).
 
 <!-- versions:start -->
-- openvibe-contracts: v0.143.0
+- openvibe-contracts: v0.158.0
 - openvibe-sdk: v0.44.0
 - openvibe-shared: v4.1.3
 <!-- versions:end -->
