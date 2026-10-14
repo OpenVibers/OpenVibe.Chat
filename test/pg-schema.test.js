@@ -3,7 +3,7 @@
  * The PostgreSQL schema (plan T3, decision 1). migrations/0001_initial.sql opens a real PostgreSQL
  * (PGlite in-process, or the containers with OV_TEST_STORE=pg) and is checked here: every Chat table
  * exists, the keys/indexes the queries rely on are present, and the retired Live read mirror captures
- * nothing any more (0006 dropped its twelve triggers; live_mirror_outbox stays until a contract migration).
+ * nothing any more (0006 dropped its twelve triggers and 0009 drops the live_mirror_outbox table).
  */
 const assert = require('assert');
 const path = require('path');
@@ -25,7 +25,7 @@ const TABLES = [
     'chat_messages', 'dm_conversations', 'dm_participants', 'dm_messages', 'dm_blocks', 'tts_voice_overrides',
     'channel_sounds', 'relay_users', 'hidden_relay_users', 'pending_ip_messages', 'stream_first_chats', 'moderation_actions',
     'channel_moderators', 'channel_moderation_settings', 'emotes', 'user_tags', 'chat_ai_summaries', 'chat_timeline_events',
-    'ctx_users', 'ctx_streams', 'ctx_managed_streams', 'ctx_channels', 'ctx_sync', 'events_outbox', 'live_mirror_outbox', 'service_outbox',
+    'ctx_users', 'ctx_streams', 'ctx_managed_streams', 'ctx_channels', 'ctx_sync', 'events_outbox', 'service_outbox',
     'chat_ingress_applied', 'audio_requests', 'import_hold', 'import_runs', 'chat_meta', 'deploy_releases',
     'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'token_revocations',
     'network_blocks', 'account_data_events', 'ticket_conversations', 'ticket_messages',
@@ -109,12 +109,12 @@ t('relay_users has a real identity id', async () => {
     assert.strictEqual(r.is_identity, 'YES', 'id is an identity column');
 });
 
-t('the retired Live mirror captures nothing (0006 dropped its triggers)', async () => {
+t('the retired Live mirror is gone (0006 dropped its triggers, 0009 its table)', async () => {
     const triggers = await all("SELECT tgname FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE 'mirror\\_%'");
     assert.deepStrictEqual(triggers, [], 'no mirror_* capture trigger remains');
-    const before = (await get('SELECT COUNT(*) AS n FROM live_mirror_outbox')).n;
+    assert.strictEqual((await get("SELECT to_regclass('live_mirror_outbox') AS t")).t, null, 'live_mirror_outbox is dropped');
     await db.prepare('INSERT INTO chat_messages (message) VALUES (?)').run('hello');
-    assert.strictEqual((await get('SELECT COUNT(*) AS n FROM live_mirror_outbox')).n, before, 'a Chat write queues nothing');
+    assert.ok((await get("SELECT COUNT(*) AS n FROM chat_messages WHERE message = 'hello'")).n >= 1, 'a Chat write still lands');
 });
 
 t('cleanup', async () => { await close(); });
