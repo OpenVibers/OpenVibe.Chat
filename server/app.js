@@ -77,6 +77,7 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     // request rates/latencies and process metrics, from openvibe-shared (before any route).
     const release = require('openvibe-shared/release').createRelease({ service: 'chat', root: require('path').join(__dirname, '..'), packages: ['openvibe-shared', 'openvibe-sdk', 'openvibe-contracts'] });
     const metrics = require('openvibe-shared/metrics').instrument(app, { service: 'chat', release: release.release });
+    app.use(require('openvibe-sdk/service').telemetryMiddleware);   // request telemetry: a no-op until server/index.js calls telemetry.init()
     release.mount(app, { registry: metrics.registry });
     app.locals.metrics = metrics.registry;
     // How sign-ins resolve (auth/network-session.js): here, through Live, or refused.
