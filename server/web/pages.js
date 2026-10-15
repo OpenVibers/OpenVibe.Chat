@@ -656,6 +656,8 @@ ${attachList}`,
         title: `What shipped on ${SITE_NAME}`, path: '/updates', robots: 'index, follow', cache: cache.htmlHeaders({ maxAge: 300 }),
         body: frame.updatesBody({ service: 'chat', siteName: SITE_NAME }) + `<script src="${ovServe.url('shipped.js')}" defer></script>`,
     }));
+    // ── Terms, privacy and DMCA for this site (openvibe-shared/legal): the Frame's footer links them here ──
+    { const legal = require('openvibe-shared/legal'); router.get(legal.PATHS, legal.handler({ id: 'chat', service: 'chat', host: 'openvibe.chat', name: SITE_NAME, profile: 'ugc' })); }
     // ── robots.txt, llms.txt, sitemap.xml: server/web/discovery.js, the shared SEO kit ──
     router.use(createDiscoveryRoutes({ config }));
 

@@ -105,4 +105,13 @@ t('the home page carries JSON-LD: WebSite plus the site\'s primary type', async 
         'the JSON-LD is the same for every reader');
 });
 
+t('/terms, /privacy and /dmca are this site\'s own documents (the Frame\'s footer links them)', async () => {
+    for (const p of ['/terms', '/privacy', '/dmca']) {
+        const r = await req(p);
+        assert.strictEqual(r.status, 200, p);
+        assert.match(r.type, /^text\/html/);
+        assert.ok(r.text.includes('openvibe.chat'), `${p} names openvibe.chat`);
+    }
+});
+
 t.run(async () => { if (h && h.close) await h.close(); });
