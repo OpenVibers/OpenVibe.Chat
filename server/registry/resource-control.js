@@ -67,14 +67,19 @@ function router({ now = () => Date.now() } = {}) {
             if (!check.valid) return http.sendProblem(res, 400, 'control.bad_request', { detail: JSON.stringify(check.errors).slice(0, 500), ctx });
             const caller = req.principal.sub;
             const digest = digestOf(request);
-            const seen = await db.get('SELECT digest, response FROM chat_control_log WHERE caller = ? AND idempotency_key = ?', [caller, request.idempotency_key]);
+            // chat_control_log (migration 0010) waits behind 0009's contract window (until 0006 is 7 days old). Until it
+            // exists, answers are not kept: archive is idempotent by itself (a second one answers changed: false).
+            const missing = (err) => /chat_control_log/.test(String(err && err.message)) && /does not exist|no such table/.test(String(err && err.message));
+            const seen = await db.get('SELECT digest, response FROM chat_control_log WHERE caller = ? AND idempotency_key = ?', [caller, request.idempotency_key])
+                .catch((err) => { if (missing(err)) return null; throw err; });
             if (seen) {
                 if (seen.digest !== digest) return http.sendProblem(res, 409, 'control.idempotency_conflict', { detail: 'this idempotency_key was used for another request', ctx });
                 return res.json(typeof seen.response === 'string' ? JSON.parse(seen.response) : seen.response);
             }
             const answer = await decide(request);
             await db.run(`INSERT INTO chat_control_log (caller, idempotency_key, owner_subject, digest, response, created_at)
-                VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`, [caller, request.idempotency_key, request.owner.id, digest, JSON.stringify(answer), now()]);
+                VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING`, [caller, request.idempotency_key, request.owner.id, digest, JSON.stringify(answer), now()])
+                .catch((err) => { if (!missing(err)) throw err; });
             return res.json(answer);
         } catch (err) { return next(err); }
     });
