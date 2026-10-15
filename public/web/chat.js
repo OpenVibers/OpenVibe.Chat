@@ -197,21 +197,40 @@
 
   // ── A room ──
   function roomItem(m) {
-    var li = el('li', 'oc-msg'); li.dataset.id = m.id || ''; li.dataset.user = m.user_id || '';
+    var ai = m.ai_member_id != null;
+    var li = el('li', 'oc-msg' + (ai ? ' oc-msg-ai' : '')); li.dataset.id = m.id || ''; li.dataset.user = m.user_id || '';
     li.appendChild(clock(m.created_at)); li.appendChild(document.createTextNode(' '));
-    var who = el('a', 'oc-name'); who.appendChild(wearing(m, m.display_name || m.username || 'someone'));
-    who.href = LIVE + '/@' + encodeURIComponent(m.username || '');
-    if (/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '')) who.style.setProperty('--nc', m.profile_color);
-    li.appendChild(who);
-    var b = badge(m.user_role); if (b) li.appendChild(b);
+    if (ai) {
+      // An AI member of the room: its name and an AI badge, never a profile link.
+      li.appendChild(el('span', 'oc-name oc-ai-name', m.display_name || 'AI'));
+      li.appendChild(document.createTextNode(' '));
+      var ab = el('span', 'oc-badge oc-ai', 'AI'); ab.title = 'An AI member of this room'; li.appendChild(ab);
+      clearThinking();
+    } else {
+      var who = el('a', 'oc-name'); who.appendChild(wearing(m, m.display_name || m.username || 'someone'));
+      who.href = LIVE + '/@' + encodeURIComponent(m.username || '');
+      if (/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '')) who.style.setProperty('--nc', m.profile_color);
+      li.appendChild(who);
+      var b = badge(m.user_role); if (b) li.appendChild(b);
+    }
     li.appendChild(document.createTextNode(' '));
     var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
-    if (cfg.moderate || (cfg.me && m.user_id === cfg.me)) {
+    if (cfg.moderate || (cfg.me && !ai && m.user_id === cfg.me)) {
       var f = el('form', 'oc-del'); f.method = 'post'; f.action = '/r/' + encodeURIComponent(cfg.room) + '/delete/' + m.id;
       var x = el('button', null, '×'); x.type = 'submit'; x.title = 'Delete this message'; x.setAttribute('aria-label', 'Delete this message');
       f.appendChild(x); li.appendChild(f);
     }
     return li;
+  }
+  // "Pantry is writing…" while a room's AI member answers (room_ai_typing), until its message arrives or 40 s pass.
+  var thinking = null, thinkingTimer = null;
+  function clearThinking() { if (thinking) { thinking.remove(); thinking = null; } if (thinkingTimer) { clearTimeout(thinkingTimer); thinkingTimer = null; } }
+  function showThinking(name) {
+    clearThinking();
+    thinking = el('li', 'oc-msg oc-msg-ai oc-thinking', (name || 'The AI member') + ' is writing\u2026');
+    thinking.setAttribute('aria-live', 'polite');
+    feed.appendChild(thinking);
+    thinkingTimer = setTimeout(clearThinking, 40000);
   }
   function startRoom() {
     var live = document.getElementById('oc-live');
@@ -233,6 +252,8 @@
           latest = Math.max(latest, Number(m.message.id) || 0);
           append(roomItem(m.message), m.message.id);
           if (!document.hidden && cfg.me) fetch(api + '/read', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ last_id: latest }) }).catch(function () {});
+        } else if (m.type === 'room_ai_typing' && m.room === cfg.room) {
+          showThinking(m.name);
         } else if (m.type === 'room_message_deleted' && m.room === cfg.room) {
           var x = feed.querySelector('[data-id="' + m.id + '"]'); if (x) x.remove();
         } else if (m.type === 'room_error' && m.message) {

@@ -291,6 +291,23 @@ side (the space's owner or staff), so one person holding both ends makes the lin
 involved. Chat shows attachments only to the room's managers (room settings, with Detach), never as a public
 claim on the room page.
 
+**AI members** (`server/rooms/ai-members.js`, `migrations/0012_room_ai_members.sql`; the owner's ask: friend groups
+and couples with AI members, and a Food household's chat with one that knows the pantry). A room's owner (or chat
+staff) adds up to 3: a name (its `@handle` is the name in lowercase), how it should be, and notes it always knows.
+When someone who may post writes `@handle`, it answers: the room's last 30 messages, its notes and any shared context
+go to OpenVibe.AI's `chat.member.reply` with Chat's own service token, attributed to the room
+(`{ service: chat, type: room }`), and the answer is a room message with `ai_member_id` set and `user_id` 0, shown with
+an AI badge, never as a person. Sockets get `room_ai_typing { room, name }` first. Only the first member named answers;
+it never answers an AI message; one answer at a time per room, 20 an hour from one person, and
+`CHAT_AI_MEMBER_REPLIES_PER_DAY` (100) a room a day, past which it says so instead. `CHAT_AI_MEMBERS=0` keeps them
+quiet (independent of the insight job's `CHAT_AI_ENABLED`). An AI member linked to an OpenVibe.Food household
+(`link_service: food`) also gets the household's pantry and plan, read from Food's
+`/internal/households/:plan/chat-context` with Chat's service token (`food.household.read`, at most once a minute;
+`CHAT_FOOD_INTERNAL_URL`). API: `GET|POST /api/chat/rooms/:slug/ai-members`, `PATCH|DELETE …/ai-members/:id` (people
+only; members see names and handles, managers the set-up); the settings page manages them without JavaScript. A room
+member can also be added by account subject: `POST /api/chat/rooms/:slug/members { subject: "usr_…" }`. Deleting an
+account keeps the AI members it added (they belong to the room) without its subject on them, and exports them.
+
 **openvibe.chat pages.** `/` global chat, `/rooms` and `/r/:slug` (above), `/messages` the DM inbox
 (conversations with unread counts, refreshed every 15 s with JavaScript; who you blocked, with Unblock),
 `/messages/:id` a conversation (participants only; a guessed id is the same 404 as a missing one; Block

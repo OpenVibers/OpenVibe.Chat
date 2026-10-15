@@ -112,3 +112,15 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
   .oc-members form { margin-left: 0; width: 100%; display: flex; flex-wrap: wrap; gap: 6px; }
   .oc-new select { flex: 1 1 140px; }
 }
+
+/* AI members of a room (server/rooms/ai-members.js): their badge, their messages, "writing…", the settings forms */
+.oc-badge.oc-ai { color: #c4b5fd; border-color: rgba(167, 139, 250, .5); margin-left: 0; }
+.oc-msg-ai { background: color-mix(in srgb, #a78bfa 7%, transparent); border-radius: 8px; }
+.oc-ai-name { font-weight: 700; color: #ddd6fe; }
+.oc-thinking { color: var(--oc-muted); font-style: italic; padding: 2px 6px; }
+.oc-ai-here { margin: .2rem 0 .6rem; }
+.oc-ai-here code { font-size: .9em; }
+.oc-ai-member { border: 1px solid var(--oc-line); border-radius: 12px; padding: 10px 14px; margin: 10px 0; }
+.oc-ai-member h3 { margin: 0 0 6px; font-size: 1rem; }
+.oc-ai-form textarea { width: 100%; box-sizing: border-box; }
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .oc-badge.oc-ai { color: #6d28d9; border-color: rgba(109, 40, 217, .45); } :root:not([data-theme="dark"]) .oc-ai-name { color: #5b21b6; } }
