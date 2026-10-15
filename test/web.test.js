@@ -43,6 +43,13 @@ t('global chat reads without JavaScript; signing in shows the composer', async (
     assert.ok(!/id="oc-compose"/.test(r.text), 'no composer for a guest');
     const me = await req('GET', '/', { headers: cookie(alice) });
     assert.match(me.text, /id="oc-compose"/);
+    // Under the room, what openvibe.chat does: six cards, each a place to go, with the showcase stylesheet. A guest's
+    // messages and settings cards go through sign-in; a signed-in person's go straight there.
+    const what = (/<section class="sc-sec" id="what-chat-does"[\s\S]*?<\/section>/.exec(r.text) || [''])[0];
+    assert.strictEqual((what.match(/class="sc-card"/g) || []).length, 6, 'six cards');
+    assert.ok(what.includes('href="/rooms"') && what.includes('href="/auth/login?next=%2Fmessages"'), what.slice(0, 300));
+    assert.match(r.text, /<link rel="stylesheet" href="\/shared\/showcase\.css\?v=/);
+    assert.ok(me.text.includes('href="/messages"') && me.text.includes('href="/settings"'), 'signed in: straight to messages and settings');
 });
 
 t('the composer posts without JavaScript, through the API\'s checks; other origins are refused', async () => {
