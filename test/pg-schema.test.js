@@ -27,7 +27,7 @@ const TABLES = [
     'channel_moderators', 'channel_moderation_settings', 'emotes', 'user_tags', 'chat_ai_summaries', 'chat_timeline_events',
     'ctx_users', 'ctx_streams', 'ctx_managed_streams', 'ctx_channels', 'ctx_sync', 'events_outbox', 'service_outbox',
     'chat_ingress_applied', 'audio_requests', 'import_hold', 'import_runs', 'chat_meta', 'deploy_releases',
-    'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'token_revocations',
+    'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'token_revocations', 'chat_control_log',
     'network_blocks', 'account_data_events', 'ticket_conversations', 'ticket_messages',
 ];
 const INDEXES = [
