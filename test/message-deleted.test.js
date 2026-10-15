@@ -183,9 +183,14 @@ function sse(pathAndQuery, headers = {}) {
             const c = {
                 status: res.statusCode,
                 body: () => body,
-                // Complete blocks only; `event: gap` data has no envelope and is left out.
-                events: () => body.split('\n\n').slice(0, -1).map((b) => b.split('\n').find((l) => l.startsWith('data: ')))
-                    .filter(Boolean).map((l) => JSON.parse(l.slice(6))).filter((m) => m.event),
+                // Complete blocks only; `event: gap` data has no envelope and is left out. Each message's position is
+                // its `id:` line, Events' opaque cursor (ADR-042 decision 7: there is no per-event sequence).
+                events: () => body.split('\n\n').slice(0, -1).map((b) => {
+                    const lines = b.split('\n');
+                    const data = lines.find((l) => l.startsWith('data: '));
+                    const id = lines.find((l) => l.startsWith('id: '));
+                    return data ? { ...JSON.parse(data.slice(6)), cursor: id ? id.slice(4) : null } : null;
+                }).filter((m) => m && m.event),
                 async waitFor(pred, ms = 3000) {
                     const until = Date.now() + ms;
                     while (!pred(c)) { if (Date.now() > until) throw new Error(`sse timeout: ${body}`); await h.sleep(20); }
@@ -230,7 +235,7 @@ t('e2e: the relay publishes the message, then its deletion; replay serves only t
         const c = await sse(`/realtime/stream?topics=chat.message.*&last_event_id=${await cursorAt(firstSeq - 1)}`, headers);
         await c.waitFor((x) => x.events().length === 2);
         const [created, deleted] = c.events();
-        assert.deepStrictEqual([created.seq, deleted.seq], [firstSeq, firstSeq + 1], `${who}: sequence intact`);
+        assert.deepStrictEqual([created.cursor, deleted.cursor], [await cursorAt(firstSeq), await cursorAt(firstSeq + 1)], `${who}: sequence intact`);
         assert.strictEqual(created.event.event_type, 'chat.message.created');
         assert.strictEqual(created.event.payload.redacted, true, who);
         assert.deepStrictEqual(created.event.subject, { type: 'chat_message', id: String(msgId) });
@@ -241,7 +246,7 @@ t('e2e: the relay publishes the message, then its deletion; replay serves only t
     const pull = await fetch(`http://127.0.0.1:${eventsPort}/api/v1/events?topic=chat.message.*&after=${await cursorAt(firstSeq - 1)}`, {
         headers: { Authorization: `Bearer ${h.serviceToken(['events.event.read'], { aud: 'openvibe.events', sub: 'svc:search' })}` },
     }).then((r) => r.json());
-    assert.deepStrictEqual(pull.events.map((e) => e.seq), [firstSeq, firstSeq + 1]);
+    assert.deepStrictEqual(pull.events.map((e) => e.cursor), [await cursorAt(firstSeq), await cursorAt(firstSeq + 1)]);
     assert.ok(!JSON.stringify(pull).includes('555-0199'));
 });
 

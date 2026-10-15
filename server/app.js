@@ -103,6 +103,8 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     app.use('/internal/moderation', express.json({ limit: '64kb' }), require('./chat/internal-moderation'));
     // OpenVibe.Services reads Chat's room summaries on loopback (ADR-048); the service guard
     // checks chat.resource.read and refuses requests that came through a public proxy.
+    // Control first (chat.resource.control: archive a person's room), then the index for everything else.
+    app.use('/api/v1/resources/control', require('./registry/resource-control').router());
     app.use('/api/v1/resources', require('./registry/resource-index').router());
     app.get('/health', (req, res) => res.json({ ok: true, service: 'chat' }));
     // Readiness in the openvibe-shared/ready shape (status ready/degraded/not_ready, named checks):
