@@ -56,6 +56,18 @@ t('only the owner Chat holds; other actions and kinds are refused', async () => 
     assert.deepStrictEqual([r.status, r.body.code], [400, 'control.bad_request'], 'Chat holds no project resources');
 });
 
+t('before migration 0010 has run, archive still works (its answers are just not kept)', async () => {
+    await h.db.run('INSERT INTO rooms (slug, name, visibility, owner_id, owner_subject) VALUES (?, ?, ?, ?, ?)', ['control-early', 'Early', 'public', owner.id, owner.subject_id]);
+    await h.db.run('ALTER TABLE chat_control_log RENAME TO chat_control_log_hidden');
+    try {
+        const r = await send(req('archive', { owned: { kind: 'chat.room', id: 'control-early' } }));
+        assert.deepStrictEqual([r.status, r.body.state, r.body.result], [200, 'done', { archived: true, changed: true }], r.text);
+        assert.ok(await archived('control-early'));
+    } finally {
+        await h.db.run('ALTER TABLE chat_control_log_hidden RENAME TO chat_control_log');
+    }
+});
+
 t('first-party only, with chat.resource.control', async () => {
     let r = await send(req('archive', { owned: { kind: 'chat.room', id: 'control-theirs' } }), { token: h.serviceToken(['chat.resource.read'], { sub: 'svc:services' }) });
     assert.strictEqual(r.status, 403);
