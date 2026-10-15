@@ -28,6 +28,8 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .oc-tabs a[aria-current="page"], .oc-tabs a:hover { color: var(--oc-text); background: var(--oc-panel); }
 .oc-account { font-size: 14px; color: var(--oc-muted); margin-left: auto; }
 .oc-main { max-width: 960px; margin: 0 auto; padding: 16px 16px 48px; overflow-wrap: anywhere; }
+/* The front page's showcase section under the room: the page column already has the gutter. */
+.oc-main .sc-sec { padding-left: 0; padding-right: 0; margin-top: 40px; }
 h1 { font-size: 1.6rem; line-height: 1.25; margin: .3em 0 .2em; }
 .oc-muted { color: var(--oc-muted); }
 .oc-live { color: var(--oc-ok); font-size: .85em; margin-left: 6px; }

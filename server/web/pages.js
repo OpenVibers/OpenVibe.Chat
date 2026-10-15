@@ -26,6 +26,7 @@
  * tables; the only openvibe.live URLs are links to people's profiles (navigation, never fetched).
  * test/live-down.test.js renders every page and uses the core APIs with Live refusing and hanging.
  */
+const showcase = require('openvibe-shared/showcase');
 const path = require('path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
@@ -143,6 +144,21 @@ function createWebRoutes({ config }) {
         const n = async (fn) => { try { return Number(await fn()) || 0; } catch { return 0; } };
         return { messages: await n(async () => await dm.getTotalUnread(actor.user.id)), rooms: await n(async () => await require('../rooms/rooms').unreadTotal(actor.user)) };
     };
+    // Under the global room on the front page: what openvibe.chat is for (openvibe-shared/showcase), each card a real
+    // place to go. Every line is true today (calls run since CHAT_CALLS=1; rooms, messages and settings are pages here).
+    const whatChatDoes = (signedIn) => showcase.features({
+        id: 'what-chat-does', title: 'What OpenVibe.Chat does',
+        lede: 'The chat behind every OpenVibe site, with one account and one set of preferences everywhere.',
+        items: [
+            { icon: 'ov:chat', title: 'One room for the network', text: 'Global chat reaches everyone on Live, Tools, Games and the rest, and reads without an account.', href: '#oc-h' },
+            { icon: 'ov:live', title: 'Stream chat on Live', text: 'Every channel on OpenVibe.Live has its room, with the streamer\'s moderators, timeouts, bans, emotes and text to speech.', href: 'https://openvibe.live/' },
+            { icon: 'ov:community', title: 'Rooms of your own', text: 'Start a public room anyone can read, or a private one that stays invisible to everyone else.', href: '/rooms' },
+            { icon: 'ov:account', title: 'Direct messages', text: 'One-to-one and group conversations. You choose who may start one, and whether groups may add you.', href: signedIn ? '/messages' : '/auth/login?next=%2Fmessages' },
+            { icon: 'ov:stream', title: 'Voice and video calls', text: 'Call a person, open a call room, or join a stream\'s call: up to eight people, with mute, camera and kick controls.', href: '/rooms' },
+            { icon: 'ov:theme', title: 'Your preferences everywhere', text: 'Compact mode, timestamps, text size, badges and emotes follow your account to every site.', href: signedIn ? '/settings' : '/auth/login?next=%2Fsettings' },
+        ],
+    });
+
     const page = async (req, res, status, o) => {
         const actor = o.actor || await viewerOf(req);
         res.status(status).set('Cache-Control', o.cache || cache.htmlHeaders({ private: true })).type('html')
@@ -208,7 +224,9 @@ function createWebRoutes({ config }) {
 ${error}
 <ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${shown.map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>
 ${composer}
-</section>`,
+</section>
+${whatChatDoes(actor.kind === 'user')}`,
+            showcase: true,
         });
     });
 
