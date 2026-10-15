@@ -23,7 +23,8 @@ const subscriptions = require('./events/subscriptions');
 const chatAi = require('./ai/chat-ai');
 const { limits } = require('./net/actor-limits');
 const { createValkey } = require('openvibe-sdk/valkey');
-const { gracefulStop } = require('openvibe-sdk/service');
+const { gracefulStop, telemetry } = require('openvibe-sdk/service');
+const { createPgTelemetrySink, startTelemetryRetention } = require('openvibe-sdk/telemetry');
 const { createApp } = require('./app');
 
 let rejectionsLogged = false;
@@ -67,6 +68,10 @@ async function start() {
     await new Promise((resolve) => server.listen(config.port, config.host, resolve));
     console.log(`[Chat] listening on http://${config.host}:${server.address().port} (ws /ws/chat${config.calls.enabled ? ', /ws/call' : ''})`);
     const subs = subscriptions.startAtBoot({ config, port: server.address().port });
+    // Request telemetry (openvibe-sdk/service, plan T1): one aggregated sample per route template, method and status
+    // class each minute, stored in this service's telemetry_samples table; rows older than 14 days go daily.
+    telemetry.init({ service: 'chat', sink: createPgTelemetrySink({ db: db.getDb(), log: console }), skipPrefixes: ['/shared'], intervalMs: 60_000 });
+    const telemetryRetention = startTelemetryRetention({ db: db.getDb(), log: console, olderThanDays: 14 });
 
     // systemd sends SIGTERM (SIGINT by hand); openvibe-sdk/service's gracefulStop takes the signal, runs the stop
     // steps in order (nothing new starts), drains the HTTP server, runs the close steps, then exits 0. drainMs
@@ -94,7 +99,7 @@ async function start() {
             () => chatServer.close(),
             () => callServer.close(),
         ],
-        close: [() => db.close()],
+        close: [async () => { if (telemetryRetention) await telemetryRetention.stop(); await telemetry.stop(); }, () => db.close()],
     });
     return { server, relay, events, callServer, subscriptions: subs, shutdown };
 }
