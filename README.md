@@ -390,6 +390,13 @@ counters.
 Production: `deploy/systemd/openvibe-chat.service`, `deploy/nginx/openvibe.live-chat.locations.conf`,
 `/etc/openvibe/chat.env`.
 
+Request telemetry: counted by route template, method and status class, not raw URL; `/shared` files,
+static assets, health, readiness and `/metrics` are not counted. One `http.request` sample per key a
+minute, plus the active-requests, p95 latency and event-loop-lag gauges, goes to `telemetry_samples`
+(openvibe-sdk 0.46, `platform.telemetry-sample@1`; `migrations/0011_telemetry.sql`), pruned daily past
+14 days. `server/app.js` mounts the SDK's `telemetryMiddleware` (a no-op until init); `server/index.js`
+calls `telemetry.init()` at production start, runs the retention and flushes on stop.
+
 ### Per-actor limits
 
 The REST API also limits who calls it (`server/net/actor-limits.js`, openvibe-sdk/limits, roadmap
