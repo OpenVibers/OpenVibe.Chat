@@ -18,6 +18,10 @@
  *     OpenAI, Anthropic or an OpenAI-compatible endpoint, their model, their daily budget). The room sees which
  *     (engine_label). Such a member is outside the room's daily cap (the key's own budget limits it); if the key is
  *     removed, its members go back to OpenVibe's model (dropKey).
+ *   - Tools (server/rooms/ai-tools.js, CHAT_AI_MEMBER_TOOLS=0 turns them off): the answer is a few turns of AI's
+ *     chat.member.turn, Chat running the tools the model asks for between them (search OpenVibe, the time, dice, a pick,
+ *     a linked household's pantry), at most MAX_TOOL_ROUNDS, then a turn that must answer in text. If a turn fails
+ *     (a provider without tools), the member answers with chat.member.reply as before.
  *   - Off with CHAT_AI_MEMBERS=0, and without the OAuth client secret (no token to call AI with).
  *
  * Room messages written by an AI member have user_id 0 and the member's name (rooms.js MSG_SELECT joins it).
@@ -26,6 +30,7 @@ const db = require('../db/database');
 const config = require('../config');
 const aiClient = require('../ai/client');
 const credentials = require('../ai/credentials');
+const aiTools = require('./ai-tools');
 
 const MAX_PER_ROOM = 3;
 const TRANSCRIPT = 30;
@@ -33,6 +38,8 @@ const LIMITS = { name: 24, persona: 1000, memory: 2000 };
 const NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N} ._'-]{0,22}[\p{L}\p{N}]$/u;
 const PER_PERSON_HOUR = 20;
 
+const MAX_TOOL_ROUNDS = 3;
+const MAX_CALLS_PER_ROUND = 4;
 const inFlight = new Set();          // room ids with an answer being written
 const personHour = new Map();        // `${room}:${user}` → [timestamps]
 
@@ -180,6 +187,58 @@ function transcriptOf(rows) {
     return rows.map((m) => `${(m.display_name || m.username || 'someone').slice(0, 40)}${m.ai_member_id ? ' (AI)' : ''}: ${String(m.message || '').replace(/\s+/g, ' ').slice(0, 400)}`).join('\n').slice(-12000);
 }
 
+/** The member's instructions for chat.member.turn (the same rules as AI's chat.member.reply template, plus tools). */
+function systemPrompt(member, room) {
+    return [
+        `You are ${member.name}, an AI member of the chat room "${String(room.name || room.slug).slice(0, 120)}" on OpenVibe.Chat. The people in the room added you to their conversation.`,
+        member.persona ? `How they want you to be: ${member.persona}` : '',
+        '',
+        'How you answer:',
+        '- Like a member of the conversation: natural, warm and to the point, in the language the person wrote in. Usually a few sentences; a list or a recipe when that is what they asked for. Plain text, no headings.',
+        '- Answer the person who named you. Use the earlier messages, the room\'s notes and the shared context when they help.',
+        '- You have tools: search OpenVibe (news, deals, coupons, wiki, rentals, videos), the current time, fair dice and random picks, and for a household its pantry. Use one when it gives a better answer, and say where a fact came from (give the link for a search result).',
+        '- Never invent facts about the people, their plans or their things beyond what the messages, notes, context and tools say. When you do not know, say so and ask.',
+        '- You can only write in this chat and use these tools. Do not claim to have done anything else (bought, booked, sent, saved, set a reminder).',
+        '- No threats, nothing sexual involving minors, and never anyone\'s private details. Swearing in jest is fine if the room does it.',
+    ].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
+}
+
+function userPrompt({ member, context, transcript, askedBy, text }) {
+    return [
+        context ? `Shared context (${context.source.slice(0, 80)}):\n${context.text.slice(0, 4000)}\n\n` : '',
+        member.memory ? `The room's notes for you:\n${member.memory}\n\n` : '',
+        `Recent messages, oldest first:\n${transcript}\n\n`,
+        `${askedBy} just wrote to you: ${text}\n\n`,
+        `Write your reply as ${member.name}. Return only the reply.`,
+    ].join('');
+}
+
+/**
+ * The answer through chat.member.turn with tools: up to MAX_TOOL_ROUNDS rounds of tool calls run here, then a turn
+ * with tool_choice none. → the reply text, or null when a turn failed (the caller falls back to chat.member.reply).
+ */
+async function answerWithTools({ room, member, context, transcript, askedBy, text, opts }) {
+    const tools = aiTools.definitions(member);
+    const messages = [
+        { role: 'system', content: systemPrompt(member, room) },
+        { role: 'user', content: userPrompt({ member, context, transcript, askedBy, text }) },
+    ];
+    for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+        const last = round === MAX_TOOL_ROUNDS;
+        const out = await aiClient.structured('chat.member.turn', { messages, tools, tool_choice: last ? 'none' : 'auto', max_tokens: 600, temperature: 0.7 },
+            { ...opts, idempotencyKey: `${opts.idempotencyKey}-t${round}` });
+        const msg = out && Array.isArray(out.choices) && out.choices[0] && out.choices[0].message;
+        if (!msg) return null;
+        const calls = !last && Array.isArray(msg.tool_calls) ? msg.tool_calls.filter((c) => c && c.function && c.function.name).slice(0, MAX_CALLS_PER_ROUND) : [];
+        if (!calls.length) return typeof msg.content === 'string' && msg.content.trim() ? msg.content : null;
+        messages.push({ role: 'assistant', content: typeof msg.content === 'string' ? msg.content : null, tool_calls: calls });
+        for (const c of calls) {
+            messages.push({ role: 'tool', tool_call_id: String(c.id || `call_${round}`).slice(0, 128), content: await aiTools.run(c.function.name, c.function.arguments, { member, contextFor }) });
+        }
+    }
+    return null;
+}
+
 /**
  * After a person's message is stored and broadcast (rooms.post). Never throws: an AI member that cannot answer
  * stays quiet or says why. `deps` lets tests inject the poster and the broadcast.
@@ -208,14 +267,22 @@ async function afterPost(room, message, user, deps = {}) {
         broadcast({ type: 'room_ai_typing', room: room.slug, name: member.name });
         const history = await rooms.history(room, { limit: TRANSCRIPT });
         const context = await contextFor(member);
-        const out = await aiClient.structured('chat.member.reply', {
-            ai_name: member.name, persona: member.persona || '', room: String(room.name || room.slug).slice(0, 120),
-            memory: member.memory || '', context: context ? context.text.slice(0, 4000) : '', context_source: context ? context.source.slice(0, 80) : '',
-            transcript: transcriptOf(history) || '(no earlier messages)',
-            asked_by: (user.display_name || user.username || 'someone').slice(0, 80), message: String(message.message).slice(0, 2000),
-        }, { force: true, attribution: { service: 'chat', type: 'room', id: String(room.id), label: String(room.name || room.slug).slice(0, 200) }, idempotencyKey: `chat-ai-${room.id}-${message.id}`,
-            ...(own ? { credential: { subject: member.engine_subject } } : {}) });
-        const text = out && typeof out.text === 'string' ? clean(out.text, 2000) : '';
+        const opts = { force: true, attribution: { service: 'chat', type: 'room', id: String(room.id), label: String(room.name || room.slug).slice(0, 200) }, idempotencyKey: `chat-ai-${room.id}-${message.id}`,
+            ...(own ? { credential: { subject: member.engine_subject } } : {}) };
+        const transcript = transcriptOf(history) || '(no earlier messages)';
+        const askedBy = (user.display_name || user.username || 'someone').slice(0, 80);
+        let text = '';
+        if (config.ai.memberTools) {
+            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, 2000), opts }) || '', 2000); } catch { text = ''; }
+        }
+        if (!text) {
+            const out = await aiClient.structured('chat.member.reply', {
+                ai_name: member.name, persona: member.persona || '', room: String(room.name || room.slug).slice(0, 120),
+                memory: member.memory || '', context: context ? context.text.slice(0, 4000) : '', context_source: context ? context.source.slice(0, 80) : '',
+                transcript, asked_by: askedBy, message: String(message.message).slice(0, 2000),
+            }, opts);
+            text = out && typeof out.text === 'string' ? clean(out.text, 2000) : '';
+        }
         if (!text) return await say(own ? 'I could not reach my model just now (its key may be out of today\'s budget, or the provider did not answer). Try again later, or the room\'s owner can switch me to OpenVibe\'s model.' : 'I could not answer just now. Try again in a minute.');
         if (!own) await countReply(room);
         return await say(text);

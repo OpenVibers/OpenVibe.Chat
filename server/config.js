@@ -194,6 +194,10 @@ module.exports = {
         // above (CHAT_AI_ENABLED); each room answers at most this many times a UTC day.
         members: process.env.CHAT_AI_MEMBERS !== '0',
         memberRepliesPerDay: Math.max(1, int(process.env.CHAT_AI_MEMBER_REPLIES_PER_DAY, 100)),
+        // Tools an AI member may use (server/rooms/ai-tools.js) through OpenVibe.AI's chat.member.turn: on unless
+        // CHAT_AI_MEMBER_TOOLS=0. Network search goes to OpenVibe.Search's public API.
+        memberTools: process.env.CHAT_AI_MEMBER_TOOLS !== '0',
+        searchUrl: strip(process.env.CHAT_SEARCH_URL || 'https://search.openvibe.network'),
     },
 
     // Channel sound clips live on disk. At cutover this is Live's sounds directory: stored rows

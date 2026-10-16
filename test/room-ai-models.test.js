@@ -53,6 +53,7 @@ t('boot', async () => {
     aiClient = require('../server/ai/client');
     aiMembers = require('../server/rooms/ai-members');
     config = require('../server/config');
+    config.ai.memberTools = false; // tools are test/room-ai-tools.test.js'; here one run is one reply
     ann = h.addUser('ann', { subject: ids.newId('user') });
     bob = h.addUser('bob', { subject: ids.newId('user') });
     for (const u of [ann, bob]) await h.ctx.upsertUser(h.live.users.get(u.id));

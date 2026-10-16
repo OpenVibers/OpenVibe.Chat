@@ -308,6 +308,14 @@ only; members see names and handles, managers the set-up); the settings page man
 member can also be added by account subject: `POST /api/chat/rooms/:slug/members { subject: "usr_…" }`. Deleting an
 account keeps the AI members it added (they belong to the room) without its subject on them, and exports them.
 
+**Tools** (`server/rooms/ai-tools.js`; the owner's "modular AI conversation… tool calling"). An AI member's answer
+is a few turns of OpenVibe.AI's `chat.member.turn` (a Chat Completions passthrough with tools, AI#96): the model may
+call `search_openvibe` (OpenVibe.Search's public results, `CHAT_SEARCH_URL`), `current_time`, `roll_dice`,
+`pick_one`, and for a member linked to a Food household `household_pantry`; Chat runs them (read-only, bounded, results
+at most 4,000 characters) and sends the results back, at most three rounds with four calls each, then a turn that must
+answer in text. If a turn fails (a provider without tools), the member answers with `chat.member.reply` as before.
+`CHAT_AI_MEMBER_TOOLS=0` turns tools off.
+
 **Their own models** (`migrations/0014_ai_member_models.sql`, `server/ai/credentials.js`; the owner's multi-model group
 chat). A person keeps an AI provider key through Chat: OpenAI, Anthropic, or any OpenAI-compatible endpoint (OpenRouter,
 Groq, Together, their own server), a model and a daily budget in US dollars (0 = no cap; left out on a change, it stays).
