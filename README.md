@@ -308,11 +308,33 @@ only; members see names and handles, managers the set-up); the settings page man
 member can also be added by account subject: `POST /api/chat/rooms/:slug/members { subject: "usr_…" }`. Deleting an
 account keeps the AI members it added (they belong to the room) without its subject on them, and exports them.
 
-**openvibe.chat pages.** `/` global chat, `/rooms` and `/r/:slug` (above), `/messages` the DM inbox
+**Servers** (`server/rooms/servers.js`, `server/rooms/server-routes.js`, `server/web/server-pages.js`,
+`migrations/0013_chat_servers.sql`; the owner's Q14: friend groups and couples first, then communities with servers,
+channels and voice). A server is a group of rooms, its channels, with one membership and one set of roles: a text
+channel is a community room and a voice channel a call room (its call is `room-<slug>`), so messages, live delivery,
+unread counts, calls and AI members work in channels unchanged. `rooms.access()` asks the server for any room with
+`server_id`: the owner is the channel's owner, admins and moderators its moderators, members its members (in a voice
+channel: speakers by default, or listeners when the channel says participant); a public server is read by anyone
+and joined by signed-in people, a private one is a 404 to outsiders and joined only through an invite
+(`/join/<code>`: any number of uses or 1/10/100, for a day, a week, a month or forever, revocable). The owner appoints
+admins, admins appoint moderators and manage channels, settings and invites, moderators remove and ban members;
+nobody acts on their own rank or above, and every action is logged (scope `server:<slug>`). A server starts with
+`#general` and a voice Lounge; a person owns up to 5, a server has up to 50 channels and 25 live invites and keeps one
+text channel. A channel's room slug is random (`ch…`); its page is `/s/<server>/<channel>` and `/r/<slug>` goes
+there. Channels follow the server's visibility (going private redacts what they had published); the rooms API refuses
+room-level joins, roles and visibility there, and `/rooms` leaves channels out. The page: your servers down the side
+with unread counts, the channels, the channel (its call for a voice channel) and the people by rank; on a phone the
+servers run across the top and the channel list folds away. API: `/api/chat/servers` (list, create, read, update,
+delete, join `{ invite? }`, leave, members, channels, invites, `GET /invites/:code`). Deleting an account removes its
+memberships; a server it owned stays without an owner while anyone else is in it, and goes with its channels when
+nobody is.
+
+**openvibe.chat pages.** `/` global chat, `/rooms` and `/r/:slug` (above), `/servers`, `/s/:slug[/:channel]`,
+`/s/:slug/settings` and `/join/:code` (servers, above), `/messages` the DM inbox
 (conversations with unread counts, refreshed every 15 s with JavaScript; who you blocked, with Unblock),
 `/messages/:id` a conversation (participants only; a guessed id is the same 404 as a missing one; Block
 the other person of a 1:1 conversation, which closes it both ways), `/settings`, `/updates`. The navigation
-counts unread messages and room messages. Everything is server-rendered and works without JavaScript.
+counts unread messages, room messages and server messages. Everything is server-rendered and works without JavaScript.
 
 **Working with Live down.** Nothing on openvibe.chat waits on Live: people sign in from their Network token
 and the `ctx_users` projection, pages read Chat's own tables, cosmetics are waited for at most 1.5 s, and
@@ -469,7 +491,8 @@ docs/                      calls-cutover.md, parity.md, chat-ingress.md, capabil
 
 ## Owns
 
-- room types: global, stream, channel, community, DM, group-DM, call, system
+- room types: global, stream, channel, community, DM, group-DM, call, system; servers (groups of rooms as text and
+  voice channels, with server roles and invites)
 - messages, replies/rich payloads, membership/roles, unread/read state, presence/typing (ephemeral)
 - bans, timeouts, delete/purge, filters, slow/member-only modes
 - TTS/audio/soundboard/media-request queues with skip/clear/failure lifecycle
