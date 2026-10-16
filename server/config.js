@@ -78,6 +78,13 @@ module.exports = {
         // Where a room's Community attachments link (a space is <communityUrl>/s/<slug>).
         communityUrl: strip(process.env.OV_COMMUNITY_URL || 'https://openvibe.community'),
     },
+    // Pictures in rooms and channels (server/rooms/pictures.js): uploaded to OpenVibe.Pics as the person (their own
+    // Network token) through MediaHub on this host, and shown inline. Off without CHAT_PICS_INTERNAL_URL.
+    pics: {
+        internalUrl: strip(process.env.CHAT_PICS_INTERNAL_URL || ''),
+        publicUrl: strip(process.env.CHAT_PICS_PUBLIC_URL || 'https://openvibe.pics'),
+        maxBytes: int(process.env.CHAT_PICS_MAX_BYTES, 20 * 1024 * 1024),
+    },
     cookies: { secure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : isProduction },
 
     // OpenVibe.Live — users, streams, channels, bans and every side effect chat triggers.

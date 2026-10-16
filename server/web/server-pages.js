@@ -30,7 +30,7 @@ const initials = (name) => String(name || '?').split(/\s+/).filter(Boolean).slic
 const hueOf = (slug) => { let h = 0; for (const c of String(slug)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 
 function mountServerPages(router, h) {
-    const { page, needUser, viewerOf, sameSite, formLimit, notice, roomMessage, callPanel, applyRoomChange, config } = h;
+    const { page, needUser, viewerOf, sameSite, formLimit, notice, roomMessage, callPanel, applyRoomChange, pictureComposer, config } = h;
     const site = config.web.baseUrl;
     const serverRoutes = () => require('../rooms/server-routes');
     const orError = (fn) => async (req, res, next) => {
@@ -115,7 +115,7 @@ ${create}`,
         let composer;
         const back = `/s/${server.slug}/${pick.slug}`;
         if (!me) composer = `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${encodeURIComponent(back)}">Sign in with OpenVibe</a> to join the conversation.</p>`;
-        else if (rcan.post) composer = `<form class="oc-compose" method="post" action="${esc(back)}" id="oc-compose"><label for="oc-input" class="oc-sr">Message ${isVoice ? '' : '#'}${esc(room.name)}</label><textarea id="oc-input" name="message" maxlength="2000" rows="2" required placeholder="Message ${isVoice ? '' : '#'}${esc(room.name)}"></textarea><button type="submit">Send</button></form>`;
+        else if (rcan.post) composer = `<form class="oc-compose" method="post" action="${esc(back)}" id="oc-compose"><label for="oc-input" class="oc-sr">Message ${isVoice ? '' : '#'}${esc(room.name)}</label><textarea id="oc-input" name="message" maxlength="2000" rows="2" required placeholder="Message ${isVoice ? '' : '#'}${esc(room.name)}"></textarea><button type="submit">Send</button></form>${pictureComposer ? pictureComposer(room, back) : ''}`;
         else if (!can.member) composer = `<form method="post" action="/s/${esc(server.slug)}/join"><button type="submit">Join ${esc(server.name)}</button></form>`;
         else composer = notice('error', 'You cannot write here right now.');
         const ais = require('../rooms/ai-members').enabled() ? (await require('../rooms/ai-members').list(room)).filter((a) => Number(a.enabled)) : [];
@@ -134,7 +134,7 @@ ${create}`,
             robots: server.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
             description: server.description || `${server.name}, a server on OpenVibe.Chat with ${server.member_count} member${Number(server.member_count) === 1 ? '' : 's'}.`,
             page: {
-                view: 'room', room: room.slug, back: `/s/${server.slug}`, kind: room.kind, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0,
+                view: 'room', room: room.slug, back: `/s/${server.slug}`, kind: room.kind, pics: require('../rooms/pictures').enabled() ? require('../rooms/pictures').publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0,
                 me: me ? me.id : null, moderate: rcan.moderate, post: rcan.post, role: rcan.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: rcan.join, talk: rcan.talk } } : {}),
             },

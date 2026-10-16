@@ -215,12 +215,49 @@
     }
     li.appendChild(document.createTextNode(' '));
     var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
+    if (!ai && cfg.pics) { var pw = pictureThumbs(m.message); if (pw) li.appendChild(pw); }
     if (cfg.moderate || (cfg.me && !ai && m.user_id === cfg.me)) {
       var f = el('form', 'oc-del'); f.method = 'post'; f.action = '/r/' + encodeURIComponent(cfg.room) + '/delete/' + m.id;
       var x = el('button', null, '×'); x.type = 'submit'; x.title = 'Delete this message'; x.setAttribute('aria-label', 'Delete this message');
       f.appendChild(x); li.appendChild(f);
     }
     return li;
+  }
+  // OpenVibe.Pics pictures a message links (server/rooms/pictures.js): thumbnails linked to the picture's page.
+  function pictureThumbs(text) {
+    var base = String(cfg.pics).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    var re = new RegExp(base + '/i/([2-9a-km-zA-HJ-NP-Z]{8})\\.(jpg|png|gif|webp|avif)(?![\\w/.-])', 'g');
+    var seen = {}, wrap = null, m, n = 0;
+    while ((m = re.exec(String(text || ''))) && n < 4) {
+      if (seen[m[1]]) continue;
+      seen[m[1]] = true; n++;
+      if (!wrap) wrap = el('span', 'oc-pics');
+      var a = el('a', 'oc-pic'); a.href = cfg.pics + '/i/' + m[1]; a.target = '_blank'; a.rel = 'noopener';
+      var img = document.createElement('img'); img.src = cfg.pics + '/i/' + m[1] + '/thumb.webp'; img.alt = 'A picture on OpenVibe.Pics'; img.loading = 'lazy'; img.decoding = 'async';
+      a.appendChild(img); wrap.appendChild(a);
+    }
+    return wrap;
+  }
+  // The "Add a picture" form sends the file to the API; the message then arrives over the socket like any other.
+  function startPictureForm() {
+    var f = document.querySelector ? document.querySelector('.oc-pic-form') : null;
+    if (!f || !window.fetch) return;
+    f.addEventListener('submit', function (e) {
+      var file = f.picture && f.picture.files && f.picture.files[0];
+      if (!file) return;
+      e.preventDefault();
+      var btn = f.querySelector('button'); if (btn) { btn.disabled = true; btn.textContent = 'Sending\u2026'; }
+      fetch('/api/chat/rooms/' + encodeURIComponent(f.getAttribute('data-room')) + '/pictures', {
+        method: 'POST', credentials: 'same-origin', body: file,
+        headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-Caption': encodeURIComponent((f.caption && f.caption.value) || '') },
+      }).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: null }; }); })
+        .then(function (x) {
+          if (!x.ok) { showError((x.d && x.d.error) || 'The picture did not go. Try again.'); return; }
+          f.reset(); var det = f.closest ? f.closest('details') : null; if (det) det.open = false;
+        })
+        .catch(function () { f.submit(); })
+        .then(function () { if (btn) { btn.disabled = false; btn.textContent = 'Send picture'; } });
+    });
   }
   // "Pantry is writing…" while a room's AI member answers (room_ai_typing), until its message arrives or 40 s pass.
   var thinking = null, thinkingTimer = null;
@@ -335,6 +372,6 @@
   toBottom();
   if (cfg.view === 'global') startGlobal();
   else if (cfg.view === 'dm') startDm();
-  else if (cfg.view === 'room') startRoom();
+  else if (cfg.view === 'room') { startRoom(); startPictureForm(); }
   else if (cfg.view === 'inbox') startInbox();
 })();
