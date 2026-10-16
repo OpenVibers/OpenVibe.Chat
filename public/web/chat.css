@@ -231,3 +231,10 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-pic-form input[type="file"] { width: 100%; }
 .oc-srv-main > .oc-pic-compose { margin: 0; padding: 0 18px 14px; }
 @media (max-width: 760px) { .oc-srv-main > .oc-pic-compose { padding: 0 12px 12px; } }
+
+/* /rooms with no public room yet: where the conversation is meanwhile. */
+.oc-rooms-empty { padding: 14px 16px; border: 1px dashed var(--oc-line, rgba(127, 127, 127, 0.35)); border-radius: 12px; margin: 0 0 18px; }
+.oc-rooms-empty p { margin: 0 0 8px; }
+.oc-goto { margin: 0; padding-left: 18px; }
+.oc-goto li { margin: 4px 0; }
+.oc-goto a { font-weight: 700; }
