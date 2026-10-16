@@ -518,7 +518,12 @@ ${staff ? '<label class="oc-check"><input type="radio" name="kind" value="system
             description: 'Chat and call rooms on OpenVibe: start one about anything, invite people, or join a public room.',
             body: `<h1>Rooms</h1>${error}
 ${mine.length ? `<h2>Your rooms</h2><ul class="oc-convs">${mine.map(roomCard).join('')}</ul>` : ''}
-<h2>Public rooms</h2><ul class="oc-convs">${pub.map(roomCard).join('') || '<li class="oc-muted">No rooms yet. Start the first one.</li>'}</ul>
+<h2>Public rooms</h2>${pub.length ? `<ul class="oc-convs">${pub.map(roomCard).join('')}</ul>` : `<div class="oc-rooms-empty">
+<p><strong>No public room is open right now: start the first one below.</strong> A room can be about anything, private to the people you invite, a voice call, or a group chat with AI members who know the context.</p>
+<p>Meanwhile the conversation is here:</p>
+<ul class="oc-goto"><li><a href="/">Global chat</a>: everyone on OpenVibe, readable without an account</li>
+<li><a href="/servers">Servers</a>: channels, voice, roles and invite links, Discord-style</li>
+<li><a href="/messages">Messages</a>: direct messages with anyone on OpenVibe</li></ul></div>`}
 ${create}`,
         });
     });
