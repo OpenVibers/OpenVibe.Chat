@@ -388,8 +388,48 @@ ${volume('tts_sound_volume', 'Chat sound volume', tts.sound_volume)}
 </form>
 <h2>Your chat history</h2>
 <p>Download every message you have sent that is still visible, in Live chat and here.</p>
-<p><a class="oc-button" href="/api/chat/me/export" download>Download (JSON)</a> <a class="oc-button" href="/api/chat/me/export?format=csv" download>Download (CSV)</a></p>`,
+<p><a class="oc-button" href="/api/chat/me/export" download>Download (JSON)</a> <a class="oc-button" href="/api/chat/me/export?format=csv" download>Download (CSV)</a></p>
+${await aiKeySection(actor)}`,
         });
+    });
+
+    // ── Your own AI key (server/ai/credentials.js): AI members you set up can think with your provider and model ──
+    const credentials = require('../ai/credentials');
+    async function aiKeySection(actor) {
+        if (!require('../rooms/ai-members').enabled()) return '';
+        let key = null, unreachable = false;
+        try { key = await credentials.get(actor.user.subject_id); } catch { unreachable = true; }
+        const opt = (v, label, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${label}</option>`;
+        const spent = key ? `$${key.spent_usd_today.toFixed(2)} of ${key.budget_usd_per_day ? `$${key.budget_usd_per_day.toFixed(2)}` : 'no cap'} used today` : '';
+        return `<h2 id="oc-ai-key">Your AI key</h2>
+<p class="oc-muted">AI members you add to a room can think with your own provider and model instead of OpenVibe's: OpenAI, Anthropic, or any OpenAI-compatible endpoint (OpenRouter, Groq, Together, your own server). The key is kept encrypted in OpenVibe.AI and never shown again; the room's messages go to your provider when one of those members answers, and its replies count against your daily budget, not the room's limit.</p>
+${unreachable ? notice('error', 'OpenVibe.AI did not answer, so your key cannot be shown or changed right now.') : `${key ? `<p><strong>${esc(credentials.label(key))}</strong> <span class="oc-muted">· key ending ${esc(key.key_hint || '····')} · ${esc(spent)}</span></p>` : '<p class="oc-muted">No key yet.</p>'}
+<form class="oc-form" method="post" action="/settings/ai-key">
+<label>Provider <select name="provider">${opt('openai', 'OpenAI or OpenAI-compatible', key ? key.provider : 'openai')}${opt('anthropic', 'Anthropic', key ? key.provider : '')}</select></label>
+<label>Endpoint <input name="base_url" type="url" maxlength="300" inputmode="url" placeholder="https://openrouter.ai/api/v1 (leave empty for OpenAI itself)" value="${esc((key && key.base_url) || '')}"></label>
+<label>Model <input name="model" required maxlength="120" placeholder="gpt-4o-mini" value="${esc((key && key.model) || '')}" autocomplete="off" spellcheck="false"></label>
+<label>API key <input name="api_key" type="password" maxlength="400" autocomplete="off" spellcheck="false" placeholder="${key ? 'Leave empty to keep the current key' : 'sk-…'}"${key ? '' : ' required'}></label>
+<label>Daily budget, US dollars <input name="budget_usd_per_day" type="number" min="0" max="1000" step="0.5" value="${key && key.budget_usd_per_day != null ? key.budget_usd_per_day : 1}"> <span class="oc-muted">0 means no cap</span></label>
+<p><button type="submit">${key ? 'Save' : 'Add key'}</button></p>
+</form>
+${key ? `<form class="oc-inline" method="post" action="/settings/ai-key/delete"><button type="submit" class="oc-link">Remove my key</button> <span class="oc-muted">(AI members that use it go back to OpenVibe's model)</span></form>` : ''}`}`;
+    }
+    router.post('/settings/ai-key', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const b = req.body || {};
+        try {
+            const key = await credentials.put(actor.user.subject_id, { provider: b.provider, base_url: b.base_url, api_key: b.api_key, model: b.model, budget_usd_per_day: b.budget_usd_per_day });
+            await require('../rooms/ai-members').relabelKey(actor.user.subject_id, key, actor.user);
+            return res.redirect(303, '/settings?saved=1#oc-ai-key');
+        } catch (err) { return res.redirect(303, `/settings?error=${encodeURIComponent(err.message || 'Could not save your key right now')}#oc-ai-key`); }
+    });
+    router.post('/settings/ai-key/delete', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        try {
+            await credentials.remove(actor.user.subject_id);
+            await require('../rooms/ai-members').dropKey(actor.user.subject_id);
+            return res.redirect(303, '/settings?saved=1#oc-ai-key');
+        } catch (err) { return res.redirect(303, `/settings?error=${encodeURIComponent(err.message || 'Could not remove your key right now')}#oc-ai-key`); }
     });
 
     router.post('/settings', formLimit, sameSite, async (req, res) => {
@@ -547,7 +587,7 @@ ${people}
         const isCall = room.kind === 'call';
         const callReady = isCall && !!require('../config').calls.enabled;
         const ais = aiMembers.enabled() ? (await aiMembers.list(room)).filter((a) => Number(a.enabled)) : [];
-        const aiHere = ais.length ? `<p class="oc-ai-here">${ais.map((a) => `<span class="oc-badge oc-ai">AI</span> <strong>${esc(a.name)}</strong>`).join(' · ')} <span class="oc-muted">· write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask${ais.length > 1 ? ' one of them' : ''} something</span></p>` : '';
+        const aiHere = ais.length ? `<p class="oc-ai-here">${ais.map((a) => `<span class="oc-badge oc-ai">AI</span> <strong>${esc(a.name)}</strong> <span class="oc-muted oc-ai-model">(${esc(aiMembers.modelOf(a))})</span>`).join(' · ')} <span class="oc-muted">· write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask${ais.length > 1 ? ' one of them' : ''} something</span></p>` : '';
         await page(req, res, 200, {
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
             description: room.topic || `${room.name}, a ${isCall ? 'call' : room.kind === 'system' ? 'announcements' : 'chat'} room on OpenVibe.`,
@@ -622,7 +662,8 @@ ${composer}${tools}`,
     router.get('/r/:slug/settings', async (req, res) => {
         const x = await loadRoom(req, res); if (!x) return;
         const { actor, room, can } = x;
-        if (room.server_id) return res.redirect(302, await channelUrl(room, '/settings'));
+        // A server's channel is set up on the server's settings page; only its AI members are set here (server admins).
+        if (room.server_id && !can.manage) return res.redirect(302, await channelUrl(room, '/settings'));
         if (!can.moderate) return res.redirect(303, `/r/${room.slug}`);
         const saved = req.query.saved ? notice('ok', 'Saved.') : '';
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
@@ -637,18 +678,34 @@ ${composer}${tools}`,
         const addRole = rooms.joinRoleOf(room);
         const attachments = can.manage ? await rooms.attachments(room) : [];
         const ais = can.manage && room.kind !== 'system' ? await aiMembers.list(room) : [];
+        let myKey = null;
+        if (can.manage && room.kind !== 'system' && aiMembers.enabled()) { try { myKey = await credentials.get(actor.user.subject_id); } catch { myKey = null; } }
+        const engineField = (a) => {
+            const cur = a ? (a.engine || 'openvibe') : 'openvibe';
+            const ownLabel = a && cur === 'own' ? aiMembers.modelOf(a) : myKey ? `Your own key: ${credentials.label(myKey)}` : 'Your own key (add one in your chat settings first)';
+            return `<label>Thinks with <select name="engine"><option value="openvibe"${cur === 'openvibe' ? ' selected' : ''}>OpenVibe's model</option><option value="own"${cur === 'own' ? ' selected' : ''}${cur === 'own' || myKey ? '' : ' disabled'}>${esc(ownLabel)}</option></select></label>
+${myKey || cur === 'own' ? '' : '<p class="oc-muted">To give it a different model (yours, from OpenAI, Anthropic or an OpenAI-compatible provider), <a href="/settings#oc-ai-key">add your AI key</a>.</p>'}`;
+        };
         const aiForm = (a) => `<form class="oc-form oc-ai-form" method="post" action="/r/${esc(room.slug)}/ai-members${a ? `/${Number(a.id)}` : ''}">
 ${a ? '' : '<h3>Add an AI member</h3>'}
 <label>Name <input name="name" required minlength="2" maxlength="24" value="${a ? esc(a.name) : ''}" placeholder="Pantry"></label>
 <label>How it should be <textarea name="persona" rows="2" maxlength="1000" placeholder="A cheerful cook who keeps meals cheap and quick">${a ? esc(a.persona) : ''}</textarea></label>
 <label>Notes it always knows <textarea name="memory" rows="3" maxlength="2000" placeholder="Lee is vegetarian. We shop on Saturdays. Budget: $80 a week.">${a ? esc(a.memory) : ''}</textarea></label>
+${engineField(a)}
 ${a ? `<label class="oc-check"><input type="checkbox" name="enabled" value="1"${Number(a.enabled) ? ' checked' : ''}> Answers when someone writes @${esc(a.handle)}</label>` : ''}
 <p><button type="submit">${a ? 'Save' : 'Add'}</button></p></form>`;
         const aiSection = can.manage && room.kind !== 'system' ? `<h2 id="oc-ai">AI members</h2>
 ${aiMembers.enabled() ? '' : notice('error', 'AI members are switched off on this server right now.')}
-<p class="oc-muted">An AI member answers when someone writes its name with an @ (for example @${esc(ais[0] ? ais[0].handle : 'pantry')}). It reads the room's recent messages and the notes you give it, through OpenVibe.AI. It cannot do anything outside the chat. At most ${aiMembers.MAX_PER_ROOM}.</p>
-${ais.map((a) => `<section class="oc-ai-member"><h3><span class="oc-badge oc-ai">AI</span> ${esc(a.name)} <span class="oc-muted">@${esc(a.handle)}</span>${a.link_service === 'food' ? ' <span class="oc-badge">knows the household\'s pantry (OpenVibe.Food)</span>' : ''}</h3>${aiForm(a)}<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/ai-members/${Number(a.id)}/delete"><button type="submit" class="oc-link">Remove ${esc(a.name)}</button></form></section>`).join('')}
+<p class="oc-muted">An AI member answers when someone writes its name with an @ (for example @${esc(ais[0] ? ais[0].handle : 'pantry')}). It reads the room's recent messages and the notes you give it, through OpenVibe.AI, with OpenVibe's model or with your own key's (several members with different models make a multi-model group chat). It cannot do anything outside the chat. At most ${aiMembers.MAX_PER_ROOM}.</p>
+${ais.map((a) => `<section class="oc-ai-member"><h3><span class="oc-badge oc-ai">AI</span> ${esc(a.name)} <span class="oc-muted">@${esc(a.handle)} · ${esc(aiMembers.modelOf(a))}</span>${a.link_service === 'food' ? ' <span class="oc-badge">knows the household\'s pantry (OpenVibe.Food)</span>' : ''}</h3>${aiForm(a)}<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/ai-members/${Number(a.id)}/delete"><button type="submit" class="oc-link">Remove ${esc(a.name)}</button></form></section>`).join('')}
 ${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}` : '';
+        if (room.server_id) {
+            return await page(req, res, 200, {
+                actor, title: `#${room.name}: AI members`, path: `/r/${room.slug}/settings`, active: 'servers', robots: 'noindex, nofollow',
+                body: `<p><a href="${esc(await channelUrl(room, '/settings'))}">← Server settings</a> · <a href="${esc(await channelUrl(room))}">#${esc(room.name)}</a></p><h1>AI members in #${esc(room.name)}</h1>${saved}${error}
+${aiSection}`,
+            });
+        }
         const communityUrl = config.web.communityUrl;
         const attachList = can.manage ? `<h2>Attached to</h2>${attachments.length ? `<ul class="oc-members">${attachments.map((a) => `<li><a href="${esc(a.service === 'community' ? `${communityUrl}/s/${encodeURIComponent(a.resource)}` : '#')}">${esc(a.title || a.resource)}</a> <span class="oc-muted">${esc(a.service === 'community' ? 'OpenVibe.Community space' : a.service)}</span><form class="oc-inline" method="post" action="/r/${esc(room.slug)}/attachments/${encodeURIComponent(a.service)}/${encodeURIComponent(a.resource)}/detach"><button type="submit" class="oc-link">Detach</button></form></li>`).join('')}</ul>` : '<p class="oc-muted">Not attached anywhere. A Community space you own can attach this room from the space\'s page.</p>'}` : '';
         await page(req, res, 200, {
@@ -716,8 +773,8 @@ ${attachList}`,
         }
         res.redirect(303, `/r/${room.slug}/settings?saved=1`);
     });
-    router.post('/r/:slug/ai-members', formLimit, sameSite, aiMemberForm(async (room, actor, can, b) => { await aiMembers.add(room, actor.user, can, { name: b.name, persona: b.persona, memory: b.memory }); }));
-    router.post('/r/:slug/ai-members/:id', formLimit, sameSite, aiMemberForm(async (room, actor, can, b, req) => { await aiMembers.update(room, can, req.params.id, { name: b.name, persona: b.persona, memory: b.memory, enabled: b.enabled === '1' }); }));
+    router.post('/r/:slug/ai-members', formLimit, sameSite, aiMemberForm(async (room, actor, can, b) => { await aiMembers.add(room, actor.user, can, { name: b.name, persona: b.persona, memory: b.memory, engine: b.engine }); }));
+    router.post('/r/:slug/ai-members/:id', formLimit, sameSite, aiMemberForm(async (room, actor, can, b, req) => { await aiMembers.update(room, can, req.params.id, { name: b.name, persona: b.persona, memory: b.memory, enabled: b.enabled === '1', engine: b.engine }, actor.user); }));
     router.post('/r/:slug/ai-members/:id/delete', formLimit, sameSite, aiMemberForm(async (room, actor, can, b, req) => { await aiMembers.remove(room, can, req.params.id); }));
 
     router.post('/r/:slug/attachments/:service/:resource/detach', formLimit, sameSite, roomsOrError(async (req, res) => {

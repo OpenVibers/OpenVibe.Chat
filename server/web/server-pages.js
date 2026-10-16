@@ -119,7 +119,7 @@ ${create}`,
         else if (!can.member) composer = `<form method="post" action="/s/${esc(server.slug)}/join"><button type="submit">Join ${esc(server.name)}</button></form>`;
         else composer = notice('error', 'You cannot write here right now.');
         const ais = require('../rooms/ai-members').enabled() ? (await require('../rooms/ai-members').list(room)).filter((a) => Number(a.enabled)) : [];
-        const aiHere = ais.length ? `<p class="oc-ai-here">${ais.map((a) => `<span class="oc-badge oc-ai">AI</span> <strong>${esc(a.name)}</strong>`).join(' · ')} <span class="oc-muted">· write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask</span></p>` : '';
+        const aiHere = ais.length ? `<p class="oc-ai-here">${ais.map((a) => `<span class="oc-badge oc-ai">AI</span> <strong>${esc(a.name)}</strong> <span class="oc-muted oc-ai-model">(${esc(require('../rooms/ai-members').modelOf(a))})</span>`).join(' · ')} <span class="oc-muted">· write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask</span></p>` : '';
         const byRank = {};
         for (const p of people) (byRank[p.role] = byRank[p.role] || []).push(p);
         const person = (p) => `<li><a class="oc-name" href="${LIVE}/@${encodeURIComponent(p.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(p.profile_color || '') ? ` style="--nc:${esc(p.profile_color)}"` : ''}>${esc(p.display_name || p.username || '?')}</a></li>`;
@@ -221,7 +221,8 @@ ${composer}
 <label>Name <input name="name" required maxlength="40" value="${esc(c.name)}"></label>
 <label>Topic <input name="topic" maxlength="200" value="${esc(c.topic || '')}"></label>
 ${c.kind === 'voice' ? `<label>Members in the call <select name="join_role"><option value="speaker"${c.join_role === 'speaker' ? ' selected' : ''}>can talk</option><option value="participant"${c.join_role === 'participant' ? ' selected' : ''}>listen and write (moderators talk)</option></select></label>` : ''}
-<p><button type="submit">Save</button> <button type="submit" name="delete" value="1" class="oc-link oc-danger-link">Delete this channel</button></p></form></details></li>`;
+<p><button type="submit">Save</button> <button type="submit" name="delete" value="1" class="oc-link oc-danger-link">Delete this channel</button></p></form>
+${can.manage && c.kind !== 'voice' && require('../rooms/ai-members').enabled() ? `<p><a href="/r/${esc(c.room)}/settings#oc-ai">AI members in #${esc(c.name)}</a> <span class="oc-muted">(they answer when someone writes their @name, with OpenVibe's model or your own key's)</span></p>` : ''}</details></li>`;
         const inviteRow = (i) => `<li><code class="oc-invite-url">${esc(`${site}/join/${i.code}`)}</code> <span class="oc-muted">${i.uses} use${i.uses === 1 ? '' : 's'}${i.max_uses != null ? ` of ${i.max_uses}` : ''}${i.expires_at ? ` · until <time datetime="${esc(i.expires_at)}">${esc(i.expires_at.slice(0, 16).replace('T', ' '))} UTC</time>` : ' · never expires'}</span>
 <form class="oc-inline" method="post" action="/s/${esc(server.slug)}/invites/${esc(i.code)}/revoke"><button type="submit" class="oc-link">Revoke</button></form></li>`;
         await page(req, res, 200, {

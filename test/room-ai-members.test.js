@@ -56,7 +56,7 @@ t('only the room\'s owner adds, changes and removes AI members; names are checke
     assert.deepStrictEqual([r.body.name, r.body.handle, r.body.memory], ['Pantry', 'pantry', 'Bob is vegetarian']);
     assert.strictEqual((await api('POST', '/our-kitchen/ai-members', ann, { name: 'pantry' })).status, 409, 'one @pantry per room');
     const seen = await api('GET', '/our-kitchen/ai-members', bob);
-    assert.deepStrictEqual(Object.keys(seen.body.ai_members[0]).sort(), ['enabled', 'handle', 'id', 'name'], 'members see who it is, not its set-up');
+    assert.deepStrictEqual(Object.keys(seen.body.ai_members[0]).sort(), ['enabled', 'handle', 'id', 'model', 'name'], 'members see who it is and its model, not its set-up');
     assert.strictEqual((await api('GET', '/our-kitchen/ai-members', ann)).body.ai_members[0].persona, 'A cheerful cook');
     assert.strictEqual((await api('PATCH', `/our-kitchen/ai-members/${r.body.id}`, bob, { memory: 'x' })).status, 403);
 });

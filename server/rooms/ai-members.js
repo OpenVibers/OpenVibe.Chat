@@ -13,6 +13,11 @@
  *     an AI member never answers an AI member.
  *   - Limits: one answer at a time per room, CHAT_AI_MEMBER_REPLIES_PER_DAY a room (100), and 20 an hour from one
  *     person. Past them, or with AI unavailable, the member says so once instead of answering.
+ *   - A model of its own (migrations/0014_ai_member_models.sql): engine 'openvibe' thinks with OpenVibe's model; engine
+ *     'own' with the provider key the manager who set it keeps in OpenVibe.AI through Chat (server/ai/credentials.js:
+ *     OpenAI, Anthropic or an OpenAI-compatible endpoint, their model, their daily budget). The room sees which
+ *     (engine_label). Such a member is outside the room's daily cap (the key's own budget limits it); if the key is
+ *     removed, its members go back to OpenVibe's model (dropKey).
  *   - Off with CHAT_AI_MEMBERS=0, and without the OAuth client secret (no token to call AI with).
  *
  * Room messages written by an AI member have user_id 0 and the member's name (rooms.js MSG_SELECT joins it).
@@ -20,6 +25,7 @@
 const db = require('../db/database');
 const config = require('../config');
 const aiClient = require('../ai/client');
+const credentials = require('../ai/credentials');
 
 const MAX_PER_ROOM = 3;
 const TRANSCRIPT = 30;
@@ -59,6 +65,22 @@ function validate({ name, persona, memory } = {}, { partial = false } = {}) {
     return out;
 }
 
+/**
+ * The engine an add or an update asks for: 'openvibe', or 'own' (the acting person's own key, which must be stored).
+ * Returns the columns to write, or null when the input does not name an engine.
+ */
+async function engineOf(input, user) {
+    if (input.engine === undefined || input.engine === null || input.engine === '') return null;
+    if (input.engine === 'openvibe') return { engine: 'openvibe', engine_subject: null, engine_label: null };
+    if (input.engine !== 'own') fail(422, 'rooms.ai_engine', 'An AI member thinks with OpenVibe\'s model or with your own key');
+    const subject = user && user.subject_id;
+    if (!subject) fail(403, 'rooms.ai_engine', 'Sign in with an OpenVibe account to use your own AI key');
+    let cred;
+    try { cred = await credentials.get(subject); } catch (err) { fail(err.status || 502, err.code || 'credentials.unreachable', err.message); }
+    if (!cred) fail(409, 'rooms.ai_no_key', 'Add your own AI key in Settings first');
+    return { engine: 'own', engine_subject: subject, engine_label: `${credentials.label(cred)}, ${(user.display_name || user.username || 'a member').slice(0, 40)}'s key` };
+}
+
 /** Add one. `can` is rooms.access() for `user`: only a room's managers add, edit or remove AI members. */
 async function add(room, user, can, input = {}) {
     if (!can || !can.manage) fail(403, 'rooms.forbidden', 'Only the room\'s owner adds AI members');
@@ -67,27 +89,46 @@ async function add(room, user, can, input = {}) {
     if ((await list(room)).length >= MAX_PER_ROOM) fail(409, 'rooms.ai_limit', `A room has at most ${MAX_PER_ROOM} AI members`);
     if (await db.get('SELECT 1 FROM room_ai_members WHERE room_id = ? AND handle = ?', [room.id, v.handle])) fail(409, 'rooms.ai_taken', `This room already has an AI member called @${v.handle}`);
     const link = input.link_service === 'food' && /^[A-Za-z0-9_-]{4,64}$/.test(String(input.link_resource || '')) ? { service: 'food', resource: String(input.link_resource) } : null;
+    const e = (await engineOf(input, user)) || { engine: 'openvibe', engine_subject: null, engine_label: null };
     const r = await db.run(
-        'INSERT INTO room_ai_members (room_id, name, handle, persona, memory, link_service, link_resource, created_by_subject) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        [room.id, v.name, v.handle, v.persona || '', v.memory || '', link ? link.service : null, link ? link.resource : null, (user && user.subject_id) || null]);
+        `INSERT INTO room_ai_members (room_id, name, handle, persona, memory, link_service, link_resource, created_by_subject, engine, engine_subject, engine_label)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+        [room.id, v.name, v.handle, v.persona || '', v.memory || '', link ? link.service : null, link ? link.resource : null, (user && user.subject_id) || null, e.engine, e.engine_subject, e.engine_label]);
     return await byId(room, r.lastInsertRowid);
 }
 
-async function update(room, can, id, input = {}) {
+async function update(room, can, id, input = {}, user = null) {
     if (!can || !can.manage) fail(403, 'rooms.forbidden', 'Only the room\'s owner changes AI members');
     const m = await byId(room, id);
     if (!m) fail(404, 'rooms.ai_not_found', 'No such AI member in this room');
     const v = validate(input, { partial: true });
     if (v.handle && v.handle !== m.handle && await db.get('SELECT 1 FROM room_ai_members WHERE room_id = ? AND handle = ? AND id <> ?', [room.id, v.handle, m.id])) fail(409, 'rooms.ai_taken', `This room already has an AI member called @${v.handle}`);
     const enabledFlag = input.enabled === undefined ? m.enabled : (input.enabled === false || input.enabled === '0' || input.enabled === 0 ? 0 : 1);
-    await db.run('UPDATE room_ai_members SET name = ?, handle = ?, persona = ?, memory = ?, enabled = ?, updated_at = ov_now() WHERE id = ?',
-        [v.name || m.name, v.handle || m.handle, v.persona !== undefined ? v.persona : m.persona, v.memory !== undefined ? v.memory : m.memory, enabledFlag, m.id]);
+    // Keeping 'own' as it is needs no key of the editor's: only a change to it does (someone else's key stays theirs).
+    const e = input.engine === 'own' && m.engine === 'own' ? null : await engineOf(input, user);
+    const eng = e || { engine: m.engine || 'openvibe', engine_subject: m.engine_subject || null, engine_label: m.engine_label || null };
+    await db.run('UPDATE room_ai_members SET name = ?, handle = ?, persona = ?, memory = ?, enabled = ?, engine = ?, engine_subject = ?, engine_label = ?, updated_at = ov_now() WHERE id = ?',
+        [v.name || m.name, v.handle || m.handle, v.persona !== undefined ? v.persona : m.persona, v.memory !== undefined ? v.memory : m.memory, enabledFlag, eng.engine, eng.engine_subject, eng.engine_label, m.id]);
     return await byId(room, m.id);
 }
 
 async function remove(room, can, id) {
     if (!can || !can.manage) fail(403, 'rooms.forbidden', 'Only the room\'s owner removes AI members');
     await db.run('DELETE FROM room_ai_members WHERE room_id = ? AND id = ?', [room.id, Number(id) || 0]);
+}
+
+/** A person's key is gone (they removed it, or their account was erased): their members go back to OpenVibe's model. */
+async function dropKey(subject) {
+    if (!subject) return 0;
+    const r = await db.run("UPDATE room_ai_members SET engine = 'openvibe', engine_subject = NULL, engine_label = NULL, updated_at = ov_now() WHERE engine_subject = ?", [String(subject)]);
+    return r.changes || 0;
+}
+
+/** Keeps every member that uses this person's key showing the key's current provider and model. */
+async function relabelKey(subject, cred, user) {
+    if (!subject || !cred) return;
+    await db.run("UPDATE room_ai_members SET engine_label = ?, updated_at = ov_now() WHERE engine = 'own' AND engine_subject = ?",
+        [`${credentials.label(cred)}, ${((user && (user.display_name || user.username)) || 'a member').slice(0, 40)}'s key`, String(subject)]);
 }
 
 /** The first enabled member a message names (@handle, as a word), or null. */
@@ -158,7 +199,8 @@ async function afterPost(room, message, user, deps = {}) {
     };
     if (inFlight.has(room.id)) return null;
     if (!personOk(room.id, user.id, Date.now())) return null;
-    if (await repliesToday(room) >= config.ai.memberRepliesPerDay) {
+    const own = member.engine === 'own' && member.engine_subject;
+    if (!own && await repliesToday(room) >= config.ai.memberRepliesPerDay) {
         return await say(`I have answered ${config.ai.memberRepliesPerDay} times in this room today, which is my limit. Ask me again tomorrow.`);
     }
     inFlight.add(room.id);
@@ -171,10 +213,11 @@ async function afterPost(room, message, user, deps = {}) {
             memory: member.memory || '', context: context ? context.text.slice(0, 4000) : '', context_source: context ? context.source.slice(0, 80) : '',
             transcript: transcriptOf(history) || '(no earlier messages)',
             asked_by: (user.display_name || user.username || 'someone').slice(0, 80), message: String(message.message).slice(0, 2000),
-        }, { force: true, attribution: { service: 'chat', type: 'room', id: String(room.id), label: String(room.name || room.slug).slice(0, 200) }, idempotencyKey: `chat-ai-${room.id}-${message.id}` });
+        }, { force: true, attribution: { service: 'chat', type: 'room', id: String(room.id), label: String(room.name || room.slug).slice(0, 200) }, idempotencyKey: `chat-ai-${room.id}-${message.id}`,
+            ...(own ? { credential: { subject: member.engine_subject } } : {}) });
         const text = out && typeof out.text === 'string' ? clean(out.text, 2000) : '';
-        if (!text) return await say('I could not answer just now. Try again in a minute.');
-        await countReply(room);
+        if (!text) return await say(own ? 'I could not reach my model just now (its key may be out of today\'s budget, or the provider did not answer). Try again later, or the room\'s owner can switch me to OpenVibe\'s model.' : 'I could not answer just now. Try again in a minute.');
+        if (!own) await countReply(room);
         return await say(text);
     } catch (err) {
         console.warn(`[Chat AI members] room ${room.id}: ${(err && err.message) || err}`);
@@ -184,11 +227,15 @@ async function afterPost(room, message, user, deps = {}) {
     }
 }
 
+/** What the room shows a member thinks with: "OpenVibe", or the own key's provider, model and whose key it is. */
+const modelOf = (m) => (m.engine === 'own' ? (m.engine_label || 'someone\'s own key') : 'OpenVibe');
+
 const toWire = (m) => ({
     id: Number(m.id), name: m.name, handle: m.handle, persona: m.persona, memory: m.memory, enabled: Boolean(Number(m.enabled)),
-    link: m.link_service ? { service: m.link_service, resource: m.link_resource } : null, created_at: m.created_at, updated_at: m.updated_at,
+    link: m.link_service ? { service: m.link_service, resource: m.link_resource } : null,
+    engine: m.engine || 'openvibe', model: modelOf(m), created_at: m.created_at, updated_at: m.updated_at,
 });
 
 function _reset() { inFlight.clear(); personHour.clear(); }
 
-module.exports = { MAX_PER_ROOM, LIMITS, AiMemberError, enabled, list, byId, add, update, remove, mentioned, handleOf, afterPost, transcriptOf, toWire, _reset };
+module.exports = { MAX_PER_ROOM, LIMITS, AiMemberError, enabled, list, byId, add, update, remove, dropKey, relabelKey, modelOf, mentioned, handleOf, afterPost, transcriptOf, toWire, _reset };
