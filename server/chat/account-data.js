@@ -99,6 +99,8 @@ const ERASE_AFTER_ROOMS = [
     ['pending_messages', 'DELETE FROM pending_ip_messages WHERE user_id = ANY(@ids)'],
     // An AI member belongs to its room, not to whoever added it: it stays, without their name on it.
     [null, 'UPDATE room_ai_members SET created_by_subject = NULL WHERE created_by_subject = ANY(@s)'],
+    // Their own AI key is gone with them (OpenVibe.AI erases it): members that thought with it go back to OpenVibe's model.
+    [null, "UPDATE room_ai_members SET engine = 'openvibe', engine_subject = NULL, engine_label = NULL WHERE engine_subject = ANY(@s)"],
 ];
 // Their channel (only when they have Live ids): emotes, sounds, moderators, stats, audio requests, the Live mirrors.
 const ERASE_CHANNEL = [

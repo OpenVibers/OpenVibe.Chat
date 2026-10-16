@@ -187,7 +187,7 @@ module.exports = {
     ai: {
         enabled: bool(process.env.CHAT_AI_ENABLED, false),
         internalUrl: strip(process.env.OV_AI_INTERNAL_URL || 'http://127.0.0.1:4700'),
-        scope: 'ai.run.create ai.run.read',
+        scope: 'ai.run.create ai.run.read ai.credential.manage',
         waitMs: Math.max(0, int(process.env.CHAT_AI_WAIT_MS, 60000)),
         tickMs: Math.max(1000, int(process.env.CHAT_AI_TICK_MS, 45000)),
         // A room's AI members (server/rooms/ai-members.js): on unless CHAT_AI_MEMBERS=0, independent of the insight job

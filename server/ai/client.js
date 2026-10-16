@@ -11,6 +11,10 @@
 const config = require('../config');
 
 let _ai = null;
+let _http = null;
+
+/** The HTTP client behind ai() (Chat's token for openvibe.ai), for calls the SDK's AI client has no method for. */
+function http() { ai(); return _http; }
 
 function ai() {
     if (_ai) return _ai;
@@ -25,8 +29,8 @@ function ai() {
         audience: 'openvibe.ai',
         scope: config.ai.scope,
     });
-    const http = createClient({ tokenProvider: tokenClient, timeoutMs: config.ai.waitMs + 10000 });
-    _ai = createAiClient(http, { baseUrl: config.ai.internalUrl });
+    _http = createClient({ tokenProvider: tokenClient, timeoutMs: config.ai.waitMs + 10000 });
+    _ai = createAiClient(_http, { baseUrl: config.ai.internalUrl });
     return _ai;
 }
 
@@ -44,11 +48,20 @@ async function structured(workflow, input, opts = {}) {
     if (!(opts.force ? config.oauth.clientSecret : enabled())) return null;
     try {
         const { runs } = ai();
-        const body = await runs.create(workflow, input, {
-            wait: config.ai.waitMs,
-            ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
-            ...(opts.attribution !== undefined ? { attribution: opts.attribution } : {}),
-        });
+        // A person's own provider key (ai.run-request `credential`): the SDK's runs.create does not carry it, so such a
+        // run is posted through the same client (and token).
+        const body = opts.credential
+            ? await http().json({
+                service: 'ai', baseUrl: config.ai.internalUrl, audience: 'openvibe.ai', method: 'POST', path: '/api/v1/runs',
+                query: { wait: Math.max(0, Math.floor(config.ai.waitMs)) },
+                json: { workflow, input, credential: opts.credential, ...(opts.attribution !== undefined ? { attribution: opts.attribution } : {}) },
+                ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : { idempotencyKey: false }),
+            })
+            : await runs.create(workflow, input, {
+                wait: config.ai.waitMs,
+                ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
+                ...(opts.attribution !== undefined ? { attribution: opts.attribution } : {}),
+            });
         const run = body && (body.run || body);
         if (!run || run.status !== 'succeeded' || run.synthetic) return null;
         return run.output || null;
@@ -58,4 +71,4 @@ async function structured(workflow, input, opts = {}) {
     }
 }
 
-module.exports = { structured, enabled, _setClient(c) { _ai = c; }, _reset() { _ai = null; } };
+module.exports = { structured, enabled, http, _setClient(c) { _ai = c; }, _setHttp(h) { _http = h; }, _reset() { _ai = null; _http = null; } };

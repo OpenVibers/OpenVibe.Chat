@@ -308,6 +308,19 @@ only; members see names and handles, managers the set-up); the settings page man
 member can also be added by account subject: `POST /api/chat/rooms/:slug/members { subject: "usr_…" }`. Deleting an
 account keeps the AI members it added (they belong to the room) without its subject on them, and exports them.
 
+**Their own models** (`migrations/0014_ai_member_models.sql`, `server/ai/credentials.js`; the owner's multi-model group
+chat). A person keeps an AI provider key through Chat: OpenAI, Anthropic, or any OpenAI-compatible endpoint (OpenRouter,
+Groq, Together, their own server), a model and a daily budget in US dollars (0 = no cap; left out on a change, it stays).
+The key goes to OpenVibe.AI (`PUT|GET|DELETE /api/v1/credentials/:subject`, Chat as its owner, Network grant
+`chat ai.credential.manage`) and is never shown again, only a four-character hint and today's spend. A room's manager
+sets a member to think with their own key (`engine: own`; `openvibe` is OpenVibe's model): its answers are runs that
+name `credential { subject }`, so they reach that provider only, count against the key's budget and not the room's
+daily cap. The room page and the API (`model`) say which model each member uses ("openai (openrouter.ai) · gpt-4o-mini,
+Ann's key"). Removing the key (or the account) sends its members back to OpenVibe's model; a new model relabels them.
+API: `GET|PUT|DELETE /api/chat/me/ai-key` (own sign-in only, not API tokens); pages: `/settings#oc-ai-key` and the
+"Thinks with" choice on each AI member. A server's admins give a text channel AI members at `/r/<channel room>/settings`,
+linked from the channel on the server's settings page.
+
 **Servers** (`server/rooms/servers.js`, `server/rooms/server-routes.js`, `server/web/server-pages.js`,
 `migrations/0013_chat_servers.sql`; the owner's Q14: friend groups and couples first, then communities with servers,
 channels and voice). A server is a group of rooms, its channels, with one membership and one set of roles: a text
