@@ -54,6 +54,7 @@ const EXPORTS = [
     ['emotes.json', `SELECT * FROM emotes WHERE user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['sounds.json', `SELECT * FROM channel_sounds WHERE created_by_subject_id = ANY(@s) OR created_by = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['moderation_on_you.json', `SELECT * FROM moderation_actions WHERE target_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['ai_members_added.json', `SELECT * FROM room_ai_members WHERE created_by_subject = ANY(@s) ORDER BY id DESC LIMIT ${LIMIT}`],
 ];
 
 async function exportPart(d, subject) {
@@ -92,6 +93,8 @@ const ERASE_AFTER_ROOMS = [
     ['tags', 'DELETE FROM user_tags WHERE user_id = ANY(@ids)'],
     ['moderator_roles', 'DELETE FROM channel_moderators WHERE user_id = ANY(@ids)'],
     ['pending_messages', 'DELETE FROM pending_ip_messages WHERE user_id = ANY(@ids)'],
+    // An AI member belongs to its room, not to whoever added it: it stays, without their name on it.
+    [null, 'UPDATE room_ai_members SET created_by_subject = NULL WHERE created_by_subject = ANY(@s)'],
 ];
 // Their channel (only when they have Live ids): emotes, sounds, moderators, stats, audio requests, the Live mirrors.
 const ERASE_CHANNEL = [

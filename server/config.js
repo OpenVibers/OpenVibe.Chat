@@ -68,6 +68,10 @@ module.exports = {
         scope: 'profile theme',
     },
 
+    // OpenVibe.Food (server/rooms/food-context.js): a household's pantry and plan for a room's AI member, read
+    // server-side with Chat's service token. The loopback address in production.
+    food: { internalUrl: strip(process.env.CHAT_FOOD_INTERNAL_URL || 'http://127.0.0.1:4970') },
+
     // openvibe.chat, the site (server/web/): global chat, messages and settings, served by Chat itself.
     web: {
         baseUrl: strip(process.env.CHAT_WEB_URL || (isProduction ? 'https://openvibe.chat' : 'http://localhost:4400')),
@@ -179,6 +183,10 @@ module.exports = {
         scope: 'ai.run.create ai.run.read',
         waitMs: Math.max(0, int(process.env.CHAT_AI_WAIT_MS, 60000)),
         tickMs: Math.max(1000, int(process.env.CHAT_AI_TICK_MS, 45000)),
+        // A room's AI members (server/rooms/ai-members.js): on unless CHAT_AI_MEMBERS=0, independent of the insight job
+        // above (CHAT_AI_ENABLED); each room answers at most this many times a UTC day.
+        members: process.env.CHAT_AI_MEMBERS !== '0',
+        memberRepliesPerDay: Math.max(1, int(process.env.CHAT_AI_MEMBER_REPLIES_PER_DAY, 100)),
     },
 
     // Channel sound clips live on disk. At cutover this is Live's sounds directory: stored rows

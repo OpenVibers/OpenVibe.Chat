@@ -415,6 +415,7 @@ ${volume('tts_sound_volume', 'Chat sound volume', tts.sound_volume)}
 
     // ── Rooms (server/rooms/) ──
     const rooms = require('../rooms/rooms');
+    const aiMembers = require('../rooms/ai-members');
     const roomRoutes = require('../rooms/routes');
     const roomsOrError = (fn) => async (req, res, next) => {
         try { return await fn(req, res, next); } catch (err) {
@@ -428,8 +429,12 @@ ${volume('tts_sound_volume', 'Chat sound volume', tts.sound_volume)}
     const roomCard = (r) => `<li class="oc-conv${r.unread ? ' oc-unread' : ''}"><a href="/r/${esc(r.slug)}"><strong>${esc(r.name)}</strong>${kindBadge(r)}${r.visibility === 'private' ? ' <span class="oc-badge">private</span>' : ''}${r.unread ? ` <span class="oc-badge">${r.unread} new</span>` : ''}<span class="oc-muted oc-last">${esc(r.topic || `${r.members} member${r.members === 1 ? '' : 's'}`)}</span></a></li>`;
     const roomMessage = (m, can, slug, me) => {
         const t = hhmm(m.created_at);
-        const del = (can.moderate || (me && m.user_id === me.id)) ? `<form class="oc-del" method="post" action="/r/${esc(slug)}/delete/${Number(m.id)}"><button type="submit" title="Delete this message" aria-label="Delete this message">×</button></form>` : '';
-        return `<li class="oc-msg" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)} <span class="oc-text">${linkify(m.message)}</span>${del}</li>`;
+        const ai = m.ai_member_id != null;
+        const del = (can.moderate || (me && !ai && m.user_id === me.id)) ? `<form class="oc-del" method="post" action="/r/${esc(slug)}/delete/${Number(m.id)}"><button type="submit" title="Delete this message" aria-label="Delete this message">×</button></form>` : '';
+        const who = ai
+            ? `<span class="oc-name oc-ai-name">${esc(m.display_name || 'AI')}</span> <span class="oc-badge oc-ai" title="An AI member of this room">AI</span>`
+            : `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)}`;
+        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} <span class="oc-text">${linkify(m.message)}</span>${del}</li>`;
     };
     const applyRoomChange = async (room) => await roomRoutes.applyRoomChange(room);
 
@@ -518,15 +523,17 @@ ${people}
         const yourRole = me && YOU_ARE[can.role] ? ` · you are ${YOU_ARE[can.role]}` : '';
         const isCall = room.kind === 'call';
         const callReady = isCall && !!require('../config').calls.enabled;
+        const ais = aiMembers.enabled() ? (await aiMembers.list(room)).filter((a) => Number(a.enabled)) : [];
+        const aiHere = ais.length ? `<p class="oc-ai-here">${ais.map((a) => `<span class="oc-badge oc-ai">AI</span> <strong>${esc(a.name)}</strong>`).join(' · ')} <span class="oc-muted">· write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask${ais.length > 1 ? ' one of them' : ''} something</span></p>` : '';
         await page(req, res, 200, {
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
             description: room.topic || `${room.name}, a ${isCall ? 'call' : room.kind === 'system' ? 'announcements' : 'chat'} room on OpenVibe.`,
-            page: { view: 'room', room: room.slug, kind: room.kind, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
+            page: { view: 'room', room: room.slug, kind: room.kind, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: can.join, talk: can.talk } } : {}) },
             body: `<p><a href="/rooms">← Rooms</a></p>
 <h1>${esc(room.name)}${kindBadge(room)}${room.visibility === 'private' ? ' <span class="oc-badge">private</span>' : ''}</h1>
 <p class="oc-muted">${room.topic ? `${esc(room.topic)} · ` : ''}${(await rooms.publicRoom(room)).members} members${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole}${manage} <span class="oc-live" id="oc-live" hidden>● live</span></p>
-${error}
+${aiHere}${error}
 ${isCall ? callPanel(room, can, me) : ''}
 <ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
 ${composer}${tools}`,
@@ -590,6 +597,19 @@ ${composer}${tools}`,
                 : `<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/members"><input type="hidden" name="username" value="${esc(m.username || '')}"><select name="role" aria-label="Role for ${esc(m.username || '')}">${choices.map((r) => roleOption(r, m.role)).join('')}</select> <button type="submit">Set</button></form>`;
         const addRole = rooms.joinRoleOf(room);
         const attachments = can.manage ? await rooms.attachments(room) : [];
+        const ais = can.manage && room.kind !== 'system' ? await aiMembers.list(room) : [];
+        const aiForm = (a) => `<form class="oc-form oc-ai-form" method="post" action="/r/${esc(room.slug)}/ai-members${a ? `/${Number(a.id)}` : ''}">
+${a ? '' : '<h3>Add an AI member</h3>'}
+<label>Name <input name="name" required minlength="2" maxlength="24" value="${a ? esc(a.name) : ''}" placeholder="Pantry"></label>
+<label>How it should be <textarea name="persona" rows="2" maxlength="1000" placeholder="A cheerful cook who keeps meals cheap and quick">${a ? esc(a.persona) : ''}</textarea></label>
+<label>Notes it always knows <textarea name="memory" rows="3" maxlength="2000" placeholder="Lee is vegetarian. We shop on Saturdays. Budget: $80 a week.">${a ? esc(a.memory) : ''}</textarea></label>
+${a ? `<label class="oc-check"><input type="checkbox" name="enabled" value="1"${Number(a.enabled) ? ' checked' : ''}> Answers when someone writes @${esc(a.handle)}</label>` : ''}
+<p><button type="submit">${a ? 'Save' : 'Add'}</button></p></form>`;
+        const aiSection = can.manage && room.kind !== 'system' ? `<h2 id="oc-ai">AI members</h2>
+${aiMembers.enabled() ? '' : notice('error', 'AI members are switched off on this server right now.')}
+<p class="oc-muted">An AI member answers when someone writes its name with an @ (for example @${esc(ais[0] ? ais[0].handle : 'pantry')}). It reads the room's recent messages and the notes you give it, through OpenVibe.AI. It cannot do anything outside the chat. At most ${aiMembers.MAX_PER_ROOM}.</p>
+${ais.map((a) => `<section class="oc-ai-member"><h3><span class="oc-badge oc-ai">AI</span> ${esc(a.name)} <span class="oc-muted">@${esc(a.handle)}</span>${a.link_service === 'food' ? ' <span class="oc-badge">knows the household\'s pantry (OpenVibe.Food)</span>' : ''}</h3>${aiForm(a)}<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/ai-members/${Number(a.id)}/delete"><button type="submit" class="oc-link">Remove ${esc(a.name)}</button></form></section>`).join('')}
+${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}` : '';
         const communityUrl = config.web.communityUrl;
         const attachList = can.manage ? `<h2>Attached to</h2>${attachments.length ? `<ul class="oc-members">${attachments.map((a) => `<li><a href="${esc(a.service === 'community' ? `${communityUrl}/s/${encodeURIComponent(a.resource)}` : '#')}">${esc(a.title || a.resource)}</a> <span class="oc-muted">${esc(a.service === 'community' ? 'OpenVibe.Community space' : a.service)}</span><form class="oc-inline" method="post" action="/r/${esc(room.slug)}/attachments/${encodeURIComponent(a.service)}/${encodeURIComponent(a.resource)}/detach"><button type="submit" class="oc-link">Detach</button></form></li>`).join('')}</ul>` : '<p class="oc-muted">Not attached anywhere. A Community space you own can attach this room from the space\'s page.</p>'}` : '';
         await page(req, res, 200, {
@@ -606,6 +626,7 @@ ${room.kind === 'call' ? `<label>People who join <select name="join_role">${room
 <p class="oc-muted">${esc(roleHelp(room.kind))}</p>
 <form class="oc-new" method="post" action="/r/${esc(room.slug)}/members"><label for="oc-invite">Add someone</label> <input id="oc-invite" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="their username"> <select name="role" aria-label="Their role">${choices.filter((r) => r !== 'none' && r !== 'blocked').map((r) => roleOption(r, addRole)).join('')}</select> <button type="submit">Add</button></form>
 <ul class="oc-members">${members.map((m) => `<li><strong>${esc(m.display_name || m.username || '?')}</strong> <span class="oc-muted">@${esc(m.username || '')}</span>${seen(m)} ${roleForm(m)}</li>`).join('')}</ul>
+${aiSection}
 ${attachList}`,
         });
     });
@@ -641,6 +662,24 @@ ${attachList}`,
         await applyRoomChange(room);
         res.redirect(303, `/r/${room.slug}/settings?saved=1`);
     }));
+
+    // ── AI members: add, change, remove (the room's managers; server/rooms/ai-members.js decides) ──
+    const aiMemberForm = (fn) => roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}/settings`;
+        try {
+            await fn(room, actor, await rooms.access(room, actor.user), req.body || {}, req);
+        } catch (err) {
+            if (err instanceof aiMembers.AiMemberError) return res.redirect(303, `/r/${room.slug}/settings?error=${encodeURIComponent(err.message)}#oc-ai`);
+            throw err;
+        }
+        res.redirect(303, `/r/${room.slug}/settings?saved=1`);
+    });
+    router.post('/r/:slug/ai-members', formLimit, sameSite, aiMemberForm(async (room, actor, can, b) => { await aiMembers.add(room, actor.user, can, { name: b.name, persona: b.persona, memory: b.memory }); }));
+    router.post('/r/:slug/ai-members/:id', formLimit, sameSite, aiMemberForm(async (room, actor, can, b, req) => { await aiMembers.update(room, can, req.params.id, { name: b.name, persona: b.persona, memory: b.memory, enabled: b.enabled === '1' }); }));
+    router.post('/r/:slug/ai-members/:id/delete', formLimit, sameSite, aiMemberForm(async (room, actor, can, b, req) => { await aiMembers.remove(room, can, req.params.id); }));
 
     router.post('/r/:slug/attachments/:service/:resource/detach', formLimit, sameSite, roomsOrError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;

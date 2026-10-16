@@ -244,6 +244,7 @@ async function upsertUser(row) {
 const userSelect = 'SELECT * FROM ctx_users';
 async function getUserById(id) { if (!id) return null; const u = await db.get(`${userSelect} WHERE id = ?`, [id]) || null; if (!u) ensureUsers([id]).catch(() => {}); return u; }
 async function getUserByUsername(name) { return name ? (await db.get(`${userSelect} WHERE lower(username) = lower(?)`, [String(name)]) || null) : null; }
+async function getUserBySubject(subject) { return subject ? (await db.get(`${userSelect} WHERE subject_id = ?`, [String(subject)]) || null) : null; }
 async function getUserByDisplayName(name) { return name ? (await db.get(`${userSelect} WHERE lower(display_name) = lower(?)`, [String(name)]) || null) : null; }
 async function subjectFor(userId) { return await db.subjectFor(userId); }
 
@@ -941,7 +942,7 @@ module.exports = {
     start, stop, sync, tick, warm, syncStatus,
     // identity + users
     authenticate, authFailureReason, upsertUser, invalidateUser, subjectFor,
-    getUserById, getUserByUsername, getUserByDisplayName, ensureUsers, ensureUserByUsername,
+    getUserById, getUserByUsername, getUserBySubject, getUserByDisplayName, ensureUsers, ensureUserByUsername,
     // streams + channels
     getStreamById, ensureStream, refreshStream, latestStreamIdForUser, getLiveStreamsByUserId, getStreamsByUserId, getManagedStreamsByUserId,
     getChannelById, getChannelByUserId, ensureChannelForUser, createChannel,

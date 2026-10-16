@@ -158,9 +158,11 @@ router.post('/:slug/members', requireAuth, manageLimit, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     try {
         const name = String((req.body && req.body.username) || '').trim();
-        let target = /^[A-Za-z0-9_]{3,24}$/.test(name) ? await ctx.getUserByUsername(name) : null;
-        if (!target && /^[A-Za-z0-9_]{3,24}$/.test(name)) target = await ctx.ensureUserByUsername(name).catch(() => null);
-        if (!target) return res.status(404).json({ error: `Nobody called ${name.slice(0, 24)} on OpenVibe`, code: 'rooms.no_user' });
+        const subject = String((req.body && req.body.subject) || '').replace(/^user:/, '').trim();
+        let target = null;
+        if (/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(subject)) target = await ctx.getUserBySubject(subject);
+        else if (/^[A-Za-z0-9_]{3,24}$/.test(name)) target = await ctx.getUserByUsername(name) || await ctx.ensureUserByUsername(name).catch(() => null);
+        if (!target) return res.status(404).json({ error: subject ? 'No such OpenVibe account' : `Nobody called ${name.slice(0, 24)} on OpenVibe`, code: 'rooms.no_user' });
         const role = await rooms.setRole(room, req.user, target.id, String((req.body && req.body.role) || 'member'));
         if (role === 'blocked' || (room.visibility === 'private' && role === 'none')) chatServer().removeFromRoom(room.id, target.id);
         await applyRoomChange(room);
@@ -186,6 +188,35 @@ router.post('/:slug/attachments', requireAuth, personOnly, attachLimit, async (r
 router.delete('/:slug/attachments/:service/:resource', requireAuth, personOnly, attachLimit, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     try { res.json({ ok: true, ...await rooms.detach(room, req.user, req.params.service, req.params.resource) }); } catch (err) { send(res, err); }
+});
+
+// ── AI members (server/rooms/ai-members.js) ──
+// Anyone who may read the room sees who its AI members are; its managers see and change how they are set up.
+const aiMembers = require('./ai-members');
+function aiSend(res, err) {
+    if (err instanceof aiMembers.AiMemberError) return res.status(err.status).json({ error: err.message, code: err.code });
+    return send(res, err);
+}
+router.get('/:slug/ai-members', optionalAuth, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    const can = await rooms.access(room, req.user || null);
+    const list = (await aiMembers.list(room)).map(aiMembers.toWire).map((m) => (can.manage ? m : { id: m.id, name: m.name, handle: m.handle, enabled: m.enabled }));
+    res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ ai_members: list, enabled: aiMembers.enabled(), max: aiMembers.MAX_PER_ROOM });
+});
+router.post('/:slug/ai-members', requireAuth, personOnly, manageLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try {
+        const m = await aiMembers.add(room, req.user, await rooms.access(room, req.user), req.body || {});
+        res.status(201).json(aiMembers.toWire(m));
+    } catch (err) { aiSend(res, err); }
+});
+router.patch('/:slug/ai-members/:id', requireAuth, personOnly, manageLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try { res.json(aiMembers.toWire(await aiMembers.update(room, await rooms.access(room, req.user), req.params.id, req.body || {}))); } catch (err) { aiSend(res, err); }
+});
+router.delete('/:slug/ai-members/:id', requireAuth, personOnly, manageLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try { await aiMembers.remove(room, await rooms.access(room, req.user), req.params.id); res.status(204).end(); } catch (err) { aiSend(res, err); }
 });
 
 module.exports = router;

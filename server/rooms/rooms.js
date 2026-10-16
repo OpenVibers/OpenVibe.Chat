@@ -269,11 +269,31 @@ async function post(room, user, text, { now = Date.now() } = {}) {
         await announceMessage(room, user, Number(r.lastInsertRowid), message, now);
         return Number(r.lastInsertRowid);
     });
+    const row = await messageById(id);
+    // A message naming one of the room's AI members (@handle) gets its answer after this one is out.
+    setImmediate(() => { require('./ai-members').afterPost(room, row, user).catch(() => {}); });
+    return row;
+}
+
+/** A message from one of the room's AI members (server/rooms/ai-members.js): user_id 0, the member's id. */
+async function postAsAi(room, member, text, { now = Date.now() } = {}) {
+    const message = String(text || '').trim().slice(0, MAX_TEXT);
+    const id = await db.tx(async () => {
+        const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, ai_member_id) VALUES (?, 0, NULL, ?, ?)', [room.id, message, member.id]);
+        await db.run('UPDATE rooms SET message_count = message_count + 1, last_message_at = ov_now() WHERE id = ?', [room.id]);
+        await announceMessage(room, { subject_id: null, username: member.handle, display_name: member.name }, Number(r.lastInsertRowid), message, now);
+        return Number(r.lastInsertRowid);
+    });
     return await messageById(id);
 }
 
-const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.created_at, m.is_deleted, u.username, u.display_name, u.profile_color, u.role AS user_role
-    FROM room_messages m LEFT JOIN ctx_users u ON u.id = m.user_id`;
+// A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
+const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.created_at, m.is_deleted, m.ai_member_id,
+        CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle ELSE u.username END AS username,
+        CASE WHEN m.ai_member_id IS NOT NULL THEN a.name ELSE u.display_name END AS display_name,
+        u.profile_color, u.role AS user_role
+    FROM room_messages m LEFT JOIN ctx_users u ON u.id = m.user_id AND m.ai_member_id IS NULL
+    LEFT JOIN room_ai_members a ON a.id = m.ai_member_id`;
 async function messageById(id) { return await db.get(`${MSG_SELECT} WHERE m.id = ?`, [id]) || null; }
 
 /** Messages oldest → newest: the newest page, one before `before`, or everything after `after`. */
@@ -415,6 +435,7 @@ async function attachments(room) {
 function _reset() { _rate.clear(); }
 
 module.exports = {
+    postAsAi,
     ensureSchema, create, list, bySlug, access, join, leave, post, history, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
     attach, detach, attachments, joinRoleOf, unreadTotal,
     RoomError, SLUG_RE, KINDS, ROLES, KIND_ROLES, JOIN_ROLE, JOIN_ROLES_CALL, ATTACH_SERVICES, _reset,

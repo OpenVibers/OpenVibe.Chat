@@ -1,32 +1,32 @@
 {
  "service": "chat",
- "release": "143e52e371b2a659c0a407635f60fd256a4e619a",
- "recorded_at": "2026-10-10T16:02:05.083Z",
+ "release": "e5199ddcd410bde4c6c8bcbad2d22985f517338a",
+ "recorded_at": "2026-10-16T17:41:47.755Z",
  "note": "N-1 fixture: written by `npm run n-1:record`, replayed by test/n-1.test.js",
  "clients": {
-  "live": "92f003c2a75833950b875e8c314a59b55e9d9502"
+  "live": "0b3fcc74ab8cb735b419949b6fb58ea7b03521c7"
  },
  "manifest": {
   "service": "chat",
-  "release": "143e52e371b2",
-  "released_at": "2026-10-10T13:50:03.000Z",
-  "booted_at": "2026-10-10T16:01:59.563Z",
-  "contracts_version": "0.129.0",
+  "release": "e5199ddcd410",
+  "released_at": "2026-10-15T17:43:52.000Z",
+  "booted_at": "2026-10-16T17:41:42.474Z",
+  "contracts_version": "0.189.0",
   "packages": {
-   "openvibe-shared": "3.0.0",
-   "openvibe-sdk": "0.38.1",
-   "openvibe-contracts": "0.129.0"
+   "openvibe-shared": "4.2.1",
+   "openvibe-sdk": "0.46.0",
+   "openvibe-contracts": "0.189.0"
   },
   "min_client_release": null,
   "mixed_version_window_hours": 24,
   "components": {
    "shell": {
     "kind": "script",
-    "version": "143e52e371b2"
+    "version": "e5199ddcd410"
    },
    "server": {
     "kind": "server",
-    "version": "143e52e371b2"
+    "version": "e5199ddcd410"
    }
   },
   "assets": {},
@@ -1530,7 +1530,7 @@
   },
   {
    "method": "GET",
-   "path": "/web/chat.css?v=f8b0b316ea",
+   "path": "/web/chat.css?v=ae2a2fde57",
    "auth": "anon",
    "accept": "html",
    "status": 200,
@@ -1552,6 +1552,17 @@
   },
   {
    "method": "GET",
+   "path": "/shared/showcase.css?v=2b67c3ab851a",
+   "auth": "anon",
+   "accept": "html",
+   "status": 200,
+   "kind": "text",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
    "path": "/shared/theme-loader.js?v=ee4a6754d0f7",
    "auth": "anon",
    "accept": "html",
@@ -1563,7 +1574,7 @@
   },
   {
    "method": "GET",
-   "path": "/shared/navbar.js?v=8a1438c1d7b3",
+   "path": "/shared/navbar.js?v=71c87996efd0",
    "auth": "anon",
    "accept": "html",
    "status": 200,
@@ -1574,7 +1585,7 @@
   },
   {
    "method": "GET",
-   "path": "/shared/footer.js?v=0eafb8254aa5",
+   "path": "/shared/footer.js?v=a8d71a10e2e2",
    "auth": "anon",
    "accept": "html",
    "status": 200,
@@ -1632,6 +1643,30 @@
   {
    "method": "GET",
    "path": "/auth/login?next=%2F",
+   "auth": "anon",
+   "accept": "html",
+   "status": 302,
+   "kind": "html",
+   "location": "/oauth/authorize",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/login?next=%2Fmessages",
+   "auth": "anon",
+   "accept": "html",
+   "status": 302,
+   "kind": "html",
+   "location": "/oauth/authorize",
+   "from": [
+    "page /"
+   ]
+  },
+  {
+   "method": "GET",
+   "path": "/auth/login?next=%2Fsettings",
    "auth": "anon",
    "accept": "html",
    "status": 302,
@@ -1723,7 +1758,7 @@
   },
   {
    "method": "GET",
-   "path": "/shared/shipped.js?v=bed628bacc75",
+   "path": "/shared/shipped.js?v=67bc1a154821",
    "auth": "anon",
    "accept": "html",
    "status": 200,

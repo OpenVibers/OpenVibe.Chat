@@ -37,10 +37,11 @@ function enabled() {
 
 /**
  * Run a workflow and return its `output` object, or null: disabled, a refusal, a failed run, or a
- * transport error all answer null — exactly Live's ai-service.structured() contract.
+ * transport error all answer null — exactly Live's ai-service.structured() contract. `force` runs it even with
+ * the insight job switched off (CHAT_AI_ENABLED): a room's AI members have their own switch (CHAT_AI_MEMBERS).
  */
 async function structured(workflow, input, opts = {}) {
-    if (!enabled()) return null;
+    if (!(opts.force ? config.oauth.clientSecret : enabled())) return null;
     try {
         const { runs } = ai();
         const body = await runs.create(workflow, input, {
