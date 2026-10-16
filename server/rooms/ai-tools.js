@@ -1,0 +1,99 @@
+'use strict';
+/**
+ * The tools a room's AI member can use (the owner's "modular AI conversation… tool calling"), run by Chat between the
+ * turns of OpenVibe.AI's `chat.member.turn` (server/rooms/ai-members.js). Each is small, read-only and bounded: an AI
+ * member still only writes in its room.
+ *
+ *   search_openvibe   OpenVibe.Search's public results for a query (news, deals, coupons, wiki, listings, videos…)
+ *   current_time      the date and time now, in a time zone
+ *   roll_dice         N dice of S sides
+ *   pick_one          one of the options given, at random
+ *   household_pantry  a Food household's pantry and plan (only for a member linked to one)
+ *
+ *   definitions(member)          → the OpenAI-style tool list for this member
+ *   run(name, args, ctx)         → the result as a string (JSON, at most RESULT_MAX characters), never throws
+ */
+const crypto = require('crypto');
+const config = require('../config');
+
+const RESULT_MAX = 4000;
+
+const fn = (name, description, properties = {}, required = []) => ({
+    type: 'function',
+    function: { name, description, parameters: { type: 'object', additionalProperties: false, properties, required } },
+});
+
+const BASE = [
+    fn('search_openvibe', 'Search the OpenVibe network (news, deals, coupon codes, wiki pages, rentals, videos, forum threads and more) and get the top results with links. Use it for questions about things on OpenVibe or recent news and deals.',
+        { query: { type: 'string', description: 'What to search for, a few words' }, limit: { type: 'integer', minimum: 1, maximum: 8 } }, ['query']),
+    fn('current_time', 'The current date and time, in a time zone (IANA name such as America/New_York; UTC when not given).',
+        { timezone: { type: 'string' } }),
+    fn('roll_dice', 'Roll dice fairly, for games and decisions.', { count: { type: 'integer', minimum: 1, maximum: 10 }, sides: { type: 'integer', minimum: 2, maximum: 1000 } }),
+    fn('pick_one', 'Pick one of the given options at random, fairly (where to eat, who goes first).', { options: { type: 'array', minItems: 2, maxItems: 30, items: { type: 'string' } } }, ['options']),
+];
+const PANTRY = fn('household_pantry', 'What is in this household\'s pantry and its meal plan, from OpenVibe.Food, right now.');
+
+const definitions = (member) => (member && member.link_service === 'food' && member.link_resource ? [...BASE, PANTRY] : BASE);
+
+const clip = (o) => { const s = typeof o === 'string' ? o : JSON.stringify(o); return s.length > RESULT_MAX ? `${s.slice(0, RESULT_MAX - 1)}…` : s; };
+const stripTags = (h) => String(h || '').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+const int = (v, min, max, dflt) => { const n = Math.floor(Number(v)); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : dflt; };
+
+async function searchOpenvibe(args, { fetchImpl = globalThis.fetch } = {}) {
+    const query = String(args.query || '').trim().slice(0, 200);
+    if (!query) return { error: 'query is required' };
+    const limit = int(args.limit, 1, 8, 5);
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 8000);
+    try {
+        const res = await fetchImpl(`${config.ai.searchUrl}/api/v1/search?${new URLSearchParams({ q: query, limit: String(limit) })}`, { headers: { accept: 'application/json', 'user-agent': 'OpenVibe.Chat AI member' }, signal: ctrl.signal, redirect: 'error' });
+        if (!res.ok) return { error: `OpenVibe.Search answered ${res.status}` };
+        const body = await res.json();
+        const results = (Array.isArray(body.results) ? body.results : []).slice(0, limit).map((r) => ({
+            title: String(r.title || '').slice(0, 200), site: r.owner, type: r.type,
+            summary: stripTags(r.snippet_html || r.summary || '').slice(0, 300), url: r.canonical_url, published_at: r.published_at || null,
+        }));
+        return { query, results, note: results.length ? 'Cite the url when you use a result.' : 'Nothing on OpenVibe matched.' };
+    } catch (err) {
+        return { error: err && err.name === 'AbortError' ? 'OpenVibe.Search did not answer in time' : 'OpenVibe.Search is unreachable' };
+    } finally { clearTimeout(timer); }
+}
+
+function currentTime(args, { now = Date.now() } = {}) {
+    let tz = String(args.timezone || 'UTC').trim() || 'UTC';
+    try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); } catch { tz = 'UTC'; }
+    const d = new Date(now);
+    return { timezone: tz, iso_utc: d.toISOString(), local: d.toLocaleString('en-US', { timeZone: tz, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' }) };
+}
+
+function rollDice(args) {
+    const count = int(args.count, 1, 10, 1); const sides = int(args.sides, 2, 1000, 6);
+    const rolls = Array.from({ length: count }, () => crypto.randomInt(1, sides + 1));
+    return { dice: `${count}d${sides}`, rolls, total: rolls.reduce((a, b) => a + b, 0) };
+}
+
+function pickOne(args) {
+    const options = (Array.isArray(args.options) ? args.options : []).map((o) => String(o).slice(0, 200)).filter(Boolean).slice(0, 30);
+    if (options.length < 2) return { error: 'give at least two options' };
+    return { options, picked: options[crypto.randomInt(0, options.length)] };
+}
+
+async function householdPantry(_args, { member, contextFor }) {
+    if (!member || member.link_service !== 'food') return { error: 'this AI member is not linked to a household' };
+    const c = contextFor ? await contextFor(member) : null;
+    return c ? { source: c.source, pantry_and_plan: c.text } : { error: 'OpenVibe.Food did not answer just now' };
+}
+
+const RUNNERS = { search_openvibe: searchOpenvibe, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry };
+
+/** Runs one tool call. `raw` is the model's JSON argument string. Unknown tools and bad JSON come back as errors. */
+async function run(name, raw, ctx = {}) {
+    const runner = RUNNERS[name];
+    if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food'))) return clip({ error: `no tool called ${String(name).slice(0, 64)}` });
+    let args = {};
+    if (raw) { try { args = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return clip({ error: 'the arguments were not valid JSON' }); } }
+    if (!args || typeof args !== 'object' || Array.isArray(args)) args = {};
+    try { return clip(await runner(args, ctx)); } catch { return clip({ error: 'the tool failed' }); }
+}
+
+module.exports = { definitions, run, RESULT_MAX, _runners: RUNNERS };
