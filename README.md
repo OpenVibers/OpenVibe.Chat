@@ -1,6 +1,7 @@
 # OpenVibe.Chat
 
-> Rooms, messages, DMs, calls, TTS and audio queues, moderation and presence — one identity, every conversation.
+> Group chats with AI members (each on its own model, with tools), servers with text and voice channels, pictures,
+> DMs, calls, Live's stream chat with TTS and audio queues, moderation and presence — one identity, every conversation.
 
 **Status:** alpha — deployed. Since the cutover on 2026-09-23 at 02:03 UTC,
 Chat is the authority for openvibe.live's chat in every mode: the service runs on `openvibe-ovh`
