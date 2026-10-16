@@ -219,3 +219,15 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-moves { display: inline-flex; gap: 4px; margin-left: auto; }
 .oc-move { width: 30px; height: 30px; padding: 0; border-radius: 8px; background: var(--oc-panel-2); color: var(--oc-text); border: 1px solid var(--oc-line); font-weight: 700; line-height: 1; }
 .oc-move:hover { border-color: var(--oc-accent); }
+
+/* Pictures in rooms and channels (server/rooms/pictures.js): thumbnails under a message, the "Add a picture" form. */
+.oc-pics { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
+.oc-pic { display: block; line-height: 0; border-radius: 10px; }
+.oc-pic img { display: block; width: auto; max-width: min(320px, 100%); max-height: 240px; border-radius: 10px; border: 1px solid var(--oc-line); background: var(--oc-panel-2); object-fit: cover; }
+.oc-pic:hover img, .oc-pic:focus-visible img { border-color: var(--oc-accent); }
+.oc-pic-compose { margin: 8px 0 0; }
+.oc-pic-compose > summary { cursor: pointer; color: var(--oc-accent); font-size: .92rem; width: max-content; }
+.oc-pic-form { margin-top: 8px; max-width: 520px; }
+.oc-pic-form input[type="file"] { width: 100%; }
+.oc-srv-main > .oc-pic-compose { margin: 0; padding: 0 18px 14px; }
+@media (max-width: 760px) { .oc-srv-main > .oc-pic-compose { padding: 0 12px 12px; } }
