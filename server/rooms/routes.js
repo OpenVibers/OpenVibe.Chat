@@ -235,7 +235,7 @@ function aiSend(res, err) {
 router.get('/:slug/ai-members', optionalAuth, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     const can = await rooms.access(room, req.user || null);
-    const list = (await aiMembers.list(room)).map(aiMembers.toWire).map((m) => (can.manage ? m : { id: m.id, name: m.name, handle: m.handle, enabled: m.enabled }));
+    const list = (await aiMembers.list(room)).map(aiMembers.toWire).map((m) => (can.manage ? m : { id: m.id, name: m.name, handle: m.handle, enabled: m.enabled, model: m.model }));
     res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ ai_members: list, enabled: aiMembers.enabled(), max: aiMembers.MAX_PER_ROOM });
 });
 router.post('/:slug/ai-members', requireAuth, personOnly, manageLimit, async (req, res) => {
@@ -247,7 +247,7 @@ router.post('/:slug/ai-members', requireAuth, personOnly, manageLimit, async (re
 });
 router.patch('/:slug/ai-members/:id', requireAuth, personOnly, manageLimit, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
-    try { res.json(aiMembers.toWire(await aiMembers.update(room, await rooms.access(room, req.user), req.params.id, req.body || {}))); } catch (err) { aiSend(res, err); }
+    try { res.json(aiMembers.toWire(await aiMembers.update(room, await rooms.access(room, req.user), req.params.id, req.body || {}, req.user))); } catch (err) { aiSend(res, err); }
 });
 router.delete('/:slug/ai-members/:id', requireAuth, personOnly, manageLimit, async (req, res) => {
     const room = await readable(req, res); if (!room) return;

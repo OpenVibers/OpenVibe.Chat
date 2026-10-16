@@ -916,4 +916,33 @@ router.get('/me/export', requireAuth, exportLimit, async (req, res) => {
     }
 });
 
+// ── Your own AI key, for the AI members you set up in rooms (server/ai/credentials.js) ─────────────────
+// Kept in OpenVibe.AI, never shown again (only a four-character hint). With your own sign-in only, not an API token.
+const aiKeyLimit = limits('chat.ai_key', { minute: 10, hour: 60 });
+const aiKeyPersonOnly = (req, res, next) => (req.authSource === 'api_token' ? res.status(403).json({ error: 'Manage your AI key with your own sign-in, not an API token', code: 'credentials.person_only' }) : next());
+function aiKeySend(res, err) {
+    const credentials = require('../ai/credentials');
+    if (err instanceof credentials.CredentialError) return res.status(err.status).json({ error: err.message, code: err.code });
+    console.error('[Chat] AI key:', err && err.message);
+    return res.status(500).json({ error: 'Could not reach your AI key right now' });
+}
+router.get('/me/ai-key', requireAuth, aiKeyPersonOnly, aiKeyLimit, async (req, res) => {
+    try { res.set('Cache-Control', 'private, no-store').json({ key: await require('../ai/credentials').get(req.user.subject_id) }); } catch (err) { aiKeySend(res, err); }
+});
+router.put('/me/ai-key', requireAuth, aiKeyPersonOnly, aiKeyLimit, async (req, res) => {
+    try {
+        const credentials = require('../ai/credentials');
+        const key = await credentials.put(req.user.subject_id, req.body || {});
+        await require('../rooms/ai-members').relabelKey(req.user.subject_id, key, req.user);
+        res.set('Cache-Control', 'private, no-store').json({ key });
+    } catch (err) { aiKeySend(res, err); }
+});
+router.delete('/me/ai-key', requireAuth, aiKeyPersonOnly, aiKeyLimit, async (req, res) => {
+    try {
+        await require('../ai/credentials').remove(req.user.subject_id);
+        const switched = await require('../rooms/ai-members').dropKey(req.user.subject_id);
+        res.json({ ok: true, members_switched: switched });
+    } catch (err) { aiKeySend(res, err); }
+});
+
 module.exports = router;
