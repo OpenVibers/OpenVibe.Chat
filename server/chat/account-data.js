@@ -12,7 +12,8 @@
  *                                     - chat, room and direct messages they sent, their DM memberships (a
  *                                       conversation left with nobody goes), room memberships and attachments;
  *                                     - rooms they own go when nobody else is in them, and otherwise stay without an
- *                                       owner; calls they made or took, and blocks both ways;
+ *                                       owner (servers they own too, with their channels); their server memberships;
+ *                                       calls they made or took, and blocks both ways;
  *                                     - their channel's emotes, sounds, moderators, first-chat stats and audio
  *                                       requests, their tags, and the AI summaries and timeline about them;
  *                                     - the channel, stream and user mirrors of their Live account (the user mirror
@@ -47,7 +48,10 @@ const EXPORTS = [
     ['room_messages.json', `SELECT * FROM room_messages WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['direct_messages.json', `SELECT * FROM dm_messages WHERE sender_subject_id = ANY(@s) OR sender_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['conversations.json', `SELECT * FROM dm_participants WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
-    ['rooms_owned.json', `SELECT * FROM rooms WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['rooms_owned.json', `SELECT * FROM rooms WHERE (owner_subject = ANY(@s) OR owner_id = ANY(@ids)) AND server_id IS NULL ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['servers_owned.json', `SELECT * FROM chat_servers WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['server_memberships.json', `SELECT m.server_id, s.slug, s.name, m.role, m.joined_at FROM chat_server_members m JOIN chat_servers s ON s.id = m.server_id WHERE m.user_id = ANY(@ids) ORDER BY m.joined_at DESC LIMIT ${LIMIT}`],
+    ['server_invites_made.json', `SELECT code, server_id, uses, max_uses, expires_at, revoked_at, created_at FROM chat_server_invites WHERE created_by_subject = ANY(@s) OR created_by = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['calls.json', `SELECT * FROM calls WHERE created_by_subject = ANY(@s) OR target_subject = ANY(@s) OR created_by = ANY(@ids) OR target_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['blocks.json', `SELECT * FROM network_blocks WHERE blocker_subject = ANY(@s) ORDER BY updated_at DESC, blocked_subject DESC LIMIT ${LIMIT}`],
     ['dm_blocks.json', `SELECT * FROM dm_blocks WHERE blocker_subject_id = ANY(@s) OR blocker_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
@@ -117,7 +121,22 @@ async function erase(d, subjects) {
     const del = async ([key, text]) => { const st = d.prepare(text); add(erased, key, (await (text.includes('@') ? st.run(p) : st.run())).changes); };
     await d.tx(async () => {
         for (const e of ERASE_FIRST) await del(e);
-        for (const r of await d.prepare('SELECT id FROM rooms WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)').all(p)) {
+        // Servers (migration 0013): their memberships go; a server they own stays, without an owner, while anyone else
+        // is in it, and goes with its channels when nobody is; invites they made stay, without their name.
+        add(erased, 'server_memberships', (await d.prepare("DELETE FROM chat_server_members WHERE user_id = ANY(@ids) AND role != 'owner'").run(p)).changes);
+        for (const sv of await d.prepare('SELECT id FROM chat_servers WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)').all(p)) {
+            const others = await d.prepare("SELECT 1 FROM chat_server_members WHERE server_id = ? AND role != 'owner' AND role != 'blocked' LIMIT 1").get(sv.id);
+            await d.prepare("DELETE FROM chat_server_members WHERE server_id = ? AND role = 'owner'").run(sv.id);
+            if (others) { await d.prepare('UPDATE chat_servers SET owner_subject = NULL WHERE id = ?').run(sv.id); add(retained, 'servers_without_owner', 1); }
+            else {
+                await d.prepare('DELETE FROM room_messages WHERE room_id IN (SELECT id FROM rooms WHERE server_id = ?)').run(sv.id);
+                await d.prepare('DELETE FROM rooms WHERE server_id = ?').run(sv.id);
+                await d.prepare('DELETE FROM chat_servers WHERE id = ?').run(sv.id);
+                add(erased, 'servers', 1);
+            }
+        }
+        await d.prepare('UPDATE chat_server_invites SET created_by_subject = NULL WHERE created_by_subject = ANY(@s)').run(p);
+        for (const r of await d.prepare('SELECT id FROM rooms WHERE (owner_subject = ANY(@s) OR owner_id = ANY(@ids)) AND server_id IS NULL').all(p)) {
             const others = await d.prepare('SELECT 1 FROM room_members WHERE room_id = ? LIMIT 1').get(r.id);
             if (others) { await d.prepare('UPDATE rooms SET owner_subject = NULL WHERE id = ?').run(r.id); add(retained, 'rooms_without_owner', 1); }
             else {

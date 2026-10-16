@@ -29,10 +29,15 @@ async function publicPages() {
     const out = [
         { path: '/', changefreq: 'hourly', priority: 1.0, lastmod: async () => await newestGlobalMessage() },
         { path: '/rooms', changefreq: 'daily', priority: 0.8, lastmod: () => newestRoomActivity(pages) },
+        { path: '/servers', changefreq: 'daily', priority: 0.8 },
         { path: '/updates', changefreq: 'daily', priority: 0.5 },
     ];
     for (const r of pages) {
         out.push({ path: `/r/${r.slug}`, changefreq: 'daily', priority: 0.6, lastmod: () => dayOf(r.last_message_at || r.created_at) });
+    }
+    // Public servers (server/rooms/servers.js): their front page, the first text channel.
+    for (const sv of (await require('../rooms/servers').list(null, { limit: 100 })).public) {
+        out.push({ path: `/s/${sv.slug}`, changefreq: 'daily', priority: 0.6, lastmod: () => dayOf(sv.created_at) });
     }
     return out;
 }
@@ -78,8 +83,8 @@ function createDiscoveryRoutes({ config }) {
         // the sitemap. Every previous Disallow is kept.
         res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.robotsTxt({
             sitemaps: [abs('/sitemap.xml')],
-            allow: ['/', '/updates', '/rooms', '/r/'],
-            disallow: ['/r/*/settings', '/messages', '/settings', '/auth/', '/api/'],
+            allow: ['/', '/updates', '/rooms', '/r/', '/servers', '/s/'],
+            disallow: ['/r/*/settings', '/s/*/settings', '/join/', '/messages', '/settings', '/auth/', '/api/'],
         }));
     });
 
@@ -92,6 +97,7 @@ function createDiscoveryRoutes({ config }) {
                 { title: 'Start here', links: [
                     { title: 'Global chat', url: abs('/'), note: 'one room for everyone on OpenVibe, newest messages at the end' },
                     { title: 'Rooms', url: abs('/rooms'), note: 'every public room, with its topic and activity' },
+                    { title: 'Servers', url: abs('/servers'), note: 'public servers: groups with text and voice channels, roles and invites' },
                     { title: 'What shipped on OpenVibe.Chat', url: abs('/updates') },
                 ] },
                 { title: 'Machine-readable', links: [

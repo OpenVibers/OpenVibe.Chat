@@ -99,6 +99,7 @@ async function publicRoom(r, extra = {}) {
         ...(kindOf(r) === 'call' ? { join_role: joinRoleOf(r), call_channel: `room-${r.slug}` } : {}),
         slow_seconds: r.slow_seconds, message_count: r.message_count, last_message_at: r.last_message_at,
         created_at: r.created_at, members: (await db.get("SELECT COUNT(*) AS n FROM room_members WHERE room_id = ? AND role != 'blocked'", [r.id]) || {}).n || 0,
+        ...(r.server_id ? { server: { slug: (await db.get('SELECT slug FROM chat_servers WHERE id = ?', [r.server_id]) || {}).slug || null, channel: r.channel_slug } } : {}),
         ...extra,
     };
 }
@@ -113,6 +114,8 @@ async function bySlug(slug) {
  * `join` and `talk` are the room's call (call rooms only).
  */
 async function access(room, user) {
+    // A server's channel: the server decides (server/rooms/servers.js).
+    if (room.server_id) return await require('./servers').channelAccess(room, user);
     const kind = kindOf(room);
     const role = user ? await roleOf(room.id, user.id) : null;
     const staff = isStaff(user);
@@ -140,7 +143,7 @@ async function create(user, { name, slug, topic, visibility = 'public', kind = '
     if (kind === 'system' && !isStaff(user)) fail(403, 'rooms.kind', 'Only chat staff create system rooms');
     if (join_role != null && join_role !== '' && (kind !== 'call' || !JOIN_ROLES_CALL.includes(join_role))) fail(422, 'rooms.join_role', 'People join a call room as speakers, participants or viewers');
     if (wordFilter.check(n).safe === false) fail(422, 'rooms.name_filtered', 'That room name is not allowed');
-    const owned = (await db.get('SELECT COUNT(*) AS n FROM rooms WHERE owner_id = ? AND archived_at IS NULL', [user.id])).n;
+    const owned = (await db.get('SELECT COUNT(*) AS n FROM rooms WHERE owner_id = ? AND archived_at IS NULL AND server_id IS NULL', [user.id])).n;
     if (owned >= MAX_ROOMS_PER_OWNER && !isStaff(user)) fail(429, 'rooms.too_many', `You can own up to ${MAX_ROOMS_PER_OWNER} rooms`);
     if (await bySlug(s)) fail(409, 'rooms.taken', 'That room address is taken');
     const t = topic ? String(topic).replace(/\s+/g, ' ').trim().slice(0, 200) : null;
@@ -157,20 +160,22 @@ async function create(user, { name, slug, topic, visibility = 'public', kind = '
 async function list(user, { limit = 50 } = {}) {
     await ensureSchema();
     const lim = Math.min(100, Math.max(1, Number(limit) || 50));
-    const pub = (await Promise.all((await db.all("SELECT * FROM rooms WHERE visibility = 'public' AND archived_at IS NULL ORDER BY COALESCE(last_message_at, created_at) DESC LIMIT ?", [lim])).map(async (r) => await publicRoom(r))));
+    // A server's channels are listed with their server (server/rooms/servers.js), not here.
+    const pub = (await Promise.all((await db.all("SELECT * FROM rooms WHERE visibility = 'public' AND archived_at IS NULL AND server_id IS NULL ORDER BY COALESCE(last_message_at, created_at) DESC LIMIT ?", [lim])).map(async (r) => await publicRoom(r))));
     const mine = user ? (await Promise.all((await db.all(`SELECT r.*, m.role, m.last_read_id, m.last_seen_at,
             (SELECT COUNT(*) FROM room_messages x WHERE x.room_id = r.id AND x.id > m.last_read_id AND x.is_deleted = 0 AND x.user_id != ?) AS unread
         FROM room_members m JOIN rooms r ON r.id = m.room_id
-        WHERE m.user_id = ? AND m.role != 'blocked' AND r.archived_at IS NULL
+        WHERE m.user_id = ? AND m.role != 'blocked' AND r.archived_at IS NULL AND r.server_id IS NULL
         ORDER BY COALESCE(r.last_message_at, r.created_at) DESC`, [user.id, user.id])).map(async (r) => await publicRoom(r, { role: r.role, unread: r.unread, last_seen_at: r.last_seen_at || null })))) : [];
     return { public: pub, mine };
 }
 
 /** Unread messages across the rooms `user` belongs to (the site's navigation shows it). */
-async function unreadTotal(user) {
+async function unreadTotal(user, { servers = false } = {}) {
     if (!user) return 0;
     await ensureSchema();
-    return (await db.get(`SELECT COUNT(*) AS n FROM room_members m JOIN rooms r ON r.id = m.room_id AND r.archived_at IS NULL
+    // Rooms count their own unread messages; servers (servers: true) count their channels'.
+    return (await db.get(`SELECT COUNT(*) AS n FROM room_members m JOIN rooms r ON r.id = m.room_id AND r.archived_at IS NULL AND r.server_id IS ${servers ? 'NOT ' : ''}NULL
         JOIN room_messages x ON x.room_id = m.room_id AND x.id > m.last_read_id AND x.is_deleted = 0 AND x.user_id != m.user_id
         WHERE m.user_id = ? AND m.role != 'blocked'`, [user.id]) || {}).n || 0;
 }
@@ -178,6 +183,7 @@ async function unreadTotal(user) {
 /** Join a public room (staff: any room) with the kind's join role; returns the caller's role. */
 async function join(room, user) {
     if (!user) fail(401, 'rooms.sign_in', 'Sign in to join a room');
+    if (room.server_id) fail(409, 'rooms.server_channel', 'This is a server\'s channel: join the server to post in it');
     const role = await roleOf(room.id, user.id);
     if (role === 'blocked') fail(403, 'rooms.blocked', 'You are blocked from this room');
     if (role) return role;
@@ -190,6 +196,7 @@ async function join(room, user) {
 }
 
 async function leave(room, user) {
+    if (room.server_id) fail(409, 'rooms.server_channel', 'This is a server\'s channel: leave the server instead');
     const role = await roleOf(room.id, user && user.id);
     if (role === 'owner') fail(409, 'rooms.owner_leaves', 'The owner cannot leave their room');
     if (role && role !== 'blocked') await db.run('DELETE FROM room_members WHERE room_id = ? AND user_id = ?', [room.id, user.id]);
@@ -310,6 +317,10 @@ async function markRead(room, user, lastId) {
     if (!user) return;
     const top = (await db.get('SELECT MAX(id) AS id FROM room_messages WHERE room_id = ?', [room.id]) || {}).id || 0;
     const to = Math.min(top, Number(lastId) || top);
+    // A server channel keeps a read row for each member (made on joining; a channel made later gets one here).
+    if (room.server_id && (await access(room, user)).role) {
+        await db.run("INSERT INTO room_members (room_id, user_id, role, last_read_id, last_seen_at) VALUES (?, ?, 'member', ?, ov_now()) ON CONFLICT (room_id, user_id) DO NOTHING", [room.id, user.id, to]);
+    }
     await db.run('UPDATE room_members SET last_read_id = GREATEST(last_read_id, ?), last_seen_at = ov_now() WHERE room_id = ? AND user_id = ?', [to, room.id, user.id]);
 }
 
@@ -333,6 +344,7 @@ async function deleteMessage(room, user, messageId) {
  * chat staff's) to appoint and remove; everything else is any moderator's.
  */
 async function setRole(room, actor, targetUserId, role) {
+    if (room.server_id) fail(409, 'rooms.server_channel', 'Roles in a server\'s channels are set for the whole server');
     const kind = kindOf(room);
     if (!ROLES.includes(role) && role !== 'none') fail(422, 'rooms.role', 'Unknown role');
     if (role === 'owner') fail(422, 'rooms.role', 'A room has one owner');
@@ -358,10 +370,12 @@ async function setRole(room, actor, targetUserId, role) {
     return role;
 }
 
-async function update(room, actor, { name, topic, visibility, slow_seconds, join_role } = {}) {
+async function update(room, actor, { name, topic, visibility, slow_seconds, join_role } = {}, { fromServer = false, minName = 3 } = {}) {
     if (!(await access(room, actor)).manage) fail(403, 'rooms.not_owner', 'Only the owner changes the room');
+    // A server's channel follows the server's visibility, and is changed through the server (servers.js).
+    if (room.server_id && !fromServer && visibility != null && visibility !== room.visibility) fail(409, 'rooms.server_channel', 'A channel is as public as its server: change the server instead');
     const next = { ...room };
-    if (name != null) { const n = String(name).replace(/\s+/g, ' ').trim(); if (n.length < 3 || n.length > 40 || !wordFilter.check(n).safe) fail(422, 'rooms.name', 'Room names are 3 to 40 characters'); next.name = n; }
+    if (name != null) { const n = String(name).replace(/\s+/g, ' ').trim(); if (n.length < minName || n.length > 40 || !wordFilter.check(n).safe) fail(422, 'rooms.name', `Room names are ${minName} to 40 characters`); next.name = n; }
     if (topic != null) next.topic = String(topic).replace(/\s+/g, ' ').trim().slice(0, 200) || null;
     if (visibility != null) { if (!['public', 'private'].includes(visibility)) fail(422, 'rooms.visibility', 'Visibility is public or private'); next.visibility = visibility; }
     if (slow_seconds != null) { const v = Number(slow_seconds); if (!Number.isInteger(v) || v < 0 || v > 600) fail(422, 'rooms.slow', 'Slow mode is 0 to 600 seconds'); next.slow_seconds = v; }
@@ -381,6 +395,13 @@ async function update(room, actor, { name, topic, visibility, slow_seconds, join
 
 /** The room's people, by role. `seen` adds last_seen_at (moderators only: it is presence). */
 async function members(room, { seen = false } = {}) {
+    // A server's channel: the server's people, with the role each has in the channel.
+    if (room.server_id) {
+        const server = await require('./servers').byId(room.server_id);
+        if (!server) return [];
+        const as = (r) => (r === 'owner' ? 'owner' : r === 'admin' || r === 'mod' ? 'mod' : kindOf(room) === 'call' ? joinRoleOf(room) : 'member');
+        return (await require('./servers').members(server)).map((m) => ({ user_id: m.user_id, role: as(m.role), server_role: m.role, username: m.username, display_name: m.display_name }));
+    }
     const order = `CASE m.role ${Object.entries(ROLE_ORDER).map(([r, n]) => `WHEN '${r}' THEN ${n}`).join(' ')} ELSE 9 END`;
     return await db.all(`SELECT m.user_id, m.role, u.username, u.display_name${seen ? ', m.last_seen_at' : ''} FROM room_members m LEFT JOIN ctx_users u ON u.id = m.user_id
         WHERE m.room_id = ? ORDER BY ${order}, lower(u.username) LIMIT 500`, [room.id]);
@@ -437,6 +458,6 @@ function _reset() { _rate.clear(); }
 module.exports = {
     postAsAi,
     ensureSchema, create, list, bySlug, access, join, leave, post, history, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
-    attach, detach, attachments, joinRoleOf, unreadTotal,
+    attach, detach, attachments, joinRoleOf, unreadTotal, isStaff, siteBanned, POSTERS, TALKERS,
     RoomError, SLUG_RE, KINDS, ROLES, KIND_ROLES, JOIN_ROLE, JOIN_ROLES_CALL, ATTACH_SERVICES, _reset,
 };

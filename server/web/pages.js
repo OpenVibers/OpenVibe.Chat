@@ -142,7 +142,12 @@ function createWebRoutes({ config }) {
     const countsOf = async (actor) => {
         if (actor.kind !== 'user') return {};
         const n = async (fn) => { try { return Number(await fn()) || 0; } catch { return 0; } };
-        return { messages: await n(async () => await dm.getTotalUnread(actor.user.id)), rooms: await n(async () => await require('../rooms/rooms').unreadTotal(actor.user)) };
+        const rooms = require('../rooms/rooms');
+        return {
+            messages: await n(async () => await dm.getTotalUnread(actor.user.id)),
+            rooms: await n(async () => await rooms.unreadTotal(actor.user)),
+            servers: await n(async () => await rooms.unreadTotal(actor.user, { servers: true })),
+        };
     };
     // Under the global room on the front page: what openvibe.chat is for (openvibe-shared/showcase), each card a real
     // place to go. Every line is true today (calls run since CHAT_CALLS=1; rooms, messages and settings are pages here).
@@ -152,7 +157,7 @@ function createWebRoutes({ config }) {
         items: [
             { icon: 'ov:chat', title: 'One room for the network', text: 'Global chat reaches everyone on Live, Tools, Games and the rest, and reads without an account.', href: '#oc-h' },
             { icon: 'ov:live', title: 'Stream chat on Live', text: 'Every channel on OpenVibe.Live has its room, with the streamer\'s moderators, timeouts, bans, emotes and text to speech.', href: 'https://openvibe.live/' },
-            { icon: 'ov:community', title: 'Rooms of your own', text: 'Start a public room anyone can read, or a private one that stays invisible to everyone else.', href: '/rooms' },
+            { icon: 'ov:community', title: 'Servers and rooms', text: 'Start a server with text and voice channels, roles and invite links, or a single room, public or private.', href: '/servers' },
             { icon: 'ov:account', title: 'Direct messages', text: 'One-to-one and group conversations. You choose who may start one, and whether groups may add you.', href: signedIn ? '/messages' : '/auth/login?next=%2Fmessages' },
             { icon: 'ov:stream', title: 'Voice and video calls', text: 'Call a person, open a call room, or join a stream\'s call: up to eight people, with mute, camera and kick controls.', href: '/rooms' },
             { icon: 'ov:theme', title: 'Your preferences everywhere', text: 'Compact mode, timestamps, text size, badges and emotes follow your account to every site.', href: signedIn ? '/settings' : '/auth/login?next=%2Fsettings' },
@@ -503,9 +508,16 @@ ${people}
 </section>`;
     }
 
+    // A server's channel has one page, in its server (server-pages.js).
+    const channelUrl = async (room, rest = '') => {
+        const s = await require('../rooms/servers').byId(room.server_id);
+        return s ? `/s/${s.slug}${rest || `/${room.channel_slug}`}` : '/servers';
+    };
+
     router.get('/r/:slug', async (req, res) => {
         const x = await loadRoom(req, res); if (!x) return;
         const { actor, me, room, can } = x;
+        if (room.server_id) return res.redirect(302, await channelUrl(room));
         const msgs = await rooms.history(room, { limit: 60 });
         if (me && can.role) await rooms.markRead(room, me);
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
@@ -584,6 +596,7 @@ ${composer}${tools}`,
     router.get('/r/:slug/settings', async (req, res) => {
         const x = await loadRoom(req, res); if (!x) return;
         const { actor, room, can } = x;
+        if (room.server_id) return res.redirect(302, await channelUrl(room, '/settings'));
         if (!can.moderate) return res.redirect(303, `/r/${room.slug}`);
         const saved = req.query.saved ? notice('ok', 'Saved.') : '';
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
@@ -691,6 +704,9 @@ ${attachList}`,
     }));
 
     // ── What shipped, robots, sitemap ──
+    // ── Servers (server/rooms/servers.js): text and voice channels, roles, invites ──
+    require('./server-pages').mountServerPages(router, { page, needUser, viewerOf, sameSite, formLimit, notice, roomMessage, callPanel, applyRoomChange, config });
+
     router.get('/updates', async (req, res) => await page(req, res, 200, {
         title: `What shipped on ${SITE_NAME}`, path: '/updates', robots: 'index, follow', cache: cache.htmlHeaders({ maxAge: 300 }),
         body: frame.updatesBody({ service: 'chat', siteName: SITE_NAME }) + `<script src="${ovServe.url('shipped.js')}" defer></script>`,
