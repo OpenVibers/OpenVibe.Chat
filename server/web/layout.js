@@ -20,6 +20,7 @@ const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public', 'web');
 const LINKS = [
     { key: 'global', label: 'Global chat', href: '/' },
     { key: 'rooms', label: 'Rooms', href: '/rooms' },
+    { key: 'servers', label: 'Servers', href: '/servers' },
     { key: 'messages', label: 'Messages', href: '/messages' },
     { key: 'settings', label: 'Settings', href: '/settings' },
 ];
@@ -102,7 +103,7 @@ ${o.callScript ? `<script src="${asset('call.js')}" defer></script>` : ''}
 <a class="oc-skip" href="#main">Skip to content</a>
 <div id="navbar-mount"></div>
 ${frame.noscriptNav({ name: SITE_NAME, home: '/', links: links(o).map(({ label, href }) => ({ label, href })) })}
-<main id="main" class="oc-main">
+<main id="main" class="oc-main${o.wide ? ' oc-main--wide' : ''}">
 <noscript><p class="oc-account">${who}</p></noscript>
 ${o.body || ''}
 </main>

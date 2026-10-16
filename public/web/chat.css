@@ -124,3 +124,98 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-ai-member h3 { margin: 0 0 6px; font-size: 1rem; }
 .oc-ai-form textarea { width: 100%; box-sizing: border-box; }
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .oc-badge.oc-ai { color: #6d28d9; border-color: rgba(109, 40, 217, .45); } :root:not([data-theme="dark"]) .oc-ai-name { color: #5b21b6; } }
+
+/* Servers (server/web/server-pages.js): your servers down the side, the channels, the channel, the people. */
+.oc-main--wide { max-width: 1440px; }
+.oc-srv { display: grid; grid-template-columns: 64px 232px minmax(0, 1fr) 212px; height: min(80vh, 900px); min-height: 480px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 16px; overflow: hidden; }
+.oc-srv-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0; background: var(--oc-bg); border-right: 1px solid var(--oc-line); overflow-y: auto; scrollbar-width: none; }
+.oc-srv-icon { position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 auto; border-radius: 50%; background: hsl(var(--oc-hue, 215) 52% 34%); color: #fff; font-weight: 800; font-size: .92rem; letter-spacing: .02em; text-decoration: none; transition: border-radius .15s ease, background-color .15s ease; }
+.oc-srv-icon:hover, .oc-srv-icon:focus-visible, .oc-srv-icon.is-active { border-radius: 14px; }
+.oc-srv-rail .oc-srv-icon.is-active::before { content: ''; position: absolute; left: -10px; top: 9px; bottom: 9px; width: 4px; border-radius: 0 4px 4px 0; background: var(--oc-text); }
+.oc-srv-add, .oc-srv-explore { background: var(--oc-panel-2); color: var(--oc-ok); font-size: 1.35rem; font-weight: 500; }
+.oc-srv-explore { color: var(--oc-accent); font-size: 1.15rem; }
+.oc-srv-add:hover, .oc-srv-explore:hover { background: var(--oc-panel); }
+.oc-srv-dot, .oc-chan-dot { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--oc-red); color: #1a0505; font-size: .66rem; font-weight: 800; line-height: 18px; text-align: center; }
+.oc-srv-dot { position: absolute; right: -5px; bottom: -4px; border: 2px solid var(--oc-bg); line-height: 14px; }
+.oc-srv-side { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 14px 10px; overflow-y: auto; border-right: 1px solid var(--oc-line); }
+.oc-srv-head { padding: 0 6px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--oc-line); }
+.oc-srv-head .oc-badge { margin-left: 0; }
+.oc-srv-name { font-size: 1.08rem; line-height: 1.3; margin: 0 0 2px; overflow-wrap: anywhere; }
+.oc-srv-meta { margin: 2px 0 0; font-size: .82rem; }
+.oc-srv-desc { margin: 6px 0 0; font-size: .86rem; color: var(--oc-muted); }
+.oc-srv-channels > summary { display: none; }
+.oc-srv-group { margin: 14px 8px 4px; font-size: .7rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--oc-muted); }
+.oc-srv-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.oc-chan { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 8px; color: var(--oc-muted); text-decoration: none; }
+.oc-chan:hover, .oc-chan:focus-visible { background: var(--oc-panel-2); color: var(--oc-text); }
+.oc-chan.is-active { background: color-mix(in srgb, var(--oc-accent) 18%, transparent); color: var(--oc-text); }
+.oc-chan.is-unread { color: var(--oc-text); font-weight: 700; }
+.oc-chan-hash { width: 16px; text-align: center; font-weight: 700; opacity: .75; }
+.oc-chan-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-chan-in { font-size: .78rem; }
+.oc-ico { flex: 0 0 auto; vertical-align: -3px; }
+.oc-srv-join, .oc-srv-invite { margin: 14px 6px 0; }
+.oc-srv-join button, .oc-srv-invite .oc-button { width: 100%; text-align: center; }
+.oc-button--quiet { background: var(--oc-panel-2); color: var(--oc-text); border: 1px solid var(--oc-line); }
+.oc-button--quiet:hover { border-color: var(--oc-accent); }
+.oc-srv-tools { margin: auto 6px 0; padding-top: 14px; font-size: .86rem; }
+.oc-srv-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: color-mix(in srgb, var(--oc-panel-2) 60%, var(--oc-panel)); }
+.oc-srv-main .oc-msg:hover { background: color-mix(in srgb, var(--oc-text) 5%, transparent); }
+.oc-chan-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 12px 18px; border-bottom: 1px solid var(--oc-line); }
+.oc-chan-head h2 { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 1.04rem; }
+.oc-chan-topic { min-width: 0; font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-srv-main > .oc-notice, .oc-srv-main > .oc-ai-here { margin: 10px 18px 0; }
+.oc-srv-main > .oc-call { margin: 12px 18px 0; }
+.oc-srv-feed { flex: 1; min-height: 0; max-height: none; margin: 0; padding: 10px 8px; background: transparent; border: 0; border-radius: 0; }
+.oc-srv-main > .oc-compose, .oc-srv-main > .oc-signin, .oc-srv-main > form { margin: 0; padding: 12px 18px 16px; border-top: 1px solid var(--oc-line); }
+.oc-srv-people { min-width: 0; padding: 14px 12px; overflow-y: auto; border-left: 1px solid var(--oc-line); }
+.oc-srv-people > details > summary { display: none; }
+.oc-srv-people .oc-srv-group { margin-top: 4px; }
+.oc-srv-people .oc-srv-group ~ .oc-srv-group { margin-top: 16px; }
+.oc-srv-people-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.oc-srv-people-list a { display: block; padding: 3px 8px; border-radius: 6px; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-srv-people-list a:hover { background: var(--oc-panel-2); }
+/* The directory, an invite, settings */
+.oc-srv-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.oc-srv-card a { display: flex; align-items: center; gap: 12px; height: 100%; padding: 12px 14px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; color: var(--oc-text); text-decoration: none; }
+.oc-srv-card a:hover, .oc-srv-card a:focus-visible { border-color: var(--oc-accent); }
+.oc-srv-card-text { display: flex; flex-direction: column; min-width: 0; }
+.oc-srv-card-text .oc-muted { font-size: .88em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-srv-icon--big { width: 72px; height: 72px; margin: 0 auto 6px; border-radius: 22px; font-size: 1.5rem; }
+.oc-invite-card { max-width: 440px; margin: 32px auto; padding: 28px 24px; text-align: center; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 16px; }
+.oc-invite-card h1 { margin-top: 0; }
+.oc-invite-card form, .oc-invite-card .oc-notice { margin-top: 16px; }
+.oc-invite-url { font-size: .85em; overflow-wrap: anywhere; }
+.oc-chan-rows li { align-items: flex-start; }
+.oc-chan-rows li > span { flex: 1 1 200px; min-width: 0; }
+.oc-chan-edit { flex-basis: 100%; }
+.oc-chan-edit summary { cursor: pointer; color: var(--oc-accent); font-size: .9rem; }
+.oc-chan-edit .oc-form { margin-top: 8px; }
+.oc-danger { background: var(--oc-red); color: #1a0505; }
+.oc-link.oc-danger-link { color: var(--oc-red); margin-left: 8px; }
+@media (max-width: 1180px) {
+  .oc-srv { grid-template-columns: 64px 220px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: auto; min-height: 0; }
+  .oc-srv-rail, .oc-srv-side, .oc-srv-main { height: min(78vh, 860px); }
+  .oc-srv-people { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--oc-line); max-height: 260px; }
+  .oc-srv-people > details > summary { display: list-item; cursor: pointer; font-weight: 700; margin-bottom: 6px; }
+  .oc-srv-people-list { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+}
+@media (max-width: 760px) {
+  .oc-srv { grid-template-columns: minmax(0, 1fr); border-radius: 12px; }
+  .oc-srv-rail, .oc-srv-side, .oc-srv-main { height: auto; }
+  .oc-srv-rail { flex-direction: row; justify-content: flex-start; padding: 10px 12px; gap: 10px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--oc-line); }
+  .oc-srv-rail .oc-srv-icon.is-active::before { left: 9px; right: 9px; top: auto; bottom: -10px; width: auto; height: 4px; border-radius: 4px 4px 0 0; }
+  .oc-srv-side { border-right: 0; border-bottom: 1px solid var(--oc-line); padding: 12px; }
+  .oc-srv-channels > summary { display: list-item; cursor: pointer; font-weight: 700; padding: 4px 6px; }
+  .oc-srv-tools { margin-top: 8px; }
+  .oc-srv-feed { max-height: 62vh; min-height: 220px; }
+  .oc-chan-head, .oc-srv-main > .oc-compose, .oc-srv-main > .oc-signin, .oc-srv-main > form { padding-left: 12px; padding-right: 12px; }
+  .oc-srv-main > .oc-notice, .oc-srv-main > .oc-ai-here, .oc-srv-main > .oc-call { margin-left: 12px; margin-right: 12px; }
+}
+
+.oc-srv-card-title { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
+.oc-srv-card-title .oc-badge { margin-left: 0; }
+.oc-badge-new { color: var(--oc-text); border-color: var(--oc-red); }
+.oc-moves { display: inline-flex; gap: 4px; margin-left: auto; }
+.oc-move { width: 30px; height: 30px; padding: 0; border-radius: 8px; background: var(--oc-panel-2); color: var(--oc-text); border: 1px solid var(--oc-line); font-weight: 700; line-height: 1; }
+.oc-move:hover { border-color: var(--oc-accent); }

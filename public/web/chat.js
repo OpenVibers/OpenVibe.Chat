@@ -259,7 +259,7 @@
         } else if (m.type === 'room_error' && m.message) {
           showError(m.message);
         } else if (m.type === 'room_left') {
-          showError('You can no longer read this room.'); setTimeout(function () { location.href = '/rooms'; }, 1500);
+          showError('You can no longer read this room.'); setTimeout(function () { location.href = cfg.back || '/rooms'; }, 1500);
         } else if (m.type === 'room_access' && m.room === cfg.room && m.can) {
           // Your role changed (a moderator made you a member, a speaker, a viewer…): the page shows what you may do now.
           if (!!m.can.post !== !!cfg.post || (m.role || null) !== (cfg.role || null)) { showError('Your role in this room changed.'); setTimeout(function () { location.reload(); }, 1200); }
@@ -329,6 +329,9 @@
   if (input) input.addEventListener('keydown', function (e) {
     if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (form.requestSubmit) form.requestSubmit(); else form.submit(); }
   });
+  // A server's channel list folds away on a phone: the channel's own header says where you are.
+  var chans = document.querySelector ? document.querySelector('.oc-srv-channels') : null;
+  if (chans && window.matchMedia && window.matchMedia('(max-width: 760px)').matches) chans.open = false;
   toBottom();
   if (cfg.view === 'global') startGlobal();
   else if (cfg.view === 'dm') startDm();
