@@ -68,6 +68,26 @@ function callOf(room) {
     try { people = enabled ? require('../calls/call-server').getParticipants(`room-${room.slug}`) : []; } catch { people = []; }
     return { enabled, channel: `room-${room.slug}`, participants: people.length, people: people.map((p) => ({ username: p.username, display_name: p.displayName, muted: !!p.muted, speaking: !!p.speaking, listening: !!p.forceMuted })) };
 }
+/** The person's own Network token from the request (never an hbt_ API token). */
+const bearerOf = (req) => { const m = /^Bearer\s+(.+)$/i.exec(String(req.get('authorization') || '')); return m ? m[1].trim() : (req.cookies && req.cookies.ov_token) || null; };
+/** Pictures go to OpenVibe.Pics as the person: an API token cannot speak for them there. */
+const personOnlyPictures = (req, res, next) => (req.authSource === 'api_token' ? res.status(403).json({ error: 'Send pictures with your own sign-in, not an API token', code: 'pictures.person_only' }) : next());
+/**
+ * Check the person may post here, send the picture to OpenVibe.Pics as them, post its link (after the caption) and
+ * deliver it. → { message, picture }. Shared by the API and the site's form.
+ */
+async function postPicture(room, user, { token, buffer, contentType, caption = '', ip = null }) {
+    const pictures = require('./pictures');
+    const a = await rooms.access(room, user);
+    if (!a.post) throw new rooms.RoomError(a.read ? 403 : 404, a.read ? 'rooms.join_first' : 'rooms.not_found', a.read ? 'Join first to send pictures here' : 'No such room');
+    const up = await pictures.upload({ token, buffer, contentType, title: caption || room.name, ip });
+    if (!up.ok) throw new rooms.RoomError(up.status, up.code, up.detail);
+    const text = [String(caption || '').replace(/\s+/g, ' ').trim(), up.picture.direct].filter(Boolean).join(' ');
+    const message = await rooms.post(room, user, text);
+    chatServer().broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
+    return { message, picture: up.picture };
+}
+
 /** People only: attaching speaks for the person (API tokens and services cannot). */
 const personOnly = (req, res, next) => (req.authSource === 'api_token' ? res.status(403).json({ error: 'Attach rooms with your own sign-in, not an API token', code: 'rooms.person_only' }) : next());
 
@@ -115,6 +135,21 @@ router.post('/:slug/messages', requireAuth, postLimit, async (req, res) => {
         const message = await rooms.post(room, req.user, req.body && req.body.message);
         chatServer().broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
         res.status(201).json({ message });
+    } catch (err) { send(res, err); }
+});
+
+// A picture (server/rooms/pictures.js): the body is the picture (Content-Type image/*), an optional caption in the
+// X-Caption header (URI-encoded). It goes to OpenVibe.Pics as the person, and its link is posted as a message.
+const pictureLimit = limits('chat.room.picture', { minute: 10, hour: 120 });
+router.post('/:slug/pictures', requireAuth, personOnlyPictures, pictureLimit, (req, res, next) => express.raw({ type: () => true, limit: (require('../config').pics.maxBytes || 20 * 1024 * 1024) + 1 })(req, res, (err) => {
+    if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'That picture is too large', code: 'pictures.too_large' });
+    return next(err);
+}), async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try {
+        const caption = (() => { try { return decodeURIComponent(String(req.get('x-caption') || '')).slice(0, 500); } catch { return ''; } })();
+        const out = await postPicture(room, req.user, { token: bearerOf(req), buffer: Buffer.isBuffer(req.body) ? req.body : null, contentType: req.get('content-type'), caption, ip: req.ip });
+        res.status(201).json(out);
     } catch (err) { send(res, err); }
 });
 
@@ -222,3 +257,4 @@ router.delete('/:slug/ai-members/:id', requireAuth, personOnly, manageLimit, asy
 module.exports = router;
 module.exports.callOf = callOf;
 module.exports.applyRoomChange = applyRoomChange;
+module.exports.postPicture = postPicture;

@@ -420,7 +420,18 @@ ${volume('tts_sound_volume', 'Chat sound volume', tts.sound_volume)}
 
     // ── Rooms (server/rooms/) ──
     const rooms = require('../rooms/rooms');
+    const pictures = require('../rooms/pictures');
     const aiMembers = require('../rooms/ai-members');
+    // A picture sent from the room's form (server/rooms/pictures.js): one image, kept in memory only until Pics has it.
+    const pictureForm = require('multer')({ storage: require('multer').memoryStorage(), limits: { fileSize: (require('../config').pics.maxBytes || 20 * 1024 * 1024), files: 1, fields: 4 } }).single('picture');
+    /** The "Add a picture" form under a room's or channel's composer (rooms where the person may post). */
+    const pictureComposer = (room, back) => (pictures.enabled() ? `<details class="oc-pic-compose"><summary>Add a picture</summary>
+<form class="oc-form oc-pic-form" method="post" action="/r/${esc(room.slug)}/picture" enctype="multipart/form-data" data-room="${esc(room.slug)}">
+<input type="hidden" name="back" value="${esc(back)}">
+<label>Picture <input type="file" name="picture" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" required></label>
+<label>Caption <input name="caption" maxlength="500" placeholder="Say something about it (optional)"></label>
+<p class="oc-muted">It goes to <a href="${esc(pictures.publicUrl())}">OpenVibe.Pics</a> as yours (location and camera details removed), where you can delete it, and the room gets its link.</p>
+<p><button type="submit">Send picture</button></p></form></details>` : '');
     const roomRoutes = require('../rooms/routes');
     const roomsOrError = (fn) => async (req, res, next) => {
         try { return await fn(req, res, next); } catch (err) {
@@ -439,7 +450,7 @@ ${volume('tts_sound_volume', 'Chat sound volume', tts.sound_volume)}
         const who = ai
             ? `<span class="oc-name oc-ai-name">${esc(m.display_name || 'AI')}</span> <span class="oc-badge oc-ai" title="An AI member of this room">AI</span>`
             : `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)}`;
-        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} <span class="oc-text">${linkify(m.message)}</span>${del}</li>`;
+        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} <span class="oc-text">${linkify(m.message)}</span>${ai ? '' : pictures.pageHtml(m.message)}${del}</li>`;
     };
     const applyRoomChange = async (room) => await roomRoutes.applyRoomChange(room);
 
@@ -524,7 +535,7 @@ ${people}
         const joinLabel = room.kind === 'system' ? 'Follow these announcements' : 'Join this room';
         let composer;
         if (!me) composer = `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${encodeURIComponent(`/r/${room.slug}`)}">Sign in with OpenVibe</a> to join the conversation.</p>`;
-        else if (can.post) composer = `<form class="oc-compose" method="post" action="/r/${esc(room.slug)}" id="oc-compose"><label for="oc-input" class="oc-sr">Message to ${esc(room.name)}</label><textarea id="oc-input" name="message" maxlength="2000" rows="2" required placeholder="${room.kind === 'system' ? 'Post an announcement' : `Message ${esc(room.name)}`}"></textarea><button type="submit">Send</button></form>`;
+        else if (can.post) composer = `<form class="oc-compose" method="post" action="/r/${esc(room.slug)}" id="oc-compose"><label for="oc-input" class="oc-sr">Message to ${esc(room.name)}</label><textarea id="oc-input" name="message" maxlength="2000" rows="2" required placeholder="${room.kind === 'system' ? 'Post an announcement' : `Message ${esc(room.name)}`}"></textarea><button type="submit">Send</button></form>${room.kind === 'system' ? '' : pictureComposer(room, `/r/${room.slug}`)}`;
         else if (!can.role) composer = `<form method="post" action="/r/${esc(room.slug)}/join"><button type="submit">${joinLabel}</button></form>`;
         else if (room.kind === 'system') composer = `<p class="oc-muted">Announcements from OpenVibe staff. You will see new ones counted in Rooms.</p>`;
         else if (can.role === 'viewer') composer = `<p class="oc-muted">You can read this room but not write in it (viewer).</p>`;
@@ -540,7 +551,7 @@ ${people}
         await page(req, res, 200, {
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
             description: room.topic || `${room.name}, a ${isCall ? 'call' : room.kind === 'system' ? 'announcements' : 'chat'} room on OpenVibe.`,
-            page: { view: 'room', room: room.slug, kind: room.kind, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
+            page: { view: 'room', room: room.slug, kind: room.kind, pics: pictures.enabled() ? pictures.publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: can.join, talk: can.talk } } : {}) },
             body: `<p><a href="/rooms">← Rooms</a></p>
 <h1>${esc(room.name)}${kindBadge(room)}${room.visibility === 'private' ? ' <span class="oc-badge">private</span>' : ''}</h1>
@@ -560,6 +571,21 @@ ${composer}${tools}`,
         const message = await rooms.post(room, actor.user, req.body && req.body.message);
         require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
         res.redirect(303, `/r/${room.slug}#oc-compose`);
+    }));
+
+    router.post('/r/:slug/picture', formLimit, sameSite, (req, res, next) => pictureForm(req, res, (err) => {
+        if (!err) return next();
+        const why = err.code === 'LIMIT_FILE_SIZE' ? `A picture can be up to ${Math.round((require('../config').pics.maxBytes || 20 * 1024 * 1024) / 1024 / 1024)} MB.` : 'That upload did not work.';
+        return res.redirect(303, `/r/${encodeURIComponent(req.params.slug)}?error=${encodeURIComponent(why)}`);
+    }), roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
+        const back = String((req.body && req.body.back) || '');
+        req.roomBack = /^\/(r|s)\/[a-z0-9-]+(\/[a-z0-9-]+)?$/.test(back) ? back : `/r/${room.slug}`;
+        const f = req.file;
+        await roomRoutes.postPicture(room, actor.user, { token: actor.token, buffer: f ? f.buffer : null, contentType: f ? f.mimetype : '', caption: req.body && req.body.caption, ip: req.ip });
+        res.redirect(303, `${req.roomBack}#oc-compose`);
     }));
 
     router.post('/r/:slug/join', formLimit, sameSite, roomsOrError(async (req, res) => {
@@ -705,7 +731,7 @@ ${attachList}`,
 
     // ── What shipped, robots, sitemap ──
     // ── Servers (server/rooms/servers.js): text and voice channels, roles, invites ──
-    require('./server-pages').mountServerPages(router, { page, needUser, viewerOf, sameSite, formLimit, notice, roomMessage, callPanel, applyRoomChange, config });
+    require('./server-pages').mountServerPages(router, { page, needUser, viewerOf, sameSite, formLimit, notice, roomMessage, callPanel, applyRoomChange, pictureComposer, config });
 
     router.get('/updates', async (req, res) => await page(req, res, 200, {
         title: `What shipped on ${SITE_NAME}`, path: '/updates', robots: 'index, follow', cache: cache.htmlHeaders({ maxAge: 300 }),

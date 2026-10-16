@@ -329,6 +329,18 @@ delete, join `{ invite? }`, leave, members, channels, invites, `GET /invites/:co
 memberships; a server it owned stays without an owner while anyone else is in it, and goes with its channels when
 nobody is.
 
+**Pictures** (`server/rooms/pictures.js`; the owner's "files and pics" for Chat, through OpenVibe.Pics). A person who
+may post sends a picture from the room's or channel's "Add a picture" form (it works without JavaScript; with it, the
+file goes to `POST /api/chat/rooms/:slug/pictures`, the body the picture and an optional `X-Caption`) and Chat hands it
+to OpenVibe.Pics **as that person**: their own Network token, through MediaHub on this host
+(`CHAT_PICS_INTERNAL_URL`, `Host: openvibe.pics`, their address in X-Forwarded-For), so the picture is theirs on Pics
+(re-encoded without its metadata, reportable, deletable, inside their Pics limits). The room gets a message with the
+caption and the picture's link. Rooms and channels show OpenVibe.Pics direct links (`https://openvibe.pics/i/<slug>.<ext>`)
+as thumbnails (`/i/<slug>/thumb.webp`) linked to the picture's page, at most four a message, on the page and live
+(chat.js); no other host's images, and global and stream chat stay text. JPEG, PNG, GIF, WebP and AVIF up to
+`CHAT_PICS_MAX_BYTES` (20 MB); `chat.room.picture` 10 a minute and 120 an hour per person; API tokens cannot send
+pictures. Off (no form; the API answers 503 `pictures.off`) without `CHAT_PICS_INTERNAL_URL`.
+
 **openvibe.chat pages.** `/` global chat, `/rooms` and `/r/:slug` (above), `/servers`, `/s/:slug[/:channel]`,
 `/s/:slug/settings` and `/join/:code` (servers, above), `/messages` the DM inbox
 (conversations with unread counts, refreshed every 15 s with JavaScript; who you blocked, with Unblock),
