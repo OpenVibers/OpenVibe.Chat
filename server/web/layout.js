@@ -62,7 +62,31 @@ function navConfig(o, config) {
 }
 
 /**
- * o: title, description, path, robots (required), body, active, actor, config, page (JSON for chat.js),
+ * The pages' Content-Security-Policy. Chat renders other people's words live, so injected script is the risk this
+ * stops: scripts only from this site (and Cloudflare's analytics beacon), inline ones only with this response's
+ * nonce. Styles may be inline (style attributes), pictures and media come from anywhere over https (posted
+ * pictures, avatars), and connections go to this site, Network (sign-in, the Frame) and Events (release and
+ * notification streams). Checked on production pages with the policy attached before shipping (2026-10-17).
+ */
+function contentSecurityPolicy(nonce) {
+    return [
+        "default-src 'self'",
+        `script-src 'self' 'nonce-${nonce}' https://static.cloudflareinsights.com`,
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob: https:",
+        "media-src 'self' blob: https:",
+        "font-src 'self' data:",
+        "connect-src 'self' wss://openvibe.chat https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com",
+        "frame-ancestors 'self'",
+        "base-uri 'self'",
+        "object-src 'none'",
+        "form-action 'self' https://openvibe.network",
+    ].join('; ');
+}
+
+/**
+ * o: title, description, path, robots (required), body, active, actor, config, page (JSON for chat.js), nonce (the
+ * response's CSP nonce: every inline <script> carries it),
  * prefs (the person's chat preferences: timestamps, compact, font_scale, show_badges), counts (unread
  * rooms/messages for the navigation), script / callScript (public/web/chat.js, call.js)
  */
@@ -83,7 +107,7 @@ function renderPage(o) {
     const p = o.prefs || {};
     const cls = [p.compact ? 'oc-compact' : '', p.timestamps ? 'oc-times' : '', p.show_badges === false ? 'oc-nobadges' : ''].filter(Boolean).join(' ');
     const scale = typeof p.font_scale === 'number' ? ` style="--oc-scale:${Math.min(1.4, Math.max(0.8, p.font_scale))}"` : '';
-    return `<!DOCTYPE html>
+    const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -117,6 +141,7 @@ document.addEventListener('DOMContentLoaded', function () {
 </script>
 </body>
 </html>`;
+    return o.nonce ? html.replace(/<script>/g, `<script nonce="${o.nonce}">`) : html;
 }
 
-module.exports = { renderPage, asset, assetVersion, esc, SITE_NAME, DEFAULT_DESCRIPTION, NETWORK_URL };
+module.exports = { renderPage, contentSecurityPolicy, asset, assetVersion, esc, SITE_NAME, DEFAULT_DESCRIPTION, NETWORK_URL };
