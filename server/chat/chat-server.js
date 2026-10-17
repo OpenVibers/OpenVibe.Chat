@@ -260,8 +260,10 @@ class ChatServer {
     handleConnection(ws, req) {
         const ip = this.getClientIp(req);
 
-        // Diagnostic: log IP resolution chain for first few connections
-        if (this.anonMap.size < 20) {
+        // Diagnostic, on demand only (CHAT_LOG_IP_RESOLUTION=1): the header chain behind the resolved address. It used to
+        // log every connection's addresses (its "first few" test was anonMap.size < 20, which stays small), putting
+        // visitors' IPs in the journal for nothing (2026-10-17).
+        if (process.env.CHAT_LOG_IP_RESOLUTION === '1') {
             console.log('[Chat] IP resolution — cf-connecting-ip:', req.headers?.['cf-connecting-ip'] || '(none)',
                 '| x-forwarded-for:', req.headers?.['x-forwarded-for'] || '(none)',
                 '| x-real-ip:', req.headers?.['x-real-ip'] || '(none)',
