@@ -461,7 +461,9 @@ the last clean Live sync is older than `LIVE_SYNC_STALE_MS` (default 60 s) or a 
 its own interval by that much. It also reports whether events are relayed and the Events consumer's
 counters.
 Production: `deploy/systemd/openvibe-chat.service`, `deploy/nginx/openvibe.live-chat.locations.conf`,
-`/etc/openvibe/chat.env`.
+`/etc/openvibe/chat.env`. The listener on 127.0.0.1:4400 belongs to `openvibe-chat.socket` (with the
+`openvibe-chat.service.d/socket.conf` drop-in): HTTP requests that arrive during a restart wait for the new process
+instead of getting 502s (open WebSockets still reconnect); ovhost restarts the service, never the socket.
 
 Request telemetry: counted by route template, method and status class, not raw URL; `/shared` files,
 static assets, health, readiness and `/metrics` are not counted. One `http.request` sample per key a

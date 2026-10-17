@@ -65,7 +65,13 @@ async function start() {
     // writes Chat's own chat_ai_summaries/chat_timeline_events rows directly (C-04 done).
     chatAi.start();
 
-    await new Promise((resolve) => server.listen(config.port, config.host, resolve));
+    // Zero-downtime restarts (as OpenVibe.Live): when systemd owns the listener (deploy/systemd/openvibe-chat.socket) it
+    // hands it over as file descriptor 3, and connections that arrive during a restart wait in the kernel's accept queue
+    // instead of being refused (chat history and the chat API of openvibe.live answered 502 through each boot). Without
+    // the socket unit this is the usual listen.
+    const socketActivated = process.env.LISTEN_FDS === '1' && Number(process.env.LISTEN_PID) === process.pid;
+    if (socketActivated) console.log('[Server] socket-activated: listening on the socket systemd handed over (fd 3)');
+    await new Promise((resolve) => server.listen(...(socketActivated ? [{ fd: 3 }] : [config.port, config.host]), resolve));
     console.log(`[Chat] listening on http://${config.host}:${server.address().port} (ws /ws/chat${config.calls.enabled ? ', /ws/call' : ''})`);
     const subs = subscriptions.startAtBoot({ config, port: server.address().port });
     // Request telemetry (openvibe-sdk/service, plan T1): one aggregated sample per route template, method and status
