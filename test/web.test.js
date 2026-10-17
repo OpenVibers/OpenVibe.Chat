@@ -176,6 +176,12 @@ t('sign-in, the Frame, robots, sitemap and /updates', async () => {
     const up = await req('GET', '/updates');
     assert.strictEqual(up.status, 200);
     assert.match(up.text, /data-ov-shipped/);
+    // A crawlable icon and the installable app's manifest (the shared set, which this site serves).
+    const icon = /<link rel="apple-touch-icon" href="(\/shared\/icons\/[^"]+)">/.exec(up.text);
+    const manifest = /<link rel="manifest" href="(\/shared\/manifest\/chat\.webmanifest[^"]*)">/.exec(up.text);
+    assert.ok(icon && manifest, 'apple-touch-icon and manifest links');
+    assert.strictEqual((await req('GET', icon[1])).status, 200);
+    assert.strictEqual((await req('GET', manifest[1])).status, 200);
     assert.strictEqual((await req('GET', '/api/nope')).status, 404, 'the API keeps its JSON 404');
 });
 

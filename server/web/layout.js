@@ -11,6 +11,11 @@ const ovServe = require('openvibe-shared/serve');
 const sharedSeo = require('openvibe-shared/seo');
 const social = require('openvibe-shared/social');
 const appIcon = require('openvibe-shared/app-icon');
+// A crawlable icon (search engines cannot use the data: favicon) and the installable app's manifest, both the shared set.
+const INSTALL_LINKS = [
+    `<link rel="apple-touch-icon" href="${require('openvibe-shared/app-icons').url('chat', 192)}">`,
+    `<link rel="manifest" href="${ovServe.manifestUrl('chat')}">`,
+].join('\n');
 const frame = require('openvibe-shared/frame');
 
 const SITE_NAME = 'OpenVibe.Chat';
@@ -114,6 +119,7 @@ function renderPage(o) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${head}
 ${appIcon.headTags({ site: 'network' })}
+${INSTALL_LINKS}
 <link rel="stylesheet" href="${asset('chat.css')}">
 <link rel="stylesheet" href="${ovServe.url('items.css')}">
 ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` : ''}
