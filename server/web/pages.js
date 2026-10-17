@@ -33,7 +33,7 @@ const rateLimit = require('express-rate-limit');
 const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
 const cache = require('openvibe-shared/cache-policy');
-const { renderPage, assetVersion, esc, SITE_NAME } = require('./layout');
+const { renderPage, contentSecurityPolicy, assetVersion, esc, SITE_NAME } = require('./layout');
 const { createSessionRoutes } = require('./session');
 const { createDiscoveryRoutes, homeJsonLd } = require('./discovery');
 const session = require('../auth/network-session');
@@ -166,8 +166,9 @@ function createWebRoutes({ config }) {
 
     const page = async (req, res, status, o) => {
         const actor = o.actor || await viewerOf(req);
-        res.status(status).set('Cache-Control', o.cache || cache.htmlHeaders({ private: true })).type('html')
-            .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: await countsOf(actor), ...o }));
+        const nonce = require('crypto').randomBytes(16).toString('base64');
+        res.status(status).set('Cache-Control', o.cache || cache.htmlHeaders({ private: true })).set('Content-Security-Policy', contentSecurityPolicy(nonce)).type('html')
+            .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: await countsOf(actor), nonce, ...o }));
     };
     const needUser = async (req, res) => {
         const actor = await viewerOf(req);

@@ -35,6 +35,14 @@ t('global chat reads without JavaScript; signing in shows the composer', async (
     assert.match(r.text, /Sign in with OpenVibe/);
     assert.match(r.text, /<meta name="robots" content="index, follow">/);
     assert.match(r.text, /\/shared\/navbar\.js\?v=/, 'the Frame from this site\'s own /shared/');
+    // A Content-Security-Policy with a per-response nonce, carried by every inline script and only by them.
+    const csp = r.headers.get('content-security-policy') || '';
+    const nonce = (/'nonce-([^']+)'/.exec(csp) || [])[1];
+    assert.ok(nonce && /script-src 'self' 'nonce-/.test(csp) && !/script-src[^;]*'unsafe-inline'/.test(csp), csp);
+    assert.ok(/object-src 'none'/.test(csp) && /frame-ancestors 'self'/.test(csp) && /base-uri 'self'/.test(csp));
+    assert.ok(!/<script>/.test(r.text), 'no inline script without the nonce');
+    assert.ok(r.text.includes(`<script nonce="${nonce}">`), 'inline scripts carry this response\'s nonce');
+    assert.notStrictEqual((/'nonce-([^']+)'/.exec((await req('GET', '/')).headers.get('content-security-policy')) || [])[1], nonce, 'a new nonce per response');
     const card = /<meta property="og:image" content="([^"]+)">/.exec(r.text);
     assert.ok(card && /\/shared\/social\/chat\.jpg\?v=/.test(card[1]), 'global chat shares the site card');
     const img = await req('GET', new URL(card[1]).pathname + new URL(card[1]).search);
