@@ -102,6 +102,18 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-call-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 0; }
 .oc-call-controls button[hidden] { display: none; }
 .oc-call-status:empty { display: none; }
+.oc-call-page h1 { margin: 0 0 4px; font-size: 1.35rem; }
+.oc-dm-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; }
+.oc-dm-head h1 { margin: 0; }
+.oc-dm-call button { padding: 7px 14px; }
+/* A call coming in (public/web/ring.js): above everything, bottom right; full width on phones. */
+.oc-ring { position: fixed; right: 16px; bottom: 16px; z-index: 50; max-width: min(360px, calc(100vw - 32px)); margin: 0; padding: 14px 16px; background: var(--oc-panel); border: 1px solid var(--oc-accent); border-radius: 14px; box-shadow: 0 12px 32px rgba(0, 0, 0, .45); }
+.oc-ring-text { margin: 0 0 10px; }
+.oc-ring-actions { display: flex; gap: 8px; margin: 0; }
+.oc-ring-answer { background: var(--oc-ok); color: #06281c; }
+.oc-ring-gone { color: var(--oc-muted); }
+@media (max-width: 520px) { .oc-ring { left: 16px; right: 16px; max-width: none; } }
+@media (prefers-reduced-motion: no-preference) { .oc-ring:not(.oc-ring-gone) { animation: oc-ring-in .25s ease-out; } @keyframes oc-ring-in { from { transform: translateY(12px); opacity: 0; } } }
 .oc-tools { display: block; margin-top: 8px; }
 .oc-blocked { margin-top: 20px; }
 .oc-blocked summary { cursor: pointer; color: var(--oc-muted); }

@@ -93,7 +93,8 @@ function contentSecurityPolicy(nonce) {
  * o: title, description, path, robots (required), body, active, actor, config, page (JSON for chat.js), nonce (the
  * response's CSP nonce: every inline <script> carries it),
  * prefs (the person's chat preferences: timestamps, compact, font_scale, show_badges), counts (unread
- * rooms/messages for the navigation), script / callScript (public/web/chat.js, call.js)
+ * rooms/messages for the navigation), script / callScript / ringScript (public/web/chat.js, call.js, ring.js: a call
+ * coming in, on every page of a signed-in person while calls are on)
  */
 function renderPage(o) {
     const { config } = o;
@@ -128,6 +129,7 @@ ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` :
 <script src="${ovServe.url('footer.js')}" defer></script>
 ${o.script ? `<script src="${asset('chat.js')}" defer></script>` : ''}
 ${o.callScript ? `<script src="${asset('call.js')}" defer></script>` : ''}
+${o.ringScript ? `<script src="${asset('ring.js')}" defer></script>` : ''}
 </head>
 <body class="${cls}"${scale}>
 <a class="oc-skip" href="#main">Skip to content</a>
