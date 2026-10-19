@@ -9,7 +9,10 @@
  *   GET  /messages            your inbox: conversations with unread counts, people you blocked;
  *                             POST /messages/new starts one by username; POST /messages/unblock/:userId
  *   GET  /messages/:id        one conversation (participants only); POST /messages/:id replies;
- *                             POST /messages/:id/block blocks the other person of a 1:1 conversation
+ *                             POST /messages/:id/block blocks the other person of a 1:1 conversation;
+ *                             POST /messages/:id/call rings them (the call-user route) and opens /call/<channel>
+ *   GET  /call/:channel       a 1:1 call's page (its caller and the people it invited): public/web/call.js joins
+ *                             it, and while the caller waits it says ringing until the answer comes
  *   GET  /rooms, /r/:slug     rooms: community, call (a voice/video call in the page, public/web/call.js)
  *                             and system (staff announcements); /r/:slug/settings for moderators
  *   GET  /settings            your portable chat settings (Network module chat.preferences); POST saves
@@ -168,7 +171,7 @@ function createWebRoutes({ config }) {
         const actor = o.actor || await viewerOf(req);
         const nonce = require('crypto').randomBytes(16).toString('base64');
         res.status(status).set('Cache-Control', o.cache || cache.htmlHeaders({ private: true })).set('Content-Security-Policy', contentSecurityPolicy(nonce)).type('html')
-            .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: await countsOf(actor), nonce, ...o }));
+            .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: await countsOf(actor), nonce, ringScript: actor.kind === 'user' && !!(config.calls && config.calls.enabled), ...o }));
     };
     const needUser = async (req, res) => {
         const actor = await viewerOf(req);
@@ -317,12 +320,69 @@ ${blockedList}`,
         if (iBlocked) composer = `${notice('error', `You blocked ${other.display_name || other.username}. Neither of you can message the other.`)}<form class="oc-inline" method="post" action="/messages/unblock/${Number(other.id)}"><input type="hidden" name="back" value="/messages/${id}"><button type="submit">Unblock ${otherName}</button></form>`;
         else if (closed) composer = notice('error', 'You cannot message this person.');
         const tools = other && !iBlocked ? `<form class="oc-inline oc-tools" method="post" action="/messages/${id}/block"><button type="submit" class="oc-link">Block ${otherName}</button></form>` : '';
+        // A 1:1 conversation nobody blocked can become a call (POST /messages/:id/call rings the other person).
+        const callForm = other && !closed && require('../config').calls.enabled
+            ? `<form class="oc-inline oc-dm-call" method="post" action="/messages/${id}/call"><button type="submit" class="oc-button--quiet">Call ${otherName}</button></form>` : '';
         await page(req, res, 200, {
             actor, title, path: `/messages/${id}`, active: 'messages', robots: 'noindex, nofollow', script: true,
             page: { view: 'dm', conversation: id, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me.id },
-            body: `<p><a href="/messages">← Messages</a></p><h1>${esc(title)}</h1>${error}
+            body: `<p><a href="/messages">← Messages</a></p><div class="oc-dm-head"><h1>${esc(title)}</h1>${callForm}</div>${error}
 <ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => dmMessage(m, me)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
 ${composer}${tools}`,
+        });
+    });
+
+    // Ring the other person of a 1:1 conversation through the call-user route (its limits, block check and ring
+    // lifecycle), then wait for them on the call's page.
+    router.post('/messages/:id/call', formLimit, sameSite, async (req, res, next) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const me = actor.user;
+        const id = parseInt(req.params.id, 10);
+        if (!Number.isInteger(id) || !await dm.isParticipant(id, me.id)) return res.redirect(303, '/messages');
+        const back = (error) => res.redirect(303, `/messages/${id}?error=${encodeURIComponent(error)}`);
+        if (!require('../config').calls.enabled) return back('Calls are not available right now.');
+        const conv = await dm.getConversation(id);
+        const others = (await dm.getParticipants(id)).filter((p) => p.id !== me.id);
+        if (!conv || conv.is_group || others.length !== 1) return back('Only a one-to-one conversation has someone to call.');
+        const other = others[0];
+        req.headers.authorization = `Bearer ${req.cookies.ov_token}`;
+        return apiBridge(require('../calls/routes'), '/voice-channels/call-user', {
+            body: () => ({ user_id: other.id }),
+            ok: (r, s, d) => (d.channel && d.channel.id ? s.redirect(303, `/call/${encodeURIComponent(d.channel.id)}?to=${Number(other.id)}&from=${id}`) : back('The call could not start.')),
+            fail: (r, s, status, error) => back(error),
+        })(req, res, next);
+    });
+
+    router.get('/call/:channel', async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const me = actor.user;
+        const callServer = require('../calls/call-server');
+        const ch = require('../config').calls.enabled ? await callServer.getChannel(String(req.params.channel).slice(0, 80), me) : null;
+        const ended = '<h1>This call has ended</h1><p><a href="/messages">Back to your messages</a></p>';
+        // Only a person's own call channel is a call page; a room's or a stream's call lives on its own page.
+        if (!ch || ch.roomSlug || ch.streamId || ch.permanent) return await page(req, res, 404, { actor, title: 'No such call', path: req.path, robots: 'noindex', body: ended });
+        const nameOf = (u) => (u ? u.display_name || u.username : 'Someone');
+        const toId = parseInt(req.query.to, 10);
+        const ringing = ch.createdBy === me.id && toId > 0 && callServer.hasInvite(ch.id, toId) ? await ctx.getUserById(toId) : null;
+        const host = ch.createdBy !== me.id ? await ctx.getUserById(ch.createdBy) : null;
+        const title = ringing ? `Calling ${nameOf(ringing)}` : host ? `Call with ${nameOf(host)}` : ch.name;
+        const from = parseInt(req.query.from, 10);
+        const backLink = Number.isInteger(from) && await dm.isParticipant(from, me.id) ? `/messages/${from}` : '/messages';
+        const people = ch.participants.length
+            ? ch.participants.map((p) => `<li>${esc(p.displayName || p.username || 'Guest')}</li>`).join('')
+            : '<li class="oc-muted">Nobody is in the call yet.</li>';
+        await page(req, res, 200, {
+            actor, title, path: `/call/${ch.id}`, active: 'messages', robots: 'noindex, nofollow', callScript: true,
+            page: { view: 'call', me: me.id, call: { channel: ch.id, join: true, talk: true, auto: true, ring: ringing ? { id: Number(ringing.id), name: nameOf(ringing) } : null } },
+            body: `<p><a href="${backLink}">← Back to the conversation</a></p>
+<section class="oc-call oc-call-page" aria-labelledby="oc-call-h" id="oc-call">
+<h1 id="oc-call-h">${esc(title)} <span class="oc-muted oc-call-count" id="oc-call-count">${ch.participantCount ? `· ${ch.participantCount} in` : ''}</span></h1>
+<p class="oc-muted" id="oc-call-how">A voice call, peer to peer: your microphone goes only to the people in it.</p>
+<ul class="oc-call-people" id="oc-call-people">${people}</ul>
+<p class="oc-call-controls"><button type="button" id="oc-call-join" hidden>Join the call</button> <button type="button" id="oc-call-mute" hidden aria-pressed="false">Mute</button> <button type="button" id="oc-call-leave" hidden>Leave the call</button></p>
+<p class="oc-muted oc-call-status" id="oc-call-status" role="status" aria-live="polite"></p>
+<noscript><p class="oc-muted">A call needs JavaScript.</p></noscript>
+</section>`,
         });
     });
 

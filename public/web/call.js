@@ -2,7 +2,10 @@
    Live's call client), signalled over /ws/call?channelId=room-<slug> with the protocol of
    server/calls/call-server.js: the newcomer offers to everyone already in, the others answer. The room's
    roles decide who talks (the server force-mutes listeners; this client never sends a microphone it may
-   not use). Names are set with textContent. The room's chat works without this file. */
+   not use). Names are set with textContent. The room's chat works without this file.
+   A 1:1 call's page (/call/<channel>, cfg.call.auto) joins as it opens; while its caller waits (cfg.call.ring) it says
+   ringing and listens on a /ws/chat socket for the callee's vc-call-response: accepted (they are on their way),
+   declined, busy or no-answer (then the call is left). */
 (function () {
   'use strict';
   var cfg = (window.__OV_PAGE && window.__OV_PAGE.chat) || null;
@@ -16,6 +19,8 @@
   var ws = null, myPeerId = null, localStream = null, muted = false, forceMuted = !canTalk, joined = false, connecting = false;
   var attempt = 0;   // each join; a teardown makes an attempt still starting stale
   var iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
+  var ringing = cfg.call.ring && cfg.call.ring.id ? cfg.call.ring : null;   // the callee the caller waits for
+  var ringSock = null;
   var peers = new Map();      // peerId → { pc, audio, pending: [candidates] }
   var people = new Map();     // peerId → participant info from the server
 
@@ -44,6 +49,7 @@
     joinBtn.hidden = joined;
     joinBtn.disabled = connecting;
     leaveBtn.hidden = !joined;
+    leaveBtn.textContent = ringing ? 'Cancel' : 'Leave the call';
     muteBtn.hidden = !joined || !localStream;
     muteBtn.disabled = forceMuted;
     muteBtn.textContent = muted || forceMuted ? 'Unmute' : 'Mute';
@@ -91,11 +97,12 @@
         (m.participants || []).forEach(function (p) { people.set(p.peerId, p); });
         if (typeof m.canTalk === 'boolean' && m.canTalk !== canTalk) { rejoin(m.canTalk); return; }
         (m.participants || []).forEach(function (p) { if (p.peerId !== myPeerId) createPeer(p.peerId, true); });
-        status(canTalk ? 'You are in the call.' : 'You are listening.');
+        status(ringing && people.size <= 1 ? 'Ringing ' + ringing.name + '…' : canTalk ? 'You are in the call.' : 'You are listening.');
         render(); applyMute();
         break;
       case 'peer-joined':
         people.set(m.peerId, m); createPeer(m.peerId, false); render();
+        if (ringing) { stopRinging(); status('You are in the call.'); }
         break;
       case 'peer-left':
         people.delete(m.peerId); closePeer(m.peerId); render();
@@ -145,8 +152,30 @@
     }
   }
 
+  // The callee's answer reaches the caller's chat sockets (call-user/respond → vc-call-response).
+  function listenForAnswer() {
+    if (!ringing || ringSock) return;
+    var sock = ringSock = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
+    sock.onopen = function () { sock.send(JSON.stringify({ type: 'join', token: sessionToken() || undefined })); };
+    sock.onmessage = function (ev) {
+      var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.type !== 'vc-call-response' || !ringing || String(m.channelId) !== String(cfg.call.channel)) return;
+      if (Number(m.fromUserId) !== Number(ringing.id)) return;
+      var who = ringing.name, st = String(m.status || '').toLowerCase();
+      if (st === 'accepted') { status(who + ' answered. Connecting…'); return; }
+      stopRinging();
+      teardown(st === 'busy' ? who + ' is in another call.' : st === 'no-answer' ? 'No answer from ' + who + '.' : who + ' declined the call.');
+    };
+  }
+  function stopRinging() {
+    ringing = null;
+    if (ringSock) { try { ringSock.close(); } catch (e) { /* */ } ringSock = null; }
+    setButtons();
+  }
+
   function teardown(text) {
     attempt++;
+    stopRinging();
     connecting = false;
     peers.forEach(function (p, id) { closePeer(id); });
     people.clear();
@@ -187,11 +216,13 @@
 
   joinBtn.hidden = false;
   joinBtn.addEventListener('click', join);
-  leaveBtn.addEventListener('click', function () { teardown('You left the call.'); });
+  leaveBtn.addEventListener('click', function () { teardown(ringing ? 'Call canceled.' : 'You left the call.'); });
   muteBtn.addEventListener('click', function () {
     if (forceMuted) return;
     muted = !muted; applyMute();
     send({ type: 'mute', muted: muted });
   });
-  window.addEventListener('pagehide', function () { if (joined) teardown(null); });
+  window.addEventListener('pagehide', function () { stopRinging(); if (joined) teardown(null); });
+  if (ringing) listenForAnswer();
+  if (cfg.call.auto) join();
 })();

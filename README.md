@@ -211,8 +211,8 @@ which path delivered each deploy first and when the other one arrived.
 
 ### Calls
 
-Live's voice/video calls moved here (roadmap WS-I task 1, `server/calls/`), **off until the calls
-cutover** (`CHAT_CALLS=1`, `docs/calls-cutover.md`):
+Live's voice/video calls moved here (roadmap WS-I task 1, `server/calls/`). They are served with `CHAT_CALLS=1`,
+which production has run since the calls cutover of 2026-10-10 (`docs/calls-cutover.md`):
 
 - **`/ws/call`** — Live's call server with the same protocol: `?channelId=` (or a stream number),
   signalling only (full-mesh WebRTC; `offer`/`answer`/`ice-candidate` relayed, `mute`, `camera-off`,
@@ -228,6 +228,14 @@ cutover** (`CHAT_CALLS=1`, `docs/calls-cutover.md`):
   `POST /internal/calls/stream-channel { stream_id, mode, user_id }` and
   `DELETE /internal/calls/stream-channel/:streamId` — a Live service token with capability
   `chat.live_bridge.write` (the name is from the retired chat bridge; Live holds the grant), loopback only.
+- **From a conversation on openvibe.chat** (`server/web/pages.js`, `public/web/ring.js`, `public/web/call.js`): a 1:1
+  conversation nobody blocked has **Call <name>**. It rings through `call-user` (its limits, block check and ring row)
+  and opens `/call/<channel>`, the call's page. The page is for its caller and the people it invited (404 to anyone
+  else), and it joins as it opens. While the caller waits it says *Ringing …* and listens on `/ws/chat` for the answer;
+  declined, busy or no answer leaves the call. Every signed-in page has `ring.js`: a ring shows who is calling with
+  **Answer** (tells the caller, opens the call page) and **Decline**. After 30 s it gives up with `no-answer`, and a
+  person already ringing or in a call answers `busy`. The invite reaches Live's chat sockets too, so a call can start
+  on one site and be answered on the other.
 - **Lifecycle** (`server/calls/lifecycle.js`, table `calls`): a ring is `direct`, `pending → ringing →
   active → ended`, or `missed` (no answer within `CALL_RING_TIMEOUT_MS`, 45 s; the caller is told),
   `declined` (declined or busy) or `failed` (the invite could not be delivered, with the reason); a
