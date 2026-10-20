@@ -250,3 +250,8 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-goto { margin: 0; padding-left: 18px; }
 .oc-goto li { margin: 4px 0; }
 .oc-goto a { font-weight: 700; }
+
+/* Spoilers (||text|| or /spoiler): a bar until selected; links inside stay hidden and unclickable until then. */
+.oc-spoiler { background: #6b7280; color: transparent; border-radius: 4px; padding: 0 2px; cursor: pointer; }
+.oc-spoiler:not(.revealed):not(:focus) * { visibility: hidden; }
+.oc-spoiler:focus, .oc-spoiler.revealed { background: rgba(127, 127, 127, 0.15); color: inherit; cursor: auto; }

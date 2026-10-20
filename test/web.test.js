@@ -266,4 +266,15 @@ t('what people wear: a name effect from Live\'s decor is drawn on the name, with
     assert.strictEqual(nameFxClass({}), null);
 });
 
+t('||spoilers|| render hidden on the pages: split before escaping, links inside stay inside, no marker in an attribute', async () => {
+    const { linkify } = require('../server/web/pages');
+    const html = linkify('the end: ||he was the ghost https://spoil.er/x <b>|| ok');
+    assert.strictEqual(html, 'the end: <span class="oc-spoiler" tabindex="0" role="button" aria-label="Spoiler, select to show">he was the ghost <a href="https://spoil.er/x" rel="nofollow ugc noopener" target="_blank">https://spoil.er/x</a> &lt;b&gt;</span> ok');
+    assert.strictEqual(linkify('a || b'), 'a || b', 'an unmatched pair stays text');
+    const tricky = linkify('https://x.com/a||b" onmouseover="x||');
+    assert.ok(!/href="[^"]*(<|\|\|)/.test(tricky) && !/onmouseover="x/.test(tricky), 'nothing from a spoiler reaches an attribute');
+    const css = require('fs').readFileSync(require('path').join(__dirname, '../public/web/chat.css'), 'utf8');
+    assert.match(css, /\.oc-spoiler:not\(\.revealed\):not\(:focus\) \* \{ visibility: hidden; \}/);
+});
+
 t.run(async () => { if (h && h.close) await h.close(); });

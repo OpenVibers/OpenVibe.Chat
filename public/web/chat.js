@@ -25,9 +25,28 @@
     if (!isNaN(d)) t.dateTime = d.toISOString();
     return t;
   }
+  // ||Spoilers||: each hidden part goes in a span.oc-spoiler (pages.js renders the same), shown once selected.
   function textWithLinks(parent, text) {
+    var raw = String(text || ''), sre = /\|\|([\s\S]+?)\|\|/g, last = 0, m;
+    while ((m = sre.exec(raw))) {
+      if (!m[1].trim()) continue;
+      linksIn(parent, raw.slice(last, m.index));
+      var s = el('span', 'oc-spoiler'); s.tabIndex = 0; s.setAttribute('role', 'button'); s.setAttribute('aria-label', 'Spoiler, select to show');
+      linksIn(s, m[1]); parent.appendChild(s);
+      last = m.index + m[0].length;
+    }
+    linksIn(parent, raw.slice(last));
+  }
+  function reveal(e) {
+    var s = e.target && e.target.closest ? e.target.closest('.oc-spoiler:not(.revealed)') : null;
+    if (!s || (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ')) return;
+    e.preventDefault(); e.stopPropagation();
+    s.classList.add('revealed'); s.removeAttribute('role'); s.removeAttribute('aria-label');
+  }
+  document.addEventListener('click', reveal, true);
+  document.addEventListener('keydown', reveal, true);
+  function linksIn(parent, text) {
     var re = /https?:\/\/[^\s<>"']+/g, last = 0, m;
-    text = String(text || '');
     while ((m = re.exec(text))) {
       if (m.index > last) parent.appendChild(document.createTextNode(text.slice(last, m.index)));
       var a = el('a', null, m[0]); a.href = m[0]; a.rel = 'nofollow ugc noopener'; a.target = '_blank';

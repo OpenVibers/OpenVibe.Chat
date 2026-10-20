@@ -181,4 +181,19 @@ t('CF-Connecting-IP / X-Forwarded-For are believed only from Cloudflare', async 
     await h.ctx.invalidateBans();
 });
 
+t('/spoiler sends the message hidden as ||text||, on the ordinary path; with no text it answers how to use it', async () => {
+    const viewer = await joined({ ip: '198.51.100.30' });
+    const sender = await joined({ ip: '198.51.100.31' });   // signed out: alice's slow-mode state belongs to a later case
+    sender.sendJson({ type: 'chat', message: '/spoiler the ghost was ||Bob' });
+    const got = await viewer.next((m) => m.type === 'chat' && /ghost/.test(m.message || ''));
+    assert.strictEqual(got.message, '||the ghost was Bob||', 'one spoiler: markers inside are dropped');
+    assert.ok(!got.is_action, 'an ordinary message, not a /me action');
+    await h.sleep(1100);
+    sender.sendJson({ type: 'chat', message: '/SPOILER   ' });
+    await sender.next((m) => m.type === 'system' && /^Usage: \/spoiler <text>/.test(m.message));
+    assert.ok(await viewer.none((m) => m.type === 'chat' && /^\|\|/.test(m.message || '') && m !== got), 'nothing sent');
+    sender.close();
+    viewer.close();
+});
+
 t.run(() => h && h.close());
