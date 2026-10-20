@@ -777,6 +777,15 @@ class ChatServer {
             return;
         }
 
+        // ── /spoiler <text>: Discord's shorthand for a message hidden until clicked. It is sent as ||text|| (the
+        // markup works anywhere in a message), so it takes the ordinary path below: filters, limits, history.
+        const spoiler = /^\/spoiler(?:\s+([\s\S]*))?$/i.exec(text);
+        if (spoiler) {
+            const hidden = (spoiler[1] || '').replace(/\|\|/g, '').trim();
+            if (!hidden) { this.sendTo(ws, { type: 'system', message: 'Usage: /spoiler <text> (or ||text|| anywhere in a message)' }); return; }
+            text = `||${hidden}||`;
+        }
+
         // ── Chat commands ────────────────────────────────────
         if (text.startsWith('/')) {
             await this.handleCommand(ws, client, text);
@@ -1617,7 +1626,7 @@ class ChatServer {
             case 'help':
                 this.sendTo(ws, {
                     type: 'system',
-                    message: `Commands: /help, /tts <message>, /color <#hex>, /viewers, /uptime, /me <action>, /paste <content>` +
+                    message: `Commands: /help, /tts <message>, /color <#hex>, /viewers, /uptime, /me <action>, /paste <content>, /spoiler <text> (or ||text||)` +
                         `\nMedia: !sr/!yt/!youtube/!req/!request <url>, !queue, !nowplaying` +
                         (await this.canModerate(client)
                             ? `\nMod: /ban <user>, /unban <user>, /timeout <user> [seconds], /clear (screens only), /slow <seconds|off>, /subonly [off], /skiptts [id], /cleartts`

@@ -70,7 +70,21 @@ const hhmm = (ts) => {
     return Number.isNaN(d.getTime()) ? { iso: '', text: '' } : { iso: d.toISOString(), text: d.toISOString().slice(11, 16) };
 };
 /** Plain text with http(s) links, escaped. */
+// ||Spoilers|| (and /spoiler, sent as one): hidden until selected. The raw text is split before escaping, so a marker
+// never lands inside a link; without JavaScript a spoiler shows while it has focus, chat.js keeps it shown.
+const SPOILER_RE = /\|\|([\s\S]+?)\|\|/g;
 function linkify(text) {
+    const raw = String(text ?? '');
+    let out = '';
+    let last = 0;
+    for (const m of raw.matchAll(SPOILER_RE)) {
+        if (!m[1].trim()) continue;
+        out += linkifyPart(raw.slice(last, m.index)) + `<span class="oc-spoiler" tabindex="0" role="button" aria-label="Spoiler, select to show">${linkifyPart(m[1])}</span>`;
+        last = m.index + m[0].length;
+    }
+    return out + linkifyPart(raw.slice(last));
+}
+function linkifyPart(text) {
     return esc(text).replace(/https?:\/\/[^\s<>"']+/g, (u) => `<a href="${u}" rel="nofollow ugc noopener" target="_blank">${u}</a>`);
 }
 /** The author's badge, from the staff map (ADR-022): staff run the site, moderators moderate chat. */
