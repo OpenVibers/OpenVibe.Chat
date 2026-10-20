@@ -601,6 +601,7 @@ class CallServer {
                     const a = callRoom ? await rooms.access(callRoom, user) : null;
                     if (!a || !a.read || !a.join) { if (c.ws.readyState === WebSocket.OPEN) { c.ws.send(JSON.stringify({ type: 'error', message: 'You cannot join this call' })); c.ws.close(); } break; }
                 }
+                const signedIn = (c.user ? c.user.id : null) !== (user ? user.id : null);
                 c.user = user; c.anonId = user ? null : chatServer.getAnonIdForConnection(c.ip, channelId);
                 c.isChannelCreator = !!(user && ch?.createdBy === user.id);
                 c.isStreamer = ch?.streamId ? !!(user && (await ctx.getStreamById(ch.streamId))?.user_id === user.id) : false;
@@ -615,6 +616,9 @@ class CallServer {
                 }));
                 const u = JSON.stringify({ type: 'peer-updated', ...pInfo });
                 for (const [pid, info] of room) { if (pid !== peerId && info.ws.readyState === WebSocket.OPEN) info.ws.send(u); }
+                // The voice-channel list (Live's sidebar) names people from these records too: without this push it
+                // kept showing a socket that signed in after its welcome as its anon number (Maticus, 2026-10-20).
+                if (signedIn) this._notifyChannelsChanged();
                 return acceptedToken;
             }
             case 'force-mute': {
