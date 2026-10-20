@@ -213,12 +213,19 @@ t('the pre-admission buffer is capped: 201 early messages close the socket (1008
     } finally { h.ctx.warm = warm; }
 });
 
-t('a cookie does not sign a call socket in: its auth-update does', async () => {
+t('a cookie does not sign a call socket in: its auth-update does, and the voice-channel list then names them', async () => {
+    const chat = await h.ws({ token: dan.token });
     const s = await callWs({ channelId: 'public', cookie: `ov_token=${cat.token}`, ip: '198.51.100.5' });
     const welcome = await s.next((m) => m.type === 'welcome');
     assert.notStrictEqual(welcome.participants.find((p) => p.peerId === welcome.peerId).username, 'cat', 'anonymous on the cookie alone');
+    // The join's own (debounced) push lists them anonymous; the sign-in comes after it.
+    await chat.next((m) => m.type === 'voice-channels' && m.channels.some((c) => c.id === 'public' && c.participants.some((p) => p.peerId === welcome.peerId && !p.username)));
     s.sendJson({ type: 'auth-update', token: cat.token });
     assert.strictEqual((await s.next((m) => m.type === 'self-updated')).participant.username, 'cat');
+    // Live's sidebar showed the anon number until something else changed the list (Maticus, 2026-10-20).
+    const named = (m) => m.type === 'voice-channels' && m.channels.some((c) => c.id === 'public' && c.participants.some((p) => p.peerId === welcome.peerId && p.username === 'cat'));
+    assert.ok(await chat.next(named), 'the list is pushed again with their name');
+    chat.close();
     await bye(s);
 });
 
