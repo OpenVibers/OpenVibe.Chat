@@ -255,3 +255,35 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-spoiler { background: #6b7280; color: transparent; border-radius: 4px; padding: 0 2px; cursor: pointer; }
 .oc-spoiler:not(.revealed):not(:focus) * { visibility: hidden; }
 .oc-spoiler:focus, .oc-spoiler.revealed { background: rgba(127, 127, 127, 0.15); color: inherit; cursor: auto; }
+
+/* The front page around global chat (server/web/home.js): the heading and real numbers, stream chats, servers and
+   rooms, how it works, questions, the rest of the network. */
+.oc-hero { padding: 8px 0 12px; }
+.oc-eyebrow { display: inline-block; margin: 0; padding: 3px 12px; border-radius: 999px; border: 1px solid var(--oc-line); color: var(--oc-accent); font-size: .78rem; font-weight: 700; letter-spacing: .3px; }
+.oc-hero h1 { margin: .5rem 0 .4rem; font-size: clamp(1.6rem, 4vw, 2.3rem); line-height: 1.15; letter-spacing: -.01em; }
+.oc-lede { margin: 0; max-width: 64ch; font-size: 1.05rem; color: var(--oc-muted); }
+.oc-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 1rem 0 0; }
+.oc-stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 1.2rem 0 0; padding: 0; }
+.oc-stats > div { display: flex; flex-direction: column-reverse; min-width: 0; padding: 8px 14px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); }
+.oc-stats dt { margin: 0; font-size: .8rem; color: var(--oc-muted); }
+.oc-stats dd { margin: 0; font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.oc-room > h2 { margin: 1.4rem 0 .2rem; font-size: 1.3rem; }
+.oc-home-sec { margin-top: 40px; }
+.oc-home-sec h2 { margin: 0 0 .5rem; font-size: 1.3rem; }
+.oc-home-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
+.oc-home-head a { font-weight: 700; font-size: .92rem; }
+.oc-streams, .oc-more { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); }
+.oc-stream, .oc-more a { display: grid; gap: 2px; height: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); color: var(--oc-text); text-decoration: none; }
+.oc-stream:hover, .oc-stream:focus-visible, .oc-more a:hover, .oc-more a:focus-visible { border-color: var(--oc-accent); }
+.oc-stream .oc-muted, .oc-more span { font-size: .88rem; color: var(--oc-muted); }
+.oc-badge-live { color: #fecaca; border-color: rgba(248, 113, 113, .6); background: rgba(127, 29, 29, .55); }
+.oc-steps { list-style: none; counter-reset: oc-step; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
+.oc-steps li { counter-increment: oc-step; padding: 14px 16px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); }
+.oc-steps li::before { content: counter(oc-step); display: inline-grid; place-items: center; width: 26px; height: 26px; margin-bottom: .4rem; border-radius: 50%; background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, var(--oc-on-accent)); font-weight: 800; font-size: .85rem; }
+.oc-steps h3 { margin: 0 0 .3rem; font-size: 1rem; }
+.oc-steps p { margin: 0; color: var(--oc-muted); font-size: .92rem; }
+.oc-faq { display: grid; gap: 8px; margin-top: 12px; }
+.oc-faq details { border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); }
+.oc-faq summary { cursor: pointer; padding: 11px 14px; font-weight: 700; }
+.oc-faq details[open] summary { border-bottom: 1px solid var(--oc-line); }
+.oc-faq p { margin: 0; padding: 11px 14px 13px; color: var(--oc-muted); }

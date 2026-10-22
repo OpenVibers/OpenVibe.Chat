@@ -39,6 +39,8 @@ const cache = require('openvibe-shared/cache-policy');
 const { renderPage, contentSecurityPolicy, assetVersion, esc, SITE_NAME } = require('./layout');
 const { createSessionRoutes } = require('./session');
 const { createDiscoveryRoutes, homeJsonLd } = require('./discovery');
+const home = require('./home');
+const sharedSeo = require('openvibe-shared/seo');
 const session = require('../auth/network-session');
 const historyStore = require('../chat/history-store');
 const dm = require('../chat/dm');
@@ -236,19 +238,32 @@ function createWebRoutes({ config }) {
 </form>`)
             : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=%2F">Sign in with OpenVibe</a> to chat. Anyone can read along.</p>`;
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
+        // Around the room: the real activity (server/web/home.js, read once a minute), how it works and questions.
+        const parts = home.sections(await home.activity());
+        const signedIn = actor.kind === 'user';
         await page(req, res, 200, {
-            actor, title: 'Global chat', path: '/', active: 'global', robots: 'index, follow', script: true,
-            description: 'The network-wide chat room of OpenVibe: everyone on every OpenVibe site, in one conversation.',
-            jsonLd: homeJsonLd(config),
-            page: { view: 'global', latest: latest_id, signedIn: actor.kind === 'user', me: actor.kind === 'user' ? actor.user.username : null },
-            body: `<section class="oc-room" aria-labelledby="oc-h">
-<h1 id="oc-h">Global chat</h1>
+            actor, fullTitle: 'OpenVibe.Chat: global chat, servers, rooms and calls', path: '/', active: 'global', robots: 'index, follow', script: true,
+            description: 'Chat with everyone on OpenVibe, start a server with text and voice channels, message friends and call them. Free and open source.',
+            jsonLd: [...homeJsonLd(config), sharedSeo.jsonLd.faq(home.FAQ)],
+            page: { view: 'global', latest: latest_id, signedIn, me: signedIn ? actor.user.username : null },
+            body: `<header class="oc-hero"><p class="oc-eyebrow">OpenVibe.Chat</p>
+<h1>Chat with everyone on OpenVibe, or start your own server</h1>
+<p class="oc-lede">Global chat for the whole network, the chat of every stream on OpenVibe.Live, servers with text and voice channels, rooms, private messages, calls of up to eight people, and AI members that join in. One free account, everywhere.</p>
+<p class="oc-hero-actions"><a class="oc-button" href="${signedIn ? '/servers#oc-new-server' : '/auth/login?next=%2Fservers'}">Start a server</a> <a class="oc-button oc-button--quiet" href="/rooms">Rooms</a> <a class="oc-button oc-button--quiet" href="${signedIn ? '/messages' : '/auth/login?next=%2Fmessages'}">Messages</a></p>
+${parts.stats}</header>
+<section class="oc-room" aria-labelledby="oc-h">
+<h2 id="oc-h">Global chat</h2>
 <p class="oc-muted">One room for everyone on OpenVibe: streamers, viewers and players, from every site. <span class="oc-live" id="oc-live" hidden>● live</span></p>
 ${error}
 <ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${shown.map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>
 ${composer}
 </section>
-${whatChatDoes(actor.kind === 'user')}`,
+${parts.streams}
+${parts.places}
+${whatChatDoes(signedIn)}
+${parts.steps}
+${parts.faq}
+${parts.more}`,
             showcase: true,
         });
     });
