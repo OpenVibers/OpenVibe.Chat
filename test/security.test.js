@@ -111,6 +111,26 @@ t('/me and /tts obey followers-only and the slur filter', async () => {
     for (const w of [viewer, bobWs, bob2]) w.close();
 });
 
+t('global chat refuses the built-in slurs, /me included; an offline channel room keeps its streamer\'s choice', async () => {
+    const slur = ['k', 'y', 'k', 'e'].join('');   // one of the built-in antisemitic patterns, spelled out at run time
+    const reader = await joined({ ip: '198.51.100.40', token: streamer.token }, {});
+    const bobG = await joined({ ip: '198.51.100.41', token: bob.token }, {});
+    bobG.sendJson({ type: 'chat', message: `you ${slur}` });
+    await bobG.next((m) => m.type === 'system' && /global chat does not allow slurs/.test(m.message));
+    await h.sleep(1100);
+    bobG.sendJson({ type: 'chat', message: `/me says ${slur}` });
+    await bobG.next((m) => m.type === 'system' && /global chat does not allow slurs/.test(m.message));
+    assert.ok(await reader.none((m) => new RegExp(slur).test(m.message || ''), 300), 'a slur reached global chat');
+    await h.sleep(1100);
+    bobG.sendJson({ type: 'chat', message: 'a perfectly ordinary line' });
+    await reader.next((m) => m.type === 'chat' && m.message === 'a perfectly ordinary line');
+    // An offline channel's room is the streamer's own: no global rule there (their Anti-Slur Nudge is off).
+    const own = await joined({ ip: '198.51.100.42', token: bob.token }, { channelUserId: other.id });
+    own.sendJson({ type: 'chat', message: `quoting ${slur} in a channel room` });
+    assert.ok(await own.none((m) => m.type === 'system' && /global chat/.test(m.message || ''), 300), 'the global rule reached a channel room');
+    for (const w of [reader, bobG, own]) w.close();
+});
+
 t('joining the channel room without the stream id does not skip slow mode or IP approval', async () => {
     const own = await joined({ ip: '198.51.100.30', token: streamer.token, stream: streamX }, { streamId: streamX });
     own.sendJson({ type: 'chat', message: '/slow 30' });
