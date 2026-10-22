@@ -61,6 +61,9 @@ const SUB_ONLY_ANON = 'This chat is in sub-only mode: sign in and subscribe to c
 // A person's own lines: what someone who blocked them on the network no longer gets (network-blocks.js).
 const LINE_FRAMES = new Set(['chat', 'tts', 'tts-audio']);
 const DEFAULT_SLUR_NUDGE = 'This streamer enabled Anti-Slur Nudge for this chat. Free speech is still alive, but this lane is closed today. Try a different word and keep it funny.';
+// Global chat is OpenVibe's own room, read on every site: the built-in slur list always applies there. Stream and
+// channel chats keep each streamer's own choice (the Anti-Slur Nudge settings).
+const GLOBAL_SLUR_REFUSED = 'That message was not sent: global chat does not allow slurs. Try different words.';
 // Built-in slur categories and normalization are defined in moderation-utils.js
 // (single source of truth — browser-side chat.js mirrors the same patterns).
 const {
@@ -1099,7 +1102,13 @@ class ChatServer {
      * the anti-slur filter. Tells the sender and returns true when the line is refused.
      */
     async _chatRulesBlock(ws, client, text, modStreamId) {
-        if (!modStreamId) return false;
+        if (!modStreamId) {
+            // A channel's room with no live stream is still the streamer's; only global chat has OpenVibe's rule.
+            if (client.streamId || client.channelUserId || permissions.can(client.user, 'staff.moderation.bypass')) return false;
+            if (!this._containsCoreSlur(text, [])) return false;
+            this.sendTo(ws, { type: 'system', message: GLOBAL_SLUR_REFUSED });
+            return true;
+        }
         const chatSettings = await this._getChannelChatSettings(modStreamId);
         const isStaff = permissions.can(client.user, 'staff.moderation.bypass');
         const canModerateThisStream = await permissions.canModerateStream(client.user, modStreamId);
