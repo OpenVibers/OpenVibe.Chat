@@ -31,7 +31,9 @@ t('boot', async () => {
 t('global chat reads without JavaScript; signing in shows the composer', async () => {
     const r = await req('GET', '/');
     assert.strictEqual(r.status, 200);
-    assert.match(r.text, /<h1 id="oc-h">Global chat<\/h1>/);
+    assert.match(r.text, /<h2 id="oc-h">Global chat<\/h2>/);
+    assert.strictEqual((r.text.match(/<h1[\s>]/g) || []).length, 1, 'one h1: what the site is');
+    assert.match(r.text, /<title>OpenVibe\.Chat: global chat, servers, rooms and calls<\/title>/);
     assert.match(r.text, /Sign in with OpenVibe/);
     assert.match(r.text, /<meta name="robots" content="index, follow">/);
     assert.match(r.text, /\/shared\/navbar\.js\?v=/, 'the Frame from this site\'s own /shared/');
@@ -275,6 +277,44 @@ t('||spoilers|| render hidden on the pages: split before escaping, links inside 
     assert.ok(!/href="[^"]*(<|\|\|)/.test(tricky) && !/onmouseover="x/.test(tricky), 'nothing from a spoiler reaches an attribute');
     const css = require('fs').readFileSync(require('path').join(__dirname, '../public/web/chat.css'), 'utf8');
     assert.match(css, /\.oc-spoiler:not\(\.revealed\):not\(:focus\) \* \{ visibility: hidden; \}/);
+});
+
+t('the front page shows real activity: this week\'s numbers, the busiest stream chats (live first), questions with their FAQPage', async () => {
+    const db = require('../server/db/database');
+    require('../server/web/home')._reset();
+    const streamer = h.addUser('streamer_one', { subject: ids.newId('user') });
+    const quiet = h.addUser('quiet_one', { subject: ids.newId('user') });
+    const banned = h.addUser('banned_one', { subject: ids.newId('user') });
+    for (const u of [streamer, quiet, banned]) await h.ctx.upsertUser(h.live.users.get(u.id));
+    await db.run('UPDATE ctx_users SET is_banned = 1 WHERE id = ?', [banned.id]);
+    const now = new Date().toISOString().replace('T', ' ').slice(0, 19);
+    const old = new Date(Date.now() - 9 * 86400000).toISOString().replace('T', ' ').slice(0, 19);
+    const line = (channel, user, ts, extra = {}) => db.run(`INSERT INTO chat_messages (stream_id, user_id, username, message, message_type, is_global, timestamp, channel_user_id, is_deleted)
+        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?)`, [1, user.id, user.username, extra.text || 'hi', extra.type || 'chat', ts, channel.id, extra.deleted ? 1 : 0]);
+    await line(streamer, alice, now); await line(streamer, bob, now); await line(streamer, alice, now);
+    await line(streamer, bob, now, { deleted: true });
+    await line(streamer, carol, now, { type: 'system' });
+    await line(streamer, carol, old);
+    await line(quiet, alice, now);
+    await line(banned, alice, now); await line(banned, bob, now); await line(banned, carol, now);
+    await db.run("INSERT INTO ctx_streams (user_id, title, is_live, started_at) VALUES (?, 'Quiet but live', 1, ?)", [quiet.id, now]);
+    const r = await req('GET', '/');
+    assert.strictEqual(r.status, 200);
+    const streams = (/<section class="oc-home-sec" aria-labelledby="oc-h-streams">[\s\S]*?<\/section>/.exec(r.text) || [''])[0];
+    assert.ok(streams.includes('href="https://openvibe.live/@streamer_one"') && streams.includes('3 messages from 2 people this week'), streams.slice(0, 600));
+    assert.ok(streams.indexOf('@quiet_one') !== -1 && streams.indexOf('@quiet_one') < streams.indexOf('@streamer_one'), 'a live stream comes first, however quiet');
+    assert.ok(streams.includes('Live now') && streams.includes('Quiet but live'));
+    assert.ok(!streams.includes('banned_one'), 'a banned channel is not shown');
+    assert.match(r.text, /<dt>messages this week<\/dt><dd>\d[\d,]*<\/dd>/, 'the week\'s count');
+    // Public rooms made earlier in this file are listed with their links; a part with nothing to show is left out.
+    const pub = await require('../server/rooms/rooms').list(null);
+    assert.strictEqual(r.text.includes('id="oc-h-rooms"'), pub.public.length > 0, 'the rooms part shows exactly when there are public rooms');
+    for (const room of pub.public.slice(0, 6)) assert.ok(r.text.includes(`href="/r/${room.slug}"`), `room ${room.slug} is linked`);
+    const ld = [...r.text.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)].flatMap((m) => [].concat(JSON.parse(m[1])));
+    const faq = ld.find((x) => x['@type'] === 'FAQPage');
+    const shown = [...r.text.matchAll(/<summary>([^<]*)<\/summary>/g)].map((m) => m[1].replace(/&#39;/g, "'"));
+    assert.deepStrictEqual(faq.mainEntity.map((q) => q.name), shown, 'every question in the FAQPage is on the page');
+    assert.match(r.text, /<meta name="description" content="[^"]{50,160}">/);
 });
 
 t.run(async () => { if (h && h.close) await h.close(); });

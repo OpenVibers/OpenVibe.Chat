@@ -62,12 +62,12 @@ function newestRoomActivity(pages) {
 function homeJsonLd(config) {
     const site = String(config.web.baseUrl).replace(/\/+$/, '');
     const name = 'OpenVibe.Chat';
-    const description = 'The network-wide chat room of OpenVibe: everyone on every OpenVibe site, in one conversation, with rooms and direct messages.';
+    const description = 'Chat with everyone on OpenVibe, start a server with text and voice channels, message friends and call them. Free and open source.';
     return [
         seo.jsonLd.website({ name, url: site, description }),
         seo.jsonLd.softwareApp({
             name, url: site, description, category: 'SocialNetworkingApplication',
-            keywords: 'chat, rooms, direct messages, openvibe',
+            keywords: 'chat, chat rooms, community servers, voice channels, video calls, direct messages, AI chat members, openvibe',
         }),
         seo.jsonLd.webPage({ name: 'Global chat', url: `${site}/`, description, siteUrl: site }),
     ];
@@ -91,7 +91,7 @@ function createDiscoveryRoutes({ config }) {
     router.get('/llms.txt', (req, res) => {
         res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.llmsTxt({
             name: 'OpenVibe.Chat',
-            summary: 'OpenVibe.Chat: the network-wide chat room of OpenVibe, plus its rooms and the direct messages of its members.',
+            summary: 'OpenVibe.Chat: global chat for the whole OpenVibe network, the chat of every stream on OpenVibe.Live, servers with text and voice channels, rooms, direct messages, calls and AI members.',
             details: 'One OpenVibe account works here and on every other OpenVibe site. Anyone can read the global chat and the public rooms without an account; posting needs a signed-in person. The global chat and the public room pages are readable as plain HTML without JavaScript and update live over the site\'s own WebSocket. Direct messages, room settings and the API are per-person and are never listed here.',
             sections: [
                 { title: 'Start here', links: [

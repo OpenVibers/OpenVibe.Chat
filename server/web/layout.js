@@ -99,7 +99,8 @@ function contentSecurityPolicy(nonce) {
 function renderPage(o) {
     const { config } = o;
     if (!o.robots) throw new TypeError('renderPage needs explicit robots');
-    const title = o.title ? `${o.title} · ${SITE_NAME}` : SITE_NAME;
+    // fullTitle: a page that names the site itself (the front page) takes no suffix.
+    const title = o.fullTitle || (o.title ? `${o.title} · ${SITE_NAME}` : SITE_NAME);
     const head = sharedSeo.headTags({
         title, description: o.description || DEFAULT_DESCRIPTION, canonical: `${config.web.baseUrl}${o.path || '/'}`,
         robots: o.robots, siteName: SITE_NAME, type: 'website', jsonLd: o.jsonLd,
