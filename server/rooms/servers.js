@@ -35,6 +35,9 @@ const fail = (status, code, message) => { throw new RoomError(status, code, mess
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$/;
 const RESERVED = new Set(['new', 'servers', 'settings', 'join', 'invite', 'invites', 'api', 'admin', 'staff', 'help', 'explore', 'discover', 'openvibe']);
+// OpenVibe's own server (/s/openvibe): only chat staff may take this reserved address, and the pages mark it Official
+// and list it first, so the official place is never a look-alike someone else registered.
+const OFFICIAL_SLUG = 'openvibe';
 const ROLES = ['owner', 'admin', 'mod', 'member', 'blocked'];
 const RANK = { owner: 0, admin: 1, mod: 2, member: 3, blocked: 4 };
 const CHANNEL_KINDS = { text: 'community', voice: 'call' };
@@ -101,7 +104,7 @@ function publicServer(s, extra = {}) {
     if (!s) return null;
     return {
         id: Number(s.id), slug: s.slug, name: s.name, description: s.description || null, visibility: s.visibility,
-        members: Number(s.member_count) || 0, created_at: s.created_at, ...extra,
+        official: s.slug === OFFICIAL_SLUG, members: Number(s.member_count) || 0, created_at: s.created_at, ...extra,
     };
 }
 
@@ -162,7 +165,7 @@ async function create(user, { name, slug, description, visibility = 'public' } =
     if (!n) fail(422, 'servers.name', 'Server names are 2 to 40 characters');
     if (wordFilter.check(n).safe === false) fail(422, 'servers.name_filtered', 'That server name is not allowed');
     const s = slug ? String(slug).toLowerCase().trim() : slugify(n);
-    if (!SLUG_RE.test(s) || RESERVED.has(s)) fail(422, 'servers.slug', 'Server addresses are 3 to 32 lowercase letters, numbers and dashes (and not a reserved word)');
+    if (!SLUG_RE.test(s) || (RESERVED.has(s) && !(s === OFFICIAL_SLUG && isStaff(user)))) fail(422, 'servers.slug', 'Server addresses are 3 to 32 lowercase letters, numbers and dashes (and not a reserved word)');
     if (!['public', 'private'].includes(visibility)) fail(422, 'servers.visibility', 'A server is public or private');
     const d = description ? String(description).replace(/\s+/g, ' ').trim().slice(0, 300) || null : null;
     if (d && wordFilter.check(d).safe === false) fail(422, 'servers.description_filtered', 'That description is not allowed');
@@ -185,7 +188,7 @@ async function create(user, { name, slug, description, visibility = 'public' } =
 /** The servers `user` is in (with unread counts), and public servers by size. */
 async function list(user, { limit = 50 } = {}) {
     const lim = Math.min(100, Math.max(1, Number(limit) || 50));
-    const pub = (await db.all("SELECT * FROM chat_servers WHERE visibility = 'public' AND archived_at IS NULL ORDER BY member_count DESC, id DESC LIMIT ?", [lim])).map((s) => publicServer(s));
+    const pub = (await db.all("SELECT * FROM chat_servers WHERE visibility = 'public' AND archived_at IS NULL ORDER BY (slug = ?) DESC, member_count DESC, id DESC LIMIT ?", [OFFICIAL_SLUG, lim])).map((s) => publicServer(s));
     if (!user) return { public: pub, mine: [] };
     const rows = await db.all(`SELECT s.*, m.role FROM chat_server_members m JOIN chat_servers s ON s.id = m.server_id
         WHERE m.user_id = ? AND m.role != 'blocked' AND s.archived_at IS NULL ORDER BY m.joined_at, s.id`, [user.id]);
@@ -413,5 +416,5 @@ module.exports = {
     bySlug, byId, roleIn, access, channelAccess, publicServer, publicChannel, channels, channelBySlug,
     create, list, join, leave, setRole, members, update, createChannel, updateChannel, deleteChannel,
     createInvite, invites, revokeInvite, inviteByCode, archive,
-    SLUG_RE, ROLES, RANK, MAX_SERVERS_PER_OWNER, MAX_CHANNELS,
+    SLUG_RE, ROLES, RANK, MAX_SERVERS_PER_OWNER, MAX_CHANNELS, OFFICIAL_SLUG,
 };

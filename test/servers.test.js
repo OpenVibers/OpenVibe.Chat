@@ -221,4 +221,17 @@ t('account deletion: memberships go; an owned server stays without an owner whil
     assert.ok(sent[0].body.erased.servers >= 1 && sent[0].body.retained.servers_without_owner >= 1, JSON.stringify(sent[0].body));
 });
 
+t('the official server: only chat staff take /s/openvibe; it is marked official and listed first', async () => {
+    assert.strictEqual((await api('POST', '/', bob, { name: 'OpenVibe', slug: 'openvibe' })).status, 422, 'a member cannot take the official address');
+    const r = await api('POST', '/', staff, { name: 'OpenVibe', slug: 'openvibe', description: 'OpenVibe\'s own server: help, feedback and what is new' });
+    assert.strictEqual(r.status, 201, r.text);
+    assert.strictEqual(r.body.server.official, true);
+    const list = (await api('GET', '/', null)).body.public;
+    assert.strictEqual(list[0].slug, 'openvibe', 'listed first, whatever its size');
+    assert.ok(list.slice(1).every((x) => x.official === false), 'no other server is official');
+    assert.strictEqual((await api('POST', '/', staff, { name: 'Explore', slug: 'explore' })).status, 422, 'the other reserved words stay reserved, even for staff');
+    assert.match((await page('/servers', null)).text, /<strong>OpenVibe<\/strong><span class="oc-badge oc-badge-official">official<\/span>/);
+    assert.match((await page('/s/openvibe', null)).text, /oc-srv-name">OpenVibe<\/h1><span class="oc-badge oc-badge-official">official<\/span>/);
+});
+
 t.run(async () => { if (h && h.close) await h.close(); });

@@ -120,7 +120,7 @@ function streamsSection(a) {
 }
 
 function placesSection(a) {
-    const servers = a.servers.map((s) => `<li><a class="oc-stream" href="/s/${esc(s.slug)}"><span class="oc-stream-name"><strong>${esc(s.name)}</strong></span><span class="oc-muted">${esc(s.description || plural(s.members, 'member', 'members'))}</span></a></li>`);
+    const servers = a.servers.map((s) => `<li><a class="oc-stream" href="/s/${esc(s.slug)}"><span class="oc-stream-name"><strong>${esc(s.name)}</strong>${s.official ? ' <span class="oc-badge oc-badge-official">official</span>' : ''}</span><span class="oc-muted">${esc(s.description || plural(s.members, 'member', 'members'))}</span></a></li>`);
     const rooms = a.rooms.map((r) => `<li><a class="oc-stream" href="/r/${esc(r.slug)}"><span class="oc-stream-name"><strong>${esc(r.name)}</strong></span><span class="oc-muted">${esc(r.topic || plural(r.members, 'member', 'members'))}${r.last_message_at ? ` · last ${esc(ago(r.last_message_at))}` : ''}</span></a></li>`);
     return [
         servers.length ? `<section class="oc-home-sec" aria-labelledby="oc-h-servers"><div class="oc-home-head"><h2 id="oc-h-servers">Public servers</h2><a href="/servers">All servers</a></div><ul class="oc-streams" role="list">${servers.join('')}</ul></section>` : '',
