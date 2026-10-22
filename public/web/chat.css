@@ -228,6 +228,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-srv-card-title { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
 .oc-srv-card-title .oc-badge { margin-left: 0; }
 .oc-badge-new { color: var(--oc-text); border-color: var(--oc-red); }
+.oc-badge-official { color: var(--oc-text); border-color: var(--accent-strong, var(--accent, #3b82f6)); }
 .oc-moves { display: inline-flex; gap: 4px; margin-left: auto; }
 .oc-move { width: 30px; height: 30px; padding: 0; border-radius: 8px; background: var(--oc-panel-2); color: var(--oc-text); border: 1px solid var(--oc-line); font-weight: 700; line-height: 1; }
 .oc-move:hover { border-color: var(--oc-accent); }

@@ -43,7 +43,7 @@ function mountServerPages(router, h) {
     const errorOf = (req) => (req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '');
 
     const icon = (s, active) => `<a class="oc-srv-icon${active ? ' is-active' : ''}" href="/s/${esc(s.slug)}" title="${esc(s.name)}" style="--oc-hue:${hueOf(s.slug)}"${active ? ' aria-current="page"' : ''}><span aria-hidden="true">${esc(initials(s.name))}</span><span class="oc-sr">${esc(s.name)}</span>${s.unread ? `<span class="oc-srv-dot" aria-label="${s.unread} unread">${s.unread > 99 ? '99+' : s.unread}</span>` : ''}</a>`;
-    const serverCard = (s) => `<li class="oc-srv-card"><a href="/s/${esc(s.slug)}"><span class="oc-srv-icon oc-srv-icon--card" style="--oc-hue:${hueOf(s.slug)}" aria-hidden="true">${esc(initials(s.name))}</span><span class="oc-srv-card-text"><span class="oc-srv-card-title"><strong>${esc(s.name)}</strong>${s.visibility === 'private' ? '<span class="oc-badge">private</span>' : ''}${s.unread ? `<span class="oc-badge oc-badge-new">${s.unread} new</span>` : ''}</span><span class="oc-muted">${esc(s.description || `${s.members} member${s.members === 1 ? '' : 's'}`)}</span></span></a></li>`;
+    const serverCard = (s) => `<li class="oc-srv-card"><a href="/s/${esc(s.slug)}"><span class="oc-srv-icon oc-srv-icon--card" style="--oc-hue:${hueOf(s.slug)}" aria-hidden="true">${esc(initials(s.name))}</span><span class="oc-srv-card-text"><span class="oc-srv-card-title"><strong>${esc(s.name)}</strong>${s.official ? '<span class="oc-badge oc-badge-official">official</span>' : ''}${s.visibility === 'private' ? '<span class="oc-badge">private</span>' : ''}${s.unread ? `<span class="oc-badge oc-badge-new">${s.unread} new</span>` : ''}</span><span class="oc-muted">${esc(s.description || `${s.members} member${s.members === 1 ? '' : 's'}`)}</span></span></a></li>`;
 
     // ── The directory ──
     router.get('/servers', async (req, res) => {
@@ -143,7 +143,7 @@ ${create}`,
 <a class="oc-srv-icon oc-srv-add" href="/servers#oc-new-server" title="Start a server"><span aria-hidden="true">+</span><span class="oc-sr">Start a server</span></a>
 <a class="oc-srv-icon oc-srv-explore" href="/servers" title="Find servers">${SEARCH_ICON}<span class="oc-sr">Find servers</span></a></nav>
 <aside class="oc-srv-side" aria-label="${esc(server.name)}">
-<header class="oc-srv-head"><h1 class="oc-srv-name">${esc(server.name)}</h1>${server.visibility === 'private' ? '<span class="oc-badge">private</span>' : ''}
+<header class="oc-srv-head"><h1 class="oc-srv-name">${esc(server.name)}</h1>${server.slug === servers.OFFICIAL_SLUG ? '<span class="oc-badge oc-badge-official">official</span>' : ''}${server.visibility === 'private' ? '<span class="oc-badge">private</span>' : ''}
 <p class="oc-muted oc-srv-meta">${Number(server.member_count) || 0} member${Number(server.member_count) === 1 ? '' : 's'}${YOU_ARE[can.role] ? ` · you are ${YOU_ARE[can.role]}` : ''}</p>
 ${server.description ? `<p class="oc-srv-desc">${esc(server.description)}</p>` : ''}</header>
 <details class="oc-srv-channels" open><summary>Channels</summary>
