@@ -64,6 +64,8 @@ const VOICE_CATALOG = {
     warlord:        { name: 'WarLord',           emoji: '⚔️', engine: 'espeak-ng', rarity: 'rare',      tier: 3, params: { voice: 'en+m7',         pitch: 10,  speed: 110 } },
     degenking:      { name: 'DegenKing',         emoji: '👑', engine: 'espeak-ng', rarity: 'rare',      tier: 3, params: { voice: 'en+m5',         pitch: 75,  speed: 195 } },
     fisherman:      { name: 'OldManSea',         emoji: '🎣', engine: 'espeak-ng', rarity: 'rare',      tier: 3, params: { voice: 'en+m4',         pitch: 30,  speed: 95  } },
+    // A Live skill-mastery voice (vs_mine_dwarf_lord): deep and slow.
+    vs_mine_dwarf_lord: { name: 'DwarfLord',      emoji: '⛏️', engine: 'espeak-ng', rarity: 'legendary', tier: 5, params: { voice: 'en+m7',         pitch: 5,   speed: 120 } },
     coinlord:       { name: 'CoinLord',          emoji: '💰', engine: 'espeak-ng', rarity: 'rare',      tier: 3, params: { voice: 'en+m6',         pitch: 40,  speed: 150 } },
 
     // ── Google Cloud TTS voices ───────────────────────────────
@@ -93,35 +95,37 @@ const VOICE_CATALOG = {
     // Journey
     gc_journey_sage:    { name: 'JourneySage',       emoji: '🗺️', engine: 'google-cloud', rarity: 'mythic', tier: 6, cloudVoice: { name: 'en-US-Journey-D',  gender: 'MALE',   locale: 'en-US' } },
     gc_journey_oracle:  { name: 'JourneyOracle',     emoji: '🗺️', engine: 'google-cloud', rarity: 'mythic', tier: 6, cloudVoice: { name: 'en-US-Journey-F',  gender: 'FEMALE', locale: 'en-US' } },
+    // One of a kind (2026-10-22): Josh's Vegas Announcer, a deep, unhurried Neural2 voice.
+    voice_vegas:        { name: 'VegasAnnouncer',    emoji: '🎙️', engine: 'google-cloud', rarity: 'mythic', tier: 6, cloudVoice: { name: 'en-US-Neural2-J',  gender: 'MALE',   locale: 'en-US', pitch: -4.0, speakingRate: 0.9 } },
     gc_journey_whisper: { name: 'JourneyWhisper',    emoji: '🗺️', engine: 'google-cloud', rarity: 'mythic', tier: 6, cloudVoice: { name: 'en-US-Journey-O',  gender: 'FEMALE', locale: 'en-US' } },
 
     // ── Amazon Polly voices ───────────────────────────────────
     // Standard
-    pl_joanna_std:      { name: 'PollyJoanna',      emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Joanna',   engine: 'standard', locale: 'en-US' } },
-    pl_matthew_std:     { name: 'PollyMatt',         emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Matthew',  engine: 'standard', locale: 'en-US' } },
-    pl_amy_std:         { name: 'PollyAmy',          emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Amy',      engine: 'standard', locale: 'en-GB' } },
-    pl_brian_std:       { name: 'PollyBrian',        emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Brian',    engine: 'standard', locale: 'en-GB' } },
-    pl_olivia_std:      { name: 'PollyOlivia',       emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Olivia',   engine: 'standard', locale: 'en-AU' } },
-    pl_ivy_std:         { name: 'PollyIvy',          emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Ivy',      engine: 'standard', locale: 'en-US' } },
-    pl_joey_std:        { name: 'PollyJoey',         emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Joey',     engine: 'standard', locale: 'en-US' } },
-    pl_kendra_std:      { name: 'PollyKendra',       emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Kendra',   engine: 'standard', locale: 'en-US' } },
+    pl_joanna_std:      { name: 'PollyJoanna',      emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Joanna',   engine: 'standard', locale: 'en-US' }, googleStandIn: { name: 'en-US-Standard-F', gender: 'FEMALE', locale: 'en-US' } },
+    pl_matthew_std:     { name: 'PollyMatt',         emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Matthew',  engine: 'standard', locale: 'en-US' }, googleStandIn: { name: 'en-US-Standard-B', gender: 'MALE', locale: 'en-US' } },
+    pl_amy_std:         { name: 'PollyAmy',          emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Amy',      engine: 'standard', locale: 'en-GB' }, googleStandIn: { name: 'en-GB-Standard-C', gender: 'FEMALE', locale: 'en-GB' } },
+    pl_brian_std:       { name: 'PollyBrian',        emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Brian',    engine: 'standard', locale: 'en-GB' }, googleStandIn: { name: 'en-GB-Standard-D', gender: 'MALE', locale: 'en-GB' } },
+    pl_olivia_std:      { name: 'PollyOlivia',       emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Olivia',   engine: 'standard', locale: 'en-AU' }, googleStandIn: { name: 'en-AU-Standard-C', gender: 'FEMALE', locale: 'en-AU' } },
+    pl_ivy_std:         { name: 'PollyIvy',          emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Ivy',      engine: 'standard', locale: 'en-US' }, googleStandIn: { name: 'en-US-Standard-G', gender: 'FEMALE', locale: 'en-US' } },
+    pl_joey_std:        { name: 'PollyJoey',         emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Joey',     engine: 'standard', locale: 'en-US' }, googleStandIn: { name: 'en-US-Standard-I', gender: 'MALE', locale: 'en-US' } },
+    pl_kendra_std:      { name: 'PollyKendra',       emoji: '🎤', engine: 'amazon-polly', rarity: 'rare', tier: 3, pollyVoice: { voiceId: 'Kendra',   engine: 'standard', locale: 'en-US' }, googleStandIn: { name: 'en-US-Standard-E', gender: 'FEMALE', locale: 'en-US' } },
     // Neural
-    pl_joanna_neural:   { name: 'NeuralJoanna',     emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Joanna',   engine: 'neural',   locale: 'en-US' } },
-    pl_matthew_neural:  { name: 'NeuralMatt',        emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Matthew',  engine: 'neural',   locale: 'en-US' } },
-    pl_ruth_neural:     { name: 'NeuralRuth',        emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Ruth',     engine: 'neural',   locale: 'en-US' } },
-    pl_stephen_neural:  { name: 'NeuralStephen',     emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Stephen',  engine: 'neural',   locale: 'en-US' } },
-    pl_amy_neural:      { name: 'NeuralAmy',         emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Amy',      engine: 'neural',   locale: 'en-GB' } },
-    pl_arthur_neural:   { name: 'NeuralArthur',      emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Arthur',   engine: 'neural',   locale: 'en-GB' } },
-    pl_danielle_neural: { name: 'NeuralDanielle',    emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Danielle', engine: 'neural',   locale: 'en-US' } },
-    pl_gregory_neural:  { name: 'NeuralGregory',     emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Gregory',  engine: 'neural',   locale: 'en-US' } },
-    pl_kevin_neural:    { name: 'NeuralKevin',       emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Kevin',    engine: 'neural',   locale: 'en-US' } },
+    pl_joanna_neural:   { name: 'NeuralJoanna',     emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Joanna',   engine: 'neural',   locale: 'en-US' }, googleStandIn: { name: 'en-US-Neural2-C', gender: 'FEMALE', locale: 'en-US' } },
+    pl_matthew_neural:  { name: 'NeuralMatt',        emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Matthew',  engine: 'neural',   locale: 'en-US' }, googleStandIn: { name: 'en-US-Neural2-A', gender: 'MALE', locale: 'en-US' } },
+    pl_ruth_neural:     { name: 'NeuralRuth',        emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Ruth',     engine: 'neural',   locale: 'en-US' }, googleStandIn: { name: 'en-US-Neural2-E', gender: 'FEMALE', locale: 'en-US' } },
+    pl_stephen_neural:  { name: 'NeuralStephen',     emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Stephen',  engine: 'neural',   locale: 'en-US' }, googleStandIn: { name: 'en-US-Neural2-I', gender: 'MALE', locale: 'en-US' } },
+    pl_amy_neural:      { name: 'NeuralAmy',         emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Amy',      engine: 'neural',   locale: 'en-GB' }, googleStandIn: { name: 'en-GB-Neural2-C', gender: 'FEMALE', locale: 'en-GB' } },
+    pl_arthur_neural:   { name: 'NeuralArthur',      emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Arthur',   engine: 'neural',   locale: 'en-GB' }, googleStandIn: { name: 'en-GB-Neural2-B', gender: 'MALE', locale: 'en-GB' } },
+    pl_danielle_neural: { name: 'NeuralDanielle',    emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Danielle', engine: 'neural',   locale: 'en-US' }, googleStandIn: { name: 'en-US-Neural2-G', gender: 'FEMALE', locale: 'en-US' } },
+    pl_gregory_neural:  { name: 'NeuralGregory',     emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Gregory',  engine: 'neural',   locale: 'en-US' }, googleStandIn: { name: 'en-US-Wavenet-B', gender: 'MALE', locale: 'en-US' } },
+    pl_kevin_neural:    { name: 'NeuralKevin',       emoji: '🧠', engine: 'amazon-polly', rarity: 'epic', tier: 4, pollyVoice: { voiceId: 'Kevin',    engine: 'neural',   locale: 'en-US' }, googleStandIn: { name: 'en-US-Wavenet-I', gender: 'MALE', locale: 'en-US' } },
     // Long-form
-    pl_danielle_long:   { name: 'LongDanielle',     emoji: '📖', engine: 'amazon-polly', rarity: 'legendary', tier: 5, pollyVoice: { voiceId: 'Danielle', engine: 'long-form', locale: 'en-US' } },
-    pl_gregory_long:    { name: 'LongGregory',      emoji: '📖', engine: 'amazon-polly', rarity: 'legendary', tier: 5, pollyVoice: { voiceId: 'Gregory',  engine: 'long-form', locale: 'en-US' } },
-    pl_ruth_long:       { name: 'LongRuth',         emoji: '📖', engine: 'amazon-polly', rarity: 'legendary', tier: 5, pollyVoice: { voiceId: 'Ruth',     engine: 'long-form', locale: 'en-US' } },
+    pl_danielle_long:   { name: 'LongDanielle',     emoji: '📖', engine: 'amazon-polly', rarity: 'legendary', tier: 5, pollyVoice: { voiceId: 'Danielle', engine: 'long-form', locale: 'en-US' }, googleStandIn: { name: 'en-US-Wavenet-H', gender: 'FEMALE', locale: 'en-US' } },
+    pl_gregory_long:    { name: 'LongGregory',      emoji: '📖', engine: 'amazon-polly', rarity: 'legendary', tier: 5, pollyVoice: { voiceId: 'Gregory',  engine: 'long-form', locale: 'en-US' }, googleStandIn: { name: 'en-US-Wavenet-J', gender: 'MALE', locale: 'en-US' } },
+    pl_ruth_long:       { name: 'LongRuth',         emoji: '📖', engine: 'amazon-polly', rarity: 'legendary', tier: 5, pollyVoice: { voiceId: 'Ruth',     engine: 'long-form', locale: 'en-US' }, googleStandIn: { name: 'en-US-Wavenet-C', gender: 'FEMALE', locale: 'en-US' } },
     // Generative
-    pl_matthew_gen:     { name: 'GenMatt',           emoji: '🌟', engine: 'amazon-polly', rarity: 'mythic', tier: 6, pollyVoice: { voiceId: 'Matthew',  engine: 'generative', locale: 'en-US' } },
-    pl_ruth_gen:        { name: 'GenRuth',           emoji: '🌟', engine: 'amazon-polly', rarity: 'mythic', tier: 6, pollyVoice: { voiceId: 'Ruth',     engine: 'generative', locale: 'en-US' } },
+    pl_matthew_gen:     { name: 'GenMatt',           emoji: '🌟', engine: 'amazon-polly', rarity: 'mythic', tier: 6, pollyVoice: { voiceId: 'Matthew',  engine: 'generative', locale: 'en-US' }, googleStandIn: { name: 'en-US-Wavenet-A', gender: 'MALE', locale: 'en-US' } },
+    pl_ruth_gen:        { name: 'GenRuth',           emoji: '🌟', engine: 'amazon-polly', rarity: 'mythic', tier: 6, pollyVoice: { voiceId: 'Ruth',     engine: 'generative', locale: 'en-US' }, googleStandIn: { name: 'en-US-Wavenet-E', gender: 'FEMALE', locale: 'en-US' } },
 
     // ── Browser-only voices (Self TTS — no server synthesis) ──
     voice_default:  { name: 'Default',    emoji: '🔊', engine: 'browser', rarity: 'common', tier: 0, browserVoice: { pitch: 1.0, rate: 1.0 } },
@@ -323,7 +327,7 @@ function synthesizeGoogleCloud(text, voiceDef) {
         const requestBody = JSON.stringify({
             input: { text },
             voice: { languageCode: cv.locale, name: cv.name, ssmlGender: cv.gender },
-            audioConfig: { audioEncoding: 'MP3', speakingRate: 1.0, pitch: 0.0 },
+            audioConfig: { audioEncoding: 'MP3', speakingRate: cv.speakingRate != null ? cv.speakingRate : 1.0, pitch: cv.pitch != null ? cv.pitch : 0.0 },
         });
 
         let headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(requestBody) };
@@ -584,10 +588,12 @@ async function _synthesizeWithDef(text, voiceDef, voiceId) {
                 return { ...(await synthesizeGoogleCloud(text, voiceDef)), voiceId };
             }
             case 'amazon-polly': {
-                if (!settings.awsAccessKeyId) {
-                    return _espeakFallback(text, voiceId);
+                if (!settings.awsAccessKeyId) return await _pollyStandIn(text, voiceDef, voiceId, 'AWS is not configured');
+                try {
+                    return { ...(await synthesizePolly(text, voiceDef)), voiceId };
+                } catch (err) {
+                    return await _pollyStandIn(text, voiceDef, voiceId, err.message);
                 }
-                return { ...(await synthesizePolly(text, voiceDef)), voiceId };
             }
             case 'espeak-ng':
                 return { ...(await synthesizeEspeak(text, voiceDef)), voiceId };
@@ -602,6 +608,27 @@ async function _synthesizeWithDef(text, voiceDef, voiceId) {
         }
         return null;
     }
+}
+
+// When Polly cannot answer (no AWS key, or a refused one: 2026-10-22 production answered 403 "The security token included
+// in the request is invalid" for every Polly voice), each Polly voice speaks with its own Google stand-in, so the voices
+// people equip stay different; only without Google too does it become Gary. The reason is logged at most once in ten
+// minutes, so a broken AWS key shows in the logs without flooding them.
+let _pollyWarnedAt = 0;
+async function _pollyStandIn(text, voiceDef, voiceId, reason) {
+    if (Date.now() - _pollyWarnedAt > 10 * 60 * 1000) {
+        _pollyWarnedAt = Date.now();
+        console.warn(`[TTS] Amazon Polly unavailable (${String(reason || '').slice(0, 160)}): Polly voices use their Google stand-ins`);
+    }
+    const settings = getTTSSettings();
+    if (voiceDef.googleStandIn && (settings.googleApiKey || settings.googleServiceAccount)) {
+        try {
+            return { ...(await synthesizeGoogleCloud(text, { cloudVoice: voiceDef.googleStandIn })), voiceId, fallback: 'google' };
+        } catch (err) {
+            console.error(`[TTS] Google stand-in failed (${voiceId}):`, err.message);
+        }
+    }
+    return _espeakFallback(text, voiceId);
 }
 
 function _espeakFallback(text, voiceId) {
