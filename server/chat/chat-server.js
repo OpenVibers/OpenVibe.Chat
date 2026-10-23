@@ -51,6 +51,8 @@ const MAX_CHAT_AUTO_DELETE_MINUTES = 10080;
 const MAX_SEND_BACKPRESSURE = 256 * 1024;
 const RATE_LIMIT_CACHE_TTL_MS = 10 * 60 * 1000;
 const SOUNDBOARD_RATE_LIMIT_MS = 8000;
+const REPEAT_WINDOW_MS = 30 * 1000;   // the repeat guard (_repeats): the same line at most REPEAT_MAX times in it
+const REPEAT_MAX = 3;
 const SOUNDBOARD_STREAM_MAX_PER_WINDOW = 15;
 const SOUNDBOARD_STREAM_WINDOW_MS = 60 * 1000;
 const GOTTI_GIF_URL = 'https://media1.tenor.com/m/Y-GsLUQT9LQAAAAd/deez-something-came-in-the-mail-today.gif';
@@ -90,6 +92,8 @@ class ChatServer {
         /** @type {Map<string, number>} `${ip}:${streamId}` → last message time (rate limiting) */
         this.rateLimits = new Map();
         this.DEFAULT_RATE_LIMIT_MS = 1000; // 1 message per second
+        /** @type {Map<string, {t: number, k: string}[]>} `${ip}:${streamId}` → recent lines (repeat guard, _repeats) */
+        this.recentLines = new Map();
         // Slow mode and sub-only mode are the channel's saved settings (slowModeMs, _chatRulesBlock);
         // channelId → { slow, sub } last announced to its room (_channelSettingsSeen).
         this._announcedModes = new Map();
@@ -200,6 +204,9 @@ class ChatServer {
                 if ((now - lastSeen) > RATE_LIMIT_CACHE_TTL_MS) {
                     this.rateLimits.delete(ip);
                 }
+            }
+            for (const [key, lines] of this.recentLines.entries()) {
+                if (!lines.length || now - lines[lines.length - 1].t > REPEAT_WINDOW_MS) this.recentLines.delete(key);
             }
 
             this.wss.clients.forEach((ws) => {
@@ -415,6 +422,23 @@ class ChatServer {
     }
 
     /**
+     * Repeat guard: whether this line is the (REPEAT_MAX + 1)th of the same within REPEAT_WINDOW_MS from one sender in
+     * one room. Lines compare without case or extra spaces, and every line with no letter, digit or emoji ("." "..")
+     * counts as the same one. Commands ("!forward", "/slow") are never counted: a robot's driver repeats them. A
+     * refused line is not remembered, so the sender is free again once the window moves on.
+     */
+    _repeats(key, text, now = Date.now()) {
+        const line = String(text == null ? '' : text).trim().toLowerCase().replace(/\s+/g, ' ');
+        if (!line || /^[!/]/.test(line)) return false;
+        const k = /[\p{L}\p{N}\p{Extended_Pictographic}]/u.test(line) ? line : '·';
+        const lines = (this.recentLines.get(key) || []).filter((x) => now - x.t < REPEAT_WINDOW_MS);
+        if (lines.filter((x) => x.k === k).length >= REPEAT_MAX) { this.recentLines.set(key, lines); return true; }
+        lines.push({ t: now, k });
+        this.recentLines.set(key, lines.slice(-20));
+        return false;
+    }
+
+    /**
      * Handle incoming chat message
      */
     async handleMessage(ws, msg) {
@@ -439,6 +463,12 @@ class ChatServer {
                 return;
             }
             this.rateLimits.set(rateKey, now);
+            // The same line again and again (2026-10-23: one viewer posted "." 170 times, 36 a minute, under
+            // the flood limit): the room's moderators may, everyone else is told once it repeats.
+            if (this._repeats(rateKey, msg.message, now) && !(client.user && await permissions.canModerateStream(client.user, slowStreamId))) {
+                this.sendTo(ws, { type: 'system', message: 'You already said that. Try something new.' });
+                return;
+            }
         }
 
         switch (msg.type) {
