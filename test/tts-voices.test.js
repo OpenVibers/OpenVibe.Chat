@@ -57,6 +57,10 @@ const voiceOf = (r) => Buffer.from(String(r.audio), 'base64').toString().replace
     assert.deepStrictEqual([vegas.engine, vegas.voiceId, voiceOf(vegas)], ['google-cloud', 'voice_vegas', 'en-US-Neural2-J']);
     const sent = JSON.parse(asked[0].body).audioConfig;
     assert.deepStrictEqual([sent.pitch, sent.speakingRate], [-4, 0.9], 'its own pitch and rate reach Google');
+    // 2fat's Bass Boss (2026-10-23): one of a kind too, deeper still.
+    const boss = await tts.synthesize('Bangers only', 'voice_twofat', '2fat');
+    assert.deepStrictEqual([boss.engine, boss.voiceId, voiceOf(boss)], ['google-cloud', 'voice_twofat', 'en-US-Neural2-D']);
+    assert.strictEqual(JSON.parse(asked[asked.length - 1].body).audioConfig.pitch, -8);
     const plain = await tts.synthesize('hello', 'gc_studio_m', 'x');
     assert.deepStrictEqual(JSON.parse(asked[asked.length - 1].body).audioConfig, { audioEncoding: 'MP3', speakingRate: 1, pitch: 0 }, 'other Google voices keep the defaults');
     assert.strictEqual(voiceOf(plain), 'en-US-Studio-Q');

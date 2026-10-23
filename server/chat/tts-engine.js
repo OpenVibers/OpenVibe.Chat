@@ -97,6 +97,8 @@ const VOICE_CATALOG = {
     gc_journey_oracle:  { name: 'JourneyOracle',     emoji: '🗺️', engine: 'google-cloud', rarity: 'mythic', tier: 6, cloudVoice: { name: 'en-US-Journey-F',  gender: 'FEMALE', locale: 'en-US' } },
     // One of a kind (2026-10-22): Josh's Vegas Announcer, a deep, unhurried Neural2 voice.
     voice_vegas:        { name: 'VegasAnnouncer',    emoji: '🎙️', engine: 'google-cloud', rarity: 'mythic', tier: 6, cloudVoice: { name: 'en-US-Neural2-J',  gender: 'MALE',   locale: 'en-US', pitch: -4.0, speakingRate: 0.9 } },
+    // One of a kind (2026-10-23): 2fat's Bass Boss, the deepest Neural2 voice there is (pitch -8).
+    voice_twofat:       { name: 'BassBoss',          emoji: '🎛️', engine: 'google-cloud', rarity: 'mythic', tier: 6, cloudVoice: { name: 'en-US-Neural2-D',  gender: 'MALE',   locale: 'en-US', pitch: -8.0, speakingRate: 1.0 } },
     gc_journey_whisper: { name: 'JourneyWhisper',    emoji: '🗺️', engine: 'google-cloud', rarity: 'mythic', tier: 6, cloudVoice: { name: 'en-US-Journey-O',  gender: 'FEMALE', locale: 'en-US' } },
 
     // ── Amazon Polly voices ───────────────────────────────────
