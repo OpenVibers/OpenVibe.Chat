@@ -487,8 +487,10 @@ WS-R task 4). A person counts as `user:usr_…` whether they call with their Net
 API token (a bot counts as its owner); anyone else by their address. Browsers call these routes
 themselves, so no service speaks for many visitors here; Live's service calls (the ingress at
 `/internal/chat`, the stream hooks at `/internal/calls`) carry every viewer's chat and are never
-limited. The per-address `/api/` limit and the chat flood controls (the socket's, DMs 10 a minute and
-5 new conversations an hour, rooms 6 every 10 s, 6 rings a minute) stay. Past a limit: `429`
+limited. The per-address `/api/` limit and the chat flood controls (the socket's: a message a second, and
+the same line at most 3 times in 30 s in a room, with punctuation-only lines counted as one and commands and
+the room's moderators exempt; DMs 10 a minute and 5 new conversations an hour, rooms 6 every 10 s, 6 rings a
+minute) stay. Past a limit: `429`
 problem+json `rate_limited` with `Retry-After`, one `[Limits]` log line and
 `chat_rate_limited_total{limit,window}`.
 

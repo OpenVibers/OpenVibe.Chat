@@ -376,4 +376,48 @@ t('a channel-only WebSocket line records the first chat for that channel', async
     ws.close();
 });
 
+t('the same line again and again is refused after three in 30 s (punctuation counts as one line); a new line, a command and a moderator are not', async () => {
+    const dana = h.addUser('dana');
+    await h.ctx.sync();
+    const ws = await h.ws({ ip: '198.51.100.62', token: dana.token, stream: streamId });
+    ws.sendJson({ type: 'join', streamId, token: dana.token });
+    await ws.next((m) => m.type === 'auth');
+    // ".", ".." and "..." are the same line to the guard: three go through, the fourth does not.
+    for (const line of ['.', '..', '...']) {
+        ws.sendJson({ type: 'chat', message: line });
+        await aliceWs.next((m) => m.type === 'chat' && m.message === line);
+        await h.sleep(1100);
+    }
+    const dots = () => aliceWs.all.filter((m) => m.type === 'chat' && m.message === '.' && m.core_username === 'dana').length;
+    const before = dots();
+    ws.sendJson({ type: 'chat', message: '.' });
+    await ws.next((m) => m.type === 'system' && m.message === 'You already said that. Try something new.');
+    await h.sleep(300);
+    assert.strictEqual(dots(), before, 'the fourth is not delivered');
+    await h.sleep(1100);
+    ws.sendJson({ type: 'chat', message: 'something new' });
+    await aliceWs.next((m) => m.type === 'chat' && m.message === 'something new');
+    ws.close();
+
+    // The rules on their own: case and spacing do not make a new line; commands never count; the window moves on.
+    const cs = h.chatServer;
+    const t0 = 1_000_000;
+    assert.deepStrictEqual(['Hi', 'hi ', 'HI', 'hi'].map((x, i) => cs._repeats('k1', x, t0 + i)), [false, false, false, true]);
+    assert.strictEqual(cs._repeats('k1', 'hi', t0 + 31_000), false, 'thirty seconds later it may be said again');
+    assert.ok([1, 2, 3, 4, 5].every((i) => cs._repeats('k2', '!forward', t0 + i) === false), 'a robot driver repeats its commands');
+    assert.ok(['😂', '😂', '😂'].every((x, i) => cs._repeats('k3', x, t0 + i) === false) && cs._repeats('k3', '😂', t0 + 9) === true, 'an emoji is a line of its own');
+    assert.strictEqual(cs._repeats('k3', '.', t0 + 10), false, 'punctuation is not the emoji');
+
+    // The room's moderators may repeat themselves.
+    const mws = await h.ws({ ip: '198.51.100.63', token: mod.token, stream: streamId });
+    mws.sendJson({ type: 'join', streamId, token: mod.token });
+    await mws.next((m) => m.type === 'auth');
+    for (let i = 0; i < 4; i++) {
+        mws.sendJson({ type: 'chat', message: 'raid incoming' });
+        await aliceWs.next((m) => m.type === 'chat' && m.message === 'raid incoming');
+        await h.sleep(1100);
+    }
+    mws.close();
+});
+
 t.run(async () => { for (const w of [aliceWs, bobWs, globalWs]) { try { w.close(); } catch { /* */ } } if (h) await h.close(); });
