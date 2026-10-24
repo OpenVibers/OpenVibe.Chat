@@ -188,3 +188,15 @@ body.oc-app-body { overflow: hidden; }
   .vb-sub { font-size: .92rem; margin-bottom: 16px; }
 }
 @media (prefers-reduced-motion: reduce) { .vb-rail { transition: none; } }
+
+/* A picture waiting to go with the next message (vibe.js), above the composer; the attach button inside it. */
+.vb-composer .vb-attach { width: 38px; height: 38px; margin-left: -8px; }
+.vb-preview { max-width: var(--vb-col); margin: 0 auto 8px; display: flex; }
+.vb-preview[hidden] { display: none; }
+.vb-preview figure { position: relative; margin: 0; }
+.vb-preview img { display: block; width: 72px; height: 72px; object-fit: cover; border-radius: 14px; border: 1px solid var(--oc-line); }
+.vb-preview button { all: unset; box-sizing: border-box; cursor: pointer; position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--oc-panel-2); color: var(--oc-text); border: 1px solid var(--oc-line); font-size: 14px; line-height: 1; }
+.vb-preview button:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
+.vb-bubble img.vb-local { display: block; max-width: 220px; max-height: 220px; border-radius: 12px; margin-top: 8px; }
+

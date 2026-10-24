@@ -406,6 +406,12 @@ socket, sends on Enter and keeps a draft typed while signed out through the sign
   person in `X-OV-Subject`; Network grants Chat `actor.task.create` and `actor.task.read`; `CHAT_ACTOR_INTERNAL_URL`;
   it counts against the person's Actor allowance; Vibe added to a room has it too), the time, dice, picks. It says
   plainly what it cannot do yet (make pictures, use the person's computer, reminders).
+- **Pictures** (`pictures.forModel`, `ai-members.js` `picturesFor`): an AI member (Vibe included) sees the
+  OpenVibe.Pics pictures a message links, or those of the asker's message just before it (picture first, then the
+  question), at most two, fetched from Pics on this host (Host `openvibe.pics`, at most 4 MB each) and sent as image
+  parts with the question. The app's composer has a picture button (or paste one); a new chat can start with a
+  picture: `POST /api/chat/vibe/picture` (the body is the picture, the question in `X-Caption`) creates the chat and
+  posts the picture through Pics as the person; a picture Pics refuses leaves no chat behind.
 - **Limits:** `CHAT_VIBE_REPLIES_PER_DAY` (100) answers a person a UTC day across all their chats (`vibe_usage`;
   deleting a chat gives none back), 60 messages an hour, 500 chats kept (starting one more deletes the oldest), the
   rooms' post limits. `CHAT_VIBE=0` turns Vibe off (it also needs AI members on and Chat's OAuth secret).

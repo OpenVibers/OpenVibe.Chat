@@ -17,6 +17,9 @@
   var room = cfg.room || null;
   var latest = Number(cfg.latest) || 0;
   var ws = null, delay = 1000, sending = false, waitTimer = null;
+  var fileInput = document.getElementById('vb-file');
+  var previewEl = document.getElementById('vb-preview');
+  var picture = null;   // { file, url }: a picture waiting to go with the next message
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function token() { var m = /(?:^|;\s*)ov_token=([^;]+)/.exec(document.cookie || ''); return m ? decodeURIComponent(m[1]) : undefined; }
@@ -30,7 +33,7 @@
   }
 
   // ── The composer ──
-  function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px'; form.classList.toggle('is-empty', !input.value.trim()); }
+  function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px'; form.classList.toggle('is-empty', !input.value.trim() && !picture); }
   if (input) {
     input.addEventListener('input', grow);
     input.addEventListener('keydown', function (e) {
@@ -45,6 +48,42 @@
     b.addEventListener('click', function () { input.value = b.getAttribute('data-prompt'); grow(); form.requestSubmit ? form.requestSubmit() : form.submit(); });
   });
 
+  // ── A picture with the message: it goes to OpenVibe.Pics as the person, and Vibe sees it ──
+  var PIC_TYPES = /^image\/(jpeg|png|gif|webp|avif)$/;
+  function clearPicture() {
+    if (picture && picture.url) URL.revokeObjectURL(picture.url);
+    picture = null;
+    if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; }
+    if (fileInput) fileInput.value = '';
+    if (input) input.required = true;
+  }
+  function choosePicture(file) {
+    if (!file) return;
+    if (!PIC_TYPES.test(file.type)) { notice('Send a JPEG, PNG, GIF, WebP or AVIF picture.'); return; }
+    if (file.size > 20 * 1024 * 1024) { notice('A picture can be up to 20 MB.'); return; }
+    clearPicture();
+    picture = { file: file, url: URL.createObjectURL(file) };
+    var fig = el('figure');
+    var img = el('img'); img.src = picture.url; img.alt = 'The picture you are sending';
+    var rm = el('button', null, '\u00d7'); rm.type = 'button'; rm.setAttribute('aria-label', 'Remove the picture');
+    rm.addEventListener('click', function () { clearPicture(); input.focus(); });
+    fig.appendChild(img); fig.appendChild(rm);
+    previewEl.appendChild(fig); previewEl.hidden = false;
+    input.required = false;
+    form.classList.remove('is-empty');
+    input.focus();
+  }
+  var attachBtn = app.querySelector('[data-vb-attach]');
+  if (attachBtn && fileInput) {
+    attachBtn.addEventListener('click', function () { fileInput.click(); });
+    fileInput.addEventListener('change', function () { choosePicture(fileInput.files && fileInput.files[0]); });
+    // A picture pasted into the composer goes the same way.
+    input.addEventListener('paste', function (e) {
+      var items = (e.clipboardData && e.clipboardData.files) || [];
+      if (items.length && PIC_TYPES.test(items[0].type)) { e.preventDefault(); choosePicture(items[0]); }
+    });
+  }
+
   // ── The thread ──
   function thread() {
     var t = document.getElementById('vb-thread');
@@ -56,10 +95,11 @@
     return t;
   }
   function have(id) { return id && document.querySelector('.vb-turn[data-id="' + Number(id) + '"]'); }
-  function meTurn(text, id) {
+  function meTurn(text, id, localPicture) {
     var li = el('li', 'vb-turn vb-me'); if (id) li.dataset.id = String(id);
     var b = el('div', 'vb-bubble'); b.appendChild(el('p', 'oc-sr', 'You said:'));
     String(text).split('\n').forEach(function (line, i) { if (i) b.appendChild(document.createElement('br')); b.appendChild(document.createTextNode(line)); });
+    if (localPicture) { var img = el('img', 'vb-local'); img.src = localPicture; img.alt = 'Your picture'; b.appendChild(img); }
     li.appendChild(b);
     return li;
   }
@@ -167,7 +207,7 @@
   // ── Sending ──
   if (form) form.addEventListener('submit', function (e) {
     var text = input.value.trim();
-    if (!text) { e.preventDefault(); return; }
+    if (!text && !picture) { e.preventDefault(); return; }
     if (form.dataset.signin) {
       // Signed out: the draft waits in this browser while they sign in, and comes back in the composer.
       e.preventDefault();
@@ -179,15 +219,24 @@
     e.preventDefault();
     sending = true;
     var old = scroll.querySelector('.vb-live-notice'); if (old) old.remove();
-    var mine = meTurn(text);
+    var sendingPicture = picture;
+    var mine = meTurn(text, null, sendingPicture && sendingPicture.url);
     thread().appendChild(mine);
     showWait(); toBottom();
-    input.value = ''; grow();
-    var url = room ? '/api/chat/rooms/' + encodeURIComponent(room) + '/messages' : '/api/chat/vibe';
-    fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) })
+    input.value = ''; picture = null; if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; } if (fileInput) fileInput.value = ''; input.required = true; grow();
+    var url, init;
+    if (sendingPicture) {
+      // The picture is the body; the question rides in X-Caption. A new chat starts with it (/api/chat/vibe/picture).
+      url = room ? '/api/chat/rooms/' + encodeURIComponent(room) + '/pictures' : '/api/chat/vibe/picture';
+      init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': sendingPicture.file.type, 'X-Caption': encodeURIComponent(text) }, body: sendingPicture.file };
+    } else {
+      url = room ? '/api/chat/rooms/' + encodeURIComponent(room) + '/messages' : '/api/chat/vibe';
+      init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) };
+    }
+    fetch(url, init)
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: null }; }); })
       .then(function (x) {
-        if (!x.ok) { mine.remove(); clearWait(); input.value = text; grow(); notice((x.d && x.d.error) || 'That did not send. Try again.'); return; }
+        if (!x.ok) { mine.remove(); clearWait(); input.value = text; if (sendingPicture) choosePicture(sendingPicture.file); grow(); notice((x.d && x.d.error) || 'That did not send. Try again.'); return; }
         if (x.d.message && x.d.message.id) { mine.dataset.id = String(x.d.message.id); latest = Math.max(latest, Number(x.d.message.id)); }
         if (!room && x.d.room) {
           room = x.d.room.slug;
@@ -199,7 +248,7 @@
           connect();
         }
       })
-      .catch(function () { mine.remove(); clearWait(); input.value = text; grow(); notice('You seem to be offline. Your message is back in the box.'); })
+      .catch(function () { mine.remove(); clearWait(); input.value = text; if (sendingPicture) choosePicture(sendingPicture.file); grow(); notice('You seem to be offline. Your message is back in the box.'); })
       .then(function () { sending = false; });
   });
 

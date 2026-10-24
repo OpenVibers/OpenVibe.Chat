@@ -46,6 +46,7 @@ const ICON = {
     menu: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
     close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
     send: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+    attach: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-8 8"/></svg>',
     more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
     messages: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4Z"/></svg>',
     rooms: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20c0-3 3-5 6-5s6 2 6 5M14 15c3 0 8 1 8 5"/></svg>',
@@ -87,8 +88,14 @@ function turn(m, me) {
 
 function composer({ slug, signedIn, enabled }) {
     const action = !signedIn ? `/auth/login` : slug ? `/vibe/${esc(slug)}` : '/vibe';
-    return `<form class="vb-composer" id="vb-composer" method="${signedIn ? 'post' : 'get'}" action="${action}"${signedIn ? '' : ' data-signin="1"'}>
+    // A picture (public/web/vibe.js): it goes to OpenVibe.Pics as the person, and Vibe sees it with the question.
+    const attach = signedIn && enabled && pictures.enabled()
+        ? `<input type="file" id="vb-file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" hidden><button class="vb-icon vb-attach" type="button" data-vb-attach aria-label="Add a picture" title="Add a picture">${ICON.attach}</button>`
+        : '';
+    return `<div class="vb-preview" id="vb-preview" hidden></div>
+<form class="vb-composer" id="vb-composer" method="${signedIn ? 'post' : 'get'}" action="${action}"${signedIn ? '' : ' data-signin="1"'}>
 ${signedIn ? '' : `<input type="hidden" name="next" value="${slug ? `/vibe/${esc(slug)}` : '/vibe'}">`}
+${attach}
 <label class="oc-sr" for="vb-input">Message Vibe</label>
 <textarea id="vb-input" name="message" rows="1" maxlength="2000" placeholder="${signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)'}"${enabled ? '' : ' disabled'} required></textarea>
 <button class="vb-send" type="submit" aria-label="Send"${enabled ? '' : ' disabled'}>${ICON.send}</button>
@@ -111,7 +118,7 @@ function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit,
         const hello = `<div class="vb-hello">
 ${MARK}
 <h1>${user ? `What can I help with${user.display_name || user.username ? `, ${esc(String(user.display_name || user.username).split(' ')[0])}` : ''}?` : 'Hi, I\'m Vibe. What can I help with?'}</h1>
-<p class="vb-sub">OpenVibe's assistant. I can search everything on OpenVibe, from news and deals to jobs, rentals and videos, read any page you link, and help you think things through.</p>
+<p class="vb-sub">OpenVibe's assistant. I can search the web and everything on OpenVibe, from news and deals to jobs, rentals and videos, read any page you link, look at pictures you send, and help you think things through.</p>
 <ul class="vb-suggest">${SUGGESTIONS.map((s) => `<li><button type="button" class="vb-chip" data-prompt="${esc(s.prompt)}"><b>${esc(s.title)}</b><span>${esc(s.text)}</span></button></li>`).join('')}</ul>
 </div>`;
         const thread = room
