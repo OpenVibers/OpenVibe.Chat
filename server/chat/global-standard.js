@@ -9,11 +9,16 @@
  * a slur one letter per line; all of it showed on openvibe.chat's front page. So here:
  *   - a core slur spelled across one sender's short lines (each at most SHORT visible characters, at most RUN_MS
  *     apart) hides the whole run;
- *   - a mirrored line (from a stream or channel room) is not shown when it is a wall (long, mostly not letters or
- *     digits) or has no letter, digit or emoji at all (".", ",", "%%%%").
- * The lines stay in their own room. The front page and the global history filter rows (filterFeed); the live mirror
+ *   - a mirrored line (from a stream or channel room) is not shown when it is a wall or has no letter, digit or emoji at
+ *     all (".", ",", "%%%%").
+ * The same viewer came back that afternoon with "[8][8][8]…" walls (a digit in every three characters passed the
+ * letters-or-digits share) and with walls typed in the global room itself, which only refused slurs. So a wall is now
+ * long and either mostly not letters or digits, or one short piece repeated (it compresses to almost nothing), and the
+ * global room refuses walls at send time (chat-server _chatRulesBlock) and hides any already there.
+ * Mirrored lines stay in their own room. The front page and the global history filter rows (filterFeed); the live mirror
  * asks a run guard per line (createRunGuard).
  */
+const zlib = require('zlib');
 const { containsCoreSlur } = require('./moderation-utils');
 
 const SHORT = 4;
@@ -23,10 +28,14 @@ const WORDISH = /[\p{L}\p{N}\p{Extended_Pictographic}]/gu;
 
 const visible = (text) => [...String(text == null ? '' : text).replace(/\s+/g, '')];
 const isShort = (text) => { const n = visible(text).length; return n > 0 && n <= SHORT; };
+// Deflated size over UTF-8 size: ordinary sentences stay above ~0.45 at this length, one piece repeated falls under 0.05.
+const REPEAT_RATIO = 0.15;
 function isWall(text) {
     const v = visible(text);
     if (v.length < WALL_MIN) return false;
-    return (v.join('').match(WORDISH) || []).length / v.length < 0.3;
+    const s = v.join('');
+    if ((s.match(WORDISH) || []).length / v.length < 0.3) return true;
+    return zlib.deflateRawSync(s).length / Buffer.byteLength(s) < REPEAT_RATIO;
 }
 const hasWords = (text) => /[\p{L}\p{N}\p{Extended_Pictographic}]/u.test(String(text || ''));
 const senderOf = (m) => (m.user_id ? `u:${m.user_id}` : m.anon_id ? `a:${m.anon_id}` : `n:${m.username || ''}`);
@@ -36,7 +45,7 @@ const atOf = (m) => { const s = String(m.timestamp || ''); const t = Date.parse(
 /** One line on its own: `mirrored` is a line from a stream or channel room. */
 function lineOk(text, { mirrored = false } = {}) {
     if (containsCoreSlur(String(text || ''), [])) return false;
-    if (mirrored && (isWall(text) || !hasWords(text))) return false;
+    if (isWall(text) || (mirrored && !hasWords(text))) return false;
     return true;
 }
 

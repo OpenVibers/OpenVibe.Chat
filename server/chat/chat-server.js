@@ -67,6 +67,7 @@ const DEFAULT_SLUR_NUDGE = 'This streamer enabled Anti-Slur Nudge for this chat.
 // Global chat is OpenVibe's own room, read on every site: the built-in slur list always applies there. Stream and
 // channel chats keep each streamer's own choice (the Anti-Slur Nudge settings).
 const GLOBAL_SLUR_REFUSED = 'That message was not sent: global chat does not allow slurs. Try different words.';
+const GLOBAL_WALL_REFUSED = 'That message was not sent: global chat does not allow walls of symbols or one thing repeated. Say it in words.';
 // Built-in slur categories and normalization are defined in moderation-utils.js
 // (single source of truth — browser-side chat.js mirrors the same patterns).
 const {
@@ -1151,6 +1152,10 @@ class ChatServer {
         if (!modStreamId) {
             // A channel's room with no live stream is still the streamer's; only global chat has OpenVibe's rule.
             if (client.streamId || client.channelUserId || permissions.can(client.user, 'staff.moderation.bypass')) return false;
+            if (globalStandard.isWall(text)) {
+                this.sendTo(ws, { type: 'system', message: GLOBAL_WALL_REFUSED });
+                return true;
+            }
             if (!this._containsCoreSlur(text, [])) return false;
             this.sendTo(ws, { type: 'system', message: GLOBAL_SLUR_REFUSED });
             return true;

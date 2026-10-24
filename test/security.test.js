@@ -131,7 +131,7 @@ t('global chat refuses the built-in slurs, /me included; an offline channel room
     for (const w of [reader, bobG, own]) w.close();
 });
 
-t('the global feed does not mirror a slur spelled a letter a line, a wall or a line of symbols from a channel room; in global chat such a run is deleted', async () => {
+t('the global feed does not mirror a slur spelled a letter a line, a wall or a line of symbols from a channel room; in global chat such a run is deleted and a wall refused', async () => {
     // 2026-10-24: walls of block characters, then a slur one letter per line in goosely's offline channel, all on
     // openvibe.chat's front page. The lines stay in their own room (the streamer's rules); the global room has OpenVibe's.
     const letters = ['k', 'y', 'k', 'e'];   // a built-in pattern, spelled out at run time as above
@@ -160,6 +160,15 @@ t('the global feed does not mirror a slur spelled a letter a line, a wall or a l
     await bobG.next((m) => m.type === 'system' && /global chat does not allow slurs/.test(m.message));
     const deleted = await reader.next((m) => m.type === 'delete-messages' && m.ids.length === 4);
     for (const id of deleted.ids) assert.strictEqual(Number((await h.db.get('SELECT is_deleted FROM chat_messages WHERE id = ?', [id])).is_deleted), 1);
+
+    // A wall typed in global chat itself is refused at send time; one short piece repeated is a wall too (10-24 16:27).
+    await h.sleep(1100);
+    const repeated = '[8]'.repeat(167);
+    bobG.sendJson({ type: 'chat', message: repeated });
+    await bobG.next((m) => m.type === 'system' && /global chat does not allow walls/.test(m.message));
+    assert.ok(await reader.none((m) => m.message === repeated, 300), 'a repeated wall reached global chat');
+    await said(own, repeated);
+    assert.ok(reader.all.every((m) => m.message !== repeated), 'a repeated wall was mirrored to the global feed');
 
     // The history the front page and every site's global feed read: none of it.
     const hist = await (await fetch(`${h.base}/api/chat/global/history?limit=200`)).json();

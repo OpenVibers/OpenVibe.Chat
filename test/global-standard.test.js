@@ -1,8 +1,8 @@
 'use strict';
 /**
  * server/chat/global-standard.js: what OpenVibe's global room shows of every room's lines. A slur spelled across one
- * sender's short lines hides the run (rows) or retracts it (live); a mirrored wall or a line without a letter, digit
- * or emoji is not shown; everything ordinary is.
+ * sender's short lines hides the run (rows) or retracts it (live); a wall (symbols, or one piece repeated) from any room
+ * and a mirrored line without a letter, digit or emoji are not shown; everything ordinary is.
  */
 const assert = require('assert');
 const { lineOk, filterFeed, createRunGuard, isWall } = require('../server/chat/global-standard');
@@ -20,7 +20,13 @@ assert.strictEqual(lineOk('.', { mirrored: false }), true, 'the global room keep
 assert.strictEqual(lineOk('😂', { mirrored: true }), true, 'an emoji is a line');
 assert.strictEqual(lineOk('gg', { mirrored: true }), true);
 assert.ok(isWall('░▒▓'.repeat(60)) && isWall('#'.repeat(600)), 'block characters and symbols');
-assert.ok(!isWall('word '.repeat(60)) && !isWall('😂'.repeat(150)) && !isWall('ok'), 'long words or emoji are not a wall');
+assert.ok(isWall('[8]'.repeat(520)) && isWall('[8]'.repeat(167)), 'one short piece repeated, digits and all (10-24 16:27)');
+assert.ok(isWall('word '.repeat(60)) && isWall('😂'.repeat(150)), 'a word or an emoji repeated a hundred times is a wall too');
+const long = 'Just got back from the stream, the part where the bridge collapsed and everyone in chat lost it was the best thing '
+    + 'I have seen all week. Anyone know if there will be a replay tonight, or a clip of the ending? 😂 12/10 would watch again.';
+assert.ok(!isWall(long) && !isWall('ok') && !isWall('😂'.repeat(20)), 'a long ordinary message, a short line and a few emoji are not');
+assert.strictEqual(lineOk('#'.repeat(500), { mirrored: false }), false, 'a wall typed in the global room itself is not shown');
+assert.strictEqual(lineOk(long, { mirrored: false }), true);
 
 // Rows: the run goes whole, an interleaved sender does not break it, another sender's letters are their own.
 const run = letters.map((l) => row(l));
