@@ -215,7 +215,9 @@ function createWebRoutes({ config }) {
         const { messages, latest_id } = await historyStore.page('global', { limit: 60 });
         // Not the lines of people this reader blocked on the network (chat/network-blocks.js).
         const hidden = actor.kind === 'user' ? await require('../chat/network-blocks').blockedUserIds(actor.user) : new Set();
-        const shown = messages.filter((m) => !m.is_deleted && (m.message_type || 'chat') === 'chat' && !(m.user_id && hidden.has(Number(m.user_id))));
+        // And not what OpenVibe's global room does not show of other rooms' lines (chat/global-standard.js).
+        const shown = require('../chat/global-standard').filterFeed(messages)
+            .filter((m) => !m.is_deleted && (m.message_type || 'chat') === 'chat' && !(m.user_id && hidden.has(Number(m.user_id))));
         // What people wear: their name effects, from the decor cache (one Live read per 200 people, kept a minute). The
         // page waits for that read a quarter of a second at most: Live slow or down never holds the page, the names just
         // stay plain until the cache is warm.

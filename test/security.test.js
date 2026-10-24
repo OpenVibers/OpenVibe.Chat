@@ -131,6 +131,46 @@ t('global chat refuses the built-in slurs, /me included; an offline channel room
     for (const w of [reader, bobG, own]) w.close();
 });
 
+t('the global feed does not mirror a slur spelled a letter a line, a wall or a line of symbols from a channel room; in global chat such a run is deleted', async () => {
+    // 2026-10-24: walls of block characters, then a slur one letter per line in goosely's offline channel, all on
+    // openvibe.chat's front page. The lines stay in their own room (the streamer's rules); the global room has OpenVibe's.
+    const letters = ['k', 'y', 'k', 'e'];   // a built-in pattern, spelled out at run time as above
+    const reader = await joined({ ip: '198.51.100.43', token: streamer.token }, {});
+    const own = await joined({ ip: '198.51.100.44', token: bob.token }, { channelUserId: other.id });
+    const said = async (ws, line) => { ws.sendJson({ type: 'chat', message: line }); await h.sleep(1100); };
+    const wall = '\u2591\u2592\u2593'.repeat(60);
+    await said(own, wall);
+    await said(own, '%%%%%%');
+    assert.ok(own.all.some((m) => m.type === 'chat' && m.message === wall), 'the wall stays in its own room');
+    assert.ok(reader.all.every((m) => m.message !== wall && m.message !== '%%%%%%'), 'a wall or a line of symbols reached the global feed');
+    for (const l of letters.slice(0, -1)) await said(own, l);
+    const mirrored = reader.all.filter((m) => m.type === 'chat' && letters.includes(m.message)).map((m) => m.id);
+    assert.strictEqual(mirrored.length, 3, 'single letters on their own are mirrored');
+    own.sendJson({ type: 'chat', message: letters[letters.length - 1] });
+    const gone = await reader.next((m) => m.type === 'delete-messages');
+    assert.deepStrictEqual(gone.ids.map(Number).sort(), mirrored.map(Number).sort(), 'the run is taken off the global feed');
+    await h.sleep(300);
+    assert.strictEqual(reader.all.filter((m) => m.type === 'chat' && letters.includes(m.message)).length, 3, 'the last letter is not mirrored');
+
+    // Global chat itself: the run is refused like a slur said whole, and its lines are deleted.
+    await h.sleep(1100);
+    const bobG = await joined({ ip: '198.51.100.45', token: bob.token }, {});
+    for (const l of letters.slice(0, -1)) await said(bobG, l);
+    bobG.sendJson({ type: 'chat', message: letters[letters.length - 1] });
+    await bobG.next((m) => m.type === 'system' && /global chat does not allow slurs/.test(m.message));
+    const deleted = await reader.next((m) => m.type === 'delete-messages' && m.ids.length === 4);
+    for (const id of deleted.ids) assert.strictEqual(Number((await h.db.get('SELECT is_deleted FROM chat_messages WHERE id = ?', [id])).is_deleted), 1);
+
+    // The history the front page and every site's global feed read: none of it.
+    const hist = await (await fetch(`${h.base}/api/chat/global/history?limit=200`)).json();
+    const lines = hist.messages.map((m) => m.message);
+    assert.ok(!lines.includes(wall) && !lines.includes('%%%%%%'), 'history shows the wall');
+    assert.ok(!hist.messages.some((m) => letters.includes(m.message)), 'history shows the spelled run');
+    const page = await (await fetch(`${h.base}/`)).text();
+    assert.ok(!page.includes('\u2591\u2592\u2593\u2591'), 'the front page shows the wall');
+    for (const w of [reader, own, bobG]) w.close();
+});
+
 t('joining the channel room without the stream id does not skip slow mode or IP approval', async () => {
     const own = await joined({ ip: '198.51.100.30', token: streamer.token, stream: streamX }, { streamId: streamX });
     own.sendJson({ type: 'chat', message: '/slow 30' });

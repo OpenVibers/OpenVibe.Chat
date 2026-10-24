@@ -28,6 +28,7 @@ const session = require('../auth/network-session');
 const { clientIpOf } = require('../net/client-ip');
 const permissions = require('../auth/permissions');
 const wordFilter = require('./word-filter');
+const globalStandard = require('./global-standard');
 const ttsEngine = require('./tts-engine');
 const soundboard = require('./soundboard-service');
 const audioQueue = require('./audio-queue');
@@ -81,6 +82,8 @@ const {
 class ChatServer {
     constructor() {
         this.wss = null;
+        // What the global room shows of each line (global-standard.js): a slur spelled across one sender's short lines.
+        this.globalRuns = globalStandard.createRunGuard();
         /** @type {Map<WebSocket, { user: object|null, anonId: string, streamId: number|null, ip: string }>} */
         this.clients = new Map();
         /** @type {Map<string, number>} ip → open sockets */
@@ -1029,9 +1032,13 @@ class ChatServer {
             // forwarding so a viewer isn't interrupted when the streamer switches
             // slots or briefly drops offline.
             await this.broadcastToChannelRoom(client.channelUserId, client.streamId, chatMsg);
-            // Surface on the homepage global feed (tagged with the channel).
-            if (client.streamId) await this.forwardToGlobal(client.streamId, chatMsg);
-            else await this.forwardToGlobalByChannel(client.channelUserId, chatMsg);
+            // Surface on the homepage global feed (tagged with the channel), unless OpenVibe's global room does not
+            // show it (global-standard.js): the line stays in its own room either way. A line that completes a slur
+            // spelled across the sender's short lines also takes the earlier ones off the global feed.
+            const shown = this.globalRuns.check({ id: chatMsg.id, message: text, user_id: client.user?.id, anon_id: client.anonId, username, mirrored: true });
+            if (shown.retract.length) await this.broadcastGlobal({ type: 'delete-messages', ids: shown.retract });
+            if (shown.ok && client.streamId) await this.forwardToGlobal(client.streamId, chatMsg);
+            else if (shown.ok) await this.forwardToGlobalByChannel(client.channelUserId, chatMsg);
             // Auto-translate (async): foreign → English for everyone, English → the channel's
             // language for a non-English streamer. Lands as a follow-up 'chat_translation'.
             await this._maybeTranslate(chatMsg, client.channelUserId, client.streamId);
@@ -1062,8 +1069,17 @@ class ChatServer {
 
         } else if (!client.channelUserId) {
             // Pure global chat (homepage) — offline channel messages were already
-            // delivered to the channel room above.
-            await this.broadcastGlobal(chatMsg);
+            // delivered to the channel room above. A slur spelled a few letters a line is refused like one said whole:
+            // this line is not shown and it and the run's earlier lines are deleted (and taken off every global feed).
+            const shown = this.globalRuns.check({ id: chatMsg.id, message: text, user_id: client.user?.id, anon_id: client.anonId, username, mirrored: false });
+            if (shown.retract.length && !permissions.can(client.user, 'staff.moderation.bypass')) {
+                const ids = [...shown.retract, chatMsg.id].filter(Boolean);
+                for (const id of ids) await db.deleteChatMessage(id, null).catch(() => {});
+                await this.broadcastGlobal({ type: 'delete-messages', ids });
+                this.sendTo(ws, { type: 'system', message: GLOBAL_SLUR_REFUSED });
+            } else {
+                await this.broadcastGlobal(chatMsg);
+            }
         } else if (this._channelOwnerInRoom(client.channelUserId)) {
             // OFFLINE channel chat with the channel OWNER present in their own room:
             // synthesize TTS so their "TTS on my channel even when offline" option has
