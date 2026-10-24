@@ -53,6 +53,26 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     }));
     assert.deepStrictEqual(asked[0], { url: 'https://openvibe.tools/api/v1/tools/read/run', body: { input: { url: 'https://example.com/a', max_chars: 6000 } } });
     assert.deepStrictEqual([page.title, page.text, page.links[0].url], ['Example', 'Hello', 'https://example.com/b']);
+    // web_search is Vibe's (a Vibe chat, or Vibe added to a room): Actor answers it as a task for the person who asked.
+    assert.ok(aiTools.definitions({ handle: 'vibe' }).some((d) => d.function.name === 'web_search'), 'Vibe searches the web');
+    assert.ok(!aiTools.definitions({ handle: 'pantry' }).some((d) => d.function.name === 'web_search'), 'another AI member does not');
+    assert.ok(/no tool called web_search/.test(await aiTools.run('web_search', '{"query":"x"}', { member: { handle: 'pantry' } })));
+    require('../server/rooms/web-search')._setTokens({ getToken: async () => 'chat-actor-token' });
+    const subject = ids.newId('user');
+    const sent = [];
+    const actorFetch = async (url, o = {}) => {
+        sent.push({ url, method: o.method || 'GET', subject: o.headers['X-OV-Subject'], auth: o.headers.Authorization, body: o.body ? JSON.parse(o.body) : null });
+        if ((o.method || 'GET') === 'POST') return { ok: true, status: 201, json: async () => ({ id: 'tsk_1', state: 'queued' }) };
+        return { ok: true, status: 200, json: async () => ({ id: 'tsk_1', state: 'succeeded', result: { answer: 'The Mariners won 5-3.', sources: ['https://example.com/score'] } }) };
+    };
+    const web = JSON.parse(await aiTools.run('web_search', '{"query":"who won the Mariners game"}', { member: { handle: 'vibe' }, subject, idempotencyKey: 'chat-ai-1-2-t0-web_search', webSearchOpts: { fetchImpl: actorFetch, pollMs: 1 } }));
+    assert.deepStrictEqual(web, { answer: 'The Mariners won 5-3.', sources: ['https://example.com/score'] });
+    assert.deepStrictEqual([sent[0].url, sent[0].method, sent[0].subject, sent[0].auth], ['http://127.0.0.1:4950/api/v1/tasks', 'POST', subject, 'Bearer chat-actor-token'], 'a task for the person, with Chat\'s own token');
+    assert.ok(sent[0].body.task.includes('who won the Mariners game') && sent[0].body.idempotency_key === 'chat-ai-1-2-t0-web_search');
+    assert.deepStrictEqual([sent[1].url, sent[1].subject], ['http://127.0.0.1:4950/api/v1/tasks/tsk_1', subject], 'it reads back only that task, as the person');
+    assert.ok(/signed in/.test(JSON.parse(await aiTools.run('web_search', '{"query":"x"}', { member: { handle: 'vibe' }, subject: null })).error), 'no person, no search');
+    const failed = JSON.parse(await aiTools.run('web_search', '{"query":"x"}', { member: { handle: 'vibe' }, subject, webSearchOpts: { pollMs: 1, fetchImpl: async (u, o = {}) => ({ ok: true, status: 200, json: async () => ((o.method || 'GET') === 'POST' ? { id: 'tsk_2', state: 'queued' } : { id: 'tsk_2', state: 'failed', error: { code: 'actor.allowance.exhausted', detail: 'The free tier runs 20 tasks a day' } }) }) } }));
+    assert.ok(/20 tasks a day/.test(failed.error), 'Actor\'s refusal reaches the model to say');
     assert.ok(aiTools.definitions({ link_service: 'food', link_resource: 'plan1' }).some((d) => d.function.name === 'household_pantry'));
     const dice = JSON.parse(await aiTools.run('roll_dice', '{"count":50,"sides":6}'));
     assert.strictEqual(dice.rolls.length, 10, 'at most ten dice');

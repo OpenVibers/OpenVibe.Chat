@@ -71,6 +71,8 @@ module.exports = {
     // OpenVibe.Food (server/rooms/food-context.js): a household's pantry and plan for a room's AI member, read
     // server-side with Chat's service token. The loopback address in production.
     food: { internalUrl: strip(process.env.CHAT_FOOD_INTERNAL_URL || 'http://127.0.0.1:4970') },
+    // OpenVibe.Actor, for Vibe's web search (server/rooms/web-search.js): tasks for the person, with Chat's own token.
+    actor: { internalUrl: strip(process.env.CHAT_ACTOR_INTERNAL_URL || 'http://127.0.0.1:4950') },
 
     // openvibe.chat, the site (server/web/): global chat, messages and settings, served by Chat itself.
     web: {
