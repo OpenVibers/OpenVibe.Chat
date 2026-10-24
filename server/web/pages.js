@@ -619,7 +619,8 @@ ${mine.length ? `<h2>Your rooms</h2><ul class="oc-convs">${mine.map(roomCard).jo
 <ul class="oc-goto"><li><a href="/">Global chat</a>: everyone on OpenVibe, readable without an account</li>
 <li><a href="/servers">Servers</a>: channels, voice, roles and invite links, Discord-style</li>
 <li><a href="/messages">Messages</a>: direct messages with anyone on OpenVibe</li></ul></div>`}
-${create}`,
+${create}
+<p class="oc-muted">Building something? A <a href="/feeds">feed</a> shows your coding session live in a room, on your Live channel or on your site.</p>`,
         });
     });
 
@@ -687,9 +688,11 @@ ${people}
         const isCall = room.kind === 'call';
         const callReady = isCall && !!require('../config').calls.enabled;
         const ais = aiMembers.enabled() ? (await aiMembers.list(room)).filter((a) => Number(a.enabled)) : [];
+        // A feed the owner shows here (server/feeds/): its card above the messages.
+        const feed = await require('../feeds/feeds').forRoom(room.id);
         const aiHere = ais.length ? `<p class="oc-ai-here">${ais.map((a) => `<span class="oc-badge oc-ai">AI</span> <strong>${esc(a.name)}</strong> <span class="oc-muted oc-ai-model">(${esc(aiMembers.modelOf(a))})</span>`).join(' · ')} <span class="oc-muted">· write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask${ais.length > 1 ? ' one of them' : ''} something</span></p>` : '';
         await page(req, res, 200, {
-            actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
+            actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady, feedView: !!feed,
             description: room.topic || `${room.name}, a ${isCall ? 'call' : room.kind === 'system' ? 'announcements' : 'chat'} room on OpenVibe.`,
             page: { view: 'room', room: room.slug, kind: room.kind, pics: pictures.enabled() ? pictures.publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: can.join, talk: can.talk } } : {}) },
@@ -698,6 +701,7 @@ ${people}
 <p class="oc-muted">${room.topic ? `${esc(room.topic)} · ` : ''}${(await rooms.publicRoom(room)).members} members${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole}${manage} <span class="oc-live" id="oc-live" hidden>● live</span></p>
 ${aiHere}${error}
 ${isCall ? callPanel(room, can, me) : ''}
+${feed ? `<div class="fv oc-room-fv" data-feed="${esc(feed.id)}"></div>` : ''}
 <ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
 ${composer}${tools}`,
         });
@@ -891,6 +895,7 @@ ${attachList}`,
     // ── Servers (server/rooms/servers.js): text and voice channels, roles, invites ──
     require('./vibe-pages').mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit, notice });
     require('./inbox-pages').mountInboxPages(router, { page, viewerOf, needUser, sameSite, formLimit, notice, config });
+    require('./feed-pages').mountFeedPages(router, { page, needUser, sameSite, formLimit, notice, config });
     require('./server-pages').mountServerPages(router, { page, needUser, viewerOf, sameSite, formLimit, notice, roomMessage, callPanel, applyRoomChange, pictureComposer, config });
 
     router.get('/updates', async (req, res) => await page(req, res, 200, {

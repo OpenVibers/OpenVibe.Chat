@@ -97,7 +97,8 @@ function contentSecurityPolicy(nonce) {
  * prefs (the person's chat preferences: timestamps, compact, font_scale, show_badges), counts (unread
  * rooms/messages for the navigation), script / callScript / ringScript (public/web/chat.js, call.js, ring.js: a call
  * coming in, on every page of a signed-in person while calls are on), app (Vibe's full-window app, server/web/vibe-pages.js:
- * vibe.css + vibe-md.js + vibe.js, and no footer), appScript (the app's own script instead of vibe.js: inbox.js)
+ * vibe.css + vibe-md.js + vibe.js, and no footer), appScript (the app's own script instead of vibe.js: inbox.js), feedView
+ * (a feed's card on the page: feed-view.css + feed-view.js, server/feeds/)
  */
 function renderPage(o) {
     const { config } = o;
@@ -129,6 +130,7 @@ ${INSTALL_LINKS}
 <link rel="stylesheet" href="${ovServe.url('items.css')}">
 ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` : ''}
 ${o.app ? `<link rel="stylesheet" href="${asset('vibe.css')}">` : ''}
+${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>
 <script src="${ovServe.url('footer.js')}" defer></script>

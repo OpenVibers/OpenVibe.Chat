@@ -186,10 +186,12 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
         },
         credentials: true,
     });
-    // The widget's visitor API answers any site, without cookies (the visitor's token is the key), so a site can build
-    // its own panel on it; an inbox that names its sites refuses the others itself (server/inbox/routes.js).
-    const openCors = cors({ origin: true, credentials: false, allowedHeaders: ['Content-Type', 'X-Visitor-Token'] });
-    app.use((req, res, next) => (req.path.startsWith('/api/chat/widget/') ? openCors : allowlistedCors)(req, res, next));
+    // The widget's visitor API and feeds answer any site, without cookies (the visitor's token, the feed's key or an API
+    // token is the key), so a site can build its own panel or publish from a browser; an inbox that names its sites
+    // refuses the others itself (server/inbox/routes.js).
+    const openCors = cors({ origin: true, credentials: false, allowedHeaders: ['Content-Type', 'X-Visitor-Token', 'Authorization'] });
+    const openPath = (p) => p.startsWith('/api/chat/widget/') || p === '/api/chat/feeds' || p.startsWith('/api/chat/feeds/');
+    app.use((req, res, next) => (openPath(req.path) ? openCors : allowlistedCors)(req, res, next));
     app.use(express.json({ limit: '1mb' }));
     app.use(express.urlencoded({ extended: true, limit: '256kb' }));
     app.use(cookieParser());
@@ -249,6 +251,8 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     // Support inboxes (server/inbox/): the widget's visitor API, and the inbox's people.
     app.use('/api/chat/widget/inbox/:id', require('./inbox/routes').widget);
     app.use('/api/chat/inboxes', require('./inbox/routes').agents);
+    // Feeds (server/feeds/): live activity (vibe coding) published with a feed's key, shown in rooms, on Live, anywhere.
+    app.use('/api/chat/feeds', require('./feeds/routes'));
     app.use('/api/chat/servers', require('./rooms/server-routes'));
     // Channel moderators & moderation settings (/api/chat/channels/:id/…): before /api/chat too.
     app.use('/api/chat/channels', require('./chat/channel-mod-routes'));

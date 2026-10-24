@@ -318,6 +318,12 @@ async function getLiveStreamsByUserId(userId) {
 async function getStreamsByUserId(userId, limit = 50) {
     return await db.all(`${STREAM_SELECT} WHERE s.user_id = ? ORDER BY s.created_at DESC LIMIT ?`, [userId, limit]);
 }
+/** The live session on a channel slot (managed stream) right now, with the slot's slug, or null. */
+async function liveStreamForSlot(managedStreamId) {
+    if (!managedStreamId) return null;
+    return await db.get(`SELECT s.id, ms.slug FROM ctx_streams s LEFT JOIN ctx_managed_streams ms ON ms.id = s.managed_stream_id
+        WHERE s.managed_stream_id = ? AND s.is_live = 1 ORDER BY s.id DESC LIMIT 1`, [managedStreamId]) || null;
+}
 async function getManagedStreamsByUserId(userId) {
     return await db.all(`
         SELECT ms.*,
@@ -944,7 +950,7 @@ module.exports = {
     authenticate, authFailureReason, upsertUser, invalidateUser, subjectFor,
     getUserById, getUserByUsername, getUserBySubject, getUserByDisplayName, ensureUsers, ensureUserByUsername,
     // streams + channels
-    getStreamById, ensureStream, refreshStream, latestStreamIdForUser, getLiveStreamsByUserId, getStreamsByUserId, getManagedStreamsByUserId,
+    getStreamById, ensureStream, refreshStream, latestStreamIdForUser, getLiveStreamsByUserId, getStreamsByUserId, getManagedStreamsByUserId, liveStreamForSlot,
     getChannelById, getChannelByUserId, ensureChannelForUser, createChannel,
     emoteSources, setChannelEmoteSources,
     // policy

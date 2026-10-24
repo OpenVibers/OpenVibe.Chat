@@ -1,0 +1,34 @@
+/* A feed's card (public/web/feed-view.js): in a room on openvibe.chat (Chat's --oc-* colours) and in the embed
+   /embed/feed/:id, which sets the same names for light and dark (server/web/feed-pages.js). */
+.fv { --fv-line: var(--oc-line, #223049); --fv-panel: var(--oc-panel, #121a2c); --fv-text: var(--oc-text, #e8edf6); --fv-muted: var(--oc-muted, #98a6bd); --fv-accent: var(--oc-accent, #3b82f6); --fv-ok: var(--oc-ok, #22c55e); }
+.fv.fv-on { border: 1px solid var(--fv-line); border-radius: 14px; background: var(--fv-panel); color: var(--fv-text); overflow: hidden; font-size: .9rem; }
+.fv.fv-gone { display: none; }
+.fv-head { all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px; }
+.fv-head:focus-visible { outline: 2px solid var(--fv-accent); outline-offset: -2px; }
+.fv-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--fv-muted); flex: none; }
+.fv-live .fv-dot { background: var(--fv-ok); box-shadow: 0 0 0 0 color-mix(in srgb, var(--fv-ok) 60%, transparent); animation: fvPulse 2s infinite; }
+@keyframes fvPulse { 70% { box-shadow: 0 0 0 7px transparent; } }
+.fv-title { font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.fv-who { color: var(--fv-muted); font-size: .8rem; white-space: nowrap; }
+.fv-who:not(:empty)::before { content: '· '; }
+.fv-when { margin-left: auto; color: var(--fv-muted); font-size: .78rem; }
+.fv-chev { color: var(--fv-muted); transition: transform .15s; }
+.fv-folded .fv-chev { transform: rotate(-90deg); }
+.fv-folded .fv-body { display: none; }
+.fv-body { border-top: 1px solid var(--fv-line); max-height: 260px; overflow-y: auto; padding: 8px 12px 10px; overscroll-behavior: contain; }
+.fv-turns, .fv-steps { list-style: none; margin: 0; padding: 0; }
+.fv-turn { padding: 4px 0; }
+.fv-turn + .fv-turn { border-top: 1px dashed color-mix(in srgb, var(--fv-line) 70%, transparent); }
+.fv-turn:not(.fv-cur) { opacity: .72; }
+.fv-prompt, .fv-answer, .fv-step, .fv-count, .fv-more, .fv-working { display: flex; gap: 7px; align-items: baseline; margin: 3px 0; min-width: 0; }
+.fv-prompt { font-weight: 600; }
+.fv-ic { flex: none; width: 1.1em; text-align: center; color: var(--fv-muted); }
+.fv-prompt .fv-ic { color: var(--fv-accent); }
+.fv-answer .fv-ic { color: var(--fv-ok); }
+.fv-txt { overflow-wrap: anywhere; }
+.fv-step { color: var(--fv-muted); font-size: .84rem; flex-wrap: wrap; }
+.fv-arg { font: .78rem ui-monospace, Menlo, Consolas, monospace; background: color-mix(in srgb, var(--fv-muted) 14%, transparent); padding: 1px 6px; border-radius: 6px; max-width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-left: 1.8em; flex-basis: 100%; }
+.fv-count, .fv-more { color: var(--fv-muted); font-size: .78rem; padding-left: 1.8em; }
+.fv-working { color: var(--fv-muted); font-size: .82rem; padding-left: 1.8em; }
+.fv-empty { margin: 4px 0; color: var(--fv-muted); font-size: .85rem; }
+@media (prefers-reduced-motion: reduce) { .fv-live .fv-dot { animation: none; } .fv-chev { transition: none; } }

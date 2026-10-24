@@ -603,6 +603,14 @@ class ChatServer {
                 this.sendTo(ws, { type: 'inbox_watching', inbox: inbox.id, conversation: client.inboxConv || null });
                 break;
             }
+            // Feeds (server/feeds/feeds.js): anyone follows a feed's card; what reaches them is already projected.
+            case 'feed_watch': {
+                const feed = await require('../feeds/feeds').get(msg.feed);
+                if (!feed) { this.sendTo(ws, { type: 'feed_error', code: 'feeds.not_found', message: 'No such feed' }); break; }
+                client.feedId = feed.id;
+                this.sendTo(ws, { type: 'feed_watching', feed: feed.id });
+                break;
+            }
             case 'room_message': {
                 const rooms = require('../rooms/rooms');
                 const room = client.roomId ? await rooms.bySlug(client.roomSlug) : null;
@@ -2557,6 +2565,20 @@ class ChatServer {
             if (!((conversationId && client.inboxConv === conversationId) || client.inboxAgent === inboxId)) continue;
             if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) ws.send(msg);
         }
+    }
+
+    /**
+     * A feed's event, as viewers see it: to everyone following the feed's card, and to the Live channel slot it is on
+     * while that slot is live, as Live's `vibe-coding` frame (the widget in Live's channel chat reads those).
+     */
+    async deliverFeed(feed, event) {
+        const msg = JSON.stringify({ type: 'feed_event', feed: feed.id, event });
+        for (const [ws, client] of this.clients) {
+            if (client.feedId === feed.id && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) ws.send(msg);
+        }
+        if (!feed.managed_stream_id) return;
+        const live = await ctx.liveStreamForSlot(feed.managed_stream_id).catch(() => null);
+        if (live) await this.broadcastToStream(Number(live.id), { type: 'vibe-coding', managed_stream_id: feed.managed_stream_id, slot_slug: live.slug || null, delay_ms: 0, event });
     }
 
     /** Everyone following a chat room (server/rooms/) on this server. */
