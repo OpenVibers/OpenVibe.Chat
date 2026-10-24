@@ -7,6 +7,8 @@
  *   search_openvibe   OpenVibe.Search's public results for a query (news, deals, coupons, wiki, listings, videos…)
  *   read_page         a web page's title, text and links, through OpenVibe.Tools' `read` tool (Tools decides what it may
  *                     reach: public http(s) addresses only); Chat never fetches the address itself
+ *   web_search        Vibe only (a Vibe chat, or Vibe added to a room): the open web, answered by OpenVibe.Actor's web
+ *                     agent as a task for the person who asked (server/rooms/web-search.js), with its sources
  *   current_time      the date and time now, in a time zone
  *   roll_dice         N dice of S sides
  *   pick_one          one of the options given, at random
@@ -36,8 +38,15 @@ const BASE = [
     fn('pick_one', 'Pick one of the given options at random, fairly (where to eat, who goes first).', { options: { type: 'array', minItems: 2, maxItems: 30, items: { type: 'string' } } }, ['options']),
 ];
 const PANTRY = fn('household_pantry', 'What is in this household\'s pantry and its meal plan, from OpenVibe.Food, right now.');
+const WEB = fn('web_search', 'Search the open web and get a short answer with its sources (OpenVibe\'s web agent; takes up to a minute). Use it for current events, prices, schedules and facts that OpenVibe search does not have.',
+    { query: { type: 'string', description: 'The question or search, in plain words' } }, ['query']);
 
-const definitions = (member) => (member && member.link_service === 'food' && member.link_resource ? [...BASE, PANTRY] : BASE);
+const isVibe = (member) => !!member && member.handle === 'vibe';
+const definitions = (member) => [
+    ...BASE,
+    ...(member && member.link_service === 'food' && member.link_resource ? [PANTRY] : []),
+    ...(isVibe(member) ? [WEB] : []),
+];
 
 const clip = (o) => { const s = typeof o === 'string' ? o : JSON.stringify(o); return s.length > RESULT_MAX ? `${s.slice(0, RESULT_MAX - 1)}…` : s; };
 const stripTags = (h) => String(h || '').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
@@ -110,12 +119,16 @@ async function householdPantry(_args, { member, contextFor }) {
     return c ? { source: c.source, pantry_and_plan: c.text } : { error: 'OpenVibe.Food did not answer just now' };
 }
 
-const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry };
+async function webSearch(args, ctx) {
+    return await require('./web-search').search({ subject: ctx.subject, query: args.query, idempotencyKey: ctx.idempotencyKey }, ctx.webSearchOpts || {});
+}
+
+const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry };
 
 /** Runs one tool call. `raw` is the model's JSON argument string. Unknown tools and bad JSON come back as errors. */
 async function run(name, raw, ctx = {}) {
     const runner = RUNNERS[name];
-    if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food'))) return clip({ error: `no tool called ${String(name).slice(0, 64)}` });
+    if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food')) || (name === 'web_search' && !isVibe(ctx.member))) return clip({ error: `no tool called ${String(name).slice(0, 64)}` });
     let args = {};
     if (raw) { try { args = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return clip({ error: 'the arguments were not valid JSON' }); } }
     if (!args || typeof args !== 'object' || Array.isArray(args)) args = {};

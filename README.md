@@ -401,8 +401,11 @@ socket, sends on Enter and keeps a draft typed while signed out through the sign
 - **Vibe's instructions** (`vibePrompt`): a private chat with the person, Markdown answers (rendered by
   `public/web/vibe-md.js`, which escapes everything first and links only http(s)), the last 30 messages at 2,000
   characters each, answers up to 8,000 characters (1,500 tokens). Tools: `search_openvibe`, `read_page` (a page's text
-  through OpenVibe.Tools' `read` tool, `CHAT_TOOLS_URL`; Tools decides what may be reached), the time, dice, picks. It
-  says plainly what it cannot do yet (search the whole web, make pictures, use the person's computer, reminders).
+  through OpenVibe.Tools' `read` tool, `CHAT_TOOLS_URL`; Tools decides what may be reached), `web_search` (the open
+  web: an OpenVibe.Actor task for the person who asked, `server/rooms/web-search.js`, with Chat's own token and the
+  person in `X-OV-Subject`; Network grants Chat `actor.task.create` and `actor.task.read`; `CHAT_ACTOR_INTERNAL_URL`;
+  it counts against the person's Actor allowance; Vibe added to a room has it too), the time, dice, picks. It says
+  plainly what it cannot do yet (make pictures, use the person's computer, reminders).
 - **Limits:** `CHAT_VIBE_REPLIES_PER_DAY` (100) answers a person a UTC day across all their chats (`vibe_usage`;
   deleting a chat gives none back), 60 messages an hour, 500 chats kept (starting one more deletes the oldest), the
   rooms' post limits. `CHAT_VIBE=0` turns Vibe off (it also needs AI members on and Chat's OAuth secret).
