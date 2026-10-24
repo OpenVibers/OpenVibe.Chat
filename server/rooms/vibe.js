@@ -7,6 +7,8 @@
  * deletion with the account (a room nobody else is in goes with its owner).
  *
  *   start(user, text)          → { room, message }: a new chat named after its first message, the message posted
+ *   createRoom(user, title)    → the new chat's room row, nothing posted yet (a chat that starts with a picture)
+ *   erase(roomId)              the chat and everything in it, at once (a first picture Pics refused)
  *   list(user, { limit })      → the person's chats, the latest conversation first
  *   ownChat(slug, user)        → the room when it is one of `user`'s Vibe chats, else null
  *   rename(room, user, name)   → the room
@@ -47,24 +49,29 @@ function titleOf(text) {
 
 const newSlug = () => `v-${crypto.randomBytes(8).toString('hex').slice(0, 12)}`;
 
-async function start(user, text) {
+async function createRoom(user, title) {
     if (!user) fail(401, 'vibe.sign_in', 'Sign in to chat with Vibe');
     if (!enabled()) fail(503, 'vibe.off', 'Vibe is resting right now. Try again later.');
-    const body = String(text || '').replace(/\r\n/g, '\n').trim();
-    if (!body) fail(422, 'rooms.empty', 'Write something first');
     const id = await db.tx(async () => {
         // The oldest chats beyond the limit go, so starting one never fails on it.
         const extra = await db.all('SELECT id FROM rooms WHERE owner_id = ? AND assistant = 1 ORDER BY COALESCE(last_message_at, created_at) DESC OFFSET ?', [user.id, MAX_CHATS - 1]);
         for (const r of extra) await erase(r.id);
         const r = await db.run("INSERT INTO rooms (slug, name, kind, visibility, owner_id, owner_subject, assistant) VALUES (?, ?, 'community', 'private', ?, ?, 1)",
-            [newSlug(), titleOf(body), user.id, user.subject_id || null]);
+            [newSlug(), titleOf(title), user.id, user.subject_id || null]);
         const roomId = Number(r.lastInsertRowid);
         await db.run("INSERT INTO room_members (room_id, user_id, role, last_seen_at) VALUES (?, ?, 'owner', ov_now())", [roomId, user.id]);
         await db.run("INSERT INTO room_ai_members (room_id, name, handle, persona, memory, created_by_subject, engine) VALUES (?, ?, ?, '', '', ?, 'openvibe')",
             [roomId, VIBE.name, VIBE.handle, user.subject_id || null]);
         return roomId;
     });
-    const room = await db.get('SELECT * FROM rooms WHERE id = ?', [id]);
+    return await db.get('SELECT * FROM rooms WHERE id = ?', [id]);
+}
+
+async function start(user, text) {
+    const body = String(text || '').replace(/\r\n/g, '\n').trim();
+    if (user && enabled() && !body) fail(422, 'rooms.empty', 'Write something first');
+    const room = await createRoom(user, body);
+    const id = room.id;
     try {
         const message = await rooms.post(room, user, body);
         return { room: await rooms.publicRoom(room, { role: 'owner' }), message };
@@ -118,4 +125,4 @@ async function countReply(user) {
         ON CONFLICT (user_id, day) DO UPDATE SET replies = vibe_usage.replies + 1`, [user.id, today()]);
 }
 
-module.exports = { VIBE, MAX_CHATS, TITLE_MAX, DEFAULT_TITLE, VibeError, enabled, isVibeRoom, titleOf, start, list, ownChat, rename, remove, repliesToday, countReply };
+module.exports = { VIBE, MAX_CHATS, TITLE_MAX, DEFAULT_TITLE, VibeError, enabled, isVibeRoom, titleOf, start, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, ownChat, rename, remove, repliesToday, countReply };

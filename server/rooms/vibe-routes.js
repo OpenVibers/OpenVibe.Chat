@@ -5,6 +5,9 @@
  *
  *   GET    /           { chats: [{ slug, name, last_message_at, created_at }], allowance: { per_day, used_today }, enabled }
  *   POST   /           { message } → 201 { room, message }: a new chat with its first message (Vibe answers over the socket)
+ *   POST   /picture    the body is a picture (Content-Type image/*), an optional question in X-Caption (URI-encoded) →
+ *                      201 { room, message, picture }: a new chat that starts with it (it goes to OpenVibe.Pics as the
+ *                      person, like a room's picture), and Vibe answers seeing it
  *   PATCH  /:slug      { name } → { room }
  *   DELETE /:slug      204: the chat and its messages are deleted
  */
@@ -43,6 +46,24 @@ router.post('/', requireAuth, personOnly, startLimit, async (req, res) => {
         const out = await vibe.start(req.user, req.body && req.body.message);
         res.status(201).json(out);
     } catch (err) { send(res, err); }
+});
+
+const pictureLimit = limits('chat.vibe.picture', { minute: 10, hour: 120 });
+const bearerOf = (req) => { const m = /^Bearer\s+(.+)$/i.exec(String(req.get('authorization') || '')); return m ? m[1].trim() : (req.cookies && req.cookies.ov_token) || null; };
+router.post('/picture', requireAuth, personOnly, pictureLimit, (req, res, next) => express.raw({ type: () => true, limit: (config.pics.maxBytes || 20 * 1024 * 1024) + 1 })(req, res, (err) => {
+    if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'That picture is too large', code: 'pictures.too_large' });
+    return next(err);
+}), async (req, res) => {
+    let room = null;
+    try {
+        const caption = (() => { try { return decodeURIComponent(String(req.get('x-caption') || '')).slice(0, 500); } catch { return ''; } })();
+        room = await vibe.createRoom(req.user, caption || 'A picture');
+        const out = await require('./routes').postPicture(room, req.user, { token: bearerOf(req), buffer: Buffer.isBuffer(req.body) ? req.body : null, contentType: req.get('content-type'), caption, ip: req.ip });
+        res.status(201).json({ room: await rooms.publicRoom(room, { role: 'owner' }), ...out });
+    } catch (err) {
+        if (room) await vibe.erase(room.id).catch(() => {});   // a picture Pics refused leaves no empty chat behind
+        send(res, err);
+    }
 });
 
 router.patch('/:slug', requireAuth, personOnly, manageLimit, async (req, res) => {

@@ -12,6 +12,8 @@
  *   enabled()                         CHAT_PICS_INTERNAL_URL is set
  *   upload({ token, buffer, contentType, title, ip }) → { ok, status, picture: { slug, direct, page } } | { ok: false, … }
  *   linksIn(text) → [{ slug, ext }]   the Pics pictures a message links
+ *   forModel({ slug, ext })  → a data: URL of the picture for an AI member to see (fetched from Pics on this host, at
+ *                              most MODEL_MAX_BYTES), or null
  */
 const http = require('http');
 const https = require('https');
@@ -19,6 +21,8 @@ const config = require('../config');
 
 const TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/avif']);
 const MAX_INLINE = 4;
+const MODEL_MAX_BYTES = 4 * 1024 * 1024;
+const MIME = { jpg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif' };
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const cfg = () => config.pics || {};
@@ -90,4 +94,24 @@ function upload({ token, buffer, contentType, title = '', ip = null }) {
     });
 }
 
-module.exports = { enabled, upload, linksIn, pageHtml, publicUrl, TYPES, MAX_INLINE };
+/** A picture for an AI member to see: GET it from OpenVibe.Pics on this host (as the public would), as a data: URL. */
+function forModel({ slug, ext }) {
+    return new Promise((resolve) => {
+        if (!enabled() || !/^[2-9a-km-zA-HJ-NP-Z]{8}$/.test(String(slug)) || !MIME[ext]) return resolve(null);
+        let u;
+        try { u = new URL(`/i/${slug}.${ext}`, cfg().internalUrl); } catch { return resolve(null); }
+        const lib = u.protocol === 'https:' ? https : http;
+        const req = lib.request({ hostname: u.hostname, port: u.port || (u.protocol === 'https:' ? 443 : 80), path: u.pathname, method: 'GET', headers: { Host: picsHost(), Accept: 'image/*' }, timeout: 15_000 }, (res) => {
+            const type = String(res.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+            if (res.statusCode !== 200 || !TYPES.has(type)) { res.resume(); return resolve(null); }
+            const chunks = []; let n = 0;
+            res.on('data', (c) => { n += c.length; if (n > MODEL_MAX_BYTES) { req.destroy(); resolve(null); } else chunks.push(c); });
+            res.on('end', () => { if (n <= MODEL_MAX_BYTES) resolve(`data:${type};base64,${Buffer.concat(chunks).toString('base64')}`); });
+        });
+        req.on('timeout', () => req.destroy(new Error('timeout')));
+        req.on('error', () => resolve(null));
+        req.end();
+    });
+}
+
+module.exports = { enabled, upload, linksIn, pageHtml, publicUrl, forModel, TYPES, MAX_INLINE, MODEL_MAX_BYTES };
