@@ -419,6 +419,49 @@ socket, sends on Enter and keeps a draft typed while signed out through the sign
   `PATCH /api/chat/vibe/:slug { name }`, `DELETE /api/chat/vibe/:slug`; then the rooms API for messages. People only
   (an API token gets 403).
 
+### Support inboxes and the website widget (openvibe.chat/inbox)
+
+The owner, 2026-10-24: one chat system "from your private conversations to your random live chat widget on websites",
+for people and for companies, with "direct live support with an agent", "fully modular and SDK and API"
+(`docs/platform.md` has the comparison with Intercom, Crisp, Chatwoot, Stream and the order of work). An **inbox**
+(`server/inbox/`, `migrations/0016_support_inboxes.sql`) is a team's support desk that any website opens with one tag:
+
+```html
+<script src="https://openvibe.chat/widget.js" data-inbox="inb_…" async></script>
+```
+
+- **The widget** (`public/web/widget.js`, under 3 KB compressed): a bubble in a shadow root (the site's CSS cannot
+  reach it) that opens the panel `openvibe.chat/embed/inbox/:id` in a frame on first use. `data-position="left"`,
+  `data-color`, `data-open="1"`. From the page: `OpenVibeChat.open()`, `.close()`, `.toggle()`; events
+  `openvibechat:open`, `:close`, `:message` (an answer arrived; the bubble shows a dot while closed). On phones the
+  panel is full screen.
+- **The visitor** needs no account: a random token (24 bytes) kept in the frame's own storage, stored only as its
+  SHA-256, resumes their conversation; the page they wrote from is kept with it. The panel says who answers (Vibe, a
+  person, waiting) and has "Talk to a person" while Vibe answers.
+- **Vibe answers first** when the inbox has it on: from the inbox's instructions and up to 10 of its pages
+  (`read_page`, those hosts only), with the conversation so far; it never invents prices, policies or order details,
+  and ends with `[HANDOFF]` (not shown) when a person should take over, which makes the conversation `waiting`. At
+  most 30 answers a conversation and `CHAT_INBOX_AI_REPLIES_PER_DAY` (500) an inbox a UTC day; then it waits for a
+  person. A person's reply takes the conversation (`open`) and Vibe stays quiet in it; resolving it closes it, and the
+  visitor's next message starts a new one.
+- **The inbox's people** (an owner and up to 50 agents, added by username; a person makes at most 10 inboxes) work at
+  `/inbox/:id`: conversations down the left (Active, Waiting, Resolved), live over the chat socket (`inbox_watch`),
+  replies on Enter. The owner's settings page shows the tag, the greeting, colour, Vibe's instructions and pages, and
+  **allowed sites**: once named, only those sites may frame the panel (`frame-ancestors`) or call the visitor API;
+  until then any site may.
+- **Build your own panel** with the visitor API, which answers any site without cookies (CORS open, the token is the
+  key): `GET /api/chat/widget/inbox/:id` (name, greeting, colour, whether Vibe answers), `POST /visit { token? }` → `{
+  token, conversation, messages }`, `GET /messages?after=` (token in `X-Visitor-Token`), `POST /messages { token,
+  message, page_url?, name? }`, `POST /handoff { token }`. Visits 60 a minute, messages 20 a minute.
+- **Agents API** (signed in, or an API token acting as its person): `GET/POST /api/chat/inboxes`, `GET/PATCH/DELETE
+  /api/chat/inboxes/:id` (the answer carries `embed.script`), `POST /:id/members { username }`, `GET
+  /:id/conversations?status=active|bot|waiting|open|resolved`, `GET|POST /:id/conversations/:cid/messages`, `PATCH
+  /:id/conversations/:cid { status }`, `POST /:id/conversations/:cid/read`. Socket: `{ type: 'inbox_watch', inbox }`
+  (a person of the inbox) or `{ type: 'inbox_watch', inbox, conversation, visitor_token }` (the visitor), then
+  `inbox_conversation`, `inbox_message`, `inbox_status`, `inbox_typing`.
+- Export and account deletion cover inboxes: the owner's inboxes go with their conversations; an agent's replies in
+  other inboxes stay, signed "A former agent".
+
 ### VIP member badges
 
 A member's messages in a creator's room (stream or offline channel chat) carry that creator's VIP

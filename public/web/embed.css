@@ -1,0 +1,48 @@
+/* The chat panel any website opens with openvibe.chat/widget.js (server/web/inbox-pages.js /embed/inbox/:id). Light or
+   dark by the visitor's own preference; the inbox's colour (--accent, set on <body>) marks its buttons and their bubbles. */
+:root { --bg: #ffffff; --panel: #f4f6fa; --text: #101828; --muted: #5b6577; --line: #e3e7ef; --mine: #eef2fb; color-scheme: light; }
+@media (prefers-color-scheme: dark) { :root { --bg: #0b1020; --panel: #121a2c; --text: #e8edf6; --muted: #98a6bd; --line: #223049; --mine: #1a2440; color-scheme: dark; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent); }
+.em { display: flex; flex-direction: column; height: 100%; }
+.em-head { display: flex; align-items: center; gap: 10px; padding: 14px 14px 12px; background: var(--accent); color: var(--on-accent, #fff); }
+.em-head b { display: block; font-size: 1rem; line-height: 1.25; }
+.em-head span { display: block; font-size: .8rem; opacity: .9; }
+.em-head > div { flex: 1; min-width: 0; }
+.em-head .em-mark { width: 34px; height: 34px; border-radius: 50%; background: rgba(255, 255, 255, .22); display: grid; place-items: center; font-weight: 800; flex: none; }
+.em-x { all: unset; cursor: pointer; width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; font-size: 22px; line-height: 1; }
+.em-x:hover { background: rgba(255, 255, 255, .18); }
+.em-x:focus-visible { outline: 2px solid currentColor; }
+.em-thread { list-style: none; margin: 0; padding: 14px 12px; flex: 1; overflow-y: auto; display: grid; align-content: start; gap: 10px; overscroll-behavior: contain; }
+.em-msg { display: flex; flex-direction: column; max-width: 86%; }
+.em-msg small { font-size: .72rem; color: var(--muted); margin: 0 4px 2px; }
+.em-them { justify-self: start; }
+.em-me { justify-self: end; align-items: flex-end; }
+.em-bubble { padding: 9px 13px; border-radius: 16px 16px 16px 5px; background: var(--panel); overflow-wrap: anywhere; }
+.em-me .em-bubble { border-radius: 16px 16px 5px 16px; background: var(--accent); color: var(--on-accent, #fff); }
+.em-bubble p { margin: 0 0 .5em; } .em-bubble p:last-child { margin: 0; }
+.em-bubble ul, .em-bubble ol { margin: .2em 0 .5em; padding-left: 1.2em; }
+.em-bubble code { font: .88em ui-monospace, Menlo, Consolas, monospace; background: rgba(127, 127, 127, .15); padding: .1em .3em; border-radius: 5px; }
+.em-bubble pre { white-space: pre-wrap; background: rgba(127, 127, 127, .12); padding: 8px 10px; border-radius: 10px; }
+.em-system { justify-self: center; max-width: 92%; text-align: center; font-size: .8rem; color: var(--muted); }
+.em-typing .em-bubble { color: var(--muted); }
+.em-dots { display: inline-flex; gap: 4px; } .em-dots i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .4; animation: emDot 1.2s infinite; }
+.em-dots i:nth-child(2) { animation-delay: .15s; } .em-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes emDot { 40% { opacity: 1; transform: translateY(-2px); } }
+@media (prefers-reduced-motion: reduce) { .em-dots i { animation: none; } }
+.em-handoff { padding: 0 12px; }
+.em-handoff button { all: unset; cursor: pointer; font-size: .82rem; color: var(--accent); padding: 4px 6px; border-radius: 8px; }
+.em-handoff button[hidden] { display: none; }
+.em-handoff button:hover { background: var(--panel); }
+.em-handoff button:focus-visible { outline: 2px solid var(--accent); }
+.em-composer { display: flex; gap: 8px; align-items: flex-end; margin: 8px 12px 6px; padding: 6px 6px 6px 12px; border: 1px solid var(--line); border-radius: 18px; background: var(--bg); }
+.em-composer:focus-within { border-color: var(--accent); }
+.em-composer textarea { flex: 1; min-width: 0; border: 0; outline: 0; resize: none; background: transparent; color: var(--text); font: inherit; padding: 6px 0; max-height: 140px; }
+.em-composer button { all: unset; cursor: pointer; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent); color: var(--on-accent, #fff); flex: none; font-weight: 800; }
+.em-composer button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.em-composer button[disabled] { opacity: .5; cursor: default; }
+.em-foot { margin: 0 0 8px; text-align: center; font-size: .72rem; color: var(--muted); }
+.em-foot a { color: inherit; }
+.em-error { margin: 0 12px; font-size: .82rem; color: #ef4444; }

@@ -293,3 +293,12 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-faq summary { cursor: pointer; padding: 11px 14px; font-weight: 700; }
 .oc-faq details[open] summary { border-bottom: 1px solid var(--oc-line); }
 .oc-faq p { margin: 0; padding: 11px 14px 13px; color: var(--oc-muted); }
+
+/* Support inboxes (server/web/inbox-pages.js): the list of a person's inboxes and the snippet to paste. */
+.ib-list { list-style: none; margin: 14px 0; padding: 0; display: grid; gap: 8px; }
+.ib-list a { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--oc-line); background: var(--oc-panel); color: var(--oc-text); text-decoration: none; }
+.ib-list a:hover { border-color: color-mix(in srgb, var(--oc-accent) 45%, var(--oc-line)); }
+.ib-list .oc-muted { margin-left: auto; font-size: .85rem; }
+.ib-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.ib-snippet { padding: 12px 14px; border-radius: 12px; background: var(--oc-panel); border: 1px solid var(--oc-line); overflow-x: auto; }
+.ib-snippet code { font: .85rem/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre; }

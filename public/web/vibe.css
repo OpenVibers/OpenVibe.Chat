@@ -200,3 +200,30 @@ body.oc-app-body { overflow: hidden; }
 .vb-preview button:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
 .vb-bubble img.vb-local { display: block; max-width: 220px; max-height: 220px; border-radius: 12px; margin-top: 8px; }
 
+
+/* ── Support inbox (server/web/inbox-pages.js, public/web/inbox.js): the same app, a conversation per visitor ── */
+.vb-st { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: .72rem; font-weight: 700; letter-spacing: .02em; vertical-align: 2px;
+  border: 1px solid var(--oc-line); color: var(--oc-muted); }
+.vb-st-bot { color: var(--oc-accent); border-color: color-mix(in srgb, var(--oc-accent) 45%, var(--oc-line)); }
+.vb-st-wait { color: var(--warning-text, #fbbf24); border-color: color-mix(in srgb, var(--warning, #f59e0b) 55%, var(--oc-line)); background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent); }
+.vb-st-open { color: var(--success-text, var(--oc-ok)); border-color: color-mix(in srgb, var(--oc-ok) 50%, var(--oc-line)); }
+.vb-st-done { opacity: .75; }
+.ib .vb-new .ib-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+.ib-tabs { display: flex; gap: 4px; padding: 0 4px 6px; }
+.ib-tabs a { flex: 1; text-align: center; padding: 6px 8px; border-radius: 9px; color: var(--oc-muted); text-decoration: none; font-size: .85rem; }
+.ib-tabs a[aria-current="page"], .ib-tabs a:hover { background: var(--oc-panel-2); color: var(--oc-text); }
+.ib-conv { white-space: normal; display: grid; gap: 2px; }
+.ib-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.ib-row b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-row .vb-st { margin-left: 4px; }
+.ib-row time { margin-left: auto; font-size: .75rem; color: var(--oc-muted); flex: none; }
+.ib-prev { color: var(--oc-muted); font-size: .84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-unread .ib-row b, .ib-unread .ib-prev { color: var(--oc-text); font-weight: 700; }
+.ib-actions { display: flex; gap: 6px; }
+.ib-actions button { padding: 6px 12px; border-radius: 10px; border: 1px solid var(--oc-line); background: var(--oc-panel); color: var(--oc-text); font: inherit; font-size: .85rem; cursor: pointer; }
+.ib-actions button:hover { border-color: color-mix(in srgb, var(--oc-accent) 45%, var(--oc-line)); }
+.ib-sys { text-align: center; color: var(--oc-muted); font-size: .82rem; }
+.ib-who { margin: 0 0 2px; font-size: .74rem; font-weight: 700; color: var(--oc-muted); }
+.ib-av { flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--oc-panel-2); color: var(--oc-text); font-weight: 700; }
+.vb-bubble.ib-ai { background: color-mix(in srgb, var(--oc-accent) 14%, var(--oc-panel-2)); }
+.ib-page { max-width: var(--vb-col); margin: 4px auto 0; font-size: .8rem; color: var(--oc-muted); overflow-wrap: anywhere; }

@@ -186,7 +186,10 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
         },
         credentials: true,
     });
-    app.use(allowlistedCors);
+    // The widget's visitor API answers any site, without cookies (the visitor's token is the key), so a site can build
+    // its own panel on it; an inbox that names its sites refuses the others itself (server/inbox/routes.js).
+    const openCors = cors({ origin: true, credentials: false, allowedHeaders: ['Content-Type', 'X-Visitor-Token'] });
+    app.use((req, res, next) => (req.path.startsWith('/api/chat/widget/') ? openCors : allowlistedCors)(req, res, next));
     app.use(express.json({ limit: '1mb' }));
     app.use(express.urlencoded({ extended: true, limit: '256kb' }));
     app.use(cookieParser());
@@ -243,6 +246,9 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
     app.use('/api/chat/rooms', require('./rooms/routes'));
     app.use('/api/chat/vibe', require('./rooms/vibe-routes'));
+    // Support inboxes (server/inbox/): the widget's visitor API, and the inbox's people.
+    app.use('/api/chat/widget/inbox/:id', require('./inbox/routes').widget);
+    app.use('/api/chat/inboxes', require('./inbox/routes').agents);
     app.use('/api/chat/servers', require('./rooms/server-routes'));
     // Channel moderators & moderation settings (/api/chat/channels/:id/…): before /api/chat too.
     app.use('/api/chat/channels', require('./chat/channel-mod-routes'));

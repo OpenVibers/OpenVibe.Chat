@@ -583,6 +583,26 @@ class ChatServer {
                 client.roomId = null;
                 client.roomSlug = null;
                 break;
+            // Support inboxes (server/inbox/inbox.js): a visitor follows their own conversation (its id and their visitor
+            // token), one of the inbox's people follows the whole inbox.
+            case 'inbox_watch': {
+                const inboxes = require('../inbox/inbox');
+                const inbox = await inboxes.get(msg.inbox);
+                if (!inbox) { this.sendTo(ws, { type: 'inbox_error', code: 'inbox.not_found', message: 'No such inbox' }); break; }
+                if (msg.visitor_token) {
+                    const conv = await inboxes.conversation(inbox, msg.conversation);
+                    if (!conv || conv.visitor_token_hash !== inboxes.hashToken(msg.visitor_token)) { this.sendTo(ws, { type: 'inbox_error', code: 'inbox.no_conversation', message: 'No such conversation' }); break; }
+                    client.inboxConv = conv.id;
+                    client.inboxAgent = null;
+                } else {
+                    await this._applyJoinToken(client, msg);
+                    if (!(await inboxes.access(inbox, client.user)).role) { this.sendTo(ws, { type: 'inbox_error', code: 'inbox.not_agent', message: 'Only the inbox\'s people follow it' }); break; }
+                    client.inboxAgent = inbox.id;
+                    client.inboxConv = null;
+                }
+                this.sendTo(ws, { type: 'inbox_watching', inbox: inbox.id, conversation: client.inboxConv || null });
+                break;
+            }
             case 'room_message': {
                 const rooms = require('../rooms/rooms');
                 const room = client.roomId ? await rooms.bySlug(client.roomSlug) : null;
@@ -2527,6 +2547,15 @@ class ChatServer {
             if (!client.streamId && !client.channelUserId && !client.roomId && ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE && !await this._blockedFor(client, blockers)) {
                 ws.send(msg);
             }
+        }
+    }
+
+    /** A support inbox's frame: to the visitor following that conversation and to the inbox's people following it. */
+    broadcastInbox(inboxId, conversationId, data) {
+        const msg = JSON.stringify(data);
+        for (const [ws, client] of this.clients) {
+            if (!((conversationId && client.inboxConv === conversationId) || client.inboxAgent === inboxId)) continue;
+            if (ws.readyState === WebSocket.OPEN && ws.bufferedAmount <= MAX_SEND_BACKPRESSURE) ws.send(msg);
         }
     }
 
