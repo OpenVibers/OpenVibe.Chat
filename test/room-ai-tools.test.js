@@ -44,7 +44,15 @@ t('boot', async () => {
 
 t('the tool list and the runners: bounded, fair, refusing what is not theirs', async () => {
     const names = aiTools.definitions({}).map((d) => d.function.name);
-    assert.deepStrictEqual(names, ['search_openvibe', 'current_time', 'roll_dice', 'pick_one'], 'no pantry for an unlinked member');
+    assert.deepStrictEqual(names, ['search_openvibe', 'read_page', 'current_time', 'roll_dice', 'pick_one'], 'no pantry for an unlinked member');
+    // read_page asks OpenVibe.Tools' read tool (Tools decides what may be reached) and passes on only the page's parts.
+    assert.ok(/full http\(s\) address/.test(JSON.parse(await aiTools.run('read_page', '{"url":"ftp://example.com"}')).error));
+    const asked = [];
+    const page = JSON.parse(await aiTools.run('read_page', '{"url":"https://example.com/a"}', {
+        fetchImpl: async (url, o) => { asked.push({ url, body: JSON.parse(o.body) }); return { ok: true, status: 200, json: async () => ({ state: 'succeeded', result: { data: { url: 'https://example.com/a', status: 200, title: 'Example', text: 'Hello', truncated: false, links: [{ text: 'More', url: 'https://example.com/b' }] } } }) }; },
+    }));
+    assert.deepStrictEqual(asked[0], { url: 'https://openvibe.tools/api/v1/tools/read/run', body: { input: { url: 'https://example.com/a', max_chars: 6000 } } });
+    assert.deepStrictEqual([page.title, page.text, page.links[0].url], ['Example', 'Hello', 'https://example.com/b']);
     assert.ok(aiTools.definitions({ link_service: 'food', link_resource: 'plan1' }).some((d) => d.function.name === 'household_pantry'));
     const dice = JSON.parse(await aiTools.run('roll_dice', '{"count":50,"sides":6}'));
     assert.strictEqual(dice.rolls.length, 10, 'at most ten dice');

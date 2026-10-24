@@ -1,0 +1,210 @@
+/* Vibe on openvibe.chat (server/web/vibe-pages.js): makes the app live. The page works without this file (forms post,
+   the server renders every message); here a first message starts the chat in place, answers arrive over the room
+   socket (/ws/chat join_room, room_message, room_ai_typing), the composer grows with its text and sends on Enter, the
+   rail slides in on phones, and a draft typed while signed out survives the sign-in. A person's text is always set
+   with textContent; Vibe's answers go through VibeMarkdown (public/web/vibe-md.js), which escapes everything first. */
+(function () {
+  'use strict';
+  var cfg = (window.__OV_PAGE && window.__OV_PAGE.chat) || null;
+  if (!cfg || cfg.view !== 'vibe') return;
+  var MD = window.VibeMarkdown;
+  var DRAFT = 'ov-vibe-draft';
+  var app = document.getElementById('vb');
+  var scroll = document.getElementById('vb-scroll');
+  var form = document.getElementById('vb-composer');
+  var input = document.getElementById('vb-input');
+  var titleEl = document.getElementById('vb-title');
+  var room = cfg.room || null;
+  var latest = Number(cfg.latest) || 0;
+  var ws = null, delay = 1000, sending = false, waitTimer = null;
+
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function token() { var m = /(?:^|;\s*)ov_token=([^;]+)/.exec(document.cookie || ''); return m ? decodeURIComponent(m[1]) : undefined; }
+  function store(fn) { try { return fn(window.localStorage); } catch (e) { return null; } }
+  function nearBottom() { return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 160; }
+  function toBottom() { scroll.scrollTop = scroll.scrollHeight; }
+  function markSvg() {
+    var s = el('span', 'vb-mark'); s.setAttribute('aria-hidden', 'true');
+    s.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 5l7 14 7-14"/></svg>';
+    return s;
+  }
+
+  // ── The composer ──
+  function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px'; form.classList.toggle('is-empty', !input.value.trim()); }
+  if (input) {
+    input.addEventListener('input', grow);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && window.matchMedia('(hover: hover)').matches) { e.preventDefault(); form.requestSubmit ? form.requestSubmit() : form.submit(); }
+    });
+    var saved = cfg.signedIn ? store(function (s) { var v = s.getItem(DRAFT); s.removeItem(DRAFT); return v; }) : null;
+    if (saved && !input.value) input.value = saved;
+    grow();
+    if (!('ontouchstart' in window)) input.focus();
+  }
+  document.querySelectorAll('.vb-chip[data-prompt]').forEach(function (b) {
+    b.addEventListener('click', function () { input.value = b.getAttribute('data-prompt'); grow(); form.requestSubmit ? form.requestSubmit() : form.submit(); });
+  });
+
+  // ── The thread ──
+  function thread() {
+    var t = document.getElementById('vb-thread');
+    if (t) return t;
+    var hello = scroll.querySelector('.vb-hello'); if (hello) hello.remove();
+    app.classList.remove('vb-empty');
+    t = el('ol', 'vb-thread'); t.id = 'vb-thread';
+    scroll.appendChild(t);
+    return t;
+  }
+  function have(id) { return id && document.querySelector('.vb-turn[data-id="' + Number(id) + '"]'); }
+  function meTurn(text, id) {
+    var li = el('li', 'vb-turn vb-me'); if (id) li.dataset.id = String(id);
+    var b = el('div', 'vb-bubble'); b.appendChild(el('p', 'oc-sr', 'You said:'));
+    String(text).split('\n').forEach(function (line, i) { if (i) b.appendChild(document.createElement('br')); b.appendChild(document.createTextNode(line)); });
+    li.appendChild(b);
+    return li;
+  }
+  function aiTurn(m) {
+    var li = el('li', 'vb-turn vb-ai'); li.dataset.id = String(m.id);
+    li.appendChild(markSvg());
+    var body = el('div', 'vb-body'); body.appendChild(el('p', 'oc-sr', 'Vibe said:'));
+    var md = el('div', 'vb-md'); md.innerHTML = MD ? MD.render(m.message) : '';
+    if (!MD) md.textContent = m.message;
+    body.appendChild(md); li.appendChild(body);
+    return li;
+  }
+  function clearWait() { var w = document.getElementById('vb-wait'); if (w) w.remove(); if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } }
+  function showWait() {
+    if (document.getElementById('vb-wait')) return;
+    var li = el('li', 'vb-turn vb-ai vb-wait'); li.id = 'vb-wait';
+    li.appendChild(markSvg());
+    var body = el('div', 'vb-body'); var dots = el('span', 'vb-dots'); dots.setAttribute('aria-label', 'Vibe is writing');
+    dots.appendChild(el('i')); dots.appendChild(el('i')); dots.appendChild(el('i'));
+    body.appendChild(dots); li.appendChild(body);
+    thread().appendChild(li);
+    // An answer takes up to a minute with tools; after two the dots give way to a way forward.
+    waitTimer = setTimeout(function () { clearWait(); notice('Vibe did not answer this time. Send your message again, or try again in a minute.'); }, 120000);
+  }
+  function notice(text) {
+    var old = scroll.querySelector('.vb-live-notice'); if (old) old.remove();
+    var p = el('p', 'oc-notice oc-error vb-live-notice', text); p.setAttribute('role', 'alert');
+    scroll.appendChild(p); toBottom();
+  }
+  function add(m) {
+    if (!m || have(m.id)) return;
+    latest = Math.max(latest, Number(m.id) || 0);
+    var stick = nearBottom();
+    if (m.ai_member_id) { clearWait(); thread().appendChild(aiTurn(m)); refreshRail(); }
+    else {
+      // The line sent from here already shows (without an id until the server answered): give it its id.
+      var pending = document.querySelector('.vb-turn.vb-me:not([data-id])');
+      if (pending && Number(m.user_id) === Number(cfg.me)) pending.dataset.id = String(m.id);
+      else thread().appendChild(meTurn(m.message, m.id));
+    }
+    if (stick) toBottom();
+  }
+
+  // ── Live ──
+  function catchUp() {
+    if (!room) return Promise.resolve();
+    return fetch('/api/chat/rooms/' + encodeURIComponent(room) + '/messages?after=' + latest + '&limit=200', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && d.messages) d.messages.forEach(add); })
+      .catch(function () {});
+  }
+  function connect() {
+    if (!room || !window.WebSocket) return;
+    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
+    ws.onopen = function () { delay = 1000; ws.send(JSON.stringify({ type: 'join_room', room: room, token: token() })); };
+    ws.onmessage = function (ev) {
+      var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (m.type === 'room_joined') catchUp();
+      else if (m.type === 'room_message' && m.room === room) add(m.message);
+      else if (m.type === 'room_ai_typing' && m.room === room) { showWait(); if (nearBottom()) toBottom(); }
+      else if (m.type === 'room_message_deleted' && m.room === room) { var x = have(m.id); if (x) x.remove(); }
+      else if (m.type === 'auth_revoked') notice('You were signed out. Sign in again to keep chatting.');
+    };
+    ws.onclose = function () { ws = null; if (room) { setTimeout(connect, delay); delay = Math.min(delay * 2, 30000); } };
+  }
+
+  // ── The rail ──
+  function refreshRail() {
+    fetch('/api/chat/vibe?limit=100', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      if (!d) return;
+      var allow = document.getElementById('vb-allow');
+      if (allow && d.allowance) allow.textContent = Math.max(0, d.allowance.per_day - d.allowance.used_today) + ' of ' + d.allowance.per_day + ' answers left today';
+      var list = document.querySelector('.vb-rail-list'); if (!list || !d.chats) return;
+      // Rebuilt from data with text nodes (the server's grouping, kept simple here: Today and Earlier).
+      var start = new Date(); start.setUTCHours(0, 0, 0, 0);
+      list.textContent = '';
+      var groups = [{ label: 'Today', chats: [] }, { label: 'Earlier', chats: [] }];
+      d.chats.forEach(function (c) { var at = Date.parse(String(c.last_message_at).indexOf('T') < 0 ? String(c.last_message_at).replace(' ', 'T') + 'Z' : c.last_message_at); (at >= start.getTime() ? groups[0] : groups[1]).chats.push(c); });
+      groups.forEach(function (g) {
+        if (!g.chats.length) return;
+        list.appendChild(el('p', 'vb-group', g.label));
+        var ul = el('ul', 'vb-chats');
+        g.chats.forEach(function (c) {
+          var li = el('li'); var a = el('a', 'vb-chat', c.name); a.href = '/vibe/' + c.slug;
+          if (c.slug === room) a.setAttribute('aria-current', 'page');
+          li.appendChild(a); ul.appendChild(li);
+        });
+        list.appendChild(ul);
+      });
+    }).catch(function () {});
+  }
+  function setRail(open) {
+    app.classList.toggle('is-open', open);
+    var scrim = app.querySelector('.vb-scrim'); if (scrim) scrim.hidden = !open;
+    var btn = app.querySelector('[data-vb-open]'); if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+  app.addEventListener('click', function (e) {
+    if (e.target.closest('[data-vb-open]')) setRail(true);
+    else if (e.target.closest('[data-vb-close]')) setRail(false);
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && app.classList.contains('is-open')) setRail(false); });
+  var del = app.querySelector('[data-vb-delete]');
+  if (del) del.addEventListener('submit', function (e) { if (!window.confirm('Delete this chat? Its messages go too.')) e.preventDefault(); });
+
+  // ── Sending ──
+  if (form) form.addEventListener('submit', function (e) {
+    var text = input.value.trim();
+    if (!text) { e.preventDefault(); return; }
+    if (form.dataset.signin) {
+      // Signed out: the draft waits in this browser while they sign in, and comes back in the composer.
+      e.preventDefault();
+      store(function (s) { s.setItem(DRAFT, text); });
+      location.href = '/auth/login?next=' + encodeURIComponent(location.pathname);
+      return;
+    }
+    if (!window.fetch || sending) return;
+    e.preventDefault();
+    sending = true;
+    var old = scroll.querySelector('.vb-live-notice'); if (old) old.remove();
+    var mine = meTurn(text);
+    thread().appendChild(mine);
+    showWait(); toBottom();
+    input.value = ''; grow();
+    var url = room ? '/api/chat/rooms/' + encodeURIComponent(room) + '/messages' : '/api/chat/vibe';
+    fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: null }; }); })
+      .then(function (x) {
+        if (!x.ok) { mine.remove(); clearWait(); input.value = text; grow(); notice((x.d && x.d.error) || 'That did not send. Try again.'); return; }
+        if (x.d.message && x.d.message.id) { mine.dataset.id = String(x.d.message.id); latest = Math.max(latest, Number(x.d.message.id)); }
+        if (!room && x.d.room) {
+          room = x.d.room.slug;
+          history.replaceState(null, '', '/vibe/' + room);
+          if (titleEl) titleEl.textContent = x.d.room.name;
+          document.title = x.d.room.name + ' · Vibe · OpenVibe.Chat';
+          form.action = '/vibe/' + room;
+          refreshRail();
+          connect();
+        }
+      })
+      .catch(function () { mine.remove(); clearWait(); input.value = text; grow(); notice('You seem to be offline. Your message is back in the box.'); })
+      .then(function () { sending = false; });
+  });
+
+  if (cfg.waiting) showWait();
+  connect();
+  toBottom();
+  window.addEventListener('pagehide', function () { var w = ws; room = null; if (w) w.close(); });
+})();

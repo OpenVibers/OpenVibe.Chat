@@ -242,6 +242,7 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     for (const [mount, router] of Object.entries(require('./prefs/routes').ROUTES)) app.use(`/api/chat/${mount}`, router);
     // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
     app.use('/api/chat/rooms', require('./rooms/routes'));
+    app.use('/api/chat/vibe', require('./rooms/vibe-routes'));
     app.use('/api/chat/servers', require('./rooms/server-routes'));
     // Channel moderators & moderation settings (/api/chat/channels/:id/…): before /api/chat too.
     app.use('/api/chat/channels', require('./chat/channel-mod-routes'));

@@ -59,6 +59,7 @@ const EXPORTS = [
     ['sounds.json', `SELECT * FROM channel_sounds WHERE created_by_subject_id = ANY(@s) OR created_by = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['moderation_on_you.json', `SELECT * FROM moderation_actions WHERE target_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['ai_members_added.json', `SELECT * FROM room_ai_members WHERE created_by_subject = ANY(@s) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['vibe_usage.json', `SELECT * FROM vibe_usage WHERE user_id = ANY(@ids) ORDER BY day DESC LIMIT ${LIMIT}`],
 ];
 
 async function exportPart(d, subject) {
@@ -97,6 +98,7 @@ const ERASE_AFTER_ROOMS = [
     ['tags', 'DELETE FROM user_tags WHERE user_id = ANY(@ids)'],
     ['moderator_roles', 'DELETE FROM channel_moderators WHERE user_id = ANY(@ids)'],
     ['pending_messages', 'DELETE FROM pending_ip_messages WHERE user_id = ANY(@ids)'],
+    ['vibe_usage', 'DELETE FROM vibe_usage WHERE user_id = ANY(@ids)'],
     // An AI member belongs to its room, not to whoever added it: it stays, without their name on it.
     [null, 'UPDATE room_ai_members SET created_by_subject = NULL WHERE created_by_subject = ANY(@s)'],
     // Their own AI key is gone with them (OpenVibe.AI erases it): members that thought with it go back to OpenVibe's model.
@@ -143,6 +145,9 @@ async function erase(d, subjects) {
             if (others) { await d.prepare('UPDATE rooms SET owner_subject = NULL WHERE id = ?').run(r.id); add(retained, 'rooms_without_owner', 1); }
             else {
                 await d.prepare('DELETE FROM room_messages WHERE room_id = ?').run(r.id);
+                // Its AI members go with it: their notes are the room's (a Vibe chat's Vibe, server/rooms/vibe.js).
+                await d.prepare('DELETE FROM room_ai_members WHERE room_id = ?').run(r.id);
+                await d.prepare('DELETE FROM room_ai_usage WHERE room_id = ?').run(r.id);
                 await d.prepare('DELETE FROM rooms WHERE id = ?').run(r.id);
                 add(erased, 'rooms', 1);
             }

@@ -23,6 +23,7 @@ const NETWORK_URL = 'https://openvibe.network';
 const DEFAULT_DESCRIPTION = 'OpenVibe.Chat: the network-wide chat room and your direct messages, one account across every OpenVibe site.';
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public', 'web');
 const LINKS = [
+    { key: 'vibe', label: 'Vibe', href: '/vibe' },
     { key: 'global', label: 'Global chat', href: '/' },
     { key: 'rooms', label: 'Rooms', href: '/rooms' },
     { key: 'servers', label: 'Servers', href: '/servers' },
@@ -94,7 +95,8 @@ function contentSecurityPolicy(nonce) {
  * response's CSP nonce: every inline <script> carries it),
  * prefs (the person's chat preferences: timestamps, compact, font_scale, show_badges), counts (unread
  * rooms/messages for the navigation), script / callScript / ringScript (public/web/chat.js, call.js, ring.js: a call
- * coming in, on every page of a signed-in person while calls are on)
+ * coming in, on every page of a signed-in person while calls are on), app (Vibe's full-window app, server/web/vibe-pages.js:
+ * vibe.css + vibe-md.js + vibe.js, and no footer)
  */
 function renderPage(o) {
     const { config } = o;
@@ -125,22 +127,24 @@ ${INSTALL_LINKS}
 <link rel="stylesheet" href="${asset('chat.css')}">
 <link rel="stylesheet" href="${ovServe.url('items.css')}">
 ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` : ''}
+${o.app ? `<link rel="stylesheet" href="${asset('vibe.css')}">` : ''}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>
 <script src="${ovServe.url('footer.js')}" defer></script>
 ${o.script ? `<script src="${asset('chat.js')}" defer></script>` : ''}
 ${o.callScript ? `<script src="${asset('call.js')}" defer></script>` : ''}
 ${o.ringScript ? `<script src="${asset('ring.js')}" defer></script>` : ''}
+${o.app ? `<script src="${asset('vibe-md.js')}" defer></script>\n<script src="${asset('vibe.js')}" defer></script>` : ''}
 </head>
-<body class="${cls}"${scale}>
+<body class="${[cls, o.app ? 'oc-app-body' : ''].filter(Boolean).join(' ')}"${scale}>
 <a class="oc-skip" href="#main">Skip to content</a>
 <div id="navbar-mount"></div>
 ${frame.noscriptNav({ name: SITE_NAME, home: '/', links: links(o).map(({ label, href }) => ({ label, href })) })}
-<main id="main" class="oc-main${o.wide ? ' oc-main--wide' : ''}">
+<main id="main" class="${o.app ? 'vb-wrap' : `oc-main${o.wide ? ' oc-main--wide' : ''}`}">
 <noscript><p class="oc-account">${who}</p></noscript>
 ${o.body || ''}
 </main>
-${frame.footer({ service: 'chat', variant: 'full', updates: '/updates' })}
+${o.app ? '' : frame.footer({ service: 'chat', variant: 'full', updates: '/updates' })}
 <script>
 window.__OV_PAGE = ${JSON.stringify({ navbar: navConfig(o, config), footer: { service: 'chat', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' }, chat: o.page || null }).replace(/</g, '\\u003c')};
 document.addEventListener('DOMContentLoaded', function () {

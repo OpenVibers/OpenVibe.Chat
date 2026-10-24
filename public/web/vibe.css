@@ -1,0 +1,190 @@
+/* Vibe, OpenVibe's assistant, on openvibe.chat (server/web/vibe-pages.js): the full-window app. The chats down the left,
+   the conversation in a readable column, one composer docked at the bottom. Colours are the network theme's (chat.css
+   maps them to --oc-*), so every theme, light ones included, carries through. */
+body.oc-app-body { overflow: hidden; }
+.vb-wrap { margin: 0; padding: 0; max-width: none; }
+.vb {
+  --vb-rail: 272px;
+  --vb-col: 768px;
+  --vb-radius: 22px;
+  display: grid;
+  grid-template-columns: var(--vb-rail) minmax(0, 1fr);
+  height: calc(100dvh - var(--ovnav-real-h, 52px));
+  min-height: 420px;
+}
+
+/* ── The rail ─────────────────────────────────────────────────────────────── */
+.vb-rail {
+  display: flex; flex-direction: column; min-height: 0;
+  background: color-mix(in srgb, var(--oc-panel) 70%, var(--oc-bg));
+  border-right: 1px solid var(--oc-line);
+  padding: 10px 8px 8px;
+}
+.vb-rail-top { display: flex; align-items: center; gap: 6px; padding: 2px 2px 8px; }
+.vb-new {
+  flex: 1; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px;
+  border-radius: 12px; color: var(--oc-text); text-decoration: none; font-weight: 600; font-size: .95rem;
+  border: 1px solid var(--oc-line); background: var(--oc-bg);
+  transition: background .15s, border-color .15s;
+}
+.vb-new:hover { background: var(--oc-panel-2); border-color: color-mix(in srgb, var(--oc-accent) 40%, var(--oc-line)); }
+.vb svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.vb-icon {
+  all: unset; box-sizing: border-box; cursor: pointer; display: inline-grid; place-items: center;
+  width: 36px; height: 36px; border-radius: 10px; color: var(--oc-muted); flex: none;
+}
+.vb-icon:hover { background: var(--oc-panel-2); color: var(--oc-text); }
+.vb-icon:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
+.vb-rail-close, .vb-menu { display: none; }
+.vb-rail-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 2px; scrollbar-width: thin; }
+.vb-group { margin: 14px 10px 4px; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
+.vb-chats { list-style: none; margin: 0; padding: 0; }
+.vb-chat {
+  display: block; padding: 8px 10px; border-radius: 10px; color: var(--oc-text); text-decoration: none;
+  font-size: .92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vb-chat:hover { background: var(--oc-panel-2); }
+.vb-chat[aria-current="page"] { background: color-mix(in srgb, var(--oc-accent) 16%, var(--oc-panel-2)); font-weight: 600; }
+.vb-rail-note { margin: 14px 10px; color: var(--oc-muted); font-size: .9rem; line-height: 1.45; }
+.vb-rail-more { border-top: 1px solid var(--oc-line); margin-top: 6px; padding-top: 6px; display: grid; gap: 1px; }
+.vb-rail-more a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; color: var(--oc-muted); text-decoration: none; font-size: .9rem; }
+.vb-rail-more a:hover { background: var(--oc-panel-2); color: var(--oc-text); }
+.vb-allow { margin: 6px 10px 2px; font-size: .78rem; color: var(--oc-muted); }
+
+/* ── The conversation ─────────────────────────────────────────────────────── */
+.vb-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+.vb-head {
+  display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 6px 12px;
+  border-bottom: 1px solid transparent;
+}
+.vb-title { flex: 1; min-width: 0; margin: 0; font-size: 1rem; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vb-empty .vb-title { color: var(--oc-muted); font-weight: 600; }
+.vb-head-new { color: var(--oc-muted); }
+.vb-actions { position: relative; }
+.vb-actions > summary { list-style: none; }
+.vb-actions > summary::-webkit-details-marker { display: none; }
+.vb-pop {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; width: min(300px, 86vw);
+  background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 14px; padding: 12px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, .35); display: grid; gap: 10px;
+}
+.vb-rename { display: grid; grid-template-columns: 1fr auto; gap: 6px 8px; align-items: center; }
+.vb-rename label { grid-column: 1 / -1; font-size: .8rem; color: var(--oc-muted); }
+.vb-pop input { min-width: 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--oc-line); background: var(--oc-bg); color: var(--oc-text); font: inherit; }
+.vb-pop button { padding: 8px 12px; border-radius: 10px; border: 1px solid var(--oc-line); background: var(--oc-panel-2); color: var(--oc-text); font: inherit; cursor: pointer; }
+.vb-pop .vb-danger { width: 100%; color: var(--oc-red); border-color: color-mix(in srgb, var(--oc-red) 45%, var(--oc-line)); background: transparent; }
+.vb-pop .vb-danger:hover { background: color-mix(in srgb, var(--oc-red) 12%, transparent); }
+
+.vb-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 16px 24px; scroll-padding-bottom: 24px; }
+.vb-scroll > .oc-notice { max-width: var(--vb-col); margin: 8px auto; }
+.vb-thread { list-style: none; margin: 0 auto; padding: 8px 0 0; max-width: var(--vb-col); display: grid; gap: 22px; }
+.vb-turn { display: flex; gap: 14px; min-width: 0; }
+.vb-me { justify-content: flex-end; }
+.vb-bubble {
+  max-width: min(85%, 620px); padding: 10px 16px; border-radius: 20px 20px 6px 20px;
+  background: var(--oc-panel-2); line-height: 1.55; overflow-wrap: anywhere;
+}
+.vb-bubble .oc-pics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.vb-bubble .oc-pic img { max-width: 220px; max-height: 220px; border-radius: 12px; display: block; }
+.vb-mark {
+  flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; margin-top: 1px;
+  background: linear-gradient(140deg, var(--oc-accent), color-mix(in srgb, var(--oc-accent) 45%, #a78bfa));
+  color: var(--oc-on-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--oc-accent) 18%, transparent);
+}
+.vb-mark svg { width: 16px; height: 16px; stroke-width: 2.6; }
+.vb-body { flex: 1; min-width: 0; padding-top: 3px; }
+
+/* Vibe's answers (public/web/vibe-md.js) */
+.vb-md { line-height: 1.65; overflow-wrap: anywhere; }
+.vb-md > :first-child { margin-top: 0; }
+.vb-md > :last-child { margin-bottom: 0; }
+.vb-md p { margin: 0 0 .8em; }
+.vb-md h3, .vb-md h4 { margin: 1.2em 0 .45em; line-height: 1.3; }
+.vb-md h3 { font-size: 1.12rem; }
+.vb-md h4 { font-size: 1rem; }
+.vb-md ul, .vb-md ol { margin: 0 0 .9em; padding-left: 1.4em; }
+.vb-md li { margin: .25em 0; }
+.vb-md li::marker { color: var(--oc-muted); }
+.vb-md a { color: var(--oc-accent); text-underline-offset: 2px; }
+.vb-md strong { font-weight: 700; }
+.vb-md code { font: .88em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--oc-panel-2); padding: .12em .38em; border-radius: 6px; }
+.vb-md pre { margin: 0 0 1em; padding: 14px 16px; border-radius: 14px; background: color-mix(in srgb, var(--oc-panel) 80%, #000); border: 1px solid var(--oc-line); overflow-x: auto; }
+.vb-md pre code { background: none; padding: 0; font-size: .86rem; white-space: pre; }
+.vb-md blockquote { margin: 0 0 .9em; padding: 2px 0 2px 14px; border-left: 3px solid var(--oc-line); color: var(--oc-muted); }
+
+.vb-dots { display: inline-flex; gap: 5px; align-items: center; height: 26px; }
+.vb-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--oc-muted); opacity: .35; animation: vbDot 1.2s infinite ease-in-out; }
+.vb-dots i:nth-child(2) { animation-delay: .15s; }
+.vb-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes vbDot { 0%, 80%, 100% { opacity: .35; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
+@media (prefers-reduced-motion: reduce) { .vb-dots i { animation: none; opacity: .7; } }
+
+/* ── A new chat ───────────────────────────────────────────────────────────── */
+.vb-hello { max-width: var(--vb-col); margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px 0 8px; }
+.vb-hello .vb-mark { width: 52px; height: 52px; margin-bottom: 14px; }
+.vb-hello .vb-mark svg { width: 26px; height: 26px; }
+.vb-hello h1 { font-size: clamp(1.5rem, 3.2vw, 2rem); letter-spacing: -.02em; margin: 0 0 8px; }
+.vb-sub { margin: 0 auto 22px; max-width: 520px; color: var(--oc-muted); line-height: 1.55; }
+.vb-suggest { list-style: none; margin: 0; padding: 0; width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.vb-chip {
+  all: unset; box-sizing: border-box; cursor: pointer; width: 100%; height: 100%; display: grid; gap: 2px; text-align: left;
+  padding: 12px 14px; border-radius: 16px; border: 1px solid var(--oc-line); background: color-mix(in srgb, var(--oc-panel) 60%, transparent);
+  transition: background .15s, border-color .15s, transform .15s;
+}
+.vb-chip:hover { background: var(--oc-panel); border-color: color-mix(in srgb, var(--oc-accent) 40%, var(--oc-line)); }
+.vb-chip:active { transform: scale(.99); }
+.vb-chip:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+.vb-chip b { font-weight: 650; font-size: .95rem; color: var(--oc-text); }
+.vb-chip span { color: var(--oc-muted); font-size: .88rem; }
+
+/* ── The composer ─────────────────────────────────────────────────────────── */
+.vb-dock { padding: 0 16px max(10px, env(safe-area-inset-bottom)); }
+.vb-composer {
+  max-width: var(--vb-col); margin: 0 auto; display: flex; align-items: flex-end; gap: 8px;
+  padding: 8px 8px 8px 18px; border-radius: var(--vb-radius); border: 1px solid var(--oc-line);
+  background: var(--oc-panel); box-shadow: 0 10px 34px rgba(0, 0, 0, .22);
+  transition: border-color .15s, box-shadow .15s;
+}
+.vb-composer:focus-within { border-color: color-mix(in srgb, var(--oc-accent) 55%, var(--oc-line)); box-shadow: 0 10px 34px rgba(0, 0, 0, .22), 0 0 0 3px color-mix(in srgb, var(--oc-accent) 16%, transparent); }
+.vb-composer textarea {
+  flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--oc-text);
+  font: inherit; font-size: 1rem; line-height: 1.5; padding: 7px 0; max-height: 40vh; overflow-y: auto;
+}
+.vb-composer textarea::placeholder { color: var(--oc-muted); }
+.vb-composer textarea:focus-visible { outline: none; }
+.vb-send {
+  all: unset; box-sizing: border-box; cursor: pointer; flex: none; width: 38px; height: 38px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, var(--oc-on-accent));
+  transition: opacity .15s, transform .15s;
+}
+.vb-send svg { stroke-width: 2.4; }
+.vb-send:hover { transform: translateY(-1px); }
+.vb-send:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+.vb-send[disabled], .vb-composer.is-empty .vb-send { opacity: .4; cursor: default; transform: none; }
+.vb-fine { max-width: var(--vb-col); margin: 6px auto 0; text-align: center; font-size: .76rem; color: var(--oc-muted); }
+
+/* ── Phones and narrow windows: the rail slides in over the chat ──────────── */
+.vb-scrim { display: none; }
+@media (max-width: 860px) {
+  .vb { grid-template-columns: minmax(0, 1fr); }
+  .vb-rail {
+    position: fixed; z-index: 30; top: var(--ovnav-real-h, 52px); bottom: 0; left: 0; width: min(300px, 86vw);
+    transform: translateX(-102%); transition: transform .22s cubic-bezier(.2, .7, .2, 1); box-shadow: 18px 0 50px rgba(0, 0, 0, .35);
+  }
+  .vb.is-open .vb-rail { transform: none; }
+  .vb-scrim { display: block; position: fixed; inset: var(--ovnav-real-h, 52px) 0 0 0; z-index: 25; background: rgba(0, 0, 0, .45); }
+  .vb-scrim[hidden] { display: none; }
+  .vb-rail-close, .vb-menu { display: inline-grid; }
+  .vb-scroll { padding: 4px 12px 18px; }
+  .vb-dock { padding: 0 10px max(8px, env(safe-area-inset-bottom)); }
+  .vb-thread { gap: 18px; }
+  .vb-turn { gap: 10px; }
+  .vb-bubble { max-width: 88%; }
+}
+@media (max-width: 520px) {
+  .vb-suggest { grid-template-columns: minmax(0, 1fr); }
+  .vb-suggest li:nth-child(n+3) { display: none; }
+  .vb-hello { justify-content: flex-end; padding-bottom: 4px; }
+  .vb-sub { font-size: .92rem; margin-bottom: 16px; }
+}
+@media (prefers-reduced-motion: reduce) { .vb-rail { transition: none; } }
