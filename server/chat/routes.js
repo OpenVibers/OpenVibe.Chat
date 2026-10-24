@@ -520,7 +520,8 @@ router.get('/global/history', optionalAuth, async (req, res) => {
         const out = afterId != null
             ? await historyStore.delta('global', { afterId, limit, channelUsername })
             : await historyStore.page('global', { limit, before, channelUsername });
-        out.messages = await withoutBlocked(req, res, out.messages);
+        // What OpenVibe's global room shows of other rooms' lines (global-standard.js), then not the reader's blocked people.
+        out.messages = await withoutBlocked(req, res, require('./global-standard').filterFeed(out.messages));
         await loadDecor(out.messages);
         out.messages = publicRows(enrichMessagesWithCosmetics(await hydrateReplies(out.messages.map((x) => ({ ...x })))));
         res.json(out);
