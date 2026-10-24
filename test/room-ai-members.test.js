@@ -119,6 +119,14 @@ t('the pages: AI messages are badged and not profile links; settings add and rem
     assert.ok(page.text.includes('<code>@pantry</code>'), 'the room says how to ask it');
     const settings = await web('GET', '/r/our-kitchen/settings', ann);
     assert.ok(settings.text.includes('id="oc-ai"') && settings.text.includes('Notes it always knows'));
+    // One click adds Vibe, OpenVibe's assistant, as a member anyone can ask with @vibe; then the button goes.
+    assert.ok(settings.text.includes('<input type="hidden" name="name" value="Vibe">') && settings.text.includes('Add Vibe</button>'));
+    const vibeAdd = await web('POST', '/r/our-kitchen/ai-members', ann, { name: 'Vibe', persona: 'Vibe, OpenVibe\'s assistant' });
+    assert.strictEqual(vibeAdd.status, 303, vibeAdd.text.slice(0, 200));
+    const vibeMember = (await api('GET', '/our-kitchen/ai-members', ann)).body.ai_members.find((m) => m.handle === 'vibe');
+    assert.ok(vibeMember, 'Vibe is a member');
+    assert.ok(!(await web('GET', '/r/our-kitchen/settings', ann)).text.includes('Add Vibe</button>'), 'no second Vibe');
+    assert.strictEqual((await web('POST', `/r/our-kitchen/ai-members/${vibeMember.id}/delete`, ann, { go: '1' })).status, 303);
     const add = await web('POST', '/r/our-kitchen/ai-members', ann, { name: 'Coach', persona: 'Keeps us honest' });
     assert.strictEqual(add.status, 303, add.text.slice(0, 200));
     const coach = (await api('GET', '/our-kitchen/ai-members', ann)).body.ai_members.find((m) => m.handle === 'coach');
