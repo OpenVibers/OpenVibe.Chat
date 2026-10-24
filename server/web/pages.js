@@ -126,6 +126,9 @@ function dmMessage(m, me) {
     const mine = me && m.sender_id === me.id;
     return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span></li>`;
 }
+// Vibe, OpenVibe's assistant, as a room's AI member (one click on the room's settings; a person's own chats with it are
+// server/rooms/vibe.js): how it should be in a group.
+const VIBE_IN_ROOMS = 'Vibe, OpenVibe\'s assistant: helpful, quick and friendly. Answers whoever asks, and helps the group decide, plan and find things, with links.';
 const notice = (kind, text) => `<p class="oc-notice oc-${kind}" role="${kind === 'error' ? 'alert' : 'status'}">${esc(text)}</p>`;
 
 /**
@@ -795,6 +798,7 @@ ${a ? `<label class="oc-check"><input type="checkbox" name="enabled" value="1"${
 ${aiMembers.enabled() ? '' : notice('error', 'AI members are switched off on this server right now.')}
 <p class="oc-muted">An AI member answers when someone writes its name with an @ (for example @${esc(ais[0] ? ais[0].handle : 'pantry')}). It reads the room's recent messages and the notes you give it, through OpenVibe.AI, with OpenVibe's model or with your own key's (several members with different models make a multi-model group chat). It cannot do anything outside the chat. At most ${aiMembers.MAX_PER_ROOM}.</p>
 ${ais.map((a) => `<section class="oc-ai-member"><h3><span class="oc-badge oc-ai">AI</span> ${esc(a.name)} <span class="oc-muted">@${esc(a.handle)} · ${esc(aiMembers.modelOf(a))}</span>${a.link_service === 'food' ? ' <span class="oc-badge">knows the household\'s pantry (OpenVibe.Food)</span>' : ''}</h3>${aiForm(a)}<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/ai-members/${Number(a.id)}/delete"><button type="submit" class="oc-link">Remove ${esc(a.name)}</button></form></section>`).join('')}
+${ais.length < aiMembers.MAX_PER_ROOM && !ais.some((a) => a.handle === 'vibe') ? `<form class="oc-form oc-ai-quick" method="post" action="/r/${esc(room.slug)}/ai-members"><input type="hidden" name="name" value="Vibe"><input type="hidden" name="persona" value="${esc(VIBE_IN_ROOMS)}"><p><button type="submit">Add Vibe</button> <span class="oc-muted">OpenVibe's assistant joins the room: anyone here can ask it with @vibe.</span></p></form>` : ''}
 ${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}` : '';
         if (room.server_id) {
             return await page(req, res, 200, {
