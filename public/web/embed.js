@@ -1,0 +1,137 @@
+/* The chat panel (server/web/inbox-pages.js /embed/inbox/:id) a website opens with openvibe.chat/widget.js. The visitor
+   is known by a token kept in this frame's own storage (partitioned by the site embedding it); their conversation comes
+   from /api/chat/widget/inbox/:id and lives over the chat socket (inbox_watch). Text the visitor or an agent wrote is
+   set with textContent; Vibe's answers go through VibeMarkdown (vibe-md.js), which escapes everything first. */
+(function () {
+  'use strict';
+  var root = document.getElementById('em');
+  if (!root) return;
+  var inbox = root.getAttribute('data-inbox');
+  var api = '/api/chat/widget/inbox/' + inbox;
+  var KEY = 'ov-inbox-' + inbox;
+  var thread = document.getElementById('em-thread');
+  var form = document.getElementById('em-form');
+  var input = form.querySelector('textarea');
+  var sendBtn = form.querySelector('button');
+  var personBtn = document.getElementById('em-person');
+  var stateEl = document.getElementById('em-state');
+  var page = new URLSearchParams(location.search).get('page') || '';
+  var token = null, conv = null, latest = 0, ws = null, delay = 1000, aiOn = root.getAttribute('data-ai') === '1', typingEl = null;
+
+  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  function store(fn) { try { return fn(window.localStorage); } catch (e) { return null; } }
+  function toParent(msg) { try { window.parent.postMessage(Object.assign({ ov: 'chat' }, msg), '*'); } catch (e) { /* not embedded */ } }
+  function bottom() { thread.scrollTop = thread.scrollHeight; }
+  var STATE = {
+    bot: 'Vibe answers right away. Ask for a person any time.',
+    waiting: 'Waiting for a person. You can leave; this conversation stays here.',
+    open: 'A person is here.',
+    resolved: 'Resolved. Write again any time.',
+  };
+  function setStatus(s) {
+    if (conv) conv.status = s;
+    stateEl.textContent = STATE[s] || stateEl.textContent;
+    personBtn.hidden = !(aiOn && conv && s === 'bot');
+  }
+  function clearTyping() { if (typingEl) { typingEl.remove(); typingEl = null; } }
+  function showTyping(who) {
+    clearTyping();
+    typingEl = el('li', 'em-msg em-them em-typing');
+    typingEl.appendChild(el('small', null, who || 'Vibe'));
+    var b = el('div', 'em-bubble'); var d = el('span', 'em-dots'); d.setAttribute('aria-label', 'writing');
+    d.appendChild(el('i')); d.appendChild(el('i')); d.appendChild(el('i')); b.appendChild(d); typingEl.appendChild(b);
+    thread.appendChild(typingEl); bottom();
+    setTimeout(clearTyping, 60000);
+  }
+  function render(m) {
+    if (m.id && thread.querySelector('[data-id="' + m.id + '"]')) return;
+    // The visitor's own line, back over the socket before the POST answered: it is the one already shown.
+    if (m.author === 'visitor') { var waiting = thread.querySelector('.em-me:not([data-id])'); if (waiting) { waiting.dataset.id = String(m.id); latest = Math.max(latest, Number(m.id)); return; } }
+    if (m.id) latest = Math.max(latest, Number(m.id));
+    var li;
+    if (m.author === 'system') { li = el('li', 'em-system', m.body); }
+    else {
+      var mine = m.author === 'visitor';
+      li = el('li', 'em-msg ' + (mine ? 'em-me' : 'em-them'));
+      if (!mine) li.appendChild(el('small', null, m.author === 'ai' ? 'Vibe' : (m.author_name || 'Support')));
+      var b = el('div', 'em-bubble');
+      if (m.author === 'ai' && window.VibeMarkdown) b.innerHTML = window.VibeMarkdown.render(m.body); else b.textContent = m.body;
+      li.appendChild(b);
+      if (!mine) { clearTyping(); toParent({ type: 'message', author: m.author }); }
+    }
+    if (m.id) li.dataset.id = String(m.id);
+    thread.appendChild(li); bottom();
+  }
+  function errorLine(text) {
+    var p = root.querySelector('.em-error'); if (!p) { p = el('p', 'em-error'); p.setAttribute('role', 'alert'); form.parentNode.insertBefore(p, form); }
+    p.textContent = text || ''; p.hidden = !text;
+  }
+
+  function watch() {
+    if (!conv || !ws || ws.readyState !== 1) return;
+    ws.send(JSON.stringify({ type: 'inbox_watch', inbox: inbox, conversation: conv.id, visitor_token: token }));
+  }
+  function connect() {
+    if (!window.WebSocket) return;
+    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
+    ws.onopen = function () { delay = 1000; watch(); catchUp(); };
+    ws.onmessage = function (ev) {
+      var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (!conv || m.conversation !== conv.id) return;
+      if (m.type === 'inbox_message') render(m.message);
+      else if (m.type === 'inbox_status') setStatus(m.status);
+      else if (m.type === 'inbox_typing') showTyping(m.who);
+    };
+    ws.onclose = function () { setTimeout(connect, delay); delay = Math.min(delay * 2, 30000); };
+  }
+  function catchUp() {
+    if (!token) return;
+    fetch(api + '/messages?after=' + latest, { headers: { 'X-Visitor-Token': token } }).then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && d.messages) d.messages.forEach(render); if (d && d.conversation) setStatus(d.conversation.status); }).catch(function () {});
+  }
+
+  function post(path, body) {
+    return fetch(api + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ token: token }, body || {})) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: {} }; }); });
+  }
+
+  post('/visit', { token: store(function (s) { return s.getItem(KEY); }) }).then(function (x) {
+    if (!x.ok) { errorLine((x.d && x.d.error) || 'This chat is not available right now.'); return; }
+    token = x.d.token; store(function (s) { s.setItem(KEY, token); });
+    aiOn = !!(x.d.inbox && x.d.inbox.ai);
+    if (x.d.inbox && x.d.inbox.color) toParent({ type: 'color', color: x.d.inbox.color });
+    conv = x.d.conversation;
+    (x.d.messages || []).forEach(render);
+    if (conv) setStatus(conv.status);
+    connect();
+  }).catch(function () { errorLine('You seem to be offline.'); });
+
+  function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; }
+  input.addEventListener('input', grow);
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event('submit')); } });
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var text = input.value.trim();
+    if (!text || !token || sendBtn.disabled) return;
+    sendBtn.disabled = true; errorLine('');
+    var pending = el('li', 'em-msg em-me'); var b = el('div', 'em-bubble', text); pending.appendChild(b); thread.appendChild(pending); bottom();
+    input.value = ''; grow();
+    post('/messages', { message: text, page_url: page }).then(function (x) {
+      if (!x.ok) { pending.remove(); input.value = text; errorLine((x.d && x.d.error) || 'That did not send. Try again.'); return; }
+      pending.dataset.id = String(x.d.message.id); latest = Math.max(latest, Number(x.d.message.id));
+      var fresh = !conv || conv.id !== x.d.conversation.id;
+      conv = x.d.conversation; setStatus(conv.status);
+      if (fresh) watch();
+      if (conv.status === 'bot') showTyping('Vibe');
+    }).catch(function () { pending.remove(); input.value = text; errorLine('You seem to be offline. Your message is back in the box.'); })
+      .then(function () { sendBtn.disabled = false; input.focus(); });
+  });
+  personBtn.addEventListener('click', function () {
+    personBtn.disabled = true;
+    post('/handoff').then(function (x) { if (x.ok && x.d.conversation) { setStatus(x.d.conversation.status); catchUp(); } else errorLine((x.d && x.d.error) || 'Try again in a moment.'); })
+      .then(function () { personBtn.disabled = false; });
+  });
+  var close = root.querySelector('[data-close]');
+  if (close) close.addEventListener('click', function () { toParent({ type: 'close' }); });
+  window.addEventListener('message', function (e) { if (e.data && e.data.ov === 'chat' && e.data.type === 'visible' && e.data.visible) { input.focus(); bottom(); } });
+})();

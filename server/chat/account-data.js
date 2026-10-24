@@ -60,6 +60,9 @@ const EXPORTS = [
     ['moderation_on_you.json', `SELECT * FROM moderation_actions WHERE target_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['ai_members_added.json', `SELECT * FROM room_ai_members WHERE created_by_subject = ANY(@s) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['vibe_usage.json', `SELECT * FROM vibe_usage WHERE user_id = ANY(@ids) ORDER BY day DESC LIMIT ${LIMIT}`],
+    ['inboxes_owned.json', `SELECT * FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
+    ['inbox_memberships.json', `SELECT * FROM inbox_members WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
+    ['inbox_replies.json', `SELECT * FROM inbox_messages WHERE author = 'agent' AND author_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
 ];
 
 async function exportPart(d, subject) {
@@ -99,6 +102,14 @@ const ERASE_AFTER_ROOMS = [
     ['moderator_roles', 'DELETE FROM channel_moderators WHERE user_id = ANY(@ids)'],
     ['pending_messages', 'DELETE FROM pending_ip_messages WHERE user_id = ANY(@ids)'],
     ['vibe_usage', 'DELETE FROM vibe_usage WHERE user_id = ANY(@ids)'],
+    // Support inboxes (server/inbox/inbox.js): the inboxes they own go with every conversation in them; in others,
+    // their replies stay for the visitor without their name, and their place on the team goes.
+    ['inbox_messages', 'DELETE FROM inbox_messages WHERE conversation_id IN (SELECT c.id FROM inbox_conversations c JOIN inboxes i ON i.id = c.inbox_id WHERE i.owner_subject = ANY(@s) OR i.owner_id = ANY(@ids))'],
+    ['inbox_conversations', 'DELETE FROM inbox_conversations WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
+    ['inbox_members', 'DELETE FROM inbox_members WHERE user_id = ANY(@ids) OR inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
+    [null, 'DELETE FROM inbox_ai_usage WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
+    ['inboxes', 'DELETE FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)'],
+    [null, "UPDATE inbox_messages SET author_user_id = NULL, author_name = 'A former agent' WHERE author = 'agent' AND author_user_id = ANY(@ids)"],
     // An AI member belongs to its room, not to whoever added it: it stays, without their name on it.
     [null, 'UPDATE room_ai_members SET created_by_subject = NULL WHERE created_by_subject = ANY(@s)'],
     // Their own AI key is gone with them (OpenVibe.AI erases it): members that thought with it go back to OpenVibe's model.

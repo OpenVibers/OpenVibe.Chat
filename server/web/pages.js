@@ -890,6 +890,7 @@ ${attachList}`,
     // ── What shipped, robots, sitemap ──
     // ── Servers (server/rooms/servers.js): text and voice channels, roles, invites ──
     require('./vibe-pages').mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit, notice });
+    require('./inbox-pages').mountInboxPages(router, { page, viewerOf, needUser, sameSite, formLimit, notice, config });
     require('./server-pages').mountServerPages(router, { page, needUser, viewerOf, sameSite, formLimit, notice, roomMessage, callPanel, applyRoomChange, pictureComposer, config });
 
     router.get('/updates', async (req, res) => await page(req, res, 200, {

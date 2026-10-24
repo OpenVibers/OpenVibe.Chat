@@ -28,6 +28,7 @@ const LINKS = [
     { key: 'rooms', label: 'Rooms', href: '/rooms' },
     { key: 'servers', label: 'Servers', href: '/servers' },
     { key: 'messages', label: 'Messages', href: '/messages' },
+    { key: 'inbox', label: 'Inbox', href: '/inbox' },
     { key: 'settings', label: 'Settings', href: '/settings' },
 ];
 
@@ -96,7 +97,7 @@ function contentSecurityPolicy(nonce) {
  * prefs (the person's chat preferences: timestamps, compact, font_scale, show_badges), counts (unread
  * rooms/messages for the navigation), script / callScript / ringScript (public/web/chat.js, call.js, ring.js: a call
  * coming in, on every page of a signed-in person while calls are on), app (Vibe's full-window app, server/web/vibe-pages.js:
- * vibe.css + vibe-md.js + vibe.js, and no footer)
+ * vibe.css + vibe-md.js + vibe.js, and no footer), appScript (the app's own script instead of vibe.js: inbox.js)
  */
 function renderPage(o) {
     const { config } = o;
@@ -134,7 +135,7 @@ ${o.app ? `<link rel="stylesheet" href="${asset('vibe.css')}">` : ''}
 ${o.script ? `<script src="${asset('chat.js')}" defer></script>` : ''}
 ${o.callScript ? `<script src="${asset('call.js')}" defer></script>` : ''}
 ${o.ringScript ? `<script src="${asset('ring.js')}" defer></script>` : ''}
-${o.app ? `<script src="${asset('vibe-md.js')}" defer></script>\n<script src="${asset('vibe.js')}" defer></script>` : ''}
+${o.app ? `<script src="${asset('vibe-md.js')}" defer></script>\n<script src="${asset(o.appScript || 'vibe.js')}" defer></script>` : ''}
 </head>
 <body class="${[cls, o.app ? 'oc-app-body' : ''].filter(Boolean).join(' ')}"${scale}>
 <a class="oc-skip" href="#main">Skip to content</a>
