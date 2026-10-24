@@ -1,0 +1,65 @@
+'use strict';
+/**
+ * /api/chat/vibe — a person's chats with Vibe, OpenVibe's assistant (server/rooms/vibe.js). A chat is a private room,
+ * so its messages, pictures and live delivery are the rooms API and socket (/api/chat/rooms/:slug/…, join_room).
+ *
+ *   GET    /           { chats: [{ slug, name, last_message_at, created_at }], allowance: { per_day, used_today }, enabled }
+ *   POST   /           { message } → 201 { room, message }: a new chat with its first message (Vibe answers over the socket)
+ *   PATCH  /:slug      { name } → { room }
+ *   DELETE /:slug      204: the chat and its messages are deleted
+ */
+const express = require('express');
+const cache = require('openvibe-shared/cache-policy');
+const config = require('../config');
+const { requireAuth } = require('../auth/auth');
+const { limits } = require('../net/actor-limits');
+const rooms = require('./rooms');
+const vibe = require('./vibe');
+
+const router = express.Router();
+const startLimit = limits('chat.vibe.start', { minute: 10, hour: 120 });
+const manageLimit = limits('chat.vibe.manage', { minute: 30, hour: 300 });
+
+function send(res, err) {
+    if (err instanceof vibe.VibeError || err instanceof rooms.RoomError) return res.status(err.status).json({ error: err.message, code: err.code });
+    console.error('[Vibe]', err && err.message);
+    return res.status(500).json({ error: 'Something went wrong' });
+}
+/** Vibe speaks for nobody but the person signed in: API tokens get the rooms API instead. */
+const personOnly = (req, res, next) => (req.authSource === 'api_token' ? res.status(403).json({ error: 'Chat with Vibe with your own sign-in', code: 'vibe.person_only' }) : next());
+
+router.get('/', requireAuth, personOnly, async (req, res) => {
+    try {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({
+            chats: await vibe.list(req.user, { limit: req.query.limit }),
+            allowance: { per_day: config.ai.vibeRepliesPerDay, used_today: await vibe.repliesToday(req.user) },
+            enabled: vibe.enabled(),
+        });
+    } catch (err) { send(res, err); }
+});
+
+router.post('/', requireAuth, personOnly, startLimit, async (req, res) => {
+    try {
+        const out = await vibe.start(req.user, req.body && req.body.message);
+        res.status(201).json(out);
+    } catch (err) { send(res, err); }
+});
+
+router.patch('/:slug', requireAuth, personOnly, manageLimit, async (req, res) => {
+    try {
+        const room = await vibe.ownChat(req.params.slug, req.user);
+        if (!room) return res.status(404).json({ error: 'No such chat', code: 'rooms.not_found' });
+        res.json({ room: await vibe.rename(room, req.user, req.body && req.body.name) });
+    } catch (err) { send(res, err); }
+});
+
+router.delete('/:slug', requireAuth, personOnly, manageLimit, async (req, res) => {
+    try {
+        const room = await vibe.ownChat(req.params.slug, req.user);
+        if (!room) return res.status(404).json({ error: 'No such chat', code: 'rooms.not_found' });
+        await vibe.remove(room, req.user);
+        res.status(204).end();
+    } catch (err) { send(res, err); }
+});
+
+module.exports = router;

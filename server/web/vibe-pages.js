@@ -1,0 +1,202 @@
+'use strict';
+/**
+ * openvibe.chat/vibe — the app for chatting with Vibe, OpenVibe's assistant (server/rooms/vibe.js), laid out the way
+ * people already know from ChatGPT, Claude and Gemini: the chats down the left, the conversation in the middle, one
+ * composer at the bottom. Server-rendered and usable without JavaScript (forms post, the page shows Vibe's answer once
+ * it is written); public/web/vibe.js makes it live over the room socket and keeps the draft through a sign-in.
+ *
+ *   GET  /vibe                  a new chat (signed out: the same page, sending asks to sign in)
+ *   GET  /vibe/:slug            one of the person's chats
+ *   POST /vibe                  form: start a chat with its first message
+ *   POST /vibe/:slug            form: a message in the chat
+ *   POST /vibe/:slug/rename     form: { name }
+ *   POST /vibe/:slug/delete     form: the chat and its messages go
+ */
+const md = require('../../public/web/vibe-md.js');
+const pictures = require('../rooms/pictures');
+const rooms = require('../rooms/rooms');
+const vibe = require('../rooms/vibe');
+const { esc } = require('./layout');
+
+const SUGGESTIONS = [
+    { title: 'Catch me up', text: 'on today\'s tech news', prompt: 'What happened in tech news today? Give me the highlights with links.' },
+    { title: 'Find a deal', text: 'on a mechanical keyboard', prompt: 'Find me a good deal on a mechanical keyboard on OpenVibe Deals.' },
+    { title: 'Look for jobs', text: 'remote video editing work', prompt: 'Find remote video editing jobs posted recently.' },
+    { title: 'Explain a page', text: 'how browser go-live works', prompt: 'Read https://openvibe.live/docs/go-live-in-your-browser and explain how going live from a browser works, in plain words.' },
+];
+
+const DAY = 86_400_000;
+const atOf = (ts) => { const s = String(ts || ''); const t = Date.parse(s.includes('T') ? s : `${s.replace(' ', 'T')}Z`); return Number.isFinite(t) ? t : 0; };
+/** The rail's groups, newest first: Today, Yesterday, Previous 7 days, Previous 30 days, then by month. */
+function groupChats(chats, now = Date.now()) {
+    const startToday = Date.UTC(new Date(now).getUTCFullYear(), new Date(now).getUTCMonth(), new Date(now).getUTCDate());
+    const groups = [];
+    for (const c of chats) {
+        const at = atOf(c.last_message_at);
+        const label = at >= startToday ? 'Today' : at >= startToday - DAY ? 'Yesterday' : at >= startToday - 7 * DAY ? 'Previous 7 days'
+            : at >= startToday - 30 * DAY ? 'Previous 30 days' : new Date(at).toLocaleDateString('en-US', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+        if (!groups.length || groups[groups.length - 1].label !== label) groups.push({ label, chats: [] });
+        groups[groups.length - 1].chats.push(c);
+    }
+    return groups;
+}
+
+const ICON = {
+    new: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>',
+    menu: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h10"/></svg>',
+    close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+    send: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 19V5M5 12l7-7 7 7"/></svg>',
+    more: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg>',
+    messages: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4Z"/></svg>',
+    rooms: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20c0-3 3-5 6-5s6 2 6 5M14 15c3 0 8 1 8 5"/></svg>',
+    globe: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>',
+};
+
+/** The mark Vibe signs its answers with (the network's V, in the accent). */
+const MARK = '<span class="vb-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 5l7 14 7-14"/></svg></span>';
+
+function rail({ chats, current, signedIn, allowance }) {
+    const groups = groupChats(chats);
+    const list = !signedIn
+        ? '<p class="vb-rail-note">Sign in to keep your chats. They are private to you.</p>'
+        : groups.length
+            ? groups.map((g) => `<p class="vb-group">${esc(g.label)}</p><ul class="vb-chats">${g.chats.map((c) => `<li><a class="vb-chat" href="/vibe/${esc(c.slug)}"${c.slug === current ? ' aria-current="page"' : ''}>${esc(c.name)}</a></li>`).join('')}</ul>`).join('')
+            : '<p class="vb-rail-note">Your chats with Vibe show up here.</p>';
+    const left = allowance ? Math.max(0, allowance.per_day - allowance.used_today) : null;
+    return `<aside class="vb-rail" id="vb-rail" aria-label="Your chats with Vibe">
+<div class="vb-rail-top">
+<a class="vb-new" href="/vibe">${ICON.new}<span>New chat</span></a>
+<button class="vb-icon vb-rail-close" type="button" data-vb-close aria-label="Close the chat list">${ICON.close}</button>
+</div>
+<nav class="vb-rail-list" aria-label="Chats with Vibe">${list}</nav>
+<nav class="vb-rail-more" aria-label="More of OpenVibe.Chat">
+<a href="/messages">${ICON.messages}<span>Messages</span></a>
+<a href="/rooms">${ICON.rooms}<span>Rooms and servers</span></a>
+<a href="/">${ICON.globe}<span>Global chat</span></a>
+</nav>
+${left != null ? `<p class="vb-allow" id="vb-allow">${left} of ${allowance.per_day} answers left today</p>` : ''}
+</aside>`;
+}
+
+function turn(m, me) {
+    const ai = !!m.ai_member_id;
+    if (ai) return `<li class="vb-turn vb-ai" data-id="${Number(m.id) || 0}">${MARK}<div class="vb-body"><p class="oc-sr">Vibe said:</p><div class="vb-md">${md.render(m.message)}</div></div></li>`;
+    const mine = me && Number(m.user_id) === Number(me.id);
+    return `<li class="vb-turn vb-me" data-id="${Number(m.id) || 0}"><div class="vb-bubble"><p class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</p>${esc(m.message).replace(/\n/g, '<br>')}${pictures.pageHtml(m.message)}</div></li>`;
+}
+
+function composer({ slug, signedIn, enabled }) {
+    const action = !signedIn ? `/auth/login` : slug ? `/vibe/${esc(slug)}` : '/vibe';
+    return `<form class="vb-composer" id="vb-composer" method="${signedIn ? 'post' : 'get'}" action="${action}"${signedIn ? '' : ' data-signin="1"'}>
+${signedIn ? '' : `<input type="hidden" name="next" value="${slug ? `/vibe/${esc(slug)}` : '/vibe'}">`}
+<label class="oc-sr" for="vb-input">Message Vibe</label>
+<textarea id="vb-input" name="message" rows="1" maxlength="2000" placeholder="${signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)'}"${enabled ? '' : ' disabled'} required></textarea>
+<button class="vb-send" type="submit" aria-label="Send"${enabled ? '' : ' disabled'}>${ICON.send}</button>
+</form>
+<p class="vb-fine">${enabled ? 'Vibe can get things wrong. Check what matters.' : 'Vibe is resting right now. Try again later.'}</p>`;
+}
+
+function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit, notice }) {
+    const allowanceOf = async (user) => ({ per_day: require('../config').ai.vibeRepliesPerDay, used_today: await vibe.repliesToday(user) });
+
+    async function render(req, res, { room = null, status = 200, error = null } = {}) {
+        const actor = await viewerOf(req);
+        const user = actor.kind === 'user' ? actor.user : null;
+        const chats = user ? await vibe.list(user) : [];
+        const allowance = user ? await allowanceOf(user) : null;
+        const messages = room ? await rooms.history(room, { limit: 200 }) : [];
+        const enabled = vibe.enabled();
+        const title = room ? room.name : 'Vibe';
+        const waiting = room && messages.length && !messages[messages.length - 1].ai_member_id;
+        const hello = `<div class="vb-hello">
+${MARK}
+<h1>${user ? `What can I help with${user.display_name || user.username ? `, ${esc(String(user.display_name || user.username).split(' ')[0])}` : ''}?` : 'Hi, I\'m Vibe. What can I help with?'}</h1>
+<p class="vb-sub">OpenVibe's assistant. I can search everything on OpenVibe, from news and deals to jobs, rentals and videos, read any page you link, and help you think things through.</p>
+<ul class="vb-suggest">${SUGGESTIONS.map((s) => `<li><button type="button" class="vb-chip" data-prompt="${esc(s.prompt)}"><b>${esc(s.title)}</b><span>${esc(s.text)}</span></button></li>`).join('')}</ul>
+</div>`;
+        const thread = room
+            ? `<ol class="vb-thread" id="vb-thread">${messages.map((m) => turn(m, user)).join('')}${waiting ? `<li class="vb-turn vb-ai vb-wait" id="vb-wait">${MARK}<div class="vb-body"><span class="vb-dots" aria-label="Vibe is writing"><i></i><i></i><i></i></span><noscript><a href="/vibe/${esc(room.slug)}">Refresh to see Vibe's answer</a></noscript></div></li>` : ''}</ol>`
+            : '';
+        const head = `<header class="vb-head">
+<button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show your chats">${ICON.menu}</button>
+<h1 class="vb-title" id="vb-title">${esc(title)}</h1>
+${room ? `<details class="vb-actions"><summary class="vb-icon" aria-label="Chat options">${ICON.more}</summary><div class="vb-pop">
+<form method="post" action="/vibe/${esc(room.slug)}/rename" class="vb-rename"><label for="vb-name">Name</label><input id="vb-name" name="name" maxlength="${vibe.TITLE_MAX}" value="${esc(room.name)}" required><button type="submit">Rename</button></form>
+<form method="post" action="/vibe/${esc(room.slug)}/delete" data-vb-delete><button type="submit" class="vb-danger">Delete this chat</button></form>
+</div></details>` : `<a class="vb-icon vb-head-new" href="/vibe" aria-label="New chat">${ICON.new}</a>`}
+</header>`;
+        const body = `<div class="vb${room ? '' : ' vb-empty'}" id="vb">
+${rail({ chats, current: room && room.slug, signedIn: !!user, allowance })}
+<div class="vb-scrim" data-vb-close hidden></div>
+<section class="vb-main" aria-label="${room ? 'Your chat with Vibe' : 'A new chat with Vibe'}">
+${head}
+<div class="vb-scroll" id="vb-scroll">
+${error ? notice('error', error) : ''}
+${room ? thread : hello}
+</div>
+<div class="vb-dock">${composer({ slug: room && room.slug, signedIn: !!user, enabled })}</div>
+</section>
+</div>`;
+        await page(req, res, status, {
+            actor, app: true, active: 'vibe', path: room ? `/vibe/${room.slug}` : '/vibe',
+            title: room ? `${room.name} · Vibe` : 'Vibe, OpenVibe\'s assistant',
+            fullTitle: room ? undefined : 'Vibe: chat with OpenVibe\'s assistant · OpenVibe.Chat',
+            description: 'Chat with Vibe, OpenVibe\'s free assistant: it searches news, deals, jobs, rentals and videos across OpenVibe, reads pages you link and helps you think.',
+            robots: room ? 'noindex, nofollow' : 'index, follow',
+            body,
+            page: {
+                view: 'vibe', room: room ? room.slug : null, me: user ? user.id : null, latest: messages.length ? messages[messages.length - 1].id : 0,
+                waiting: !!waiting, enabled, signedIn: !!user,
+            },
+        });
+    }
+
+    router.get('/vibe', async (req, res) => { await render(req, res); });
+
+    router.get('/vibe/:slug', async (req, res) => {
+        const actor = await viewerOf(req);
+        if (actor.kind !== 'user') return res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+        const room = await vibe.ownChat(req.params.slug, actor.user);
+        if (!room) return render(req, res, { status: 404, error: 'That chat is not here: it may have been deleted. Start a new one below.' });
+        await render(req, res, { room });
+    });
+
+    router.post('/vibe', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        try {
+            const out = await vibe.start(actor.user, req.body && req.body.message);
+            res.redirect(303, `/vibe/${out.room.slug}`);
+        } catch (err) {
+            await render(req, res, { status: err.status || 500, error: err.status ? err.message : 'Something went wrong. Try again.' });
+        }
+    });
+
+    router.post('/vibe/:slug', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await vibe.ownChat(req.params.slug, actor.user);
+        if (!room) return res.redirect(303, '/vibe');
+        try {
+            const message = await rooms.post(room, actor.user, req.body && req.body.message);
+            require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
+            res.redirect(303, `/vibe/${room.slug}`);
+        } catch (err) {
+            await render(req, res, { room, status: err.status || 500, error: err.status ? err.message : 'Your message could not be sent.' });
+        }
+    });
+
+    router.post('/vibe/:slug/rename', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await vibe.ownChat(req.params.slug, actor.user);
+        if (!room) return res.redirect(303, '/vibe');
+        try { await vibe.rename(room, actor.user, req.body && req.body.name); res.redirect(303, `/vibe/${room.slug}`); } catch (err) { await render(req, res, { room, status: err.status || 500, error: err.message }); }
+    });
+
+    router.post('/vibe/:slug/delete', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await vibe.ownChat(req.params.slug, actor.user);
+        if (room) await vibe.remove(room, actor.user);
+        res.redirect(303, '/vibe');
+    });
+}
+
+module.exports = { mountVibePages, groupChats, SUGGESTIONS };

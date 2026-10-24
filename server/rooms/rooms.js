@@ -71,6 +71,7 @@ const ROLE_ORDER = { owner: 0, mod: 1, speaker: 2, participant: 3, member: 4, vi
 /** Services a room can be attached to, and what names the resource there. */
 const ATTACH_SERVICES = Object.freeze({ community: { resource: /^[a-z0-9][a-z0-9-]{1,39}$/, noun: 'space' } });
 const MAX_TEXT = 2000;
+const MAX_AI_TEXT_VIBE = 8000;
 const MAX_ROOMS_PER_OWNER = 10;
 const RATE = { max: 6, windowMs: 10_000 };
 
@@ -99,6 +100,7 @@ async function publicRoom(r, extra = {}) {
         ...(kindOf(r) === 'call' ? { join_role: joinRoleOf(r), call_channel: `room-${r.slug}` } : {}),
         slow_seconds: r.slow_seconds, message_count: r.message_count, last_message_at: r.last_message_at,
         created_at: r.created_at, members: (await db.get("SELECT COUNT(*) AS n FROM room_members WHERE room_id = ? AND role != 'blocked'", [r.id]) || {}).n || 0,
+        ...(Number(r.assistant) === 1 ? { assistant: true } : {}),
         ...(r.server_id ? { server: { slug: (await db.get('SELECT slug FROM chat_servers WHERE id = ?', [r.server_id]) || {}).slug || null, channel: r.channel_slug } } : {}),
         ...extra,
     };
@@ -143,7 +145,7 @@ async function create(user, { name, slug, topic, visibility = 'public', kind = '
     if (kind === 'system' && !isStaff(user)) fail(403, 'rooms.kind', 'Only chat staff create system rooms');
     if (join_role != null && join_role !== '' && (kind !== 'call' || !JOIN_ROLES_CALL.includes(join_role))) fail(422, 'rooms.join_role', 'People join a call room as speakers, participants or viewers');
     if (wordFilter.check(n).safe === false) fail(422, 'rooms.name_filtered', 'That room name is not allowed');
-    const owned = (await db.get('SELECT COUNT(*) AS n FROM rooms WHERE owner_id = ? AND archived_at IS NULL AND server_id IS NULL', [user.id])).n;
+    const owned = (await db.get('SELECT COUNT(*) AS n FROM rooms WHERE owner_id = ? AND archived_at IS NULL AND server_id IS NULL AND assistant = 0', [user.id])).n;
     if (owned >= MAX_ROOMS_PER_OWNER && !isStaff(user)) fail(429, 'rooms.too_many', `You can own up to ${MAX_ROOMS_PER_OWNER} rooms`);
     if (await bySlug(s)) fail(409, 'rooms.taken', 'That room address is taken');
     const t = topic ? String(topic).replace(/\s+/g, ' ').trim().slice(0, 200) : null;
@@ -160,12 +162,12 @@ async function create(user, { name, slug, topic, visibility = 'public', kind = '
 async function list(user, { limit = 50 } = {}) {
     await ensureSchema();
     const lim = Math.min(100, Math.max(1, Number(limit) || 50));
-    // A server's channels are listed with their server (server/rooms/servers.js), not here.
-    const pub = (await Promise.all((await db.all("SELECT * FROM rooms WHERE visibility = 'public' AND archived_at IS NULL AND server_id IS NULL ORDER BY COALESCE(last_message_at, created_at) DESC LIMIT ?", [lim])).map(async (r) => await publicRoom(r))));
+    // A server's channels are listed with their server (server/rooms/servers.js), and Vibe chats under Vibe (vibe.js), not here.
+    const pub = (await Promise.all((await db.all("SELECT * FROM rooms WHERE visibility = 'public' AND archived_at IS NULL AND server_id IS NULL AND assistant = 0 ORDER BY COALESCE(last_message_at, created_at) DESC LIMIT ?", [lim])).map(async (r) => await publicRoom(r))));
     const mine = user ? (await Promise.all((await db.all(`SELECT r.*, m.role, m.last_read_id, m.last_seen_at,
             (SELECT COUNT(*) FROM room_messages x WHERE x.room_id = r.id AND x.id > m.last_read_id AND x.is_deleted = 0 AND x.user_id != ?) AS unread
         FROM room_members m JOIN rooms r ON r.id = m.room_id
-        WHERE m.user_id = ? AND m.role != 'blocked' AND r.archived_at IS NULL AND r.server_id IS NULL
+        WHERE m.user_id = ? AND m.role != 'blocked' AND r.archived_at IS NULL AND r.server_id IS NULL AND r.assistant = 0
         ORDER BY COALESCE(r.last_message_at, r.created_at) DESC`, [user.id, user.id])).map(async (r) => await publicRoom(r, { role: r.role, unread: r.unread, last_seen_at: r.last_seen_at || null })))) : [];
     return { public: pub, mine };
 }
@@ -175,7 +177,7 @@ async function unreadTotal(user, { servers = false } = {}) {
     if (!user) return 0;
     await ensureSchema();
     // Rooms count their own unread messages; servers (servers: true) count their channels'.
-    return (await db.get(`SELECT COUNT(*) AS n FROM room_members m JOIN rooms r ON r.id = m.room_id AND r.archived_at IS NULL AND r.server_id IS ${servers ? 'NOT ' : ''}NULL
+    return (await db.get(`SELECT COUNT(*) AS n FROM room_members m JOIN rooms r ON r.id = m.room_id AND r.archived_at IS NULL AND r.assistant = 0 AND r.server_id IS ${servers ? 'NOT ' : ''}NULL
         JOIN room_messages x ON x.room_id = m.room_id AND x.id > m.last_read_id AND x.is_deleted = 0 AND x.user_id != m.user_id
         WHERE m.user_id = ? AND m.role != 'blocked'`, [user.id]) || {}).n || 0;
 }
@@ -284,7 +286,8 @@ async function post(room, user, text, { now = Date.now() } = {}) {
 
 /** A message from one of the room's AI members (server/rooms/ai-members.js): user_id 0, the member's id. */
 async function postAsAi(room, member, text, { now = Date.now() } = {}) {
-    const message = String(text || '').trim().slice(0, MAX_TEXT);
+    // Vibe's answers in its own chats may run longer than a person's message (a recipe, a plan, code).
+    const message = String(text || '').trim().slice(0, Number(room.assistant) === 1 ? MAX_AI_TEXT_VIBE : MAX_TEXT);
     const id = await db.tx(async () => {
         const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, ai_member_id) VALUES (?, 0, NULL, ?, ?)', [room.id, message, member.id]);
         await db.run('UPDATE rooms SET message_count = message_count + 1, last_message_at = ov_now() WHERE id = ?', [room.id]);
@@ -348,6 +351,7 @@ async function setRole(room, actor, targetUserId, role) {
     const kind = kindOf(room);
     if (!ROLES.includes(role) && role !== 'none') fail(422, 'rooms.role', 'Unknown role');
     if (role === 'owner') fail(422, 'rooms.role', 'A room has one owner');
+    if (Number(room.assistant) === 1) fail(409, 'vibe.private', 'A chat with Vibe is yours alone: start a room to talk with others and Vibe');
     if (role !== 'none' && !KIND_ROLES[kind].includes(role)) fail(422, 'rooms.role_kind', `A ${kind} room has no ${role} role (its roles: ${KIND_ROLES[kind].filter((r) => r !== 'owner').join(', ')})`);
     const a = await access(room, actor);
     if (!a.moderate) fail(403, 'rooms.not_mod', 'Only the room\'s owner and moderators manage members');
@@ -378,6 +382,7 @@ async function update(room, actor, { name, topic, visibility, slow_seconds, join
     if (name != null) { const n = String(name).replace(/\s+/g, ' ').trim(); if (n.length < minName || n.length > 40 || !wordFilter.check(n).safe) fail(422, 'rooms.name', `Room names are ${minName} to 40 characters`); next.name = n; }
     if (topic != null) next.topic = String(topic).replace(/\s+/g, ' ').trim().slice(0, 200) || null;
     if (visibility != null) { if (!['public', 'private'].includes(visibility)) fail(422, 'rooms.visibility', 'Visibility is public or private'); next.visibility = visibility; }
+    if (Number(room.assistant) === 1 && next.visibility !== 'private') fail(409, 'vibe.private', 'A chat with Vibe stays private');
     if (slow_seconds != null) { const v = Number(slow_seconds); if (!Number.isInteger(v) || v < 0 || v > 600) fail(422, 'rooms.slow', 'Slow mode is 0 to 600 seconds'); next.slow_seconds = v; }
     if (join_role != null && join_role !== '') {
         if (kindOf(room) !== 'call' || !JOIN_ROLES_CALL.includes(join_role)) fail(422, 'rooms.join_role', 'People join a call room as speakers, participants or viewers');

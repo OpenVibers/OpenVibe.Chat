@@ -383,6 +383,33 @@ and the `ctx_users` projection, pages read Chat's own tables, cosmetics are wait
 the only openvibe.live URLs are profile links. `test/live-down.test.js` renders every page and uses the
 forms, the core APIs and the socket with Live refusing connections and with Live hanging.
 
+### Vibe, OpenVibe's assistant (openvibe.chat/vibe)
+
+The owner, 2026-10-24: "turn openvibe.chat into the main chat app", familiar like ChatGPT (plan track K,
+`OpenVibe_Consumer_Plan_2026-10-24.md`). `/vibe` is that app: the person's chats with Vibe down the left (Today,
+Yesterday, Previous 7 days…), the conversation in a readable column, one composer at the bottom, suggestions on a new
+chat, and the rest of Chat (Messages, Rooms and servers, Global chat) under the list. It works without JavaScript
+(forms post; the page shows Vibe's answer once written); `public/web/vibe.js` starts a chat in place, follows the room
+socket, sends on Enter and keeps a draft typed while signed out through the sign-in.
+
+- **A chat is a private room** (`server/rooms/vibe.js`, `migrations/0015_vibe_chats.sql`: `rooms.assistant = 1`) the
+  person owns, with one AI member, Vibe, who answers every message without being named (`ai-members.js` afterPost).
+  Messages, pictures, the socket (`join_room`, `room_message`, `room_ai_typing`), export and account deletion are the
+  rooms'. Nobody can be added to it and it cannot be made public; it is not listed with rooms, does not count toward
+  the 10 rooms a person may own, and is not in the unread counts. A chat is named after its first message (40
+  characters, cut at a word); deleting one deletes its messages (not archived).
+- **Vibe's instructions** (`vibePrompt`): a private chat with the person, Markdown answers (rendered by
+  `public/web/vibe-md.js`, which escapes everything first and links only http(s)), the last 30 messages at 2,000
+  characters each, answers up to 8,000 characters (1,500 tokens). Tools: `search_openvibe`, `read_page` (a page's text
+  through OpenVibe.Tools' `read` tool, `CHAT_TOOLS_URL`; Tools decides what may be reached), the time, dice, picks. It
+  says plainly what it cannot do yet (search the whole web, make pictures, use the person's computer, reminders).
+- **Limits:** `CHAT_VIBE_REPLIES_PER_DAY` (100) answers a person a UTC day across all their chats (`vibe_usage`;
+  deleting a chat gives none back), 60 messages an hour, 500 chats kept (starting one more deletes the oldest), the
+  rooms' post limits. `CHAT_VIBE=0` turns Vibe off (it also needs AI members on and Chat's OAuth secret).
+- **API:** `GET /api/chat/vibe` (chats, allowance), `POST /api/chat/vibe { message }` → 201 `{ room, message }`,
+  `PATCH /api/chat/vibe/:slug { name }`, `DELETE /api/chat/vibe/:slug`; then the rooms API for messages. People only
+  (an API token gets 403).
+
 ### VIP member badges
 
 A member's messages in a creator's room (stream or offline channel chat) carry that creator's VIP
