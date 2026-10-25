@@ -218,6 +218,10 @@ body.oc-app-body { overflow: hidden; }
 .ib-row .vb-st { margin-left: 4px; }
 .ib-rate { font-size: .85rem; line-height: 1; }
 .ib-ok { color: var(--oc-ok, #22c55e); font-weight: 800; margin-left: 4px; font-size: .9em; }
+.ib-pick { list-style: none; margin: 0 0 6px; padding: 4px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); max-height: 260px; overflow-y: auto; }
+.ib-pick li { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px; border-radius: 8px; cursor: pointer; min-width: 0; }
+.ib-pick li span { color: var(--oc-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.ib-pick li.is-on, .ib-pick li:hover { background: color-mix(in srgb, var(--oc-accent) 14%, transparent); }
 .ib-row time { margin-left: auto; font-size: .75rem; color: var(--oc-muted); flex: none; }
 .ib-prev { color: var(--oc-muted); font-size: .84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-unread .ib-row b, .ib-unread .ib-prev { color: var(--oc-text); font-weight: 700; }

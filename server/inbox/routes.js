@@ -18,6 +18,7 @@
  *   GET    /:id              { inbox, members, embed }    PATCH /:id (owner)    DELETE /:id (owner)
  *   POST   /:id/members      { username } (owner)         DELETE /:id/members/:userId (owner)
  *   POST   /:id/identity     { action: on | rotate | off } (owner) → { identity_secret }: verified visitors
+ *   GET    /:id/replies      { replies }: saved replies    POST /:id/replies { shortcut, body }    DELETE /:id/replies/:replyId
  *   GET    /:id/conversations                  ?status=active|bot|waiting|open|resolved
  *   GET    /:id/conversations/:cid/messages    ?after=
  *   POST   /:id/conversations/:cid/messages    { message } → 201: a person's answer (the conversation becomes open)
@@ -127,6 +128,18 @@ agents.get('/:id', requireAuth, async (req, res) => {
 agents.patch('/:id', requireAuth, manageLimit, async (req, res) => {
     const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
     try { res.json({ inbox: inboxes.shape(await inboxes.update(inbox, req.user, req.body || {})) }); } catch (err) { send(res, err); }
+});
+agents.get('/:id/replies', requireAuth, async (req, res) => {
+    const inbox = await agentInbox(req, res); if (!inbox) return;
+    noStore(res).json({ replies: await inboxes.savedReplies(inbox) });
+});
+agents.post('/:id/replies', requireAuth, manageLimit, async (req, res) => {
+    const inbox = await agentInbox(req, res); if (!inbox) return;
+    try { res.json({ replies: await inboxes.saveReply(inbox, req.user, req.body || {}) }); } catch (err) { send(res, err); }
+});
+agents.delete('/:id/replies/:replyId', requireAuth, manageLimit, async (req, res) => {
+    const inbox = await agentInbox(req, res); if (!inbox) return;
+    try { res.json({ replies: await inboxes.deleteReply(inbox, req.user, req.params.replyId) }); } catch (err) { send(res, err); }
 });
 agents.post('/:id/identity', requireAuth, manageLimit, async (req, res) => {
     const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;

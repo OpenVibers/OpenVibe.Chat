@@ -111,6 +111,7 @@ const ERASE_AFTER_ROOMS = [
     ['inbox_conversations', 'DELETE FROM inbox_conversations WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     ['inbox_members', 'DELETE FROM inbox_members WHERE user_id = ANY(@ids) OR inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     [null, 'DELETE FROM inbox_ai_usage WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
+    [null, 'DELETE FROM inbox_saved_replies WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     ['inboxes', 'DELETE FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)'],
     [null, "UPDATE inbox_messages SET author_user_id = NULL, author_name = 'A former agent' WHERE author = 'agent' AND author_user_id = ANY(@ids)"],
     // Feeds (server/feeds/feeds.js): a person's feeds go with everything published to them.

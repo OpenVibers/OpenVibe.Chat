@@ -251,6 +251,34 @@ async function stampIdentity(convId, who) {
         [who.id, who.name, who.email, convId]);
 }
 
+// ── Saved replies ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+const SHORTCUT_RE = /^[a-z0-9][a-z0-9-]{0,29}$/;
+const MAX_SAVED = 100;
+const savedShape = (r) => ({ id: Number(r.id), shortcut: r.shortcut, body: r.body, created_by: r.created_by == null ? null : Number(r.created_by) });
+async function savedReplies(inbox) {
+    return (await db.all('SELECT * FROM inbox_saved_replies WHERE inbox_id = ? ORDER BY shortcut', [inbox.id])).map(savedShape);
+}
+/** Any of the inbox's people saves a reply; the same shortcut replaces it. */
+async function saveReply(inbox, user, { shortcut, body } = {}) {
+    if (!(await access(inbox, user)).role) fail(403, 'inbox.not_agent', 'Only the inbox\'s people save replies');
+    const key = String(shortcut || '').trim().toLowerCase().replace(/^\//, '');
+    if (!SHORTCUT_RE.test(key)) fail(422, 'inbox.shortcut', 'A shortcut is letters, digits and dashes, up to 30');
+    const text = clean(body, LIMITS.body);
+    if (!text) fail(422, 'inbox.empty', 'Write the reply');
+    const n = (await db.get('SELECT COUNT(*) AS n FROM inbox_saved_replies WHERE inbox_id = ?', [inbox.id])).n;
+    const exists = await db.get('SELECT 1 FROM inbox_saved_replies WHERE inbox_id = ? AND shortcut = ?', [inbox.id, key]);
+    if (!exists && Number(n) >= MAX_SAVED) fail(429, 'inbox.too_many_saved', `At most ${MAX_SAVED} saved replies`);
+    await db.run(`INSERT INTO inbox_saved_replies (inbox_id, shortcut, body, created_by) VALUES (?, ?, ?, ?)
+        ON CONFLICT (inbox_id, shortcut) DO UPDATE SET body = excluded.body, created_by = excluded.created_by`, [inbox.id, key, text, user.id]);
+    return await savedReplies(inbox);
+}
+async function deleteReply(inbox, user, id) {
+    if (!(await access(inbox, user)).role) fail(403, 'inbox.not_agent', 'Only the inbox\'s people change saved replies');
+    await db.run('DELETE FROM inbox_saved_replies WHERE inbox_id = ? AND id = ?', [inbox.id, Number(id) || 0]);
+    return await savedReplies(inbox);
+}
+
 // ── Visitors ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -426,7 +454,9 @@ async function aiAnswer(inbox, convId, deps = {}) {
             .map((m) => ({ role: m.author === 'visitor' ? 'user' : 'assistant', content: `${m.author === 'agent' ? `(${m.author_name || 'a person'} from ${inbox.name}) ` : ''}${String(m.body).slice(0, 2000)}` }));
         const tools = inboxTools(inbox);
         const aiClient = deps.aiClient || require('../ai/client');
-        const messagesForModel = [{ role: 'system', content: inboxPrompt(inbox) }, ...transcript];
+        // What Vibe may know about where the visitor is and who they are (a verified name only: anyone can type a name).
+        const context = [conv.page_url ? `The visitor is on this page: ${conv.page_url}` : '', Number(conv.verified) && conv.visitor_name ? `${inbox.name}'s site says the visitor is ${conv.visitor_name}.` : ''].filter(Boolean).join('\n');
+        const messagesForModel = [{ role: 'system', content: inboxPrompt(inbox) + (context ? `\n\n${context}` : '') }, ...transcript];
         const lastId = history.length ? history[history.length - 1].id : 0;
         let text = '';
         for (let round = 0; round <= 3 && !text; round++) {
@@ -459,6 +489,6 @@ function _reset() { inFlight.clear(); }
 module.exports = {
     InboxError, INBOX_RE, CONV_RE, LIMITS, MAX_INBOXES, AI_PER_CONVERSATION, hashToken,
     create, update, remove, get, access, mine, members, addMember, removeMember, shape, publicConfig, plainText, peopleAnswer,
-    visit, visitorPost, handoff, rate, setIdentity, verifiedIdentity, conversations, conversation, messages, agentPost, setStatus, markRead, convShape,
+    visit, visitorPost, handoff, rate, setIdentity, verifiedIdentity, savedReplies, saveReply, deleteReply, conversations, conversation, messages, agentPost, setStatus, markRead, convShape,
     aiAnswer, inboxPrompt, _reset,
 };

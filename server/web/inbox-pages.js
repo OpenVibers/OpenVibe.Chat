@@ -120,6 +120,7 @@ ${list}
         const filter = ['active', 'waiting', 'resolved'].includes(req.query.f) ? req.query.f : 'active';
         const list = await inboxes.conversations(inbox, { status: filter });
         const current = req.query.c ? await inboxes.conversation(inbox, req.query.c) : null;
+        const saved = await inboxes.savedReplies(inbox);
         const msgs = current ? await inboxes.messages(current) : [];
         if (current) await inboxes.markRead(inbox, current);
         const item = (c) => `<li><a class="vb-chat ib-conv" href="/inbox/${esc(inbox.id)}?c=${esc(c.id)}&amp;f=${filter}"${current && c.id === current.id ? ' aria-current="page"' : ''} data-conv="${esc(c.id)}">
@@ -151,13 +152,13 @@ ${current ? `${Number(current.verified) ? `<p class="ib-page">Verified by your s
         : `<div class="vb-hello"><h1>${list.length ? 'Pick a conversation' : 'No conversations yet'}</h1><p class="vb-sub">${list.length ? 'Waiting ones come first: those visitors asked for a person.' : 'Paste the snippet from Settings into your site. Visitors write; Vibe answers; you take over when it matters.'}</p></div>`}
 </div>
 ${current ? `<div class="vb-dock"><form class="vb-composer" id="vb-composer" method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}">
-<label class="oc-sr" for="vb-input">Reply</label><textarea id="vb-input" name="message" rows="1" maxlength="4000" placeholder="Reply as ${esc(actor.user.display_name || actor.user.username)}" required></textarea>
+<label class="oc-sr" for="vb-input">Reply</label><textarea id="vb-input" name="message" rows="1" maxlength="4000" placeholder="Reply as ${esc(actor.user.display_name || actor.user.username)}${saved.length ? ' · / for saved replies' : ''}" required aria-autocomplete="list"></textarea>
 <button class="vb-send" type="submit" aria-label="Send">&#8593;</button></form><p class="vb-fine">Replying takes the conversation from Vibe.</p></div>` : ''}
 </section>
 </div>`;
         await page(req, res, 200, {
             actor, app: true, appScript: 'inbox.js', active: 'inbox', path: `/inbox/${inbox.id}`, title: `${inbox.name} · Inbox`, robots: 'noindex, nofollow', body,
-            page: { view: 'inbox', inbox: inbox.id, conversation: current ? current.id : null, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: actor.user.id, filter },
+            page: { view: 'inbox', inbox: inbox.id, conversation: current ? current.id : null, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: actor.user.id, filter, saved: saved.map((r) => ({ shortcut: r.shortcut, body: r.body })) },
         });
     });
 
@@ -182,6 +183,7 @@ ${current ? `<div class="vb-dock"><form class="vb-composer" id="vb-composer" met
         const team = await inboxes.members(inbox);
         const embed = embedOf(inbox);
         const owner = role === 'owner';
+        const saved = await inboxes.savedReplies(inbox);
         await page(req, res, 200, {
             actor, title: `${inbox.name}: settings`, path: `/inbox/${inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
             body: `<p><a href="/inbox/${esc(inbox.id)}">&larr; ${esc(inbox.name)}</a></p><h1>${esc(inbox.name)}</h1>
@@ -217,7 +219,12 @@ hash_hmac('sha256', (string) $user->id, $secret)`)}</code></pre>
 <p><button type="submit">Save</button></p></form>` : '<p class="oc-muted">Only the owner changes the settings.</p>'}
 <h2>People</h2>
 <ul class="oc-members">${team.map((m) => `<li><b>${esc(m.display_name || m.username || `user ${m.user_id}`)}</b> <span class="oc-muted">@${esc(m.username || '')} · ${m.role}</span>${owner && m.role !== 'owner' ? ` <form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/members/${m.user_id}/delete"><button class="oc-link" type="submit">Remove</button></form>` : ''}</li>`).join('')}</ul>
-${owner ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/members"><label>Add a person by username <input name="username" required maxlength="40" placeholder="username"></label><p><button type="submit">Add</button></p></form>` : ''}`,
+${owner ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/members"><label>Add a person by username <input name="username" required maxlength="40" placeholder="username"></label><p><button type="submit">Add</button></p></form>` : ''}
+<h2>Saved replies</h2>
+<p class="oc-muted">Ready answers for the whole team: type <code>/</code> in the reply box and its shortcut.</p>
+${saved.length ? `<ul class="oc-members">${saved.map((r) => `<li><b>/${esc(r.shortcut)}</b> <span class="oc-muted">${esc(r.body.slice(0, 120))}${r.body.length > 120 ? '…' : ''}</span> <form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/replies/${r.id}/delete"><button class="oc-link" type="submit">Delete</button></form></li>`).join('')}</ul>` : ''}
+<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/replies"><label>Shortcut <input name="shortcut" required maxlength="30" pattern="/?[a-zA-Z0-9][a-zA-Z0-9-]*" placeholder="refund"></label>
+<label>Reply <textarea name="body" rows="3" maxlength="4000" required placeholder="Refunds go back to the card you paid with within 5 days."></textarea></label><p><button type="submit">Save the reply</button></p></form>`,
         });
     });
 
@@ -228,6 +235,16 @@ ${owner ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/m
             await inboxes.update(a.inbox, a.actor.user, { name: b.name, greeting: b.greeting, color: b.color, ai_enabled: b.ai_enabled === '1', handoff: b.handoff === '1', ai_instructions: b.ai_instructions, knowledge_urls: b.knowledge_urls, allowed_origins: b.allowed_origins });
             res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
         } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not save')}`); }
+    });
+    router.post('/inbox/:id/replies', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        try { await inboxes.saveReply(a.inbox, a.actor.user, req.body || {}); res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`); }
+        catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not save')}`); }
+    });
+    router.post('/inbox/:id/replies/:rid/delete', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        try { await inboxes.deleteReply(a.inbox, a.actor.user, req.params.rid); } catch { /* unchanged */ }
+        res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
     });
     router.post('/inbox/:id/identity', formLimit, sameSite, async (req, res) => {
         const a = await agentInbox(req, res); if (!a) return;

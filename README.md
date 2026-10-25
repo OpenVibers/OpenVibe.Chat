@@ -460,6 +460,9 @@ for people and for companies, with "direct live support with an agent", "fully m
   token is derived from their id (`CHAT_INBOX_IDENTITY_KEY`, else Chat's OAuth secret; never stored), so their
   conversation follows them to every device. A wrong or missing hash is just an anonymous visitor. Agents never see the
   secret.
+- **Saved replies:** the team's ready answers (`GET/POST /api/chat/inboxes/:id/replies { shortcut, body }`, `DELETE
+  /:id/replies/:replyId`, or the settings page); typing `/` in the reply box lists them by shortcut (arrows, Enter or
+  Tab). **Vibe knows the page** the visitor wrote from, and a verified visitor's name.
 - **Ratings:** a resolved conversation asks the visitor "How was this?" (👍 / 👎, then a line if they like:
   `POST /rating { token, rating: 1 | -1, comment?, conversation? }`); the people see it in the list and the
   conversation, live (`inbox_rating`).

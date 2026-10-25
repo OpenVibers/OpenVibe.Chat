@@ -216,6 +216,24 @@ t('verified visitors: a signed identity names the visitor and follows them to an
     assert.strictEqual((await widget('POST', '/visit', { user })).body.verified, false, 'off: nobody is verified');
 });
 
+t('saved replies for the team (picked with "/"), and Vibe knows the page the visitor is on', async () => {
+    const r = await agentsApi('POST', `/${inbox.id}/replies`, bob, { shortcut: '/Refund', body: 'Refunds reach your card in 5 days.' });
+    assert.deepStrictEqual(r.body.replies.map((x) => [x.shortcut, x.body]), [['refund', 'Refunds reach your card in 5 days.']]);
+    assert.strictEqual((await agentsApi('POST', `/${inbox.id}/replies`, bob, { shortcut: 'no spaces', body: 'x' })).status, 422);
+    const outsider = h.addUser('dee', { subject: ids.newId('user') });
+    assert.strictEqual((await agentsApi('GET', `/${inbox.id}/replies`, outsider)).status, 404);
+    const app = await fetch(`${h.base}/inbox/${inbox.id}?c=${conv.id}`, { headers: { cookie: `ov_token=${bob.token}` } }).then((x) => x.text());
+    assert.ok(app.includes('/ for saved replies') && app.includes('Refunds reach your card in 5 days.'), 'the reply box knows them');
+    const id = r.body.replies[0].id;
+    assert.deepStrictEqual((await agentsApi('DELETE', `/${inbox.id}/replies/${id}`, ann)).body.replies, []);
+    reply = 'The Aurora ships in 2 days.';
+    turns.length = 0;
+    const v = (await widget('POST', '/visit', {})).body.token;
+    await widget('POST', '/messages', { token: v, message: 'When does this one ship?', page_url: 'https://shop.example/lamps/aurora' });
+    await until(async () => turns.some((x) => x.workflow === 'chat.member.turn'), 'Vibe asked');
+    assert.ok(turns.find((x) => x.workflow === 'chat.member.turn').input.messages[0].content.includes('The visitor is on this page: https://shop.example/lamps/aurora'));
+});
+
 t('the embed page and the loader: frame-ancestors follow the allowed sites', async () => {
     let r = await fetch(`${h.base}/embed/inbox/${inbox.id}`);
     assert.strictEqual(r.status, 200);
