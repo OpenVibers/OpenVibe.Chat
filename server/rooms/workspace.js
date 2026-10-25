@@ -129,6 +129,26 @@ async function cancel(room, user, id, deps = {}) {
     return task;
 }
 
+/**
+ * "Run on my computer": the person who asked hands their own code or computer task to OpenVibe.Actor, which sends code
+ * to OpenVibe.Codes on their machines (OpenVibe.Run's worker chain) and computer work to their computer through
+ * OpenVibe.Bot, at the level they set there. Without such a machine Actor says so and the task shows why.
+ */
+async function runOnComputer(room, user, id, deps = {}) {
+    await mustRead(room, user);
+    const t = await row(room, id);
+    if (!t) fail(404, 'work.not_found', 'No such task in this room');
+    if (!user || Number(t.requested_by) !== Number(user.id)) fail(403, 'work.not_yours', 'Only the person who asked runs a task on their own computer');
+    if (!['code', 'computer'].includes(t.kind)) fail(409, 'work.not_computer', 'Only code and computer tasks run on a computer');
+    if (t.status !== 'queued') fail(409, 'work.taken', 'This task is already being worked on or finished');
+    const r = await db.run("UPDATE room_tasks SET status = 'running', runner = 'actor', started_at = ov_now(), updated_at = ov_now() WHERE id = ? AND room_id = ? AND status = 'queued'", [t.id, room.id]);
+    if (!r.changes) fail(409, 'work.taken', 'Someone took it a moment ago');
+    await startOnActor(room, t, deps);
+    const task = shape(await row(room, t.id), room);
+    changed(room, task);
+    return task;
+}
+
 /** A worker takes a task no service runs: a person who may post, or an agent with such a person's API token. */
 async function claim(room, user, id, { runner = null } = {}) {
     const a = await mustRead(room, user);
@@ -193,14 +213,19 @@ async function actorCall(method, path, subject, body, { fetchImpl = globalThis.f
 
 /** The text Actor gets: what kind of work, the title, the details. */
 function actorText(t) {
-    const lead = { research: 'Research this and write a short report for a team, with the links of your sources', web: 'Search the web and answer, with the links of your sources', answer: 'Answer this for a team' }[t.kind] || 'Do this';
+    const lead = {
+        research: 'Research this and write a short report for a team, with the links of your sources', web: 'Search the web and answer, with the links of your sources', answer: 'Answer this for a team',
+        code: 'Make this code change with OpenVibe.Codes on my own computer, run its tests, and hand it in as a pull request for review (never straight to main)',
+        computer: 'Do this on my own computer, step by step, and say what you did',
+    }[t.kind] || 'Do this';
     return `${lead}: ${t.title}${t.details ? `\n\n${t.details}` : ''}`.slice(0, 7000);
 }
 
 async function startOnActor(room, t, deps = {}) {
     try {
         const task = await actorCall('POST', '/api/v1/tasks', t.requested_subject, { task: actorText(t), idempotency_key: `chat-room-task-${t.id}` }, deps);
-        await setStatus(room, t.id, { actor_task: String(task.id), runner: 'actor', status: task.state === 'running' ? 'running' : 'queued', started_at: nowText() });
+        // A task a worker could take stays taken while Actor holds it, so nobody claims it twice.
+        await setStatus(room, t.id, { actor_task: String(task.id), runner: 'actor', status: task.state === 'running' || !QUICK.has(t.kind) ? 'running' : 'queued', started_at: nowText() });
     } catch (err) {
         await setStatus(room, t.id, { status: 'failed', runner: 'actor', error: oneLine(err.message, LIMITS.error), finished_at: nowText() });
         await announce(room, await row(room, t.id), deps).catch(() => {});
@@ -276,4 +301,4 @@ function stop() { if (timer) clearInterval(timer); timer = null; }
 
 function _setTokens(t) { tokens = t; }
 
-module.exports = { KINDS, QUICK, WorkError, list, get, add, cancel, claim, report, poll, announce, start, stop, shape, _setTokens };
+module.exports = { KINDS, QUICK, WorkError, list, get, add, cancel, claim, report, runOnComputer, poll, announce, start, stop, shape, _setTokens };

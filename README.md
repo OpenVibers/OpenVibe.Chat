@@ -398,7 +398,10 @@ member on their first visit, and nobody else reads it, whatever role they once h
   follows them every 10 s.
 - **Other kinds** (`code`, `computer`, `other`) wait for a worker: a member (or an agent working with a member's API
   token, such as the agent harness) claims one, then reports how it went and where it landed (an https link, such as a
-  pull request).
+  pull request). Or the person who asked a `code` or `computer` task presses **Run on my computer**: it becomes their
+  own OpenVibe.Actor task, which hands code to OpenVibe.Codes on their machines (OpenVibe.Run's workers) and computer
+  work to their computer through OpenVibe.Bot, at the level they set there; without such a machine the task fails with
+  Actor's reason.
 - **Results** of every task, whoever ran it, are announced in the room by its Vibe with a link to the task's page
   (`/r/:slug/tasks/:id`: details, the full result, sources, cost). Open pages refresh the panel when the chat socket
   sends `room_task`.
@@ -412,7 +415,7 @@ member on their first visit, and nobody else reads it, whatever role they once h
   without who asked or who took it.
 
 API (`/api/chat/rooms`, also in openvibe-sdk): `GET|POST /:slug/tasks`, `GET /:slug/tasks/:id`,
-`POST /:slug/tasks/:id/cancel|claim|report`.
+`POST /:slug/tasks/:id/cancel|claim|run|report`.
 
 ### Vibe, OpenVibe's assistant (openvibe.chat/vibe)
 
