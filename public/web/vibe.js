@@ -201,6 +201,21 @@
     else if (e.target.closest('[data-vb-close]')) setRail(false);
   });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && app.classList.contains('is-open')) setRail(false); });
+  // ── Search chats: typing narrows the listed chats by name at once; Enter searches inside them too (?q=) ──
+  var q = document.getElementById('vb-q');
+  var searched = null;
+  try { searched = new URLSearchParams(location.search).get('q'); } catch (e) { searched = null; }
+  if (q && searched) q.value = searched.slice(0, 80);   // the page never repeats it (server/web/vibe-pages.js)
+  if (q && !searched) q.addEventListener('input', function () {
+    var v = q.value.trim().toLowerCase();
+    var list = document.querySelector('.vb-rail-list'); if (!list) return;
+    [].forEach.call(list.querySelectorAll('.vb-chats'), function (ul) {
+      var shown = 0;
+      [].forEach.call(ul.children, function (li) { var hit = !v || li.textContent.toLowerCase().indexOf(v) >= 0; li.hidden = !hit; if (hit) shown++; });
+      ul.hidden = !shown;
+      var head = ul.previousElementSibling; if (head && head.classList.contains('vb-group')) head.hidden = !shown;
+    });
+  });
   var del = app.querySelector('[data-vb-delete]');
   if (del) del.addEventListener('submit', function (e) { if (!window.confirm('Delete this chat? Its messages go too.')) e.preventDefault(); });
 
