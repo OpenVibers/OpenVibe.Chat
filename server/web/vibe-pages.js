@@ -54,24 +54,41 @@ const ICON = {
     tasks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>',
     computer: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
     team: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 9h6M7 13h10"/></svg>',
+    search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>',
 };
+
+/** A search hit's message, cut to about 90 characters around the first match, with the match marked. */
+function snippet(text, q) {
+    const flat = String(text || '').replace(/\s+/g, ' ').trim();
+    const at = flat.toLowerCase().indexOf(String(q).toLowerCase());
+    if (at < 0) return esc(flat.slice(0, 90));
+    const from = Math.max(0, at - 36);
+    const to = Math.min(flat.length, at + q.length + 54);
+    return `${from > 0 ? '…' : ''}${esc(flat.slice(from, at))}<mark>${esc(flat.slice(at, at + q.length))}</mark>${esc(flat.slice(at + q.length, to))}${to < flat.length ? '…' : ''}`;
+}
 
 /** The mark Vibe signs its answers with (the network's V, in the accent). */
 const MARK = '<span class="vb-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 5l7 14 7-14"/></svg></span>';
 
-function rail({ chats, current, signedIn, allowance }) {
+function rail({ chats, current, signedIn, allowance, query = '' }) {
     const groups = groupChats(chats);
+    const found = query
+        ? (chats.length
+            ? `<p class="vb-group">Chats with “${esc(query)}”</p><ul class="vb-chats">${chats.map((c) => `<li><a class="vb-chat vb-hit" href="/vibe/${esc(c.slug)}"${c.slug === current ? ' aria-current="page"' : ''}><span>${esc(c.name)}</span>${c.hit ? `<small>${snippet(c.hit, query)}</small>` : ''}</a></li>`).join('')}</ul>`
+            : `<p class="vb-rail-note">No chat mentions “${esc(query)}”.</p>`) + '<p class="vb-rail-note"><a href="/vibe">All your chats</a></p>'
+        : null;
     const list = !signedIn
         ? '<p class="vb-rail-note">Sign in to keep your chats. They are private to you.</p>'
-        : groups.length
+        : found || (groups.length
             ? groups.map((g) => `<p class="vb-group">${esc(g.label)}</p><ul class="vb-chats">${g.chats.map((c) => `<li><a class="vb-chat" href="/vibe/${esc(c.slug)}"${c.slug === current ? ' aria-current="page"' : ''}>${esc(c.name)}</a></li>`).join('')}</ul>`).join('')
-            : '<p class="vb-rail-note">Your chats with Vibe show up here.</p>';
+            : '<p class="vb-rail-note">Your chats with Vibe show up here.</p>');
     const left = allowance ? Math.max(0, allowance.per_day - allowance.used_today) : null;
     return `<aside class="vb-rail" id="vb-rail" aria-label="Your chats with Vibe">
 <div class="vb-rail-top">
 <a class="vb-new" href="/vibe">${ICON.new}<span>New chat</span></a>
 <button class="vb-icon vb-rail-close" type="button" data-vb-close aria-label="Close the chat list">${ICON.close}</button>
 </div>
+${signedIn ? `<form class="vb-search" action="/vibe" method="get" role="search">${ICON.search}<label class="oc-sr" for="vb-q">Search your chats</label><input id="vb-q" name="q" type="search" maxlength="${vibe.SEARCH_MAX}" placeholder="Search chats" value="${esc(query)}" autocomplete="off" enterkeyhint="search"></form>` : ''}
 <nav class="vb-rail-list" aria-label="Chats with Vibe">${list}</nav>
 <nav class="vb-rail-more" aria-label="More of OpenVibe.Chat">
 <a href="https://openvibe.actor/tasks" title="Every task you gave an agent, one-off or recurring, with what it cost">${ICON.tasks}<span>Tasks</span></a>
@@ -139,7 +156,10 @@ function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit,
     async function render(req, res, { room = null, status = 200, error = null } = {}) {
         const actor = await viewerOf(req);
         const user = actor.kind === 'user' ? actor.user : null;
-        const chats = user ? await vibe.list(user) : [];
+        // ?q= from the rail's search box: the person's chats whose name or messages hold it (2 characters or more).
+        const query = room ? '' : String((req.query && req.query.q) || '').replace(/[\u0000-\u001f]/g, ' ').trim().slice(0, vibe.SEARCH_MAX);
+        const searching = !!user && query.length >= 2;
+        const chats = user ? (searching ? await vibe.search(user, query) : await vibe.list(user)) : [];
         const allowance = user ? await allowanceOf(user) : null;
         const messages = room ? await rooms.history(room, { limit: 200 }) : [];
         const enabled = vibe.enabled();
@@ -163,7 +183,7 @@ ${room ? `<details class="vb-actions"><summary class="vb-icon" aria-label="Chat 
 </div></details>` : `<a class="vb-icon vb-head-new" href="/vibe" aria-label="New chat">${ICON.new}</a>`}
 </header>`;
         const body = `<div class="vb${room ? '' : ' vb-empty'}" id="vb">
-${rail({ chats, current: room && room.slug, signedIn: !!user, allowance })}
+${rail({ chats, current: room && room.slug, signedIn: !!user, allowance, query: searching ? query : '' })}
 <div class="vb-scrim" data-vb-close hidden></div>
 <section class="vb-main" aria-label="${room ? 'Your chat with Vibe' : 'A new chat with Vibe'}">
 ${head}

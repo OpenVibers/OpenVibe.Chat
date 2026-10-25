@@ -36,6 +36,17 @@ body.oc-app-body { overflow: hidden; }
 .vb-icon:hover { background: var(--oc-panel-2); color: var(--oc-text); }
 .vb-icon:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
 .vb-rail-close, .vb-menu { display: none; }
+.vb-search { position: relative; margin: 0 2px 6px; }
+.vb-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--oc-muted); pointer-events: none; }
+.vb-search input {
+  box-sizing: border-box; width: 100%; min-height: 38px; padding: 0 12px 0 34px; border-radius: 10px;
+  border: 1px solid var(--oc-line); background: var(--oc-bg); color: var(--oc-text); font: inherit; font-size: .9rem;
+}
+.vb-search input:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; border-color: transparent; }
+.vb-chat.vb-hit { white-space: normal; }
+.vb-hit span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vb-hit small { display: block; margin-top: 2px; color: var(--oc-muted); font-size: .8rem; line-height: 1.35; overflow-wrap: anywhere; }
+.vb-hit mark { background: color-mix(in srgb, var(--oc-accent) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
 .vb-rail-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 2px; scrollbar-width: thin; }
 .vb-group { margin: 14px 10px 4px; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
 .vb-chats { list-style: none; margin: 0; padding: 0; }

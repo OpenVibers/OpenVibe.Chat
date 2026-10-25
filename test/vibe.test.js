@@ -150,6 +150,24 @@ t('Ask Vibe from any OpenVibe site: the selection and the page fill a new chat\'
     assert.match(r.text, /name="next" value="\/vibe\?ask=hello"/, 'signed out, the question survives the sign-in');
 });
 
+t('search chats: the rail\'s box finds a chat by its name or by any message in it, only among the person\'s own', async () => {
+    const made = await vibeApi('POST', '', ann, { message: 'Find me a cheap blue bicycle near the river' });
+    assert.strictEqual(made.status, 201, made.text);
+    await answers(made.body.room.slug, 1);   // Vibe's answer lists rice and lentils
+    const signed = await web('GET', '/vibe', ann);
+    assert.match(signed.text, /<form class="vb-search" action="\/vibe" method="get" role="search">/);
+    assert.ok(!(await web('GET', '/vibe')).text.includes('vb-search'), 'signed out, there is nothing to search');
+    let r = await web('GET', '/vibe?q=BICYCLE', ann);
+    assert.ok(r.text.includes('Chats with “BICYCLE”'), 'the results say what was searched');
+    assert.match(r.text, new RegExp(`class="vb-chat vb-hit" href="/vibe/${made.body.room.slug}"><span>Find me a cheap blue bicycle near the…</span><small>Find me a cheap blue <mark>bicycle</mark> near the river</small>`));
+    r = await web('GET', '/vibe?q=lentils', ann);
+    assert.ok(r.text.includes('<mark>lentils</mark>'), 'a match in Vibe\'s answer counts');
+    assert.ok(r.text.includes('value="lentils"'), 'the box keeps the search');
+    assert.ok((await web('GET', '/vibe?q=100%25', ann)).text.includes('No chat mentions “100%”'), '% is a character, not a wildcard');
+    assert.ok((await web('GET', '/vibe?q=bicycle', bob)).text.includes('No chat mentions “bicycle”'), 'never someone else\'s chats');
+    assert.ok(!(await web('GET', '/vibe?q=b', ann)).text.includes('Chats with “'), 'one character lists the chats as usual');
+});
+
 t('answers render as escaped Markdown with http(s) links only', () => {
     assert.strictEqual(md.render('**hi** `<b>`'), '<p><strong>hi</strong> <code>&lt;b&gt;</code></p>');
     assert.ok(!md.render('<script>alert(1)</script>').includes('<script'));

@@ -10,6 +10,7 @@
  *   createRoom(user, title)    → the new chat's room row, nothing posted yet (a chat that starts with a picture)
  *   erase(roomId)              the chat and everything in it, at once (a first picture Pics refused)
  *   list(user, { limit })      → the person's chats, the latest conversation first
+ *   search(user, q, { limit }) → those whose name or a message holds q (ignoring case), each with its newest hit
  *   ownChat(slug, user)        → the room when it is one of `user`'s Vibe chats, else null
  *   rename(room, user, name)   → the room
  *   remove(room, user)         → the chat and its messages are deleted (not archived: it was the person's own)
@@ -32,6 +33,7 @@ const rooms = require('./rooms');
 const VIBE = { name: 'Vibe', handle: 'vibe' };
 const MAX_CHATS = 500;
 const TITLE_MAX = 40;
+const SEARCH_MAX = 80;   // the longest search the rail's box sends
 const DEFAULT_TITLE = 'Chat with Vibe';
 
 class VibeError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
@@ -143,6 +145,22 @@ async function list(user, { limit = 100 } = {}) {
     return rows.map((r) => ({ slug: r.slug, name: r.name, last_message_at: r.last_message_at || r.created_at, created_at: r.created_at }));
 }
 
+/**
+ * Search chats (the rail's box): the person's own chats whose name or any message holds `q`, ignoring case, newest
+ * first, each with its newest matching message as `hit` (null when only the name matched). Under 2 characters: none.
+ */
+async function search(user, q, { limit = 30 } = {}) {
+    const text = String(q || '').trim().slice(0, SEARCH_MAX);
+    if (!user || text.length < 2) return [];
+    const like = `%${text.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const rows = await db.all(`SELECT r.slug, r.name, r.last_message_at, r.created_at,
+            (SELECT m.message FROM room_messages m WHERE m.room_id = r.id AND m.is_deleted = 0 AND m.message ILIKE ? ORDER BY m.id DESC LIMIT 1) AS hit
+        FROM rooms r WHERE r.owner_id = ? AND r.assistant = 1 AND r.archived_at IS NULL
+        AND (r.name ILIKE ? OR EXISTS (SELECT 1 FROM room_messages m WHERE m.room_id = r.id AND m.is_deleted = 0 AND m.message ILIKE ?))
+        ORDER BY COALESCE(r.last_message_at, r.created_at) DESC LIMIT ?`, [like, user.id, like, like, Math.min(50, Math.max(1, Number(limit) || 30))]);
+    return rows.map((r) => ({ slug: r.slug, name: r.name, last_message_at: r.last_message_at || r.created_at, created_at: r.created_at, hit: r.hit || null }));
+}
+
 async function ownChat(slug, user) {
     if (!user) return null;
     const room = await rooms.bySlug(slug);
@@ -179,4 +197,4 @@ async function countReply(user) {
         ON CONFLICT (user_id, day) DO UPDATE SET replies = vibe_usage.replies + 1`, [user.id, today()]);
 }
 
-module.exports = { VIBE, MAX_CHATS, TITLE_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, ownChat, rename, remove, repliesToday, countReply };
+module.exports = { VIBE, MAX_CHATS, TITLE_MAX, SEARCH_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, search, ownChat, rename, remove, repliesToday, countReply };
