@@ -559,6 +559,7 @@ ${key ? `<form class="oc-inline" method="post" action="/settings/ai-key/delete">
 
     // ── Rooms (server/rooms/) ──
     const rooms = require('../rooms/rooms');
+    const roomHooks = require('../rooms/hooks');
     const pictures = require('../rooms/pictures');
     const aiMembers = require('../rooms/ai-members');
     // A picture sent from the room's form (server/rooms/pictures.js): one image, kept in memory only until Pics has it.
@@ -820,6 +821,14 @@ ${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}` : '';
 ${aiSection}`,
             });
         }
+        const hookList = can.manage && rooms.isWorkspace(room) ? await roomHooks.list(room) : [];
+        const hookSection = can.manage && rooms.isWorkspace(room) ? `<h2 id="oc-hooks">Alerts into this room</h2>
+<p class="oc-muted">Other systems post here through a hook: an OpenVibe.Watch webhook action, an OpenVibe.Events subscription, or anything that signs its POST the same way. Each one arrives as a message from the room's Vibe, and can add a task to the queue for you. At most ${roomHooks.MAX_PER_ROOM}.</p>
+${hookList.length ? `<ul class="oc-members">${hookList.map((h) => `<li><strong>${esc(h.label)}</strong> <span class="oc-muted">${h.queue_kind ? `queues ${esc(h.queue_kind)} work` : 'a message only'} · ${h.deliveries} received${h.last_at ? ` · last ${esc(String(h.last_at).slice(0, 16))}` : ''}</span><form class="oc-inline" method="post" action="/r/${esc(room.slug)}/hooks/${encodeURIComponent(h.id)}/delete"><button type="submit" class="oc-link">Delete</button></form></li>`).join('')}</ul>` : ''}
+${hookList.length < roomHooks.MAX_PER_ROOM ? `<form class="oc-form" method="post" action="/r/${esc(room.slug)}/hooks">
+<label>Name <input name="label" required minlength="2" maxlength="60" placeholder="Site errors"></label>
+<label>Each alert <select name="queue_kind"><option value="">posts a message</option><option value="research">posts and asks Vibe to look into it (research, runs on your allowance)</option><option value="code">posts and queues a code task for a worker</option><option value="other">posts and queues a task for a worker</option></select></label>
+<p><button type="submit">Make a hook</button></p></form>` : ''}` : '';
         const communityUrl = config.web.communityUrl;
         const attachList = can.manage ? `<h2>Attached to</h2>${attachments.length ? `<ul class="oc-members">${attachments.map((a) => `<li><a href="${esc(a.service === 'community' ? `${communityUrl}/s/${encodeURIComponent(a.resource)}` : '#')}">${esc(a.title || a.resource)}</a> <span class="oc-muted">${esc(a.service === 'community' ? 'OpenVibe.Community space' : a.service)}</span><form class="oc-inline" method="post" action="/r/${esc(room.slug)}/attachments/${encodeURIComponent(a.service)}/${encodeURIComponent(a.resource)}/detach"><button type="submit" class="oc-link">Detach</button></form></li>`).join('')}</ul>` : '<p class="oc-muted">Not attached anywhere. A Community space you own can attach this room from the space\'s page.</p>'}` : '';
         await page(req, res, 200, {
@@ -838,6 +847,7 @@ ${room.kind === 'call' ? `<label>People who join <select name="join_role">${room
 <label>Slow mode (seconds between messages, 0 = off) <input name="slow_seconds" type="number" min="0" max="600" value="${Number(room.slow_seconds) || 0}"></label>
 ${rooms.isWorkspace(room) ? `<label>Shared screen <input name="screen_url" type="url" value="${esc(room.screen_url || '')}" placeholder="https://openvibe.bot/screen/…"> <span class="oc-muted">A screen share link from OpenVibe.Bot (a computer's owner makes it on its screen page). Members see the screen beside the conversation, and with a "use" link they can click and type on it. Empty: no screen.</span></label>` : ''}
 <p><button type="submit">Save</button></p></form>` : ''}
+${hookSection}
 <h2>Members</h2>
 <p class="oc-muted">${esc(roleHelp(room.kind))}</p>
 <form class="oc-new" method="post" action="/r/${esc(room.slug)}/members"><label for="oc-invite">Add someone</label> <input id="oc-invite" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="their username"> <select name="role" aria-label="Their role">${choices.filter((r) => r !== 'none' && r !== 'blocked').map((r) => roleOption(r, addRole)).join('')}</select> <button type="submit">Add</button></form>
@@ -863,6 +873,43 @@ ${attachList}`,
             ...(rooms.isWorkspace(room) && b.screen_url !== undefined ? { screen_url: b.screen_url } : {}) });
         await applyRoomChange(room);
         res.redirect(303, `/r/${room.slug}/settings?saved=1`);
+    }));
+
+    router.post('/r/:slug/hooks', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}/settings`;
+        let made;
+        try { made = await roomHooks.create(room, actor.user, { label: req.body && req.body.label, queue_kind: (req.body && req.body.queue_kind) || null }); } catch (err) {
+            if (err instanceof roomHooks.HookError) return res.redirect(303, `/r/${room.slug}/settings?error=${encodeURIComponent(err.message)}#oc-hooks`);
+            throw err;
+        }
+        const address = `${config.web.baseUrl}/api/chat/hooks/${made.hook.id}`;
+        res.set('Cache-Control', 'no-store');
+        await page(req, res, 200, {
+            actor, title: `${room.name}: new hook`, path: req.path, active: 'rooms', robots: 'noindex, nofollow',
+            body: `<p><a href="/r/${esc(room.slug)}/settings#oc-hooks">← Room settings</a></p><h1>Hook "${esc(made.hook.label)}" is ready</h1>
+${notice('ok', 'Copy the secret now: it is not shown again. Anyone with the address and the secret can post in the room.')}
+<label class="oc-form">Address <input readonly value="${esc(address)}"></label>
+<label class="oc-form">Secret <input readonly value="${esc(made.secret)}"></label>
+<h2>From OpenVibe.Watch</h2>
+<ol><li>On openvibe.services, open your project's Secrets page, save the secret (for example as <code>staff_room_hook</code>) and grant it to <code>watch</code>.</li>
+<li>On the watch, add a webhook action to the address above, with that secret as its <code>secret_ref</code> (the watch names the project).</li>
+<li>Each time the watch fires, Vibe says so here${made.hook.queue_kind ? `, and a ${esc(made.hook.queue_kind)} task joins the queue for you` : ''}.</li></ol>
+<h2>From anything else</h2>
+<p>POST JSON (<code>{"text": "…"}</code>, or an OpenVibe event <code>{"event": {"type", "data"}}</code>) signed like an OpenVibe.Events delivery: <code>openvibe-sdk/events</code> <code>signDeliveryHeaders(body, secret)</code> gives the headers.</p>`,
+        });
+    }));
+    router.post('/r/:slug/hooks/:id/delete', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
+        try { await roomHooks.remove(room, actor.user, req.params.id); } catch (err) {
+            if (err instanceof roomHooks.HookError) return res.redirect(303, `/r/${room.slug}/settings?error=${encodeURIComponent(err.message)}#oc-hooks`);
+            throw err;
+        }
+        res.redirect(303, `/r/${room.slug}/settings?saved=1#oc-hooks`);
     }));
 
     router.post('/r/:slug/members', formLimit, sameSite, roomsOrError(async (req, res) => {

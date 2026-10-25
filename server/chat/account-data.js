@@ -61,6 +61,8 @@ const EXPORTS = [
     ['ai_members_added.json', `SELECT * FROM room_ai_members WHERE created_by_subject = ANY(@s) ORDER BY id DESC LIMIT ${LIMIT}`],
     // Work they put on a workspace room's queue (server/rooms/workspace.js), with its results.
     ['room_tasks.json', `SELECT t.id, r.slug AS room, t.title, t.details, t.kind, t.status, t.via, t.result, t.result_url, t.sources, t.error, t.created_at, t.finished_at FROM room_tasks t JOIN rooms r ON r.id = t.room_id WHERE t.requested_subject = ANY(@s) OR t.requested_by = ANY(@ids) ORDER BY t.id DESC LIMIT ${LIMIT}`],
+    // Hooks they made into a workspace room (server/rooms/hooks.js), without their secrets.
+    ['room_hooks.json', `SELECT h.id, r.slug AS room, h.label, h.queue_kind, h.deliveries, h.last_at, h.created_at FROM room_hooks h JOIN rooms r ON r.id = h.room_id WHERE h.created_by = ANY(@ids) ORDER BY h.created_at DESC LIMIT ${LIMIT}`],
     ['vibe_usage.json', `SELECT * FROM vibe_usage WHERE user_id = ANY(@ids) ORDER BY day DESC LIMIT ${LIMIT}`],
     ['inboxes_owned.json', `SELECT * FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['inbox_memberships.json', `SELECT * FROM inbox_members WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
@@ -131,6 +133,8 @@ const ERASE_AFTER_ROOMS = [
     ['feeds', 'DELETE FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)'],
     // An AI member belongs to its room, not to whoever added it: it stays, without their name on it.
     [null, 'UPDATE room_ai_members SET created_by_subject = NULL WHERE created_by_subject = ANY(@s)'],
+    // A hook queues work as the person who made it: it goes with them.
+    ['room_hooks', 'DELETE FROM room_hooks WHERE created_by = ANY(@ids)'],
     // A workspace room's queue keeps the work the team relies on, without who asked or who took it.
     [null, "UPDATE room_tasks SET requested_by = 0, requested_subject = NULL WHERE requested_subject = ANY(@s) OR requested_by = ANY(@ids)"],
     [null, "UPDATE room_tasks SET runner = 'a former member' WHERE runner ~ '^user:[0-9]+$' AND substr(runner, 6)::bigint = ANY(@ids)"],

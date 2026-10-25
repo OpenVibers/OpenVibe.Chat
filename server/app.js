@@ -192,6 +192,8 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     const openCors = cors({ origin: true, credentials: false, allowedHeaders: ['Content-Type', 'X-Visitor-Token', 'Authorization'] });
     const openPath = (p) => p.startsWith('/api/chat/widget/') || p === '/api/chat/feeds' || p.startsWith('/api/chat/feeds/');
     app.use((req, res, next) => (openPath(req.path) ? openCors : allowlistedCors)(req, res, next));
+    // A workspace room's incoming hooks check a signature over the raw body, so they read it before the JSON parser does.
+    app.post('/api/chat/hooks/:id', express.raw({ type: () => true, limit: '64kb' }), require('./rooms/hooks').ingress);
     app.use(express.json({ limit: '1mb' }));
     app.use(express.urlencoded({ extended: true, limit: '256kb' }));
     app.use(cookieParser());
