@@ -16,6 +16,7 @@ const path = require('path');
 const md = require('../../public/web/vibe-md.js');
 const inboxes = require('../inbox/inbox');
 const webhooks = require('../inbox/webhooks');
+const actions = require('../inbox/actions');
 const pictures = require('../rooms/pictures');
 const { embedOf } = require('../inbox/routes');
 const { esc, asset } = require('./layout');
@@ -197,6 +198,7 @@ ${pictures.enabled() ? '<label class="ib-pic-btn" title="Send a picture"><input 
         const owner = role === 'owner';
         const saved = await inboxes.savedReplies(inbox);
         const hooks = owner ? await webhooks.list(inbox) : [];
+        const acts = owner ? await actions.list(inbox) : [];
         await page(req, res, 200, {
             actor, title: `${inbox.name}: settings`, path: `/inbox/${inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
             body: `<p><a href="/inbox/${esc(inbox.id)}">&larr; ${esc(inbox.name)}</a></p><h1>${esc(inbox.name)}</h1>
@@ -225,6 +227,17 @@ ${hooks.length ? `<ul class="oc-members">${hooks.map((w) => `<li><b>${esc(w.form
 <form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/webhooks/${w.id}/test"><button class="oc-link" type="submit">Send a test</button></form>
 <form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/webhooks/${w.id}/delete"><button class="oc-link" type="submit">Remove</button></form></li>`).join('')}</ul>` : ''}
 ${hooks.length < webhooks.MAX_WEBHOOKS ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/webhooks"><label>Address (https) <input name="url" type="url" required maxlength="1000" placeholder="https://hooks.slack.com/services/…"></label><p><button type="submit">Add the webhook</button></p></form>` : ''}
+<h2>Actions</h2>
+<p class="oc-muted">Let Vibe ask your own systems while it answers, like looking up an order or a booking. Vibe asks the visitor for what an action needs, then Chat POSTs it to your address as signed JSON, with your verified visitor's id when your site signed one, so your server decides what it may tell them. Answer with <code>{ "text": "…" }</code> or plain text within 8 seconds; Vibe uses it as information, never as instructions.</p>
+${acts.length ? `<ul class="oc-members">${acts.map((x) => `<li><b>${esc(x.name)}</b> <span class="oc-muted">${esc(x.description.slice(0, 120))} · ${esc(x.url.replace(/^https:\/\//, '').slice(0, 60))}${x.params.length ? ` · needs ${esc(x.params.map((q) => q.name).join(', '))}` : ''} · ${x.last_status ? `last answer ${x.last_status}${x.last_error ? ` (${esc(x.last_error)})` : ''}` : 'not called yet'}</span>
+<form class="oc-inline ib-try" method="post" action="/inbox/${esc(inbox.id)}/actions/${x.id}/test">${x.params.map((q) => `<input name="arg_${esc(q.name)}" maxlength="300" placeholder="${esc(q.name)}" aria-label="${esc(q.name)}">`).join('')}<button class="oc-link" type="submit">Try it</button></form>
+<form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/actions/${x.id}/delete"><button class="oc-link" type="submit">Remove</button></form></li>`).join('')}</ul>` : ''}
+${acts.length < actions.MAX_ACTIONS ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/actions">
+<label>Name <input name="name" required pattern="[a-z][a-z0-9_]{1,39}" maxlength="40" placeholder="look_up_order"></label>
+<label>What it does and when Vibe should use it <textarea name="description" required minlength="10" maxlength="400" rows="2" placeholder="Finds an order's status and delivery date. Use it when a visitor asks where their order is."></textarea></label>
+<label>What it needs, one a line (name: what it is) <textarea name="params" maxlength="1500" rows="2" placeholder="order_id: the order number from the confirmation email"></textarea></label>
+<label>Address (https) <input name="url" type="url" required maxlength="1000" placeholder="https://example.com/api/vibe/order"></label>
+<p><button type="submit">Add the action</button></p></form>` : ''}
 <h2>How it looks and what Vibe knows</h2>
 <form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/settings">
 <label>Name <input name="name" required minlength="2" maxlength="60" value="${esc(shape.name)}"></label>
@@ -314,6 +327,38 @@ ${notice('ok', 'Here is its signing secret. Copy it now: it is shown only this o
     router.post('/inbox/:id/webhooks/:wid/delete', formLimit, sameSite, async (req, res) => {
         const a = await agentInbox(req, res); if (!a) return;
         if (a.role === 'owner') await webhooks.remove(a.inbox, req.params.wid);
+        res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
+    });
+    router.post('/inbox/:id/actions', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        if (a.role !== 'owner') return res.redirect(303, `/inbox/${a.inbox.id}/settings`);
+        try {
+            const { action, secret } = await actions.add(a.inbox, a.actor.user, req.body || {});
+            const sample = JSON.stringify({ event: { id: 'evt_…', type: 'chat.inbox.action', source: 'chat', occurred_at: '…', data: {
+                action: action.name, arguments: Object.fromEntries(action.params.map((q) => [q.name, '…'])), inbox: { id: a.inbox.id, name: a.inbox.name },
+                conversation: { id: 'cv_…', page_url: '…', verified: true, visitor_id: 'your id for them', visitor_email: '…' } } } }, null, 2);
+            await page(req, res, 201, { actor: a.actor, title: `${a.inbox.name}: action`, path: `/inbox/${a.inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
+                body: `<p><a href="/inbox/${esc(a.inbox.id)}/settings">&larr; ${esc(a.inbox.name)} settings</a></p><h1>Action added</h1>
+${notice('ok', 'Here is its signing secret. Copy it now: it is shown only this once.')}<pre class="ib-snippet"><code>${esc(secret)}</code></pre>
+<p>Each time Vibe uses <b>${esc(action.name)}</b>, your address gets a POST like this:</p>
+<pre class="ib-snippet"><code>${esc(sample)}</code></pre>
+<p class="oc-muted">Check it with <code>parseDelivery(rawBody, headers, secret, { requireV2: true })</code> from <code>openvibe-sdk/events</code>. <code>visitor_id</code> is set only for a visitor your site verified: look up their own orders with it, never with what they typed alone. Answer within 8 seconds with <code>{ "text": "Order 1042 ships Tuesday." }</code> or plain text (4 KB at most).</p>` });
+        } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not work')}`); }
+    });
+    router.post('/inbox/:id/actions/:xid/test', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a || a.role !== 'owner') return a && res.redirect(303, `/inbox/${a.inbox.id}/settings`);
+        const args = Object.fromEntries(Object.entries(req.body || {}).filter(([k]) => k.startsWith('arg_')).map(([k, v]) => [k.slice(4), String(v)]));
+        try {
+            const r = await actions.test(a.inbox, req.params.xid, args);
+            // The answer is shown on this page, never put in a URL.
+            await page(req, res, 200, { actor: a.actor, title: `${a.inbox.name}: action test`, path: `/inbox/${a.inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
+                body: `<p><a href="/inbox/${esc(a.inbox.id)}/settings">&larr; ${esc(a.inbox.name)} settings</a></p><h1>Action test</h1>
+${r.ok ? `${notice('ok', `Your address answered ${r.status}. Vibe would read:`)}<pre class="ib-snippet"><code>${esc(r.result || '(nothing)')}</code></pre>` : notice('error', `It did not work: ${r.error}`)}` });
+        } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not work')}`); }
+    });
+    router.post('/inbox/:id/actions/:xid/delete', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        if (a.role === 'owner') await actions.remove(a.inbox, req.params.xid);
         res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
     });
     router.post('/inbox/:id/replies', formLimit, sameSite, async (req, res) => {

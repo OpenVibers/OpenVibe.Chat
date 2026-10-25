@@ -303,6 +303,9 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .ib-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; flex: none; }
 .ib-snippet { padding: 12px 14px; border-radius: 12px; background: var(--oc-panel); border: 1px solid var(--oc-line); overflow-x: auto; }
 .ib-snippet code { font: .85rem/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre; }
+.ib-try input { width: 10em; padding: 4px 8px; margin-right: 6px; }   /* an action's test values, beside "Try it" */
+.oc-members li form.ib-try { margin-left: 0; margin-right: auto; }   /* under its description, left; Remove stays right */
+.oc-members + .oc-form { margin-top: 14px; }
 
 /* Feeds (server/web/feed-pages.js; the card itself is public/web/feed-view.css) */
 .oc-room-fv { margin: 0 0 12px; }

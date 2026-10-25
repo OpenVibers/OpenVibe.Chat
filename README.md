@@ -485,6 +485,16 @@ for people and for companies, with "direct live support with an agent", "fully m
   waiting (once a conversation every 10 minutes) or rates. Delivery tries three times (now, 30 s, 5 min); each
   webhook shows its last answer, and 20 failures in a row switch it off. `GET/POST /api/chat/inboxes/:id/webhooks
   { url }`, `POST /:id/webhooks/:hookId/test`, `DELETE /:id/webhooks/:hookId`.
+- **Actions** (`server/inbox/actions.js`; up to five an inbox, the owner's; https on the public internet only): Vibe
+  asks the team's own systems while it answers, like looking up an order. The owner names one (`look_up_order`), says
+  what it does and when to use it, lists what it needs (`order_id: the order number`) and gives an address; Vibe sees it
+  as the tool `action_look_up_order`, asks the visitor for what it needs, and Chat POSTs `{ event: { type:
+  'chat.inbox.action', data: { action, arguments, inbox, conversation: { id, page_url, verified, visitor_id,
+  visitor_email } } } }` signed with the action's secret (shown once; `parseDelivery` checks it). `visitor_id` is the
+  site's own id for a verified visitor, else null, so the site answers only about that person's orders. The answer,
+  `{ "text": "…" }` or plain text within 8 seconds (4 KB), goes back to Vibe as data, never instructions. `GET/POST
+  /api/chat/inboxes/:id/actions { name, description, url, params }`, `POST /:id/actions/:actionId/test { arguments }`
+  ("Try it" in the settings), `DELETE /:id/actions/:actionId`.
 - **Pictures:** one of the inbox's people sends a picture from the reply box (`POST
   /api/chat/inboxes/:id/conversations/:cid/picture`, the body is the picture, a line in `X-Caption`); it goes to
   OpenVibe.Pics as them, like a room's picture, and the message carries its link, which the visitor's panel and the
