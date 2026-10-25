@@ -57,9 +57,31 @@
     if (fileInput) fileInput.value = '';
     if (input) input.required = true;
   }
+  // A text file goes into the message itself, as a fenced block named after it, cut to what still fits in the box.
+  var TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|log|xml|ya?ml|toml|ini|html|css|m?js|ts|py|go|rs|java|c|h|cpp|rb|php|sh|sql)$/i;
+  function readText(file) {
+    if (file.size > 2 * 1024 * 1024) { notice('A text file can be up to 2 MB.'); return; }
+    var reader = new FileReader();
+    reader.onload = function () {
+      var text = String(reader.result || '').replace(/\r\n?/g, '\n').replace(/\u0000/g, '').trim();
+      if (!text) { notice('That file is empty.'); return; }
+      var name = String(file.name || 'file').replace(/[\r\n`]/g, '').slice(0, 80);
+      var before = input.value.trim();
+      var head = (before ? before + '\n\n' : '') + name + ':\n```\n';
+      var space = Number(input.getAttribute('maxlength') || 12000) - head.length - 5;
+      if (space < 200) { notice('The box is nearly full. Send what is there first.'); return; }
+      var cut = text.length > space;
+      input.value = head + (cut ? text.slice(0, space - 20) + '\n… (cut to fit)' : text) + '\n```';
+      grow(); input.focus();
+      if (cut) notice('The file was longer than a message: its first part is in the box.');
+    };
+    reader.onerror = function () { notice('That file could not be read.'); };
+    reader.readAsText(file);
+  }
   function choosePicture(file) {
     if (!file) return;
-    if (!PIC_TYPES.test(file.type)) { notice('Send a JPEG, PNG, GIF, WebP or AVIF picture.'); return; }
+    if (!PIC_TYPES.test(file.type) && (/^text\//.test(file.type) || file.type === 'application/json' || TEXT_EXT.test(file.name || ''))) { readText(file); if (fileInput) fileInput.value = ''; return; }
+    if (!PIC_TYPES.test(file.type) || !fileInput || !/image\//.test(fileInput.accept)) { notice('Send a JPEG, PNG, GIF, WebP or AVIF picture, or a text file.'); return; }
     if (file.size > 20 * 1024 * 1024) { notice('A picture can be up to 20 MB.'); return; }
     clearPicture();
     picture = { file: file, url: URL.createObjectURL(file) };

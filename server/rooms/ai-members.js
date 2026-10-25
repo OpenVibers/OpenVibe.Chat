@@ -350,7 +350,7 @@ async function afterPost(room, message, user, deps = {}) {
         const context = await contextFor(member);
         const opts = { force: true, attribution: { service: 'chat', type: 'room', id: String(room.id), label: String(room.name || room.slug).slice(0, 200) }, idempotencyKey: `chat-ai-${room.id}-${message.id}`,
             ...(own ? { credential: { subject: member.engine_subject } } : {}) };
-        const transcript = transcriptOf(history, vibe ? { each: 2000, total: 16000 } : {}) || '(no earlier messages)';
+        const transcript = transcriptOf(history, vibe ? { each: 6000, total: 24000 } : {}) || '(no earlier messages)';
         const askedBy = (user.display_name || user.username || 'someone').slice(0, 80);
         // Vibe's memory of the person (server/rooms/vibe-memory.js): only in their own chat, and only while it is on.
         const vibeMemory = require('./vibe-memory');
@@ -371,7 +371,7 @@ async function afterPost(room, message, user, deps = {}) {
         } : null;
         if (config.ai.memberTools) {
             const images = await picturesFor(message, history, user).catch(() => []);
-            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, called, onText, steps }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
+            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, vibe ? 12000 : 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, called, onText, steps }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
         }
         // A plain "remember that …" is kept even when the model only promised it (small models often do).
         if (memory !== null && text && !called.has('remember')) {
