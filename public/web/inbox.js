@@ -97,7 +97,34 @@
     ws.onclose = function () { setTimeout(connect, delay); delay = Math.min(delay * 2, 30000); };
   }
 
+  // Saved replies: "/" at the start of the reply box lists them by shortcut; Enter, Tab or a click puts one in.
+  var saved = Array.isArray(cfg.saved) ? cfg.saved : [], pick = null, picked = 0;
+  function closePick() { if (pick) { pick.remove(); pick = null; } input && input.removeAttribute('aria-activedescendant'); }
+  function showPick() {
+    var m = /^\/([a-z0-9-]*)$/i.exec(input.value);
+    if (!m || !saved.length) { closePick(); return; }
+    var q = m[1].toLowerCase(), list = saved.filter(function (r) { return r.shortcut.indexOf(q) === 0; }).slice(0, 8);
+    if (!list.length) { closePick(); return; }
+    if (!pick) { pick = el('ul', 'ib-pick'); pick.setAttribute('role', 'listbox'); form.parentNode.insertBefore(pick, form); }
+    pick.textContent = ''; picked = Math.min(picked, list.length - 1);
+    list.forEach(function (r, i) {
+      var li = el('li', i === picked ? 'is-on' : ''); li.id = 'ib-pick-' + i; li.setAttribute('role', 'option');
+      li.appendChild(el('b', null, '/' + r.shortcut)); li.appendChild(el('span', null, r.body.slice(0, 90)));
+      li.addEventListener('mousedown', function (e) { e.preventDefault(); usePick(r); });
+      pick.appendChild(li);
+    });
+    pick._list = list; input.setAttribute('aria-activedescendant', 'ib-pick-' + picked);
+  }
+  function usePick(r) { input.value = r.body; closePick(); input.dispatchEvent(new Event('input')); input.focus(); }
+
   if (form && input) {
+    input.addEventListener('input', function () { picked = 0; showPick(); });
+    input.addEventListener('keydown', function (e) {
+      if (!pick) return;
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); picked = (picked + (e.key === 'ArrowDown' ? 1 : -1) + pick._list.length) % pick._list.length; showPick(); }
+      else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); usePick(pick._list[picked]); }
+      else if (e.key === 'Escape') closePick();
+    });
     var grow = function () { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px'; };
     input.addEventListener('input', grow);
     input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit ? form.requestSubmit() : form.submit(); } });

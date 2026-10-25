@@ -58,8 +58,11 @@ center (MagicBrowse privacy), getstream.io (Stream vs Sendbird), rumbletalk.com,
 3. **Community room** (built: `data-room`, bubble or inline, sign-in by ticket) **and site assistant** (built: an inbox
    whose people do not answer) **modes** of the widget; pictures, video and files in the embed (signed-in
    visitors first, then anonymous once Pics/Video take anonymous uploads); call escalation from a support conversation.
-4. **Developer platform**: capabilities in OpenVibe.Contracts (`chat.inbox.*`, `chat.conversation.*`, `chat.feed.*`),
-   `openvibe-sdk/chat`, Events types (`chat.conversation.created`, `.handoff_requested`, `.resolved`), webhooks.
-5. **Enterprise**: verified visitor identity (an HMAC of the site's user id, like Intercom's identity verification),
-   teams and routing, canned replies, CSAT, retention and export settings, translation, page-context sharing with the
-   visitor's permission (co-browsing-lite), procedures (Vibe calls a site's webhook to look up an order).
+4. **Developer platform**: `openvibe-sdk/chat` (built, SDK#78: inboxes, feeds, Vibe, `createInboxVisitor`,
+   `createFeedPublisher`), inbox webhooks (built: `chat.inbox.*` events signed like Events deliveries, Slack and
+   Discord lines). Next: capabilities in OpenVibe.Contracts (`chat.inbox.*`, `chat.feed.*`) so developer apps act for an
+   inbox's people, and the same events on OpenVibe.Events once it scopes event types to their owner.
+5. **Enterprise**: built: verified visitors (an HMAC of the site's user id, like Intercom's identity verification),
+   saved replies (the canned replies of other tools), ratings (CSAT), page context for Vibe, notifications. Next:
+   teams and routing, retention and export settings, translation, sharing the page with the visitor's permission
+   (co-browsing-lite), procedures (Vibe calls a site's webhook to look up an order).

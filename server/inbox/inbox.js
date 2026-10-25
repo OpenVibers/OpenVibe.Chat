@@ -148,6 +148,7 @@ async function mine(user) {
 function shape(r) {
     return {
         id: r.id, name: r.name, greeting: r.greeting, color: r.color, ai_enabled: !!Number(r.ai_enabled), handoff: peopleAnswer(r), ai_instructions: r.ai_instructions,
+        verified_visitors: !!r.identity_secret,
         knowledge_urls: json(r.knowledge_urls, []), allowed_origins: json(r.allowed_origins, []), created_at: r.created_at,
     };
 }
@@ -183,6 +184,7 @@ const convShape = (c) => c && ({
     id: c.id, inbox_id: c.inbox_id, status: c.status, visitor_name: c.visitor_name || null, page_url: c.page_url || null,
     assignee_id: c.assignee_id ? Number(c.assignee_id) : null, agent_unread: Number(c.agent_unread) || 0,
     rating: c.rating == null ? null : Number(c.rating), rating_comment: c.rating_comment || null,
+    verified: !!Number(c.verified), visitor_email: c.visitor_email || null, external_id: c.external_id || null,
     created_at: c.created_at, last_message_at: c.last_message_at || c.created_at,
 });
 const msgShape = (m) => m && ({ id: Number(m.id), conversation_id: m.conversation_id, author: m.author, author_name: m.author_name || null, body: m.body, created_at: m.created_at });
@@ -193,6 +195,7 @@ async function addMessage(conv, { author, body, userId = null, name = null }, de
     await db.run(`UPDATE inbox_conversations SET last_message_at = ov_now()${author === 'visitor' ? ', agent_unread = agent_unread + 1' : ''} WHERE id = ?`, [conv.id]);
     const message = msgShape(row);
     broadcaster(deps)(conv.inbox_id, conv.id, { type: 'inbox_message', inbox: conv.inbox_id, conversation: conv.id, message });
+    if (author !== 'system') require('./webhooks').later(conv.inbox_id, 'message.created', { conversationId: conv.id, message });
     return message;
 }
 
@@ -200,7 +203,8 @@ async function setStatusRow(conv, status, deps = {}, extra = {}) {
     await db.run(`UPDATE inbox_conversations SET status = ?${extra.assignee ? ', assignee_id = COALESCE(assignee_id, ?)' : ''} WHERE id = ?`,
         extra.assignee ? [status, extra.assignee, conv.id] : [status, conv.id]);
     broadcaster(deps)(conv.inbox_id, conv.id, { type: 'inbox_status', inbox: conv.inbox_id, conversation: conv.id, status });
-    if (status === 'waiting' && conv.status !== 'waiting') require('./notify').later(conv, 'waiting');
+    if (status === 'waiting' && conv.status !== 'waiting') { require('./notify').later(conv, 'waiting'); require('./webhooks').later(conv.inbox_id, 'conversation.waiting', { conversationId: conv.id }); }
+    if (status === 'resolved' && conv.status !== 'resolved') require('./webhooks').later(conv.inbox_id, 'conversation.resolved', { conversationId: conv.id });
     return { ...conv, status };
 }
 
@@ -213,16 +217,85 @@ async function openConversationFor(inbox, token) {
         ORDER BY created_at DESC LIMIT 1`, [inbox.id, hashToken(token)]) || null;
 }
 
-// ── Visitors ───────────────────────────────────────────────────────────────────────────────────────────────────────
+// ── Verified visitors ──────────────────────────────────────────────────────────────────────────────────────────────
 
-/** A visitor opens the widget: their token (a new one when theirs is missing or malformed) and their open conversation. */
-async function visit(inbox, token) {
-    const t = TOKEN_RE.test(String(token || '')) ? String(token) : newToken();
-    const conv = await openConversationFor(inbox, t);
-    return { token: t, conversation: convShape(conv), messages: conv ? await messages(conv) : [] };
+/** Turn verification on (a new secret), make a new secret, or turn it off. The owner puts the secret on their server. */
+async function setIdentity(inbox, user, action) {
+    if ((await access(inbox, user)).role !== 'owner') fail(403, 'inbox.owner_only', 'Only the inbox\'s owner changes it');
+    if (!['on', 'rotate', 'off'].includes(action)) fail(422, 'inbox.identity', 'on, rotate or off');
+    const secret = action === 'off' ? null : action === 'on' && inbox.identity_secret ? inbox.identity_secret : crypto.randomBytes(32).toString('hex');
+    await db.run('UPDATE inboxes SET identity_secret = ? WHERE id = ?', [secret, inbox.id]);
+    return { identity_secret: secret };
 }
 
-async function visitorPost(inbox, token, { message, page_url = null, name = null } = {}, deps = {}) {
+/**
+ * A site's signed identity for its visitor: { id, name?, email?, hash } where hash is HMAC-SHA256(the inbox's identity
+ * secret, id) in hex, made on the site's server. → { id, name, email } when it checks out, else null (the visitor
+ * stays anonymous: a wrong or missing hash is not an error).
+ */
+function verifiedIdentity(inbox, user) {
+    if (!inbox.identity_secret || !user || typeof user !== 'object') return null;
+    const id = clean(user.id, 128);
+    const hash = String(user.hash || '').toLowerCase();
+    if (!id || !/^[0-9a-f]{64}$/.test(hash)) return null;
+    const want = crypto.createHmac('sha256', inbox.identity_secret).update(id).digest();
+    if (!crypto.timingSafeEqual(want, Buffer.from(hash, 'hex'))) return null;
+    const email = clean(user.email, 200);
+    return { id, name: clean(user.name, LIMITS.visitorName) || null, email: /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : null };
+}
+/** The same visitor token on every device for a verified person, so their conversation follows them (never stored). */
+function identityToken(inbox, who) {
+    const key = config.inbox.identityKey || config.oauth.clientSecret || 'openvibe-chat-development';
+    return crypto.createHmac('sha256', key).update(`inbox-identity:${inbox.id}:${who.id}`).digest('base64url').slice(0, 32);
+}
+async function stampIdentity(convId, who) {
+    await db.run('UPDATE inbox_conversations SET external_id = ?, visitor_name = COALESCE(?, visitor_name), visitor_email = COALESCE(?, visitor_email), verified = 1 WHERE id = ?',
+        [who.id, who.name, who.email, convId]);
+}
+
+// ── Saved replies ──────────────────────────────────────────────────────────────────────────────────────────────────
+
+const SHORTCUT_RE = /^[a-z0-9][a-z0-9-]{0,29}$/;
+const MAX_SAVED = 100;
+const savedShape = (r) => ({ id: Number(r.id), shortcut: r.shortcut, body: r.body, created_by: r.created_by == null ? null : Number(r.created_by) });
+async function savedReplies(inbox) {
+    return (await db.all('SELECT * FROM inbox_saved_replies WHERE inbox_id = ? ORDER BY shortcut', [inbox.id])).map(savedShape);
+}
+/** Any of the inbox's people saves a reply; the same shortcut replaces it. */
+async function saveReply(inbox, user, { shortcut, body } = {}) {
+    if (!(await access(inbox, user)).role) fail(403, 'inbox.not_agent', 'Only the inbox\'s people save replies');
+    const key = String(shortcut || '').trim().toLowerCase().replace(/^\//, '');
+    if (!SHORTCUT_RE.test(key)) fail(422, 'inbox.shortcut', 'A shortcut is letters, digits and dashes, up to 30');
+    const text = clean(body, LIMITS.body);
+    if (!text) fail(422, 'inbox.empty', 'Write the reply');
+    const n = (await db.get('SELECT COUNT(*) AS n FROM inbox_saved_replies WHERE inbox_id = ?', [inbox.id])).n;
+    const exists = await db.get('SELECT 1 FROM inbox_saved_replies WHERE inbox_id = ? AND shortcut = ?', [inbox.id, key]);
+    if (!exists && Number(n) >= MAX_SAVED) fail(429, 'inbox.too_many_saved', `At most ${MAX_SAVED} saved replies`);
+    await db.run(`INSERT INTO inbox_saved_replies (inbox_id, shortcut, body, created_by) VALUES (?, ?, ?, ?)
+        ON CONFLICT (inbox_id, shortcut) DO UPDATE SET body = excluded.body, created_by = excluded.created_by`, [inbox.id, key, text, user.id]);
+    return await savedReplies(inbox);
+}
+async function deleteReply(inbox, user, id) {
+    if (!(await access(inbox, user)).role) fail(403, 'inbox.not_agent', 'Only the inbox\'s people change saved replies');
+    await db.run('DELETE FROM inbox_saved_replies WHERE inbox_id = ? AND id = ?', [inbox.id, Number(id) || 0]);
+    return await savedReplies(inbox);
+}
+
+// ── Visitors ───────────────────────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * A visitor opens the widget: their token (a new one when theirs is missing or malformed; a verified person's own, the
+ * same on every device) and their open conversation.
+ */
+async function visit(inbox, token, user = null) {
+    const who = verifiedIdentity(inbox, user);
+    const t = who ? identityToken(inbox, who) : TOKEN_RE.test(String(token || '')) ? String(token) : newToken();
+    let conv = await openConversationFor(inbox, t);
+    if (conv && who) { await stampIdentity(conv.id, who); conv = await db.get('SELECT * FROM inbox_conversations WHERE id = ?', [conv.id]); }
+    return { token: t, verified: !!who, conversation: convShape(conv), messages: conv ? await messages(conv) : [] };
+}
+
+async function visitorPost(inbox, token, { message, page_url = null, name = null, user = null } = {}, deps = {}) {
     if (!TOKEN_RE.test(String(token || ''))) fail(401, 'inbox.visitor', 'Open the chat again to start a conversation');
     const body = clean(message, LIMITS.body);
     if (!body) fail(422, 'inbox.empty', 'Write something first');
@@ -233,8 +306,12 @@ async function visitorPost(inbox, token, { message, page_url = null, name = null
         const id = newId('cnv');
         await db.run(`INSERT INTO inbox_conversations (id, inbox_id, visitor_token_hash, visitor_name, status, page_url, last_message_at)
             VALUES (?, ?, ?, ?, ?, ?, ov_now())`, [id, inbox.id, hashToken(token), clean(name, LIMITS.visitorName) || null, Number(inbox.ai_enabled) ? 'bot' : 'waiting', pageUrlOf(page_url)]);
+        // A verified person's conversation carries who they are (only with their own token: an id is not enough).
+        const who = verifiedIdentity(inbox, user);
+        if (who && identityToken(inbox, who) === String(token)) await stampIdentity(id, who);
         conv = await db.get('SELECT * FROM inbox_conversations WHERE id = ?', [id]);
         broadcaster(deps)(inbox.id, conv.id, { type: 'inbox_conversation', inbox: inbox.id, conversation: convShape(conv) });
+        require('./webhooks').later(inbox.id, 'conversation.created', { conversationId: conv.id });
     }
     const filtered = wordFilter.check(body);
     const posted = await addMessage(conv, { author: 'visitor', body: filtered.safe ? body : filtered.filtered, name: conv.visitor_name }, deps);
@@ -277,6 +354,7 @@ async function rate(inbox, token, { rating, comment = '', conversation: convId =
     await db.run('UPDATE inbox_conversations SET rating = ?, rating_comment = ?, rated_at = ov_now() WHERE id = ?', [r, (filtered.safe ? clean(comment, 500) : filtered.filtered) || null, conv.id]);
     const shaped = convShape(await db.get('SELECT * FROM inbox_conversations WHERE id = ?', [conv.id]));
     broadcaster(deps)(inbox.id, null, { type: 'inbox_rating', inbox: inbox.id, conversation: conv.id, rating: shaped.rating, comment: shaped.rating_comment });
+    require('./webhooks').later(inbox.id, 'conversation.rated', { conversationId: conv.id });
     return shaped;
 }
 
@@ -285,7 +363,7 @@ async function rate(inbox, token, { rating, comment = '', conversation: convId =
 async function conversations(inbox, { status = null, limit = 100 } = {}) {
     const where = status === 'active' ? "AND c.status IN ('bot', 'waiting', 'open')" : STATUSES.includes(status) ? 'AND c.status = ?' : '';
     const params = [inbox.id, ...(STATUSES.includes(status) ? [status] : []), Math.min(200, Number(limit) || 100)];
-    const rows = await db.all(`SELECT c.*, (SELECT body FROM inbox_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_body
+    const rows = await db.all(`SELECT c.*, (SELECT body FROM inbox_messages m WHERE m.conversation_id = c.id AND m.author <> 'system' ORDER BY m.id DESC LIMIT 1) AS last_body
         FROM inbox_conversations c WHERE c.inbox_id = ? ${where}
         ORDER BY CASE c.status WHEN 'waiting' THEN 0 WHEN 'open' THEN 1 WHEN 'bot' THEN 2 ELSE 3 END, COALESCE(c.last_message_at, c.created_at) DESC LIMIT ?`, params);
     return rows.map((r) => ({ ...convShape(r), preview: plainText(r.last_body).slice(0, 140) }));
@@ -380,7 +458,9 @@ async function aiAnswer(inbox, convId, deps = {}) {
             .map((m) => ({ role: m.author === 'visitor' ? 'user' : 'assistant', content: `${m.author === 'agent' ? `(${m.author_name || 'a person'} from ${inbox.name}) ` : ''}${String(m.body).slice(0, 2000)}` }));
         const tools = inboxTools(inbox);
         const aiClient = deps.aiClient || require('../ai/client');
-        const messagesForModel = [{ role: 'system', content: inboxPrompt(inbox) }, ...transcript];
+        // What Vibe may know about where the visitor is and who they are (a verified name only: anyone can type a name).
+        const context = [conv.page_url ? `The visitor is on this page: ${conv.page_url}` : '', Number(conv.verified) && conv.visitor_name ? `${inbox.name}'s site says the visitor is ${conv.visitor_name}.` : ''].filter(Boolean).join('\n');
+        const messagesForModel = [{ role: 'system', content: inboxPrompt(inbox) + (context ? `\n\n${context}` : '') }, ...transcript];
         const lastId = history.length ? history[history.length - 1].id : 0;
         let text = '';
         for (let round = 0; round <= 3 && !text; round++) {
@@ -413,6 +493,6 @@ function _reset() { inFlight.clear(); }
 module.exports = {
     InboxError, INBOX_RE, CONV_RE, LIMITS, MAX_INBOXES, AI_PER_CONVERSATION, hashToken,
     create, update, remove, get, access, mine, members, addMember, removeMember, shape, publicConfig, plainText, peopleAnswer,
-    visit, visitorPost, handoff, rate, conversations, conversation, messages, agentPost, setStatus, markRead, convShape,
+    visit, visitorPost, handoff, rate, setIdentity, verifiedIdentity, savedReplies, saveReply, deleteReply, conversations, conversation, messages, agentPost, setStatus, markRead, convShape,
     aiAnswer, inboxPrompt, _reset,
 };

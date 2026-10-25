@@ -120,6 +120,7 @@ t('ratchet: every file that makes an outbound request itself is reviewed', () =>
         'server/chat/emotes-routes.js': 'FFZ / BTTV / 7TV emote providers (fixed hosts, hardcoded URLs)',
         'server/chat/soundboard-service.js': '101soundboards (host allowlist; audio via safeLookup)',
         'server/chat/tts-engine.js': 'Google / AWS TTS (fixed hosts)',
+        'server/inbox/webhooks.js': "an inbox owner's webhook addresses: https only, assertPublicUrl when saved and safeLookup on every delivery, no redirects followed",
     };
     const root = path.join(__dirname, '..');
     const found = [];

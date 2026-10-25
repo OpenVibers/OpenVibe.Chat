@@ -27,7 +27,7 @@ async function until(fn, label) {
 const visitorMessages = async () => (await widget('GET', `/messages?token=${token}`)).body.messages;
 
 t('boot', async () => {
-    h = await boot({ env: { CHAT_WEB_URL: SITE } });
+    h = await boot({ env: { CHAT_WEB_URL: SITE, CHAT_INBOX_POSTS_PER_MINUTE: '500' } });
     aiClient = require('../server/ai/client');
     inboxes = require('../server/inbox/inbox');
     ann = h.addUser('ann', { subject: ids.newId('user') });
@@ -189,6 +189,85 @@ t('a visitor waiting for a person tells the inbox\'s people, unless one follows 
         assert.strictEqual(pushed.length, 2);
         agent.close();
     } finally { notify._setPush(null); }
+});
+
+t('verified visitors: a signed identity names the visitor and follows them to another device; a wrong hash stays anonymous', async () => {
+    const crypto = require('crypto');
+    assert.strictEqual((await agentsApi('POST', `/${inbox.id}/identity`, bob, { action: 'on' })).status, 403, 'the owner\'s call');
+    const secret = (await agentsApi('POST', `/${inbox.id}/identity`, ann, { action: 'on' })).body.identity_secret;
+    assert.ok(/^[0-9a-f]{64}$/.test(secret));
+    const user = { id: 'cust-42', name: 'Dana Lee', email: 'dana@shop.example', hash: crypto.createHmac('sha256', secret).update('cust-42').digest('hex') };
+    const a = await widget('POST', '/visit', { user });
+    assert.strictEqual(a.body.verified, true);
+    const posted = await widget('POST', '/messages', { token: a.body.token, message: 'Order 42 is late', user });
+    assert.deepStrictEqual([posted.body.conversation.verified, posted.body.conversation.visitor_name, posted.body.conversation.visitor_email], [true, 'Dana Lee', 'dana@shop.example']);
+    const b = await widget('POST', '/visit', { token: 'y'.repeat(32), user });
+    assert.strictEqual(b.body.token, a.body.token, 'another device: the same person, the same conversation');
+    assert.strictEqual(b.body.conversation.id, posted.body.conversation.id);
+    const forged = await widget('POST', '/visit', { user: { ...user, hash: '0'.repeat(64) } });
+    assert.ok(forged.body.verified === false && forged.body.token !== a.body.token, 'a wrong hash is just an anonymous visitor');
+    const viewPage = await fetch(`${h.base}/inbox/${inbox.id}?c=${posted.body.conversation.id}`, { headers: { cookie: `ov_token=${bob.token}` } }).then((r) => r.text());
+    assert.ok(viewPage.includes('Verified by your site') && viewPage.includes('dana@shop.example'));
+    const settings = await fetch(`${h.base}/inbox/${inbox.id}/settings`, { headers: { cookie: `ov_token=${ann.token}` } }).then((r) => r.text());
+    assert.ok(settings.includes(secret) && settings.includes('hash_hmac'), 'the owner sees the secret and how to sign');
+    const agentSettings = await fetch(`${h.base}/inbox/${inbox.id}/settings`, { headers: { cookie: `ov_token=${bob.token}` } }).then((r) => r.text());
+    assert.ok(!agentSettings.includes(secret), 'an agent never sees it');
+    await agentsApi('POST', `/${inbox.id}/identity`, ann, { action: 'off' });
+    assert.strictEqual((await widget('POST', '/visit', { user })).body.verified, false, 'off: nobody is verified');
+});
+
+t('saved replies for the team (picked with "/"), and Vibe knows the page the visitor is on', async () => {
+    const r = await agentsApi('POST', `/${inbox.id}/replies`, bob, { shortcut: '/Refund', body: 'Refunds reach your card in 5 days.' });
+    assert.deepStrictEqual(r.body.replies.map((x) => [x.shortcut, x.body]), [['refund', 'Refunds reach your card in 5 days.']]);
+    assert.strictEqual((await agentsApi('POST', `/${inbox.id}/replies`, bob, { shortcut: 'no spaces', body: 'x' })).status, 422);
+    const outsider = h.addUser('dee', { subject: ids.newId('user') });
+    assert.strictEqual((await agentsApi('GET', `/${inbox.id}/replies`, outsider)).status, 404);
+    const app = await fetch(`${h.base}/inbox/${inbox.id}?c=${conv.id}`, { headers: { cookie: `ov_token=${bob.token}` } }).then((x) => x.text());
+    assert.ok(app.includes('/ for saved replies') && app.includes('Refunds reach your card in 5 days.'), 'the reply box knows them');
+    const id = r.body.replies[0].id;
+    assert.deepStrictEqual((await agentsApi('DELETE', `/${inbox.id}/replies/${id}`, ann)).body.replies, []);
+    reply = 'The Aurora ships in 2 days.';
+    turns.length = 0;
+    const v = (await widget('POST', '/visit', {})).body.token;
+    await widget('POST', '/messages', { token: v, message: 'When does this one ship?', page_url: 'https://shop.example/lamps/aurora' });
+    await until(async () => turns.some((x) => x.workflow === 'chat.member.turn'), 'Vibe asked');
+    assert.ok(turns.find((x) => x.workflow === 'chat.member.turn').input.messages[0].content.includes('The visitor is on this page: https://shop.example/lamps/aurora'));
+});
+
+t('webhooks: signed JSON for every event, a line for Slack when a visitor waits; private addresses refused; the owner\'s', async () => {
+    const webhooks = require('../server/inbox/webhooks');
+    const { parseDelivery } = require('openvibe-sdk/events');
+    const sent = [];
+    const lookup = (host, opts, cb) => cb(null, [{ address: host === 'internal.example' ? '10.1.2.3' : '93.184.216.34', family: 4 }]);
+    webhooks._setSend(async (url, body, headers) => { sent.push({ url, raw: body, body: JSON.parse(body), headers }); return { status: 200 }; }, lookup);
+    try {
+        assert.strictEqual((await agentsApi('POST', `/${inbox.id}/webhooks`, bob, { url: 'https://example.com/hook' })).status, 403, 'the owner\'s call');
+        assert.strictEqual((await agentsApi('POST', `/${inbox.id}/webhooks`, ann, { url: 'https://internal.example/hook' })).status, 422, 'a private address');
+        assert.strictEqual((await agentsApi('POST', `/${inbox.id}/webhooks`, ann, { url: 'http://example.com/hook' })).status, 422, 'https only');
+        const json = await agentsApi('POST', `/${inbox.id}/webhooks`, ann, { url: 'https://example.com/hook' });
+        assert.ok(json.status === 201 && /^whsec_/.test(json.body.secret) && json.body.webhook.format === 'openvibe');
+        const slack = await agentsApi('POST', `/${inbox.id}/webhooks`, ann, { url: 'https://hooks.slack.com/services/T0/B0/xyz' });
+        assert.ok(slack.body.webhook.format === 'slack' && slack.body.secret === null, 'Slack\'s address is its own secret');
+        const v = (await widget('POST', '/visit', {})).body.token;
+        await widget('POST', '/messages', { token: v, message: 'The lamp will not turn on <!channel>' });
+        await widget('POST', '/handoff', { token: v });
+        await until(async () => sent.some((x) => x.url.includes('slack')), 'Slack hears the visitor waiting');
+        const types = sent.filter((x) => x.url === 'https://example.com/hook').map((x) => x.body.event.type);
+        assert.ok(['chat.inbox.conversation.created', 'chat.inbox.message.created', 'chat.inbox.conversation.waiting'].every((t2) => types.includes(t2)), types.join());
+        const one = sent.find((x) => x.body.event && x.body.event.type === 'chat.inbox.conversation.waiting');
+        const parsed = parseDelivery(one.raw, one.headers, json.body.secret, { requireV2: true });
+        assert.ok(parsed && parsed.event.type === 'chat.inbox.conversation.waiting', 'the signature checks out with openvibe-sdk/events');
+        assert.strictEqual(parseDelivery(one.raw, one.headers, 'whsec_wrong', { requireV2: true }), null);
+        assert.strictEqual(parsed.event.data.conversation.status, 'waiting');
+        const line = sent.find((x) => x.url.includes('slack')).body.text;
+        assert.ok(line.includes('is waiting for a person in Acme') && line.includes('The lamp will not turn on') && line.includes(`/inbox/${inbox.id}?c=`), line);
+        assert.ok(line.includes('&lt;!channel&gt;') && !line.includes('<!channel>'), 'a visitor cannot ping the channel');
+        const list = (await agentsApi('GET', `/${inbox.id}/webhooks`, ann)).body.webhooks;
+        assert.ok(list.every((w) => w.last_status === 200) && !JSON.stringify(list).includes('whsec_'), 'the list never shows the secret');
+        assert.strictEqual((await agentsApi('POST', `/${inbox.id}/webhooks/${json.body.webhook.id}/test`, ann)).body.ok, true);
+        assert.strictEqual((await agentsApi('DELETE', `/${inbox.id}/webhooks/${slack.body.webhook.id}`, ann)).status, 204);
+        await agentsApi('DELETE', `/${inbox.id}/webhooks/${json.body.webhook.id}`, ann);
+    } finally { webhooks._setSend(null); }
 });
 
 t('the embed page and the loader: frame-ancestors follow the allowed sites', async () => {

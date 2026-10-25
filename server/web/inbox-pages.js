@@ -15,6 +15,7 @@
 const path = require('path');
 const md = require('../../public/web/vibe-md.js');
 const inboxes = require('../inbox/inbox');
+const webhooks = require('../inbox/webhooks');
 const { embedOf } = require('../inbox/routes');
 const { esc, asset } = require('./layout');
 
@@ -120,10 +121,11 @@ ${list}
         const filter = ['active', 'waiting', 'resolved'].includes(req.query.f) ? req.query.f : 'active';
         const list = await inboxes.conversations(inbox, { status: filter });
         const current = req.query.c ? await inboxes.conversation(inbox, req.query.c) : null;
+        const saved = await inboxes.savedReplies(inbox);
         const msgs = current ? await inboxes.messages(current) : [];
         if (current) await inboxes.markRead(inbox, current);
         const item = (c) => `<li><a class="vb-chat ib-conv" href="/inbox/${esc(inbox.id)}?c=${esc(c.id)}&amp;f=${filter}"${current && c.id === current.id ? ' aria-current="page"' : ''} data-conv="${esc(c.id)}">
-<span class="ib-row"><b>${esc(c.visitor_name || 'Visitor')}</b>${statusChip(c.status)}${c.rating ? `<span class="ib-rate" title="${esc(c.rating_comment || '')}">${c.rating > 0 ? '👍' : '👎'}</span>` : ''}<time>${esc(ago(c.last_message_at))}</time></span>
+<span class="ib-row"><b>${esc(c.visitor_name || 'Visitor')}</b>${c.verified ? '<span class="ib-ok" title="Verified by your site">✓</span>' : ''}${statusChip(c.status)}${c.rating ? `<span class="ib-rate" title="${esc(c.rating_comment || '')}">${c.rating > 0 ? '👍' : '👎'}</span>` : ''}<time>${esc(ago(c.last_message_at))}</time></span>
 <span class="ib-prev">${esc(c.preview || '')}</span></a></li>`;
         const turn = (m) => {
             if (m.author === 'system') return `<li class="ib-sys" data-id="${m.id}">${esc(m.body)}</li>`;
@@ -145,19 +147,19 @@ ${Number(inbox.ai_enabled) && current.status !== 'bot' && current.status !== 're
 <div class="vb-scrim" data-vb-close hidden></div>
 <section class="vb-main" aria-label="Conversation">
 <header class="vb-head"><button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show conversations">&#9776;</button>
-<h1 class="vb-title">${current ? `${esc(current.visitor_name || 'Visitor')} ${statusChip(current.status)}${current.rating ? ` <span class="ib-rate" title="${esc(current.rating_comment || 'The visitor\'s rating')}">${Number(current.rating) > 0 ? '👍' : '👎'}</span>` : ''}` : esc(inbox.name)}</h1>${actions}</header>
+<h1 class="vb-title">${current ? `${esc(current.visitor_name || 'Visitor')}${Number(current.verified) ? ' <span class="ib-ok" title="Verified by your site">✓</span>' : ''} ${statusChip(current.status)}${current.rating ? ` <span class="ib-rate" title="${esc(current.rating_comment || 'The visitor\'s rating')}">${Number(current.rating) > 0 ? '👍' : '👎'}</span>` : ''}` : esc(inbox.name)}</h1>${actions}</header>
 <div class="vb-scroll" id="vb-scroll">
-${current ? `${current.rating_comment ? `<p class="ib-page">Rated ${Number(current.rating) > 0 ? '👍' : '👎'}: “${esc(current.rating_comment)}”</p>` : ''}${current.page_url ? `<p class="ib-page">From <a href="${esc(current.page_url)}" rel="noopener nofollow" target="_blank">${esc(current.page_url)}</a></p>` : ''}<ol class="vb-thread" id="vb-thread">${msgs.map(turn).join('')}</ol>`
+${current ? `${Number(current.verified) ? `<p class="ib-page">Verified by your site${current.visitor_email ? ` · <a href="mailto:${esc(current.visitor_email)}">${esc(current.visitor_email)}</a>` : ''} · id ${esc(current.external_id || '')}</p>` : ''}${current.rating_comment ? `<p class="ib-page">Rated ${Number(current.rating) > 0 ? '👍' : '👎'}: “${esc(current.rating_comment)}”</p>` : ''}${current.page_url ? `<p class="ib-page">From <a href="${esc(current.page_url)}" rel="noopener nofollow" target="_blank">${esc(current.page_url)}</a></p>` : ''}<ol class="vb-thread" id="vb-thread">${msgs.map(turn).join('')}</ol>`
         : `<div class="vb-hello"><h1>${list.length ? 'Pick a conversation' : 'No conversations yet'}</h1><p class="vb-sub">${list.length ? 'Waiting ones come first: those visitors asked for a person.' : 'Paste the snippet from Settings into your site. Visitors write; Vibe answers; you take over when it matters.'}</p></div>`}
 </div>
 ${current ? `<div class="vb-dock"><form class="vb-composer" id="vb-composer" method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}">
-<label class="oc-sr" for="vb-input">Reply</label><textarea id="vb-input" name="message" rows="1" maxlength="4000" placeholder="Reply as ${esc(actor.user.display_name || actor.user.username)}" required></textarea>
+<label class="oc-sr" for="vb-input">Reply</label><textarea id="vb-input" name="message" rows="1" maxlength="4000" placeholder="Reply as ${esc(actor.user.display_name || actor.user.username)}${saved.length ? ' · / for saved replies' : ''}" required aria-autocomplete="list"></textarea>
 <button class="vb-send" type="submit" aria-label="Send">&#8593;</button></form><p class="vb-fine">Replying takes the conversation from Vibe.</p></div>` : ''}
 </section>
 </div>`;
         await page(req, res, 200, {
             actor, app: true, appScript: 'inbox.js', active: 'inbox', path: `/inbox/${inbox.id}`, title: `${inbox.name} · Inbox`, robots: 'noindex, nofollow', body,
-            page: { view: 'inbox', inbox: inbox.id, conversation: current ? current.id : null, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: actor.user.id, filter },
+            page: { view: 'inbox', inbox: inbox.id, conversation: current ? current.id : null, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: actor.user.id, filter, saved: saved.map((r) => ({ shortcut: r.shortcut, body: r.body })) },
         });
     });
 
@@ -182,6 +184,8 @@ ${current ? `<div class="vb-dock"><form class="vb-composer" id="vb-composer" met
         const team = await inboxes.members(inbox);
         const embed = embedOf(inbox);
         const owner = role === 'owner';
+        const saved = await inboxes.savedReplies(inbox);
+        const hooks = owner ? await webhooks.list(inbox) : [];
         await page(req, res, 200, {
             actor, title: `${inbox.name}: settings`, path: `/inbox/${inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
             body: `<p><a href="/inbox/${esc(inbox.id)}">&larr; ${esc(inbox.name)}</a></p><h1>${esc(inbox.name)}</h1>
@@ -190,7 +194,27 @@ ${req.query.made ? notice('ok', 'Your inbox is ready. Paste the snippet into you
 <p>Paste this before <code>&lt;/body&gt;</code> on every page that should show the chat bubble:</p>
 <pre class="ib-snippet"><code>${esc(embed.script)}</code></pre>
 <p class="oc-muted">Your page can open it with <code>OpenVibeChat.open()</code>. Try it: <a href="${esc(embed.panel)}" target="_blank" rel="noopener">open the chat panel</a>.</p>
-${owner ? `<h2>How it looks and what Vibe knows</h2>
+${owner ? `<h2>Verified visitors</h2>
+${shape.verified_visitors ? `<p>On. Your site signs who its signed-in visitor is, and Chat trusts the name and email that come with it; their conversation follows them to every device. Keep this secret on your server only:</p>
+<pre class="ib-snippet"><code>${esc(inbox.identity_secret)}</code></pre>
+<p>For a signed-in visitor, add <code>data-user-id</code>, <code>data-user-name</code>, <code>data-user-email</code> and <code>data-user-hash</code> to the tag (or call <code>OpenVibeChat.identify({ id, name, email, hash })</code>), where the hash is the HMAC-SHA256 of the id with the secret, in hex:</p>
+<pre class="ib-snippet"><code>${esc(`// Node
+crypto.createHmac('sha256', SECRET).update(String(user.id)).digest('hex')
+# Python
+hmac.new(SECRET.encode(), str(user.id).encode(), hashlib.sha256).hexdigest()
+// PHP
+hash_hmac('sha256', (string) $user->id, $secret)`)}</code></pre>
+<form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/identity"><button name="action" value="rotate">Make a new secret</button></form>
+<form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/identity"><button class="oc-link" name="action" value="off">Turn it off</button></form>`
+        : `<p class="oc-muted">Off: every visitor is anonymous to you unless they give a name. When your site has its own accounts, turn this on and your server signs who each visitor is; you see their verified name and email, and they find their conversation on any device.</p>
+<form method="post" action="/inbox/${esc(inbox.id)}/identity"><button name="action" value="on">Turn on verified visitors</button></form>`}
+<h2>Webhooks</h2>
+<p class="oc-muted">Your systems hear what happens: a Slack or Discord webhook address gets a line when a visitor waits for a person, writes while waiting, or rates a conversation; any other https address gets every event as signed JSON (verify it with <code>openvibe-sdk/events</code> <code>parseDelivery</code>).</p>
+${hooks.length ? `<ul class="oc-members">${hooks.map((w) => `<li><b>${esc(w.format === 'openvibe' ? 'JSON' : w.format === 'slack' ? 'Slack' : 'Discord')}</b> <span class="oc-muted">${esc(w.url.replace(/^https:\/\//, '').slice(0, 60))}${w.url.length > 68 ? '…' : ''} · ${w.on ? (w.last_status ? `last answer ${w.last_status}${w.last_error ? ` (${esc(w.last_error)})` : ''}` : 'nothing sent yet') : 'off after repeated failures: add it again to switch it on'}</span>
+<form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/webhooks/${w.id}/test"><button class="oc-link" type="submit">Send a test</button></form>
+<form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/webhooks/${w.id}/delete"><button class="oc-link" type="submit">Remove</button></form></li>`).join('')}</ul>` : ''}
+${hooks.length < webhooks.MAX_WEBHOOKS ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/webhooks"><label>Address (https) <input name="url" type="url" required maxlength="1000" placeholder="https://hooks.slack.com/services/…"></label><p><button type="submit">Add the webhook</button></p></form>` : ''}
+<h2>How it looks and what Vibe knows</h2>
 <form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/settings">
 <label>Name <input name="name" required minlength="2" maxlength="60" value="${esc(shape.name)}"></label>
 <label>Greeting <input name="greeting" maxlength="300" value="${esc(shape.greeting)}"></label>
@@ -203,7 +227,12 @@ ${owner ? `<h2>How it looks and what Vibe knows</h2>
 <p><button type="submit">Save</button></p></form>` : '<p class="oc-muted">Only the owner changes the settings.</p>'}
 <h2>People</h2>
 <ul class="oc-members">${team.map((m) => `<li><b>${esc(m.display_name || m.username || `user ${m.user_id}`)}</b> <span class="oc-muted">@${esc(m.username || '')} · ${m.role}</span>${owner && m.role !== 'owner' ? ` <form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/members/${m.user_id}/delete"><button class="oc-link" type="submit">Remove</button></form>` : ''}</li>`).join('')}</ul>
-${owner ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/members"><label>Add a person by username <input name="username" required maxlength="40" placeholder="username"></label><p><button type="submit">Add</button></p></form>` : ''}`,
+${owner ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/members"><label>Add a person by username <input name="username" required maxlength="40" placeholder="username"></label><p><button type="submit">Add</button></p></form>` : ''}
+<h2>Saved replies</h2>
+<p class="oc-muted">Ready answers for the whole team: type <code>/</code> in the reply box and its shortcut.</p>
+${saved.length ? `<ul class="oc-members">${saved.map((r) => `<li><b>/${esc(r.shortcut)}</b> <span class="oc-muted">${esc(r.body.slice(0, 120))}${r.body.length > 120 ? '…' : ''}</span> <form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/replies/${r.id}/delete"><button class="oc-link" type="submit">Delete</button></form></li>`).join('')}</ul>` : ''}
+<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/replies"><label>Shortcut <input name="shortcut" required maxlength="30" pattern="/?[a-zA-Z0-9][a-zA-Z0-9-]*" placeholder="refund"></label>
+<label>Reply <textarea name="body" rows="3" maxlength="4000" required placeholder="Refunds go back to the card you paid with within 5 days."></textarea></label><p><button type="submit">Save the reply</button></p></form>`,
         });
     });
 
@@ -214,6 +243,44 @@ ${owner ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/m
             await inboxes.update(a.inbox, a.actor.user, { name: b.name, greeting: b.greeting, color: b.color, ai_enabled: b.ai_enabled === '1', handoff: b.handoff === '1', ai_instructions: b.ai_instructions, knowledge_urls: b.knowledge_urls, allowed_origins: b.allowed_origins });
             res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
         } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not save')}`); }
+    });
+    router.post('/inbox/:id/webhooks', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        if (a.role !== 'owner') return res.redirect(303, `/inbox/${a.inbox.id}/settings`);
+        try {
+            const { secret } = await webhooks.add(a.inbox, a.actor.user, req.body && req.body.url);
+            if (!secret) return res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
+            // The secret is shown on this answer only (never in a URL: addresses end up in histories and logs).
+            await page(req, res, 201, { actor: a.actor, title: `${a.inbox.name}: webhook`, path: `/inbox/${a.inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
+                body: `<p><a href="/inbox/${esc(a.inbox.id)}/settings">&larr; ${esc(a.inbox.name)} settings</a></p><h1>Webhook added</h1>
+${notice('ok', 'Here is its signing secret. Copy it now: it is shown only this once.')}<pre class="ib-snippet"><code>${esc(secret)}</code></pre>
+<p class="oc-muted">Check each delivery with it: <code>parseDelivery(rawBody, headers, secret, { requireV2: true })</code> from <code>openvibe-sdk/events</code> (X-OpenVibe-Timestamp and X-OpenVibe-Signature-V2).</p>` });
+        } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not work')}`); }
+    });
+    router.post('/inbox/:id/webhooks/:wid/test', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a || a.role !== 'owner') return a && res.redirect(303, `/inbox/${a.inbox.id}/settings`);
+        try { const r = await webhooks.test(a.inbox, req.params.wid); res.redirect(303, `/inbox/${a.inbox.id}/settings?${r.ok ? 'saved=1' : `error=${encodeURIComponent(`The test got ${r.error}`)}`}`); }
+        catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not work')}`); }
+    });
+    router.post('/inbox/:id/webhooks/:wid/delete', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        if (a.role === 'owner') await webhooks.remove(a.inbox, req.params.wid);
+        res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
+    });
+    router.post('/inbox/:id/replies', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        try { await inboxes.saveReply(a.inbox, a.actor.user, req.body || {}); res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`); }
+        catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not save')}`); }
+    });
+    router.post('/inbox/:id/replies/:rid/delete', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        try { await inboxes.deleteReply(a.inbox, a.actor.user, req.params.rid); } catch { /* unchanged */ }
+        res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
+    });
+    router.post('/inbox/:id/identity', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        try { await inboxes.setIdentity(a.inbox, a.actor.user, String((req.body && req.body.action) || '')); res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`); }
+        catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not work')}`); }
     });
     router.post('/inbox/:id/members', formLimit, sameSite, async (req, res) => {
         const a = await agentInbox(req, res); if (!a) return;

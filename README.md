@@ -452,6 +452,26 @@ for people and for companies, with "direct live support with an agent", "fully m
 - **A site assistant** is an inbox whose people do not answer (`handoff` off in its settings): Vibe answers alone, there
   is no "Talk to a person", Vibe is told nobody else answers (it points to the contact details in the instructions
   instead of handing off), and when it cannot go on the visitor is told plainly. An inbox needs Vibe or its people.
+- **Verified visitors** (for a site with its own accounts): the owner turns them on in settings, which makes an
+  identity secret (`POST /api/chat/inboxes/:id/identity { action: on | rotate | off }`) to keep on their server. For a
+  signed-in visitor the site adds `data-user-id`, `data-user-name`, `data-user-email` and `data-user-hash` (the
+  HMAC-SHA256 of the id with the secret, in hex) to the tag, or calls `OpenVibeChat.identify({ id, name, email, hash })`.
+  When the hash checks out, Chat trusts the name and email, the team sees "verified" with the email, and the visitor's
+  token is derived from their id (`CHAT_INBOX_IDENTITY_KEY`, else Chat's OAuth secret; never stored), so their
+  conversation follows them to every device. A wrong or missing hash is just an anonymous visitor. Agents never see the
+  secret.
+- **Webhooks** (`server/inbox/webhooks.js`; up to three an inbox, the owner's; https on the public internet only):
+  any address gets every event as JSON, `{ event: { id, type, source: 'chat', occurred_at, data } }` with `type`
+  `chat.inbox.conversation.created | .waiting | .resolved | .rated` or `chat.inbox.message.created`. Each is signed like
+  an OpenVibe.Events delivery with the webhook's secret (shown once), so `parseDelivery(raw, headers, secret,
+  { requireV2: true })` from `openvibe-sdk/events` checks it. A Slack (`hooks.slack.com`) or Discord
+  (`discord.com/api/webhooks`) address gets a readable line instead, when a visitor waits for a person, writes while
+  waiting (once a conversation every 10 minutes) or rates. Delivery tries three times (now, 30 s, 5 min); each
+  webhook shows its last answer, and 20 failures in a row switch it off. `GET/POST /api/chat/inboxes/:id/webhooks
+  { url }`, `POST /:id/webhooks/:hookId/test`, `DELETE /:id/webhooks/:hookId`.
+- **Saved replies:** the team's ready answers (`GET/POST /api/chat/inboxes/:id/replies { shortcut, body }`, `DELETE
+  /:id/replies/:replyId`, or the settings page); typing `/` in the reply box lists them by shortcut (arrows, Enter or
+  Tab). **Vibe knows the page** the visitor wrote from, and a verified visitor's name.
 - **Ratings:** a resolved conversation asks the visitor "How was this?" (👍 / 👎, then a line if they like:
   `POST /rating { token, rating: 1 | -1, comment?, conversation? }`); the people see it in the list and the
   conversation, live (`inbox_rating`).
