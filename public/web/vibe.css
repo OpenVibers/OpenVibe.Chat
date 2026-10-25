@@ -48,7 +48,7 @@ body.oc-app-body { overflow: hidden; }
 .vb-rail-note { margin: 14px 10px; color: var(--oc-muted); font-size: .9rem; line-height: 1.45; }
 .vb-rail-more { border-top: 1px solid var(--oc-line); margin-top: 6px; padding-top: 6px; display: grid; gap: 1px; }
 .vb-rail-more a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; color: var(--oc-muted); text-decoration: none; font-size: .9rem; }
-.vb-rail-more a:hover { background: var(--oc-panel-2); color: var(--oc-text); }
+@media (hover: hover) { .vb-rail-more a:hover { background: var(--oc-panel-2); color: var(--oc-text); } }
 .vb-allow { margin: 6px 10px 2px; font-size: .78rem; color: var(--oc-muted); }
 
 /* ── The conversation ─────────────────────────────────────────────────────── */
