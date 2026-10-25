@@ -132,7 +132,41 @@
     var md = el('div', 'vb-md'); md.innerHTML = MD ? MD.render(m.message) : '';
     if (!MD) md.textContent = m.message;
     body.appendChild(md); li.appendChild(body);
+    // Copy, and Try again (it moves to this, the newest answer, when the person's message came just before).
+    var row = el('div', 'vb-acts');
+    var copy = el('button', 'vb-act', 'Copy'); copy.type = 'button'; copy.setAttribute('data-vb-copy', '');
+    row.appendChild(copy);
+    var prev = thread().lastElementChild;
+    if (room && prev && prev.classList.contains('vb-me')) {
+      [].forEach.call(document.querySelectorAll('.vb-retry'), function (f) { f.remove(); });
+      var form = el('form', 'vb-retry'); form.method = 'post'; form.action = '/vibe/' + room + '/retry';
+      var again = el('button', 'vb-act', 'Try again'); again.type = 'submit'; form.appendChild(again);
+      row.appendChild(form);
+    }
+    body.appendChild(row);
+    enhance(li);
     return li;
+  }
+  // Copy buttons: the whole answer as its text, and each code block on its own. Shown only where the clipboard works.
+  function copyText(btn, text) {
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(text).then(function () {
+      // A code block's button draws its label in CSS (so copying the whole answer never picks it up): a class says Copied.
+      var code = btn.classList.contains('vb-copy-code');
+      var was = btn.textContent;
+      if (!code) btn.textContent = 'Copied';
+      btn.classList.add('is-done');
+      setTimeout(function () { if (!code) btn.textContent = was; btn.classList.remove('is-done'); }, 1500);
+    }, function () { notice('Copying did not work here. Select the text instead.'); });
+  }
+  function enhance(scope) {
+    if (!navigator.clipboard) return;
+    [].forEach.call(scope.querySelectorAll('[data-vb-copy]'), function (b) { b.hidden = false; });
+    [].forEach.call(scope.querySelectorAll('.vb-ai .vb-md pre'), function (pre) {
+      if (pre.querySelector('.vb-copy-code')) return;
+      var b = el('button', 'vb-copy-code'); b.type = 'button'; b.setAttribute('aria-label', 'Copy this code');
+      pre.appendChild(b);
+    });
   }
   // "How Vibe did this" under an agent task's answer that arrives while the page is open (the server folds it on load).
   function attachHow(li, id) {
@@ -357,6 +391,27 @@
       .then(function () { sending = false; });
   });
 
+  enhance(app);
+  app.addEventListener('click', function (e) {
+    var whole = e.target.closest('[data-vb-copy]');
+    if (whole) { var md = whole.closest('.vb-body').querySelector('.vb-md'); if (md) copyText(whole, md.innerText.trim()); return; }
+    var code = e.target.closest('.vb-copy-code');
+    if (code) { var c = code.parentNode.querySelector('code'); if (c) copyText(code, c.textContent); }
+  });
+  // Try again: Vibe's last answer goes and a new one is written (POST /api/chat/vibe/:slug/retry).
+  app.addEventListener('submit', function (e) {
+    var f = e.target.closest('.vb-retry'); if (!f || !room) return;
+    e.preventDefault();
+    var li = f.closest('.vb-turn');
+    fetch('/api/chat/vibe/' + encodeURIComponent(room) + '/retry', { method: 'POST', credentials: 'same-origin' })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: null }; }); })
+      .then(function (x) {
+        if (!x.ok) { notice((x.d && x.d.error) || 'That did not work. Try again in a minute.'); return; }
+        if (li) li.remove();
+        showWait(); toBottom();
+      })
+      .catch(function () { notice('You seem to be offline.'); });
+  });
   if (cfg.waiting) showWait();
   connect();
   if (!cfg.memory) toBottom();   // the Memory page reads from the top

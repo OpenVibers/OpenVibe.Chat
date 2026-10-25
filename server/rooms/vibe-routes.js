@@ -12,6 +12,8 @@
  *                      answered in the chat (server/rooms/how.js)
  *   PATCH  /:slug      { name } → { room }
  *   DELETE /:slug      204: the chat and its messages are deleted
+ *   POST   /:slug/retry  202 { removed }: Vibe's last answer goes and it answers the person's last message anew (409
+ *                      when the last two messages are not that exchange)
  *   GET    /memory     { on, notes: [{ id, text, source, created_at }], max }: what Vibe remembers about the person
  *                      (server/rooms/vibe-memory.js)
  *   POST   /memory     { text } → 201 { note } (a note of their own), 422 when it is empty, too long, secret-looking,
@@ -124,6 +126,14 @@ router.get('/:slug/how', requireAuth, personOnly, async (req, res) => {
         if (!room) return res.status(404).json({ error: 'No such chat', code: 'vibe.not_found' });
         return res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ how: Object.fromEntries(await how.forRoom(room)) });
     } catch (err) { return send(res, err); }
+});
+
+router.post('/:slug/retry', requireAuth, personOnly, startLimit, async (req, res) => {
+    try {
+        const room = await vibe.ownChat(req.params.slug, req.user);
+        if (!room) return res.status(404).json({ error: 'No such chat', code: 'rooms.not_found' });
+        res.status(202).json(await vibe.retry(room, req.user));
+    } catch (err) { send(res, err); }
 });
 
 router.patch('/:slug', requireAuth, personOnly, manageLimit, async (req, res) => {

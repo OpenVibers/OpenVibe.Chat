@@ -11,6 +11,7 @@
  *   POST /vibe/:slug            form: a message in the chat
  *   POST /vibe/:slug/rename     form: { name }
  *   POST /vibe/:slug/delete     form: the chat and its messages go
+ *   POST /vibe/:slug/retry      form: "Try again" on Vibe's last answer (rooms/vibe.js retry)
  *   GET  /vibe/memory           what Vibe remembers about the person (server/rooms/vibe-memory.js), with forms to add a
  *                               note (POST /vibe/memory), delete one (POST /vibe/memory/:id/delete), forget everything
  *                               (POST /vibe/memory/clear) and switch the memory off or on (POST /vibe/memory/switch)
@@ -113,9 +114,17 @@ ${left != null ? `<p class="vb-allow" id="vb-allow">${left} of ${allowance.per_d
 </aside>`;
 }
 
-function turn(m, me, hows = new Map()) {
+/**
+ * Under each answer: Copy (shown by vibe.js; it needs the clipboard) and, under the answer to the person's last message,
+ * Try again (a form, so it works without JavaScript too).
+ */
+function acts(slug) {
+    return `<div class="vb-acts"><button type="button" class="vb-act" data-vb-copy hidden>Copy</button>${slug ? `<form method="post" action="/vibe/${esc(slug)}/retry" class="vb-retry"><button type="submit" class="vb-act">Try again</button></form>` : ''}</div>`;
+}
+
+function turn(m, me, hows = new Map(), retrySlug = null) {
     const ai = !!m.ai_member_id;
-    if (ai) return `<li class="vb-turn vb-ai" data-id="${Number(m.id) || 0}">${MARK}<div class="vb-body"><p class="oc-sr">Vibe said:</p><div class="vb-md">${md.render(m.message)}</div>${how.html(hows.get(Number(m.id)))}</div></li>`;
+    if (ai) return `<li class="vb-turn vb-ai" data-id="${Number(m.id) || 0}">${MARK}<div class="vb-body"><p class="oc-sr">Vibe said:</p><div class="vb-md">${md.render(m.message)}</div>${how.html(hows.get(Number(m.id)))}${acts(retrySlug)}</div></li>`;
     const mine = me && Number(m.user_id) === Number(me.id);
     return `<li class="vb-turn vb-me" data-id="${Number(m.id) || 0}"><div class="vb-bubble"><p class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</p>${esc(m.message).replace(/\n/g, '<br>')}${pictures.pageHtml(m.message)}</div></li>`;
 }
@@ -183,6 +192,8 @@ function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit,
         const enabled = vibe.enabled();
         const title = room ? room.name : 'Vibe';
         const waiting = room && messages.length && !messages[messages.length - 1].ai_member_id;
+        // Try again goes under the last answer when it answers the person's last message.
+        const retryable = room && messages.length > 1 && !!messages[messages.length - 1].ai_member_id && !messages[messages.length - 2].ai_member_id && user && Number(messages[messages.length - 2].user_id) === Number(user.id);
         const hello = `<div class="vb-hello">
 ${MARK}
 <h1>${user ? `What can I help with${user.display_name || user.username ? `, ${esc(String(user.display_name || user.username).split(' ')[0])}` : ''}?` : 'Hi, I\'m Vibe. What can I help with?'}</h1>
@@ -190,7 +201,7 @@ ${MARK}
 <ul class="vb-suggest">${SUGGESTIONS.map((s) => `<li><button type="button" class="vb-chip" data-prompt="${esc(s.prompt)}"><b>${esc(s.title)}</b><span>${esc(s.text)}</span></button></li>`).join('')}</ul>
 </div>`;
         const thread = room
-            ? `<ol class="vb-thread" id="vb-thread">${messages.map((m) => turn(m, user, hows)).join('')}${waiting ? `<li class="vb-turn vb-ai vb-wait" id="vb-wait">${MARK}<div class="vb-body"><span class="vb-dots" aria-label="Vibe is writing"><i></i><i></i><i></i></span><noscript><a href="/vibe/${esc(room.slug)}">Refresh to see Vibe's answer</a></noscript></div></li>` : ''}</ol>`
+            ? `<ol class="vb-thread" id="vb-thread">${messages.map((m, i) => turn(m, user, hows, i === messages.length - 1 && retryable ? room.slug : null)).join('')}${waiting ? `<li class="vb-turn vb-ai vb-wait" id="vb-wait">${MARK}<div class="vb-body"><span class="vb-dots" aria-label="Vibe is writing"><i></i><i></i><i></i></span><noscript><a href="/vibe/${esc(room.slug)}">Refresh to see Vibe's answer</a></noscript></div></li>` : ''}</ol>`
             : '';
         const head = `<header class="vb-head">
 <button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show your chats">${ICON.menu}</button>
@@ -344,6 +355,13 @@ ${notes.length ? `<h2 class="vb-group">${notes.length} of ${memory.MAX_NOTES} no
         const room = await vibe.ownChat(req.params.slug, actor.user);
         if (!room) return res.redirect(303, '/vibe');
         try { await vibe.rename(room, actor.user, req.body && req.body.name); res.redirect(303, `/vibe/${room.slug}`); } catch (err) { await render(req, res, { room, status: err.status || 500, error: err.message }); }
+    });
+
+    router.post('/vibe/:slug/retry', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await vibe.ownChat(req.params.slug, actor.user);
+        if (!room) return res.redirect(303, '/vibe');
+        try { await vibe.retry(room, actor.user); res.redirect(303, `/vibe/${room.slug}`); } catch (err) { await render(req, res, { room, status: err.status || 500, error: err.status ? err.message : 'That did not work. Try again in a minute.' }); }
     });
 
     router.post('/vibe/:slug/delete', formLimit, sameSite, async (req, res) => {

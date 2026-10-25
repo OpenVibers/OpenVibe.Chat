@@ -14,6 +14,8 @@
  *   ownChat(slug, user)        → the room when it is one of `user`'s Vibe chats, else null
  *   rename(room, user, name)   → the room
  *   remove(room, user)         → the chat and its messages are deleted (not archived: it was the person's own)
+ *   retry(room, user)          → { removed }: "Try again": Vibe's last answer goes and it answers the person's last
+ *                                message anew (in the background, like any answer; it counts against the allowance)
  *   repliesToday(user) / countReply(user)   the person's answers from Vibe this UTC day, across all their chats
  *   work(room, user, text, mode) → { message, task }: a Research, Agent or Code request (the composer's modes): the
  *                                  message is posted without Vibe's instant answer and becomes a task of the chat
@@ -188,6 +190,24 @@ async function remove(room, user) {
     await db.tx(() => erase(room.id));
 }
 
+/** The chat's last two messages, when they are the person's message and then Vibe's answer to it, else null. */
+async function lastExchange(room, user) {
+    const [answer, asked] = await db.all('SELECT * FROM room_messages WHERE room_id = ? AND is_deleted = 0 ORDER BY id DESC LIMIT 2', [room.id]);
+    if (!answer || !answer.ai_member_id || !asked || asked.ai_member_id || Number(asked.user_id) !== Number(user.id)) return null;
+    return { answer, asked };
+}
+
+async function retry(room, user) {
+    if (!isVibeRoom(room) || !user || Number(room.owner_id) !== Number(user.id)) fail(404, 'rooms.not_found', 'No such chat');
+    if (!enabled()) fail(503, 'vibe.off', 'Vibe is resting right now. Try again later.');
+    const last = await lastExchange(room, user);
+    if (!last) fail(409, 'vibe.nothing_to_retry', 'Only Vibe\'s answer to your last message can be tried again');
+    await db.run('UPDATE room_messages SET is_deleted = 1, deleted_by = ? WHERE id = ? AND is_deleted = 0', [user.id, last.answer.id]);
+    try { require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message_deleted', room: room.slug, id: Number(last.answer.id) }); } catch { /* sockets are optional */ }
+    setImmediate(() => { require('./ai-members').afterPost(room, last.asked, user).catch(() => {}); });
+    return { removed: Number(last.answer.id) };
+}
+
 async function repliesToday(user) {
     const row = await db.get('SELECT replies FROM vibe_usage WHERE user_id = ? AND day = ?', [user.id, today()]);
     return Number(row && row.replies) || 0;
@@ -197,4 +217,4 @@ async function countReply(user) {
         ON CONFLICT (user_id, day) DO UPDATE SET replies = vibe_usage.replies + 1`, [user.id, today()]);
 }
 
-module.exports = { VIBE, MAX_CHATS, TITLE_MAX, SEARCH_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, search, ownChat, rename, remove, repliesToday, countReply };
+module.exports = { VIBE, MAX_CHATS, TITLE_MAX, SEARCH_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, search, ownChat, rename, remove, retry, lastExchange, repliesToday, countReply };
