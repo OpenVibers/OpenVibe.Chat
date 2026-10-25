@@ -350,7 +350,7 @@ async function afterPost(room, message, user, deps = {}) {
         broadcast({ type: 'room_ai_typing', room: room.slug, name: member.name });
         const history = await rooms.history(room, { limit: TRANSCRIPT });
         const context = await contextFor(member);
-        const opts = { force: true, attribution: { service: 'chat', type: 'room', id: String(room.id), label: String(room.name || room.slug).slice(0, 200) }, idempotencyKey: `chat-ai-${room.id}-${message.id}`,
+        const opts = { force: true, attribution: { service: 'chat', type: 'room', id: String(room.id), label: String(room.name || room.slug).slice(0, 200) }, idempotencyKey: `chat-ai-${room.id}-${message.id}${deps.retryOf ? `-r${Number(deps.retryOf)}` : ''}`,
             ...(own ? { credential: { subject: member.engine_subject } } : {}) };
         const transcript = transcriptOf(history, vibe ? { each: 6000, total: 24000 } : {}) || '(no earlier messages)';
         const askedBy = (user.display_name || user.username || 'someone').slice(0, 80);
