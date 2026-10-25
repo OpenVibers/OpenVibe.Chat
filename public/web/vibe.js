@@ -200,6 +200,17 @@
       det.appendChild(ul); body.appendChild(det);
   }
   function clearWait() { var w = document.getElementById('vb-wait'); if (w) w.remove(); if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } }
+  // Stop: what Vibe wrote so far stays as its answer (POST /api/chat/vibe/:slug/stop); shown once the chat exists (a new
+  // chat's first bubble is drawn before it does, so the first words add it).
+  function addStop(li) {
+    if (!room || !li || li.querySelector('.vb-stop')) return;
+    var stop = el('button', 'vb-act vb-stop', 'Stop'); stop.type = 'button';
+    stop.addEventListener('click', function () {
+      stop.disabled = true;
+      fetch('/api/chat/vibe/' + encodeURIComponent(room) + '/stop', { method: 'POST', credentials: 'same-origin' }).catch(function () { stop.disabled = false; });
+    });
+    li.appendChild(stop);
+  }
   function showWait() {
     if (document.getElementById('vb-wait')) return;
     var li = el('li', 'vb-turn vb-ai vb-wait'); li.id = 'vb-wait';
@@ -207,6 +218,7 @@
     var body = el('div', 'vb-body'); var dots = el('span', 'vb-dots'); dots.setAttribute('aria-label', 'Vibe is writing');
     dots.appendChild(el('i')); dots.appendChild(el('i')); dots.appendChild(el('i'));
     body.appendChild(dots); li.appendChild(body);
+    addStop(li);
     thread().appendChild(li);
     // An answer takes up to a minute with tools; after two the dots give way to a way forward.
     waitTimer = setTimeout(function () { clearWait(); notice('Vibe did not answer this time. Send your message again, or try again in a minute.'); }, 120000);
@@ -216,6 +228,7 @@
   function streamText(text) {
     showWait();
     var w = document.getElementById('vb-wait'); if (!w) return;
+    addStop(w);
     var stick = nearBottom();
     var body = w.querySelector('.vb-body');
     var md = body.querySelector('.vb-md');

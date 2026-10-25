@@ -45,6 +45,7 @@ const PER_PERSON_HOUR_VIBE = 60;
 const MAX_TOOL_ROUNDS = 3;
 const MAX_CALLS_PER_ROUND = 4;
 const inFlight = new Set();          // room ids with an answer being written
+const stoppers = new Map();          // a Vibe chat's room id → the AbortController of the answer being written (stop())
 const personHour = new Map();        // `${room}:${user}` → [timestamps]
 
 const handleOf = (name) => String(name || '').toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, '').slice(0, 24);
@@ -283,7 +284,7 @@ function userPrompt({ member, context, transcript, askedBy, text }) {
  * The answer through chat.member.turn with tools: up to MAX_TOOL_ROUNDS rounds of tool calls run here, then a turn
  * with tool_choice none. → the reply text, or null when a turn failed (the caller falls back to chat.member.reply).
  */
-async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], user = null, messageId = null, memory = null, called = new Set(), onText = null, steps = null }) {
+async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], user = null, messageId = null, memory = null, called = new Set(), onText = null, steps = null, signal = null }) {
     const tools = aiTools.definitions(member, room, { memory: memory !== null });
     const vibe = Number(room.assistant) === 1;
     const prompt = userPrompt({ member, context, transcript, askedBy, text });
@@ -293,9 +294,10 @@ async function answerWithTools({ room, member, context, transcript, askedBy, tex
         { role: 'user', content: images.length ? [{ type: 'text', text: `${prompt}\n\n(${images.length === 1 ? 'The picture they sent is' : 'The pictures they sent are'} attached.)` }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] : prompt },
     ];
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
+        if (signal && signal.aborted) return null;   // stopped (stop()): the caller keeps what was written
         const last = round === MAX_TOOL_ROUNDS;
         const turn = { messages, tools, tool_choice: last ? 'none' : 'auto', max_tokens: vibe ? 1500 : 600, temperature: 0.7 };
-        const turnOpts = { ...opts, idempotencyKey: `${opts.idempotencyKey}-t${round}` };
+        const turnOpts = { ...opts, idempotencyKey: `${opts.idempotencyKey}-t${round}`, ...(signal ? { signal } : {}) };
         // Vibe's answer streams (each round's text so far, to the chat as it is written); other members answer whole.
         const out = onText ? await aiClient.stream('chat.member.turn', turn, turnOpts, onText) : await aiClient.structured('chat.member.turn', turn, turnOpts);
         const msg = out && Array.isArray(out.choices) && out.choices[0] && out.choices[0].message;
@@ -369,9 +371,17 @@ async function afterPost(room, message, user, deps = {}) {
             lastDelta = now;
             broadcast({ type: 'room_ai_delta', room: room.slug, name: member.name, text: String(pending).slice(0, 8000) });
         } : null;
+        // Stop (stop(), the chat's Stop button): the answer so far is kept, marked as stopped, and the run is cancelled.
+        const controller = vibe ? new AbortController() : null;
+        if (controller) stoppers.set(room.id, controller);
         if (config.ai.memberTools) {
             const images = await picturesFor(message, history, user).catch(() => []);
-            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, vibe ? 12000 : 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, called, onText, steps }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
+            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, vibe ? 12000 : 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, called, onText, steps, signal: controller && controller.signal }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
+        }
+        if (controller && controller.signal.aborted) {
+            const sofar = clean(pending || '', 7900);
+            if (sofar && !own) await require('./vibe').countReply(user);
+            return await say(sofar ? `${sofar}\n\n*Stopped.*` : 'Stopped before I wrote anything.', steps && steps.steps.length ? steps : null);
         }
         // A plain "remember that …" is kept even when the model only promised it (small models often do).
         if (memory !== null && text && !called.has('remember')) {
@@ -395,7 +405,16 @@ async function afterPost(room, message, user, deps = {}) {
         return null;
     } finally {
         inFlight.delete(room.id);
+        stoppers.delete(room.id);
     }
+}
+
+/** Stop the answer being written in a Vibe chat → true when one was. */
+function stop(roomId) {
+    const c = stoppers.get(Number(roomId)) || stoppers.get(roomId);
+    if (!c || c.signal.aborted) return false;
+    c.abort();
+    return true;
 }
 
 /** What the room shows a member thinks with: "OpenVibe", or the own key's provider, model and whose key it is. */
@@ -407,6 +426,6 @@ const toWire = (m) => ({
     engine: m.engine || 'openvibe', model: modelOf(m), created_at: m.created_at, updated_at: m.updated_at,
 });
 
-function _reset() { inFlight.clear(); personHour.clear(); }
+function _reset() { inFlight.clear(); personHour.clear(); stoppers.clear(); }
 
-module.exports = { MAX_PER_ROOM, LIMITS, AiMemberError, enabled, list, byId, add, update, remove, dropKey, relabelKey, modelOf, mentioned, handleOf, afterPost, transcriptOf, vibePrompt, toWire, _reset };
+module.exports = { MAX_PER_ROOM, LIMITS, AiMemberError, enabled, list, byId, add, update, remove, dropKey, relabelKey, modelOf, mentioned, handleOf, afterPost, stop, transcriptOf, vibePrompt, toWire, _reset };
