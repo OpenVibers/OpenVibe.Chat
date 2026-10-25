@@ -461,6 +461,10 @@ for people and for companies, with "direct live support with an agent", "fully m
   /api/chat/support/:cid/messages`). The account comes only from the request's credentials. A
   site's verified identity, when there is one, still decides the token. Export lists these conversations; deletion
   leaves them with the inbox's team, without the person.
+- **Who answers** (`server/inbox/routing.js`): replying takes a conversation, and any of the inbox's people can assign
+  it to another ("Answered by", `PATCH /api/chat/inboxes/:id/conversations/:cid { assignee_id }`). With **take turns**
+  on (`route: round_robin`), a visitor who starts waiting goes to the person assigned longest ago, and only they are
+  notified. The list has a **Mine** tab (`?status=mine`) and shows who has each conversation.
 - **Business hours** (`server/inbox/hours.js`; settings, or `PATCH { hours: { tz, days, start, end } }`, null for
   always): outside them the panel says when the team is back ("tomorrow at 9 AM (Los Angeles time)"), a handoff says
   so, and Vibe tells visitors a person replies when the team is back. Notifications still go out.

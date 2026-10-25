@@ -97,6 +97,10 @@
       else if (m.type === 'inbox_message') {
         touchList(m.conversation, m.message.body, null);
         if (m.conversation === cfg.conversation) appendToThread(m.message);
+      } else if (m.type === 'inbox_assigned') {
+        var row2 = listItem(m.conversation); var prev = row2 && row2.querySelector('.ib-prev');
+        if (prev) { var who = prev.querySelector('.ib-who-has'); if (who) who.textContent = m.assignee === cfg.me ? 'You' : 'Someone'; }
+        if (m.conversation === cfg.conversation) { var sel = document.querySelector('.ib-assign select'); if (sel) sel.value = m.assignee == null ? '' : String(m.assignee); }
       } else if (m.type === 'inbox_rating') {
         var item = listItem(m.conversation), row = item && item.querySelector('.ib-row');
         if (row) { var old = row.querySelector('.ib-rate'); if (old) old.remove(); var r = el('span', 'ib-rate', m.rating > 0 ? '👍' : '👎'); if (m.comment) r.title = m.comment; row.insertBefore(r, row.querySelector('time')); }
@@ -214,6 +218,9 @@
     var scrim = app.querySelector('.vb-scrim'); if (scrim) scrim.hidden = !open;
     var btn = app.querySelector('[data-vb-open]'); if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
   }
+  // "Answered by": choosing a person assigns at once.
+  var assignSel = document.querySelector('.ib-assign select[data-autosubmit]');
+  if (assignSel) assignSel.addEventListener('change', function () { assignSel.form.requestSubmit ? assignSel.form.requestSubmit() : assignSel.form.submit(); });
   app.addEventListener('click', function (e) { if (e.target.closest('[data-vb-open]')) setRail(true); else if (e.target.closest('[data-vb-close]')) setRail(false); });
   bottom();
   connect();

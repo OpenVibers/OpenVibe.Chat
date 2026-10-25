@@ -218,6 +218,9 @@ body.oc-app-body { overflow: hidden; }
 .ib-row .vb-st { margin-left: 4px; }
 .ib-rate { font-size: .85rem; line-height: 1; }
 .ib-ok { color: var(--oc-ok, #22c55e); font-weight: 800; margin-left: 4px; font-size: .9em; }
+.ib-assign { display: inline-flex; align-items: center; margin-right: 8px; font-size: .85rem; color: var(--oc-muted); }
+.ib-assign select { margin-left: 6px; font-size: .85rem; padding: 4px 8px; }
+.ib-who-has { color: var(--oc-accent); font-weight: 600; }
 .ib-pic-btn { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; color: var(--oc-muted); flex: none; font-size: 1.1rem; }
 .ib-pic-btn:hover { color: var(--oc-accent); background: color-mix(in srgb, var(--oc-accent) 12%, transparent); }
 .ib-pic-btn:focus-within { outline: 2px solid var(--oc-accent); }

@@ -29,10 +29,10 @@
  *   POST   /:id/conversations/:cid/picture   the body is a picture, an optional line in X-Caption → 201 { message, picture }
  *   GET    /:id/webhooks     (owner) { webhooks }    POST /:id/webhooks { url } → 201 { webhook, secret }
  *   POST   /:id/webhooks/:hookId/test → { ok, status, error }    DELETE /:id/webhooks/:hookId
- *   GET    /:id/conversations                  ?status=active|bot|waiting|open|resolved
+ *   GET    /:id/conversations                  ?status=active|mine|bot|waiting|open|resolved
  *   GET    /:id/conversations/:cid/messages    ?after=
  *   POST   /:id/conversations/:cid/messages    { message } → 201: a person's answer (the conversation becomes open)
- *   PATCH  /:id/conversations/:cid             { status: open | resolved | bot }
+ *   PATCH  /:id/conversations/:cid             { status: open | resolved | bot, assignee_id: a person's id | null }
  *   POST   /:id/conversations/:cid/read
  */
 const express = require('express');
@@ -219,7 +219,7 @@ agents.delete('/:id/members/:userId', requireAuth, manageLimit, async (req, res)
 });
 agents.get('/:id/conversations', requireAuth, async (req, res) => {
     const inbox = await agentInbox(req, res); if (!inbox) return;
-    noStore(res).json({ conversations: await inboxes.conversations(inbox, { status: req.query.status || 'active', limit: req.query.limit }) });
+    noStore(res).json({ conversations: await inboxes.conversations(inbox, { status: req.query.status || 'active', limit: req.query.limit, user: req.user }) });
 });
 agents.get('/:id/conversations/:cid/messages', requireAuth, async (req, res) => {
     const conv = await agentConversation(req, res); if (!conv) return;
@@ -231,7 +231,14 @@ agents.post('/:id/conversations/:cid/messages', requireAuth, replyLimit, async (
 });
 agents.patch('/:id/conversations/:cid', requireAuth, manageLimit, async (req, res) => {
     const conv = await agentConversation(req, res); if (!conv) return;
-    try { res.json({ conversation: await inboxes.setStatus(req.inbox, conv, req.user, req.body && req.body.status) }); } catch (err) { send(res, err); }
+    const b = req.body || {};
+    try {
+        let out = null;
+        if (Object.prototype.hasOwnProperty.call(b, 'assignee_id')) out = await inboxes.assign(req.inbox, conv, req.user, b.assignee_id);
+        if (b.status !== undefined) out = await inboxes.setStatus(req.inbox, { ...conv, assignee_id: out ? out.assignee_id : conv.assignee_id }, req.user, b.status);
+        if (!out) return res.status(422).json({ error: 'Send a status or an assignee_id', code: 'inbox.nothing' });
+        res.json({ conversation: out });
+    } catch (err) { send(res, err); }
 });
 agents.post('/:id/conversations/:cid/read', requireAuth, async (req, res) => {
     const conv = await agentConversation(req, res); if (!conv) return;
