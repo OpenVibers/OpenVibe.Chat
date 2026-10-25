@@ -279,6 +279,12 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-hero ~ .oc-room > h2, .oc-home-sec h2 { font-size: clamp(22px, 2.6vw, 30px); }
 .oc-home-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 4px 16px; }
 .oc-home-head a { font-weight: 700; font-size: .92rem; }
+/* Ask Vibe on the front page (server/web/home.js vibeSection): one line that opens a Vibe chat with the question in it. */
+.oc-vibe-card { margin-top: 32px; padding: 18px 20px; border: 1px solid color-mix(in srgb, var(--oc-accent) 35%, var(--oc-line)); border-radius: 16px; background: color-mix(in srgb, var(--oc-accent) 6%, var(--oc-panel)); }
+.oc-vibe-card p { margin: 0 0 12px; }
+.oc-vibe-ask { display: flex; gap: 8px; }
+.oc-vibe-ask input { flex: 1; min-width: 0; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--oc-line); background: var(--oc-bg); color: var(--oc-text); font: inherit; }
+.oc-vibe-ask input:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; border-color: transparent; }
 .oc-streams, .oc-more { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); }
 .oc-stream, .oc-more a { display: grid; gap: 2px; height: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); color: var(--oc-text); text-decoration: none; }
 .oc-stream:hover, .oc-stream:focus-visible, .oc-more a:hover, .oc-more a:focus-visible { border-color: var(--oc-accent); }
