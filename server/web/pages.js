@@ -600,12 +600,16 @@ ${key ? `<form class="oc-inline" method="post" action="/settings/ai-key/delete">
         const { public: pub, mine } = await rooms.list(me);
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const staff = !!me && permissions.can(me, 'staff.moderation.chat');
-        const create = me ? `<form class="oc-form oc-create" method="post" action="/rooms/new">
+        // ?new=workspace (other OpenVibe sites link "Work on it together" here) picks the workspace kind and fills the name.
+        const wantWork = req.query.new === 'workspace';
+        const preName = wantWork && typeof req.query.name === 'string' ? req.query.name.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 40) : '';
+        const create = me ? `<form class="oc-form oc-create" id="oc-new-room" method="post" action="/rooms/new">
 <h2>Start a room</h2>
-<label>Name <input name="name" required minlength="3" maxlength="40" placeholder="Night Owls"></label>
+<label>Name <input name="name" required minlength="3" maxlength="40" placeholder="Night Owls" value="${esc(preName)}"></label>
 <label>Topic <input name="topic" maxlength="200" placeholder="What it is about (optional)"></label>
 <fieldset class="oc-fieldset"><legend>Kind</legend>
-<label class="oc-check"><input type="radio" name="kind" value="community" checked> Chat room: people write to each other</label>
+<label class="oc-check"><input type="radio" name="kind" value="community"${wantWork ? '' : ' checked'}> Chat room: people write to each other</label>
+<label class="oc-check"><input type="radio" name="kind" value="workspace"${wantWork ? ' checked' : ''}> Workspace: a team and Vibe work together, with a work queue, alerts from other systems and a shared screen</label>
 <label class="oc-check"><input type="radio" name="kind" value="call"> Call room: a voice call with a text chat beside it</label>
 ${staff ? '<label class="oc-check"><input type="radio" name="kind" value="system"> Announcements: only OpenVibe staff post (staff)</label>' : ''}
 </fieldset>
@@ -632,8 +636,14 @@ ${create}
     router.post('/rooms/new', formLimit, sameSite, roomsOrError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         const b = req.body || {};
+        const work = b.kind === 'workspace';
         const kind = rooms.KINDS.includes(b.kind) ? b.kind : 'community';
         const room = await rooms.create(actor.user, { name: b.name, topic: b.topic, visibility: b.private === '1' ? 'private' : 'public', kind, join_role: kind === 'call' ? b.join_role || null : null });
+        if (work) {
+            const made = await rooms.bySlug(room.slug);
+            await rooms.update(made, actor.user, { workspace: true });
+            if (aiMembers.enabled()) await aiMembers.add(made, actor.user, await rooms.access(made, actor.user), { name: 'Vibe', persona: VIBE_IN_ROOMS }).catch(() => null);
+        }
         res.redirect(303, `/r/${room.slug}`);
     }));
 

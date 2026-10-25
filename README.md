@@ -391,7 +391,8 @@ A workspace room has a **work queue** beside its conversation ([server/rooms/wor
 migration with Vibe in it) is OpenVibe staff's own: every member of staff (chat staff, `staff.moderation.chat`) becomes a
 member on their first visit, and nobody else reads it, whatever role they once had. **Any community room** becomes a
 workspace when its owner ticks "Work together here" in the room's settings (or `PATCH /api/chat/rooms/:slug`
-`{ "workspace": true }`); from the settings page Vibe joins it, when there is room for one more AI member, to run and
+`{ "workspace": true }`), and "Start a room" offers a **Workspace** kind (preselected by `/rooms?new=workspace&name=…`, the
+link other OpenVibe sites use for "Work on it together"); from those pages Vibe joins it, when there is room for one more AI member, to run and
 announce the work. Switching it off hides the queue and drops the shared screen; the staff room stays a workspace, and
 a call room, a server's channel or a chat with Vibe never becomes one.
 

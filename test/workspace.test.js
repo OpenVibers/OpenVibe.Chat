@@ -229,4 +229,18 @@ t('any community room\'s owner makes it a workspace (and Vibe joins); the staff 
     assert.ok([403, 404].includes((await api('PATCH', `/rooms/${slug}`, kim, { workspace: true })).status), 'someone else cannot');
 });
 
+t('starting a room: the Workspace kind (preselected from ?new=workspace) makes a workspace with Vibe in it', async () => {
+    const cookie = `ov_token=${user.token}`;
+    const list = await h.http('GET', '/rooms?new=workspace&name=Launch%20week%00', { headers: { cookie } });
+    assert.match(list.text, /name="kind" value="workspace" checked/);
+    assert.match(list.text, /value="Launch week"/, 'the name is filled in, without control characters');
+    const res = await h.http('POST', '/rooms/new', { headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' }, raw: 'name=Launch+week&kind=workspace&private=1' });
+    assert.ok(res.status < 400, res.text.slice(0, 200));
+    const made = await h.db.getDb().prepare("SELECT slug FROM rooms WHERE name = 'Launch week' ORDER BY id DESC LIMIT 1").get();
+    const room = await rooms.bySlug(made.slug);
+    assert.ok(room && rooms.isWorkspace(room) && room.visibility === 'private' && room.kind === 'community');
+    const ai = await h.db.getDb().prepare('SELECT handle FROM room_ai_members WHERE room_id = ?').all(room.id);
+    assert.deepStrictEqual(ai.map((a) => a.handle), ['vibe']);
+});
+
 t.run(async () => { if (h && h.close) await h.close(); });
