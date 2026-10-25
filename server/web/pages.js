@@ -301,6 +301,9 @@ ${parts.more}`,
         const blocked = await dm.getBlockedUsers(me.id);
         const blockedList = blocked.length ? `<details class="oc-blocked"><summary>People you blocked (${blocked.length})</summary><ul class="oc-members">${blocked.map((b) => `<li><strong>${esc(b.display_name || b.username)}</strong> <span class="oc-muted">@${esc(b.username || '')}</span><form class="oc-inline" method="post" action="/messages/unblock/${Number(b.id)}"><button type="submit" class="oc-link">Unblock</button></form></li>`).join('')}</ul></details>` : '';
         const unread = convs.reduce((n, c) => n + (Number(c.unread_count) || 0), 0);
+        // Support conversations with sites' chats, where they signed in to OpenVibe (server/inbox/: theirs to follow up).
+        const support = await require('../inbox/inbox').mySupport(me, { limit: 20 }).catch(() => []);
+        const supportList = support.length ? `<h2>Support</h2><ul class="oc-convs">${support.map((c) => { const t = hhmm(c.last_message_at); return `<li class="oc-conv"><a href="/support/${esc(c.id)}"><strong>${esc(c.inbox.name)}</strong> <span class="oc-badge">${esc({ bot: 'Vibe', waiting: 'Waiting', open: 'Open', resolved: 'Resolved' }[c.status] || c.status)}</span><span class="oc-muted oc-last">${esc(c.preview || '')}</span></a>${t.text ? `<time class="oc-time" datetime="${t.iso}">${t.iso.slice(0, 10)}</time>` : ''}</li>`; }).join('')}</ul>` : '';
         await page(req, res, 200, {
             actor, title: 'Messages', path: '/messages', active: 'messages', robots: 'noindex, nofollow', script: true,
             page: { view: 'inbox', unread, me: me.id },
@@ -308,6 +311,7 @@ ${parts.more}`,
 <p class="oc-muted" id="oc-inbox-status" aria-live="polite">${unread ? `${unread} unread` : 'All caught up'}</p>
 <form class="oc-new" method="post" action="/messages/new"><label for="oc-to">Message someone</label> <input id="oc-to" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="their username" autocomplete="off"> <button type="submit">Start</button></form>
 <ul class="oc-convs" id="oc-convs">${rows.join('\n') || '<li class="oc-muted">No conversations yet.</li>'}</ul>
+${supportList}
 ${blockedList}`,
         });
     });

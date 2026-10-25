@@ -596,6 +596,14 @@ class ChatServer {
                     client.inboxAgent = null;
                 } else {
                     await this._applyJoinToken(client, msg);
+                    // A visitor signed in to OpenVibe follows a conversation of their own (their openvibe.chat Messages).
+                    const mine = msg.conversation && client.user ? await inboxes.conversation(inbox, msg.conversation) : null;
+                    if (mine && mine.visitor_user_id != null && Number(mine.visitor_user_id) === Number(client.user.id)) {
+                        client.inboxConv = mine.id;
+                        client.inboxAgent = null;
+                        this.sendTo(ws, { type: 'inbox_watching', inbox: inbox.id, conversation: mine.id });
+                        break;
+                    }
                     if (!(await inboxes.access(inbox, client.user)).role) { this.sendTo(ws, { type: 'inbox_error', code: 'inbox.not_agent', message: 'Only the inbox\'s people follow it' }); break; }
                     client.inboxAgent = inbox.id;
                     client.inboxConv = null;

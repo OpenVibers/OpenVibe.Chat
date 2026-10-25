@@ -328,6 +328,40 @@ t('pictures: one of the people sends a picture (through OpenVibe.Pics as them); 
     assert.ok(panel.includes('data-pics="https://openvibe.pics"'), 'the visitor\'s panel knows where pictures come from');
 });
 
+t('a visitor signed in to OpenVibe: their conversation is theirs, in their Messages, on any device; they answer from openvibe.chat', async () => {
+    const carol = h.addUser('carol', { subject: ids.newId('user') });
+    await h.ctx.upsertUser(h.live.users.get(carol.id));
+    const as = { authorization: `Bearer ${carol.token}` };
+    const anon = (await widget('POST', '/visit', {})).body.token;
+    await widget('POST', '/messages', { token: anon, message: 'Before signing in' });
+    const signed = await widget('POST', '/visit', { token: anon }, as);
+    assert.ok(signed.body.account && signed.body.account.name === 'Carol' && signed.body.token !== anon, JSON.stringify(signed.body.account));
+    assert.ok(signed.body.messages.some((m) => m.body === 'Before signing in'), 'signing in keeps the conversation they had');
+    const cid = signed.body.conversation.id;
+    const other = await widget('POST', '/visit', {}, as);
+    assert.strictEqual(other.body.conversation.id, cid, 'another device, the same conversation');
+    const spoof = await widget('POST', '/messages', { token: 'q'.repeat(32), message: 'hi', account: { id: carol.id, display_name: 'Carol' } });
+    assert.strictEqual((await h.db.get('SELECT visitor_user_id FROM inbox_conversations WHERE id = ?', [spoof.body.conversation.id])).visitor_user_id, null, 'an account in the body counts for nothing');
+    const get = (path, u) => fetch(`${h.base}${path}`, { headers: { cookie: `ov_token=${u.token}` }, redirect: 'manual' }).then(async (r) => ({ status: r.status, text: await r.text() }));
+    const messages = await get('/messages', carol);
+    assert.ok(messages.text.includes('<h2>Support</h2>') && messages.text.includes(`href="/support/${cid}"`) && messages.text.includes('Acme'));
+    const sp = await get(`/support/${cid}`, carol);
+    assert.ok(sp.status === 200 && sp.text.includes('Before signing in') && sp.text.includes('support.js'));
+    assert.strictEqual((await get(`/support/${cid}`, bob)).status, 404, 'only theirs');
+    const watcher = await h.ws({});
+    watcher.sendJson({ type: 'inbox_watch', inbox: inbox.id, conversation: cid, token: carol.token });
+    await watcher.next((m) => m.type === 'inbox_watching' && m.conversation === cid);
+    const sent = await fetch(`${h.base}/support/${cid}`, { method: 'POST', redirect: 'manual', headers: { cookie: `ov_token=${carol.token}`, 'content-type': 'application/x-www-form-urlencoded', origin: SITE }, body: 'message=Following+up+from+Messages' });
+    assert.strictEqual(sent.status, 303);
+    await watcher.next((m) => m.type === 'inbox_message' && m.message.body === 'Following up from Messages');
+    watcher.close();
+    const intruder = await h.ws({});
+    intruder.sendJson({ type: 'inbox_watch', inbox: inbox.id, conversation: cid, token: bob.token });
+    // Bob is one of the inbox's people: he follows the inbox, never as the visitor.
+    await intruder.next((m) => m.type === 'inbox_watching' && m.conversation === null);
+    intruder.close();
+});
+
 t('the embed page and the loader: frame-ancestors follow the allowed sites', async () => {
     let r = await fetch(`${h.base}/embed/inbox/${inbox.id}`);
     assert.strictEqual(r.status, 200);

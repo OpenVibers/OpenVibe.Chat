@@ -63,6 +63,9 @@ const EXPORTS = [
     ['inboxes_owned.json', `SELECT * FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['inbox_memberships.json', `SELECT * FROM inbox_members WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['inbox_replies.json', `SELECT * FROM inbox_messages WHERE author = 'agent' AND author_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    // Their own conversations with sites' chats (signed in to OpenVibe in the panel) and what was said in them.
+    ['support_conversations.json', `SELECT c.id, c.inbox_id, i.name AS inbox_name, c.status, c.page_url, c.created_at, c.last_message_at FROM inbox_conversations c JOIN inboxes i ON i.id = c.inbox_id WHERE c.visitor_user_id = ANY(@ids) ORDER BY c.created_at DESC LIMIT ${LIMIT}`],
+    ['support_messages.json', `SELECT m.conversation_id, m.author, m.author_name, m.body, m.created_at FROM inbox_messages m JOIN inbox_conversations c ON c.id = m.conversation_id WHERE c.visitor_user_id = ANY(@ids) ORDER BY m.id DESC LIMIT ${LIMIT}`],
     // Feeds (server/feeds/feeds.js): the feeds, without their key's hash, and what was published to them.
     ['feeds.json', `SELECT id, kind, title, room_id, managed_stream_id, settings, key_hint, legacy_source, created_at, last_event_at FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['feed_events.json', `SELECT e.feed_id, e.session_key, e.event_id, e.type, e.summary, e.payload, e.created_at FROM feed_events e JOIN feeds f ON f.id = e.feed_id WHERE f.owner_subject = ANY(@s) OR f.owner_id = ANY(@ids) ORDER BY e.id DESC LIMIT ${LIMIT}`],
@@ -116,6 +119,9 @@ const ERASE_AFTER_ROOMS = [
     [null, 'DELETE FROM inbox_webhooks WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     ['inboxes', 'DELETE FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)'],
     [null, "UPDATE inbox_messages SET author_user_id = NULL, author_name = 'A former agent' WHERE author = 'agent' AND author_user_id = ANY(@ids)"],
+    // As a visitor of others' inboxes: their conversations stay with those teams, without them.
+    [null, "UPDATE inbox_messages SET author_name = NULL WHERE author = 'visitor' AND conversation_id IN (SELECT id FROM inbox_conversations WHERE visitor_user_id = ANY(@ids))"],
+    [null, "UPDATE inbox_conversations SET visitor_user_id = NULL, visitor_subject = NULL, visitor_name = 'A former visitor', visitor_email = NULL, external_id = NULL WHERE visitor_user_id = ANY(@ids)"],
     // Feeds (server/feeds/feeds.js): a person's feeds go with everything published to them.
     ['feed_events', 'DELETE FROM feed_events WHERE feed_id IN (SELECT id FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     [null, 'DELETE FROM feed_sessions WHERE feed_id IN (SELECT id FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],

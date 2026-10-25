@@ -317,3 +317,9 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-table { border-collapse: collapse; width: 100%; max-width: 760px; font-size: .92rem; }
 .oc-table th, .oc-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--oc-line); vertical-align: top; }
 .oc-table th { color: var(--oc-muted); font-weight: 600; }
+/* A visitor's own support conversation (server/web/inbox-pages.js /support/:cid) */
+.sp-thread { list-style: none; margin: 14px 0; padding: 0; display: grid; gap: 8px; max-width: 760px; }
+.sp-msg { padding: 8px 12px; border-radius: 12px; background: var(--oc-panel); border: 1px solid var(--oc-line); overflow-wrap: anywhere; }
+.sp-msg.sp-me { background: color-mix(in srgb, var(--oc-accent) 12%, var(--oc-panel)); }
+.sp-text p { display: inline; margin: 0; }
+.sp-sys { font-size: .85rem; text-align: center; }

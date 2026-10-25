@@ -53,7 +53,7 @@ function embedHtml(inbox) {
 <form class="em-composer" id="em-form"><label class="em-sr" for="em-input" hidden>Your message</label>
 <textarea id="em-input" rows="1" maxlength="4000" placeholder="Write a message" aria-label="Your message"></textarea>
 <button type="submit" aria-label="Send">&#8593;</button></form>
-<p class="em-foot">Chat by <a href="https://openvibe.chat" target="_blank" rel="noopener">OpenVibe</a>${Number(inbox.ai_enabled) ? ' · Vibe can get things wrong' : ''}</p>
+<p class="em-foot">Chat by <a href="https://openvibe.chat" target="_blank" rel="noopener">OpenVibe</a>${Number(inbox.ai_enabled) ? ' · Vibe can get things wrong' : ''}<span id="em-account"></span></p>
 </div>
 <noscript><p style="padding:16px">This chat needs JavaScript.</p></noscript>
 </body>
@@ -246,6 +246,35 @@ ${saved.length ? `<ul class="oc-members">${saved.map((r) => `<li><b>/${esc(r.sho
             res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
         } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not save')}`); }
     });
+    // ── A visitor's own support conversations (signed in to OpenVibe in a site's chat panel) ──
+    router.get('/support/:cid', async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const conv = await inboxes.myConversation(actor.user, req.params.cid);
+        const inbox = conv ? await inboxes.get(conv.inbox_id) : null;
+        if (!conv || !inbox) return await page(req, res, 404, { actor, title: 'Conversation not found', path: '/messages', robots: 'noindex, nofollow', body: '<h1>Conversation not found</h1><p><a href="/messages">Your messages</a></p>' });
+        const msgs = await inboxes.messages(conv);
+        const who = (m) => (m.author === 'visitor' ? 'You' : m.author === 'ai' ? 'Vibe' : m.author === 'system' ? '' : (m.author_name || inbox.name));
+        const line = (m) => (m.author === 'system' ? `<li class="oc-muted sp-sys" data-id="${m.id}">${esc(m.body)}</li>`
+            : `<li class="sp-msg${m.author === 'visitor' ? ' sp-me' : ''}" data-id="${m.id}"><b>${esc(who(m))}</b> <span class="sp-text">${m.author === 'ai' ? md.render(m.body) : esc(m.body).replace(/\n/g, '<br>')}</span>${m.author === 'agent' ? pictures.pageHtml(m.body) : ''}</li>`);
+        await page(req, res, 200, {
+            actor, title: `${inbox.name}: support`, path: `/support/${conv.id}`, active: 'messages', robots: 'noindex, nofollow',
+            page: { view: 'support', inbox: inbox.id, conversation: conv.id, latest: msgs.length ? msgs[msgs.length - 1].id : 0 },
+            scripts: ['vibe-md.js', 'support.js'],
+            body: `<p><a href="/messages">&larr; Messages</a></p>
+<h1><span class="ib-dot" style="background:${esc(inbox.color)}"></span> ${esc(inbox.name)} ${statusChip(conv.status)}</h1>
+<p class="oc-muted">Your conversation with ${esc(inbox.name)}${conv.page_url ? `, from <a href="${esc(conv.page_url)}" rel="noopener nofollow" target="_blank">${esc(conv.page_url.replace(/^https?:\/\//, '').slice(0, 60))}</a>` : ''}. Replies show here and in the chat on their site.</p>
+<ol class="sp-thread" id="sp-thread" aria-live="polite">${msgs.map(line).join('')}</ol>
+<form class="oc-compose" method="post" action="/support/${esc(conv.id)}" id="sp-form"><label for="sp-input" class="oc-sr">Your message</label><textarea id="sp-input" name="message" maxlength="4000" rows="2" required placeholder="${conv.status === 'resolved' ? 'Write to start a new conversation' : 'Write a message'}"></textarea><button type="submit">Send</button></form>`,
+        });
+    });
+    router.post('/support/:cid', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const conv = await inboxes.myConversation(actor.user, req.params.cid);
+        if (!conv) return res.redirect(303, '/messages');
+        try { const out = await inboxes.accountPost(actor.user, conv, req.body && req.body.message); res.redirect(303, `/support/${out.conversation.id}`); }
+        catch (err) { res.redirect(303, `/support/${conv.id}`); }
+    });
+
     router.post('/inbox/:id/webhooks', formLimit, sameSite, async (req, res) => {
         const a = await agentInbox(req, res); if (!a) return;
         if (a.role !== 'owner') return res.redirect(303, `/inbox/${a.inbox.id}/settings`);

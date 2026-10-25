@@ -125,12 +125,16 @@
   }
   function catchUp() {
     if (!token) return;
-    fetch(api + '/messages?after=' + latest, { headers: { 'X-Visitor-Token': token } }).then(function (r) { return r.ok ? r.json() : null; })
+    fetch(api + '/messages?after=' + latest, { headers: headers({ 'X-Visitor-Token': token }) }).then(function (r) { return r.ok ? r.json() : null; })
       .then(function (d) { if (d && d.messages) d.messages.forEach(render); if (d && d.conversation) setStatus(d.conversation.status); }).catch(function () {});
   }
 
+  // A visitor may sign in to OpenVibe here (the same ticket window as a room on a site): their conversations are theirs,
+  // in their openvibe.chat Messages and on every device. The token stays in this frame's own storage.
+  var ACCT = 'ov-embed-token', acct = store(function (s) { return s.getItem(ACCT); }) || null, acctName = null, polling = null;
+  function headers(extra) { var hd = Object.assign({ 'Content-Type': 'application/json' }, extra || {}); if (acct) hd.Authorization = 'Bearer ' + acct; return hd; }
   function post(path, body) {
-    return fetch(api + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ token: token, user: identity || undefined }, body || {})) })
+    return fetch(api + path, { method: 'POST', headers: headers(), body: JSON.stringify(Object.assign({ token: token, user: identity || undefined }, body || {})) })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: {} }; }); });
   }
 
@@ -148,12 +152,42 @@
       people = !(x.d.inbox && x.d.inbox.people === false);
       if (x.d.inbox && x.d.inbox.color) toParent({ type: 'color', color: x.d.inbox.color });
       if (before && before !== token) Array.prototype.forEach.call(thread.querySelectorAll('[data-id], .em-rate'), function (n) { n.remove(); });
+      if (acct && !x.d.account) { acct = null; store(function (s) { s.removeItem(ACCT); }); }   // a sign-in that expired
+      acctName = x.d.account ? x.d.account.name : null; accountLine();
       conv = x.d.conversation;
       (x.d.messages || []).forEach(render);
       if (conv) setStatus(conv.status);
       if (!ws) connect(); else watch();
     }).catch(function () { errorLine('You seem to be offline.'); });
   }
+  var acctEl = document.getElementById('em-account');
+  function newTicket() { var b = new Uint8Array(32); crypto.getRandomValues(b); return btoa(String.fromCharCode.apply(null, b)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, ''); }
+  function accountLine() {
+    if (!acctEl) return;
+    acctEl.textContent = ' · ';
+    var a = el('a', null, acctName ? 'Signed in as ' + acctName + ' · Sign out' : polling ? 'Finish signing in in the window…' : 'Keep this conversation: sign in');
+    a.href = '#';
+    a.addEventListener('click', function (e) { e.preventDefault(); if (acctName) signOut(); else if (!polling) signIn(); });
+    acctEl.appendChild(a);
+  }
+  function signIn() {
+    var ticket = newTicket();
+    var w = window.open('/embed/signin#t=' + ticket, 'ovchat-signin', 'width=480,height=680');
+    if (!w) { errorLine('Allow pop-ups for this site to sign in.'); return; }
+    var started = Date.now();
+    polling = setInterval(function () {
+      if (Date.now() - started > 120000) { clearInterval(polling); polling = null; accountLine(); return; }
+      fetch('/embed/ticket', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: ticket }) })
+        .then(function (r) { return r.json(); }).then(function (d) {
+          if (!d || !d.token) return;
+          clearInterval(polling); polling = null;
+          acct = d.token; store(function (s) { s.setItem(ACCT, acct); });
+          begin();
+        }).catch(function () {});
+    }, 1500);
+    accountLine();
+  }
+  function signOut() { acct = null; acctName = null; store(function (s) { s.removeItem(ACCT); s.removeItem(KEY); }); token = null; begin(); }
   window.addEventListener('message', function (e) {
     if (e.source !== window.parent || !e.data || e.data.ov !== 'chat' || e.data.type !== 'identify') return;
     var u = e.data.user;

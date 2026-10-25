@@ -183,7 +183,7 @@ async function removeMember(inbox, user, userId) {
 const convShape = (c) => c && ({
     id: c.id, inbox_id: c.inbox_id, status: c.status, visitor_name: c.visitor_name || null, page_url: c.page_url || null,
     assignee_id: c.assignee_id ? Number(c.assignee_id) : null, agent_unread: Number(c.agent_unread) || 0,
-    rating: c.rating == null ? null : Number(c.rating), rating_comment: c.rating_comment || null,
+    rating: c.rating == null ? null : Number(c.rating), rating_comment: c.rating_comment || null, account: c.visitor_user_id != null,
     verified: !!Number(c.verified), visitor_email: c.visitor_email || null, external_id: c.external_id || null,
     created_at: c.created_at, last_message_at: c.last_message_at || c.created_at,
 });
@@ -248,6 +248,18 @@ function identityToken(inbox, who) {
     const key = config.inbox.identityKey || config.oauth.clientSecret || 'openvibe-chat-development';
     return crypto.createHmac('sha256', key).update(`inbox-identity:${inbox.id}:${who.id}`).digest('base64url').slice(0, 32);
 }
+/**
+ * A visitor signed in to OpenVibe in the panel: their own token for this inbox, the same on every device, so their
+ * conversation follows them, and it is listed in their Messages (mySupport). A site's verified identity still wins.
+ */
+function accountToken(inbox, account) {
+    const key = config.inbox.identityKey || config.oauth.clientSecret || 'openvibe-chat-development';
+    return crypto.createHmac('sha256', key).update(`inbox-account:${inbox.id}:${account.id}`).digest('base64url').slice(0, 32);
+}
+async function stampAccount(convId, account) {
+    await db.run('UPDATE inbox_conversations SET visitor_user_id = ?, visitor_subject = ?, visitor_name = COALESCE(visitor_name, ?) WHERE id = ?',
+        [account.id, account.subject_id || null, clean(account.display_name || account.username, LIMITS.visitorName) || null, convId]);
+}
 async function stampIdentity(convId, who) {
     await db.run('UPDATE inbox_conversations SET external_id = ?, visitor_name = COALESCE(?, visitor_name), visitor_email = COALESCE(?, visitor_email), verified = 1 WHERE id = ?',
         [who.id, who.name, who.email, convId]);
@@ -287,15 +299,22 @@ async function deleteReply(inbox, user, id) {
  * A visitor opens the widget: their token (a new one when theirs is missing or malformed; a verified person's own, the
  * same on every device) and their open conversation.
  */
-async function visit(inbox, token, user = null) {
+async function visit(inbox, token, user = null, account = null) {
     const who = verifiedIdentity(inbox, user);
-    const t = who ? identityToken(inbox, who) : TOKEN_RE.test(String(token || '')) ? String(token) : newToken();
+    const before = TOKEN_RE.test(String(token || '')) ? String(token) : null;
+    const t = who ? identityToken(inbox, who) : account ? accountToken(inbox, account) : before || newToken();
+    // Signing in keeps the conversation the visitor already had: it moves to their own token.
+    if (account && before && before !== t && !(await openConversationFor(inbox, t))) {
+        await db.run(`UPDATE inbox_conversations SET visitor_token_hash = ? WHERE inbox_id = ? AND visitor_token_hash = ? AND status <> 'resolved'`, [hashToken(t), inbox.id, hashToken(before)]);
+    }
     let conv = await openConversationFor(inbox, t);
-    if (conv && who) { await stampIdentity(conv.id, who); conv = await db.get('SELECT * FROM inbox_conversations WHERE id = ?', [conv.id]); }
-    return { token: t, verified: !!who, conversation: convShape(conv), messages: conv ? await messages(conv) : [] };
+    if (conv && who) await stampIdentity(conv.id, who);
+    if (conv && account) await stampAccount(conv.id, account);
+    if (conv && (who || account)) conv = await db.get('SELECT * FROM inbox_conversations WHERE id = ?', [conv.id]);
+    return { token: t, verified: !!who, account: account ? { name: account.display_name || account.username } : null, conversation: convShape(conv), messages: conv ? await messages(conv) : [] };
 }
 
-async function visitorPost(inbox, token, { message, page_url = null, name = null, user = null } = {}, deps = {}) {
+async function visitorPost(inbox, token, { message, page_url = null, name = null, user = null, account = null } = {}, deps = {}) {
     if (!TOKEN_RE.test(String(token || ''))) fail(401, 'inbox.visitor', 'Open the chat again to start a conversation');
     const body = clean(message, LIMITS.body);
     if (!body) fail(422, 'inbox.empty', 'Write something first');
@@ -309,6 +328,7 @@ async function visitorPost(inbox, token, { message, page_url = null, name = null
         // A verified person's conversation carries who they are (only with their own token: an id is not enough).
         const who = verifiedIdentity(inbox, user);
         if (who && identityToken(inbox, who) === String(token)) await stampIdentity(id, who);
+        if (account && accountToken(inbox, account) === String(token)) await stampAccount(id, account);
         conv = await db.get('SELECT * FROM inbox_conversations WHERE id = ?', [id]);
         broadcaster(deps)(inbox.id, conv.id, { type: 'inbox_conversation', inbox: inbox.id, conversation: convShape(conv) });
         require('./webhooks').later(inbox.id, 'conversation.created', { conversationId: conv.id });
@@ -356,6 +376,30 @@ async function rate(inbox, token, { rating, comment = '', conversation: convId =
     broadcaster(deps)(inbox.id, null, { type: 'inbox_rating', inbox: inbox.id, conversation: conv.id, rating: shaped.rating, comment: shaped.rating_comment });
     require('./webhooks').later(inbox.id, 'conversation.rated', { conversationId: conv.id });
     return shaped;
+}
+
+// ── A visitor's own support conversations (signed in to OpenVibe) ───────────────────────────────────────────────────
+
+/** Their conversations with every inbox, newest first, with the inbox's name and colour. */
+async function mySupport(account, { limit = 50 } = {}) {
+    const rows = await db.all(`SELECT c.*, i.name AS inbox_name, i.color AS inbox_color,
+            (SELECT body FROM inbox_messages m WHERE m.conversation_id = c.id AND m.author <> 'system' ORDER BY m.id DESC LIMIT 1) AS last_body
+        FROM inbox_conversations c JOIN inboxes i ON i.id = c.inbox_id AND i.archived_at IS NULL
+        WHERE c.visitor_user_id = ? ORDER BY COALESCE(c.last_message_at, c.created_at) DESC LIMIT ?`, [account.id, Math.min(200, Number(limit) || 50)]);
+    return rows.map((r) => ({ ...convShape(r), inbox: { id: r.inbox_id, name: r.inbox_name, color: r.inbox_color }, preview: plainText(r.last_body).slice(0, 140) }));
+}
+async function myConversation(account, id) {
+    if (!account || !CONV_RE.test(String(id || ''))) return null;
+    return await db.get('SELECT * FROM inbox_conversations WHERE id = ? AND visitor_user_id = ?', [id, account.id]) || null;
+}
+/** They write from openvibe.chat: into that conversation, or, once it is resolved, a new one with the same inbox. */
+async function accountPost(account, conv, text, deps = {}) {
+    const inbox = await get(conv.inbox_id);
+    if (!inbox) fail(404, 'inbox.not_found', 'This inbox is closed');
+    if (conv.status === 'resolved' || conv.visitor_token_hash !== hashToken(accountToken(inbox, account))) {
+        if (conv.status !== 'resolved') await db.run('UPDATE inbox_conversations SET visitor_token_hash = ? WHERE id = ?', [hashToken(accountToken(inbox, account)), conv.id]);
+    }
+    return await visitorPost(inbox, accountToken(inbox, account), { message: text, account }, deps);
 }
 
 // ── Agents ─────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -493,6 +537,6 @@ function _reset() { inFlight.clear(); }
 module.exports = {
     InboxError, INBOX_RE, CONV_RE, LIMITS, MAX_INBOXES, AI_PER_CONVERSATION, hashToken,
     create, update, remove, get, access, mine, members, addMember, removeMember, shape, publicConfig, plainText, peopleAnswer,
-    visit, visitorPost, handoff, rate, setIdentity, verifiedIdentity, savedReplies, saveReply, deleteReply, conversations, conversation, messages, agentPost, setStatus, markRead, convShape,
+    visit, visitorPost, handoff, rate, setIdentity, verifiedIdentity, savedReplies, saveReply, deleteReply, mySupport, myConversation, accountPost, conversations, conversation, messages, agentPost, setStatus, markRead, convShape,
     aiAnswer, inboxPrompt, _reset,
 };

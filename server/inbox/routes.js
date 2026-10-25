@@ -34,7 +34,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const cache = require('openvibe-shared/cache-policy');
 const config = require('../config');
-const { requireAuth } = require('../auth/auth');
+const { requireAuth, requestUser } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const inboxes = require('./inbox');
 const webhooks = require('./webhooks');
@@ -69,9 +69,15 @@ widget.get('/', visitLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
     noStore(res).json({ inbox: inboxes.publicConfig(inbox) });
 });
+// A visitor signed in to OpenVibe (their own sign-in in Authorization, or the cookie on openvibe.chat itself; never an
+// API token): their conversations are theirs. Only ever from the request's credentials, never from its body.
+async function accountOf(req) {
+    const u = await requestUser(req).catch(() => null);
+    return u && u.auth_source !== 'api_token' ? u : null;
+}
 widget.post('/visit', visitLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
-    try { noStore(res).json({ inbox: inboxes.publicConfig(inbox), ...(await inboxes.visit(inbox, tokenOf(req), req.body && req.body.user)) }); } catch (err) { send(res, err); }
+    try { noStore(res).json({ inbox: inboxes.publicConfig(inbox), ...(await inboxes.visit(inbox, tokenOf(req), req.body && req.body.user, await accountOf(req))) }); } catch (err) { send(res, err); }
 });
 widget.get('/messages', visitLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
@@ -83,7 +89,7 @@ widget.get('/messages', visitLimit, async (req, res) => {
 });
 widget.post('/messages', postLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
-    try { res.status(201).json(await inboxes.visitorPost(inbox, tokenOf(req), req.body || {})); } catch (err) { send(res, err); }
+    try { res.status(201).json(await inboxes.visitorPost(inbox, tokenOf(req), { ...(req.body || {}), account: await accountOf(req) })); } catch (err) { send(res, err); }
 });
 widget.post('/handoff', postLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
