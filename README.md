@@ -449,6 +449,11 @@ for people and for companies, with "direct live support with an agent", "fully m
   replies on Enter. The owner's settings page shows the tag, the greeting, colour, Vibe's instructions and pages, and
   **allowed sites**: once named, only those sites may frame the panel (`frame-ancestors`) or call the visitor API;
   until then any site may.
+- **Nobody misses a visitor:** when a conversation starts waiting (the visitor asked for a person, Vibe handed off,
+  or Vibe is off) or a visitor writes while it waits or is open, and none of the inbox's people has it open live, each
+  of them (or only whoever took the conversation) gets an OpenVibe notification through the Network
+  (`server/inbox/notify.js`; Chat's service token, `network.notifications.push` as service `chat`), at most one per
+  conversation every 10 minutes except when it starts waiting. `CHAT_INBOX_NOTIFY=0` turns it off.
 - **Build your own panel** with the visitor API, which answers any site without cookies (CORS open, the token is the
   key): `GET /api/chat/widget/inbox/:id` (name, greeting, colour, whether Vibe answers), `POST /visit { token? }` → `{
   token, conversation, messages }`, `GET /messages?after=` (token in `X-Visitor-Token`), `POST /messages { token,

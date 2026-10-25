@@ -129,6 +129,36 @@ t('the socket: the visitor hears the people, the people hear new conversations',
     agent.close(); visitor.close();
 });
 
+t('a visitor waiting for a person tells the inbox\'s people, unless one follows it live; once per conversation for a while', async () => {
+    const notify = require('../server/inbox/notify');
+    const pushed = [];
+    notify._setPush(async (n) => { pushed.push(n); return { sent: true }; });
+    try {
+        const v = (await widget('POST', '/visit', {})).body.token;
+        await widget('POST', '/messages', { token: v, message: 'My lamp **flickers**' });
+        await widget('POST', '/handoff', { token: v });
+        await until(async () => pushed.length >= 2, 'the owner and the agent told');
+        assert.deepStrictEqual(pushed.map((n) => n.subjectId).sort(), [ann.subject_id, bob.subject_id].sort());
+        const n = pushed[0];
+        assert.ok(n.title.includes('is waiting for a person') && n.title.includes('Acme'), n.title);
+        assert.ok(n.url.startsWith(`${SITE}/inbox/${inbox.id}?c=cnv_`) && n.service === 'chat' && n.category === 'chat' && n.priority === 'high');
+        assert.strictEqual(n.message, 'My lamp flickers', 'the visitor\'s words, as plain text');
+        await widget('POST', '/messages', { token: v, message: 'Hello?' });
+        await new Promise((r) => setTimeout(r, 150));
+        assert.strictEqual(pushed.length, 2, 'a second line soon after is not another notification');
+        // One of them follows the inbox live: nobody else is buzzed.
+        const agent = await h.ws({ token: bob.token });
+        agent.sendJson({ type: 'inbox_watch', inbox: inbox.id });
+        await agent.next((m) => m.type === 'inbox_watching');
+        const v2 = (await widget('POST', '/visit', {})).body.token;
+        await widget('POST', '/messages', { token: v2, message: 'hi' });
+        await widget('POST', '/handoff', { token: v2 });
+        await new Promise((r) => setTimeout(r, 150));
+        assert.strictEqual(pushed.length, 2);
+        agent.close();
+    } finally { notify._setPush(null); }
+});
+
 t('the embed page and the loader: frame-ancestors follow the allowed sites', async () => {
     let r = await fetch(`${h.base}/embed/inbox/${inbox.id}`);
     assert.strictEqual(r.status, 200);

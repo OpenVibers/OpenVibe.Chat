@@ -2558,6 +2558,13 @@ class ChatServer {
         }
     }
 
+    /** How many of an inbox's people follow it live right now (server/inbox/notify.js tells the others' devices). */
+    inboxWatchers(inboxId) {
+        let n = 0;
+        for (const [ws, client] of this.clients) if (client.inboxAgent === inboxId && ws.readyState === WebSocket.OPEN) n++;
+        return n;
+    }
+
     /** A support inbox's frame: to the visitor following that conversation and to the inbox's people following it. */
     broadcastInbox(inboxId, conversationId, data) {
         const msg = JSON.stringify(data);

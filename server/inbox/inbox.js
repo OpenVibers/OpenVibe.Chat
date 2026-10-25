@@ -192,6 +192,7 @@ async function setStatusRow(conv, status, deps = {}, extra = {}) {
     await db.run(`UPDATE inbox_conversations SET status = ?${extra.assignee ? ', assignee_id = COALESCE(assignee_id, ?)' : ''} WHERE id = ?`,
         extra.assignee ? [status, extra.assignee, conv.id] : [status, conv.id]);
     broadcaster(deps)(conv.inbox_id, conv.id, { type: 'inbox_status', inbox: conv.inbox_id, conversation: conv.id, status });
+    if (status === 'waiting' && conv.status !== 'waiting') require('./notify').later(conv, 'waiting');
     return { ...conv, status };
 }
 
@@ -219,6 +220,7 @@ async function visitorPost(inbox, token, { message, page_url = null, name = null
     if (!body) fail(422, 'inbox.empty', 'Write something first');
     if (wordFilter.isSpam && wordFilter.isSpam(body)) fail(422, 'inbox.spam', 'That looks like spam');
     let conv = await openConversationFor(inbox, token);
+    const started = !conv;
     if (!conv) {
         const id = newId('cnv');
         await db.run(`INSERT INTO inbox_conversations (id, inbox_id, visitor_token_hash, visitor_name, status, page_url, last_message_at)
@@ -228,6 +230,8 @@ async function visitorPost(inbox, token, { message, page_url = null, name = null
     }
     const filtered = wordFilter.check(body);
     const posted = await addMessage(conv, { author: 'visitor', body: filtered.safe ? body : filtered.filtered, name: conv.visitor_name }, deps);
+    // A person is needed: a new conversation with Vibe off starts waiting, and a visitor writing to people is news.
+    if (conv.status === 'waiting' || conv.status === 'open') require('./notify').later(conv, started ? 'waiting' : 'message');
     if (conv.status === 'bot') {
         const run = () => aiAnswer(inbox, conv.id, deps).catch((e) => console.warn(`[Inbox] ${inbox.id}: ${e && e.message}`));
         if (deps.awaitAi) await run(); else setImmediate(run);
