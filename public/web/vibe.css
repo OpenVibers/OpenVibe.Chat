@@ -246,6 +246,12 @@ body.oc-app-body { overflow: hidden; }
   .vb-hello { justify-content: flex-end; padding-bottom: 4px; }
   .vb-sub { font-size: .92rem; margin-bottom: 16px; }
 }
+/* A short phone (an SE, a landscape tablet with the keyboard up): the greeting, one suggestion and the composer fit. */
+@media (max-width: 520px) and (max-height: 700px) {
+  .vb-hello .vb-mark { display: none; }
+  .vb-hello h1 { font-size: 1.35rem; }
+  .vb-suggest li:nth-child(n+2) { display: none; }
+}
 @media (prefers-reduced-motion: reduce) { .vb-rail { transition: none; } }
 
 /* A picture waiting to go with the next message (vibe.js), above the composer; the attach button inside it. */

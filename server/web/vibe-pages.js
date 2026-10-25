@@ -180,7 +180,7 @@ function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit,
         const hello = `<div class="vb-hello">
 ${MARK}
 <h1>${user ? `What can I help with${user.display_name || user.username ? `, ${esc(String(user.display_name || user.username).split(' ')[0])}` : ''}?` : 'Hi, I\'m Vibe. What can I help with?'}</h1>
-<p class="vb-sub">OpenVibe's assistant. I can search the web and everything on OpenVibe, from news and deals to jobs, rentals and videos, read any page you link, look at pictures you send, remember what you ask me to, set up work that runs every day for you, and help you think things through.</p>
+<p class="vb-sub">OpenVibe's assistant. I search the web and all of OpenVibe (news, deals, jobs, rentals, videos), read the pages and pictures you share, remember what you ask me to, and set up work that runs every day for you.</p>
 <ul class="vb-suggest">${SUGGESTIONS.map((s) => `<li><button type="button" class="vb-chip" data-prompt="${esc(s.prompt)}"><b>${esc(s.title)}</b><span>${esc(s.text)}</span></button></li>`).join('')}</ul>
 </div>`;
         const thread = room
