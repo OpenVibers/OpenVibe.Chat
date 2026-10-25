@@ -125,6 +125,7 @@
       if (m.type === 'inbox_message') render(m.message);
       else if (m.type === 'inbox_status') setStatus(m.status);
       else if (m.type === 'inbox_typing') showTyping(m.who);
+      else if (m.type === 'inbox_call') { if (m.state === 'ringing') callCard(m.by); else endCallCard(); }
     };
     ws.onclose = function () { setTimeout(connect, delay); delay = Math.min(delay * 2, 30000); };
   }
@@ -163,6 +164,7 @@
       conv = x.d.conversation;
       (x.d.messages || []).forEach(render);
       if (conv) setStatus(conv.status);
+      if (conv && conv.call) callCard(null);
       if (!ws) connect(); else watch();
     }).catch(function () { errorLine('You seem to be offline.'); });
   }
@@ -250,6 +252,43 @@
       fileIn.click();
     });
     fileIn.addEventListener('change', function () { var f = fileIn.files && fileIn.files[0]; fileIn.value = ''; sendPicture(f); });
+  }
+  // A voice call one of the team started (server/inbox/inbox.js startCall): a card in the thread to join it, peer to
+  // peer through support-call.js with this visitor's token; "Not now" or hanging up ends it for everyone.
+  var callEl = null, call = null;
+  function callCard(by) {
+    if (!conv || !window.OVSupportCall) return;
+    if (!callEl) { callEl = el('li', 'em-call'); callEl.setAttribute('role', 'group'); callEl.setAttribute('aria-label', 'Voice call'); thread.appendChild(callEl); }
+    if (call) return;
+    callEl.textContent = '';
+    callEl.appendChild(el('p', 'em-call-text', (by || 'The team') + ' would like to talk. Join the voice call?'));
+    var row = el('div', 'em-call-row');
+    var yes = el('button', 'em-call-join', 'Join the call'); yes.type = 'button';
+    var no = el('button', 'em-call-no', 'Not now'); no.type = 'button';
+    yes.addEventListener('click', joinCall);
+    no.addEventListener('click', function () { post('/call/end').catch(function () {}); endCallCard(); });
+    row.appendChild(yes); row.appendChild(no); callEl.appendChild(row);
+    bottom(); toParent({ type: 'message', author: 'agent' });
+  }
+  function joinCall() {
+    var text = el('p', 'em-call-text', 'Joining the call…');
+    callEl.textContent = ''; callEl.appendChild(text);
+    var row = el('div', 'em-call-row');
+    var mute = el('button', 'em-call-no', 'Mute'); mute.type = 'button'; mute.setAttribute('aria-pressed', 'false');
+    var hang = el('button', 'em-call-hang', 'Hang up'); hang.type = 'button';
+    row.appendChild(mute); row.appendChild(hang); callEl.appendChild(row);
+    call = window.OVSupportCall.join({
+      channel: 'support-' + conv.id, visitorToken: token,
+      onState: function (s, t) { if (s === 'in') text.textContent = t || 'You are in the call.'; else if (s === 'ended' || s === 'error') { call = null; endCallCard(t); } else text.textContent = t; },
+      onPeople: function (names) { text.textContent = names.length ? 'In the call with ' + names.join(', ') + '.' : 'Waiting for the team to join…'; },
+    });
+    mute.addEventListener('click', function () { if (!call) return; call.mute(!call.muted); mute.textContent = call.muted ? 'Unmute' : 'Mute'; mute.setAttribute('aria-pressed', call.muted ? 'true' : 'false'); });
+    hang.addEventListener('click', function () { post('/call/end').catch(function () {}); if (call) call.leave(); });
+  }
+  function endCallCard(text) {
+    if (call) { var c = call; call = null; c.leave(); }
+    if (callEl) { callEl.remove(); callEl = null; }
+    if (text && text !== 'You left the call.') errorLine('');
   }
   personBtn.addEventListener('click', function () {
     personBtn.disabled = true;

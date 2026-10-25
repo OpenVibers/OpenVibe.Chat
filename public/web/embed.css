@@ -71,6 +71,14 @@ a { color: var(--accent); }
 .re-signin[disabled] { opacity: .65; cursor: default; }
 .em-head a.em-x { color: inherit; text-decoration: none; }
 .em-pics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.em-call { list-style: none; justify-self: stretch; padding: 12px 14px; border-radius: 16px; border: 1px solid var(--accent); background: var(--panel); }   /* a voice call the team started */
+.em-call-text { margin: 0 0 10px; font-weight: 600; }
+.em-call-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.em-call button { all: unset; cursor: pointer; padding: 8px 14px; border-radius: 999px; font-weight: 700; font-size: .9rem; }
+.em-call button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.em-call button.em-call-join { background: var(--accent); color: var(--on-accent, #fff); }   /* after `all: unset` above */
+.em-call button.em-call-no { box-shadow: inset 0 0 0 1px var(--line); }
+.em-call button.em-call-hang { background: #dc2626; color: #fff; }
 .em-me .em-pics { justify-content: flex-end; }
 .em-pic { display: block; line-height: 0; border-radius: 12px; }
 .em-pic img { display: block; width: 240px; max-width: 100%; height: auto; max-height: 200px; border-radius: 12px; border: 1px solid var(--line); object-fit: cover; }   /* a definite width: the link is as wide as the picture, so it lines up under its bubble */

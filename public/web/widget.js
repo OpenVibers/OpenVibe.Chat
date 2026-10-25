@@ -74,7 +74,7 @@
     if (frame) return;
     frame = document.createElement('iframe');
     frame.title = 'Chat';
-    frame.allow = 'clipboard-write';
+    frame.allow = 'clipboard-write; microphone; autoplay';   // a voice call the team starts (the browser still asks)
     frame.src = isRoom ? base + '/embed/room/' + encodeURIComponent(room) + '?bubble=1'
       : base + '/embed/inbox/' + inbox + '?page=' + encodeURIComponent(location.href.slice(0, 500)) + (identity ? '&id=1' : '');
     frame.addEventListener('load', sendIdentity);

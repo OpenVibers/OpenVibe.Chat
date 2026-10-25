@@ -11,6 +11,7 @@
  *   POST   /messages         { token, message, page_url?, name?, user? } → 201 { conversation, message }
  *   POST   /handoff          { token } → { conversation }  ("Talk to a person"; 409 when only Vibe answers)
  *   POST   /rating           { token, rating: 1 | -1, comment?, conversation? } → { conversation }  (else their latest resolved)
+ *   POST   /call/end         { token } → { ended }: the visitor declines or hangs up the conversation's voice call
  *   POST   /picture          the body is a picture; X-Visitor-Token, an optional line in X-Caption → 201 { conversation, message,
  *                             picture } (signed in to OpenVibe only: it goes to OpenVibe.Pics as them; 403 inbox.sign_in_to_attach)
  *
@@ -38,6 +39,8 @@
  *   GET    /:id/conversations/:cid/messages    ?after=
  *   POST   /:id/conversations/:cid/messages    { message } → 201: a person's answer (the conversation becomes open)
  *   PATCH  /:id/conversations/:cid             { status: open | resolved | bot, assignee_id: a person's id | null }
+ *   POST   /:id/conversations/:cid/call   → { channel }: a voice call with the visitor (/ws/call?channelId=support-<cid>)
+ *   DELETE /:id/conversations/:cid/call   → { ended }
  *   POST   /:id/conversations/:cid/read
  */
 const express = require('express');
@@ -101,6 +104,14 @@ widget.get('/messages', visitLimit, async (req, res) => {
 widget.post('/messages', postLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
     try { res.status(201).json(await inboxes.visitorPost(inbox, tokenOf(req), { ...(req.body || {}), account: await accountOf(req) })); } catch (err) { send(res, err); }
+});
+widget.post('/call/end', postLimit, async (req, res) => {
+    const inbox = await inboxOr404(req, res); if (!inbox) return;
+    try {
+        const v = await inboxes.visit(inbox, tokenOf(req));
+        if (!v.conversation) return res.json({ ended: false });
+        res.json(await inboxes.endCall(inbox, await inboxes.conversation(inbox, v.conversation.id), null));
+    } catch (err) { send(res, err); }
 });
 widget.post('/handoff', postLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
@@ -287,6 +298,15 @@ agents.get('/:id/conversations/:cid/messages', requireAuth, async (req, res) => 
 agents.post('/:id/conversations/:cid/messages', requireAuth, replyLimit, async (req, res) => {
     const conv = await agentConversation(req, res); if (!conv) return;
     try { res.status(201).json({ message: await inboxes.agentPost(req.inbox, conv, req.user, req.body && req.body.message) }); } catch (err) { send(res, err); }
+});
+agents.post('/:id/conversations/:cid/call', requireAuth, manageLimit, async (req, res) => {
+    const conv = await agentConversation(req, res); if (!conv) return;
+    if (req.authSource === 'api_token') return res.status(403).json({ error: 'Calls are made with your own sign-in', code: 'inbox.person_only' });
+    try { noStore(res).json(await inboxes.startCall(req.inbox, conv, req.user)); } catch (err) { send(res, err); }
+});
+agents.delete('/:id/conversations/:cid/call', requireAuth, manageLimit, async (req, res) => {
+    const conv = await agentConversation(req, res); if (!conv) return;
+    try { res.json(await inboxes.endCall(req.inbox, conv, req.user)); } catch (err) { send(res, err); }
 });
 agents.patch('/:id/conversations/:cid', requireAuth, manageLimit, async (req, res) => {
     const conv = await agentConversation(req, res); if (!conv) return;

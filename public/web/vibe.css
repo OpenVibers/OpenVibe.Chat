@@ -239,6 +239,13 @@ body.oc-app-body { overflow: hidden; }
 .ib-actions { display: flex; gap: 6px; }
 .ib-actions button { padding: 6px 12px; border-radius: 10px; border: 1px solid var(--oc-line); background: var(--oc-panel); color: var(--oc-text); font: inherit; font-size: .85rem; cursor: pointer; }
 .ib-actions button:hover { border-color: color-mix(in srgb, var(--oc-accent) 45%, var(--oc-line)); }
+/* A voice call with the visitor: the Call button beside the actions, and the bar above the reply box while one is open. */
+.ib-call-btn { margin-left: 6px; padding: 6px 14px; border-radius: 10px; border: 0; background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, #fff); font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; }
+.ib-call-btn[hidden], .ib-callbar[hidden], .ib-callbar button[hidden] { display: none; }
+.ib-callbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--oc-accent); background: var(--oc-panel); }
+.ib-call-text { flex: 1 1 200px; font-weight: 600; }
+.ib-callbar button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--oc-line); background: transparent; color: var(--oc-text); font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; }
+.ib-callbar .ib-call-end { border-color: transparent; background: #dc2626; color: #fff; }
 .ib-sys { text-align: center; color: var(--oc-muted); font-size: .82rem; }
 .ib-who { margin: 0 0 2px; font-size: .74rem; font-weight: 700; color: var(--oc-muted); }
 .ib-av { flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--oc-panel-2); color: var(--oc-text); font-weight: 700; }

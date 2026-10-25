@@ -59,6 +59,10 @@ const KICK_COOLDOWN_MS = 60 * 1000;
 const PUBLIC_CHANNEL_ID = 'public';
 const MODES = ['mic', 'mic+cam', 'cam+mic'];
 const ROOM_CHANNEL = /^room-([a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9]))$/;
+// A support call (server/inbox/inbox.js startCall): `support-<conversation id>`, open while one of the inbox's people
+// keeps it; the inbox's people join as themselves, the visitor with their visitor token (a support-visitor message).
+const SUPPORT_CHANNEL = /^support-(cnv_[0-9A-HJKMNP-TV-Z]{26})$/;
+const SUPPORT_MAX = 4;
 
 class CallServer {
     constructor() {
@@ -140,7 +144,7 @@ class CallServer {
     async listChannels(viewer = null) {
         const result = [];
         for (const [id, ch] of this.channels) {
-            if (ch.roomSlug) continue;   // call rooms are listed as rooms (openvibe.chat), not in the voice sidebar
+            if (ch.roomSlug || ch.support) continue;   // call rooms are listed as rooms (openvibe.chat), support calls in their inbox
             if (ch.private && !await this._canSeePrivate(ch, viewer)) continue;
             const room = this.rooms.get(id);
             const participants = [];
@@ -178,6 +182,33 @@ class CallServer {
         }, 400);
         if (this._notifyTimer.unref) this._notifyTimer.unref();
     }
+
+    /** Open a support call for a conversation (one of the inbox's people asked): → the channel id. */
+    startSupportCall({ inboxId, inboxName, convId, userId }) {
+        const id = `support-${convId}`;
+        if (!SUPPORT_CHANNEL.test(id)) throw new Error('not a conversation id');
+        if (!this.channels.has(id)) {
+            this.channels.set(id, {
+                id, name: `${inboxName}: support call`, mode: 'mic', createdBy: userId, streamId: null, permanent: false,
+                support: { inboxId, convId }, createdAt: Date.now(), maxParticipants: SUPPORT_MAX,
+            });
+        }
+        return id;
+    }
+
+    /** End a conversation's support call: everyone in it is told, the channel goes. → whether there was one. */
+    async endSupportCall(convId) {
+        const id = `support-${convId}`;
+        if (!this.channels.has(id)) return false;
+        await this.endCall(id, 'closed');
+        this.channels.delete(id);
+        this.callBans.delete(id);
+        await lifecycle.channelClosed(id, 'closed').catch(() => {});
+        return true;
+    }
+
+    /** Whether a conversation has a support call open. */
+    supportCallOpen(convId) { return this.channels.has(`support-${convId}`); }
 
     /** The call room behind a `room-<slug>` channel id, or null. */
     async _roomOf(channelId) {
@@ -283,7 +314,7 @@ class CallServer {
         return {
             peerId, username: info.user ? info.user.username : null,
             anonId: info.anonId || null,
-            displayName: info.user ? (info.user.display_name || info.user.username) : info.anonId,
+            displayName: info.supportName || (info.user ? (info.user.display_name || info.user.username) : info.anonId),
             userId: info.user ? info.user.id : null,
             avatarUrl: info.user ? info.user.avatar_url : null,
             profileColor: info.user ? info.user.profile_color : null,
@@ -294,6 +325,7 @@ class CallServer {
             speaking: info.speaking || false,
             nameFX: cosmeticProfile.nameFX || null, particleFX: cosmeticProfile.particleFX || null, hatFX: cosmeticProfile.hatFX || null, badgeFX: cosmeticProfile.badgeFX || null,
             ...(info.inRoom ? { roomRole: info.roomRole || null, canTalk: !info.listenOnly } : {}),
+            ...(info.supportRole ? { supportRole: info.supportRole } : {}),
         };
     }
 
@@ -360,7 +392,7 @@ class CallServer {
         // browser's upgrade is anonymous, and a private call or a members-only room must still let it
         // in. A socket refused while anonymous waits briefly for that message.
         user = await this._presentedUser(early, user);
-        let admission = await this._admission(channel, resolvedId, user);
+        let admission = await this._admission(channel, resolvedId, user, early);
         if (admission.error) {
             // Admission may have awaited Live while an auth-update arrived in the buffer. A newly
             // presented identity (anonymous upgrade only: auth-update cannot switch an already
@@ -368,18 +400,19 @@ class CallServer {
             const presented = await this._presentedUser(early, user);
             if (presented && presented.id !== (user && user.id)) {
                 user = presented;
-                admission = await this._admission(channel, resolvedId, user);
+                admission = await this._admission(channel, resolvedId, user, early);
             }
         }
         if (admission.error && !user) {
             await this._firstAuthMessage(ws, FIRST_TOKEN_WAIT_MS);
             if (ws.readyState !== WebSocket.OPEN) return;
             user = await this._presentedUser(early, user);
-            if (user) admission = await this._admission(channel, resolvedId, user);
+            if (user || channel.support) admission = await this._admission(channel, resolvedId, user, early);
         }
         if (admission.error) { ws.send(JSON.stringify({ type: 'error', message: admission.error })); ws.close(); return; }
         const roomAccess = admission.roomAccess;
         const listenOnly = !!(roomAccess && !roomAccess.talk);
+        const support = admission.support || null;
 
         const peerId = this._generatePeerId();
         const anonId = user ? null : chatServer.getAnonIdForConnection(ip, resolvedId);
@@ -425,6 +458,7 @@ class CallServer {
         const clientInfo = {
             ws, user, anonId, ip, peerId, identity, muted: listenOnly, cameraOff: true, forceMuted: listenOnly, forceCameraOff: listenOnly, speaking: false,
             isChannelCreator, isStreamer, listenOnly, inRoom: !!channel.roomSlug, roomRole: roomAccess ? roomAccess.role : null, _msgCount: 0, _msgResetTime: Date.now(),
+            ...(support ? { supportRole: support.role, supportName: support.name } : {}),
         };
         this.clients.set(ws, { channelId: resolvedId, peerId });
         room.set(peerId, clientInfo);
@@ -484,8 +518,9 @@ class CallServer {
     }
 
     /** Whether `user` may enter `channel`: { error } or { roomAccess } (null outside call rooms). */
-    async _admission(channel, channelId, user) {
+    async _admission(channel, channelId, user, early = []) {
         if (channel.private && !await this._canSeePrivate(channel, user)) return { error: 'This is a private call' };
+        if (channel.support) return await this._supportAdmission(channel, user, early);
         // A call room: the room's roles decide who is in and who talks.
         if (!channel.roomSlug) return { roomAccess: null };
         const room = await this._roomOf(channelId);
@@ -514,12 +549,37 @@ class CallServer {
         return next;
     }
 
-    /** Resolves on the next auth-update (buffered by then), close, or timeout. */
+    /**
+     * A support call's door: one of the inbox's people (signed in) joins as themselves; the visitor shows their visitor
+     * token in a support-visitor message and joins under the name they gave (else "Visitor"). Anyone else: not found.
+     */
+    async _supportAdmission(channel, user, early) {
+        const inboxes = require('../inbox/inbox');
+        const inbox = await inboxes.get(channel.support.inboxId);
+        if (!inbox) return { error: 'Voice channel not found' };
+        if (user) {
+            const a = await inboxes.access(inbox, user).catch(() => null);
+            if (a && a.role) return { roomAccess: null, support: { role: 'agent', name: null } };
+        }
+        let token = null;
+        for (const data of early) {
+            let msg;
+            try { msg = JSON.parse(data); } catch { continue; }
+            if (msg?.type === 'support-visitor' && typeof msg.token === 'string') { token = msg.token; break; }
+        }
+        const conv = token ? await inboxes.conversation(inbox, channel.support.convId).catch(() => null) : null;
+        if (conv && conv.visitor_token_hash && conv.visitor_token_hash === inboxes.hashToken(token)) {
+            return { roomAccess: null, support: { role: 'visitor', name: conv.visitor_name || 'Visitor' } };
+        }
+        return { error: 'Voice channel not found' };
+    }
+
+    /** Resolves on the next auth-update or support-visitor message (buffered by then), close, or timeout. */
     _firstAuthMessage(ws, ms) {
         return new Promise((resolve) => {
             const done = () => { clearTimeout(timer); ws.off('message', onMessage); ws.off('close', done); resolve(); };
             const onMessage = (data) => {
-                try { if (JSON.parse(data)?.type === 'auth-update') done(); } catch { /* wait */ }
+                try { const t = JSON.parse(data)?.type; if (t === 'auth-update' || t === 'support-visitor') done(); } catch { /* wait */ }
             };
             const timer = setTimeout(done, ms);
             ws.on('message', onMessage);

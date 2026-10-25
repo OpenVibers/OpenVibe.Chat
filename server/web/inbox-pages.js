@@ -43,6 +43,7 @@ function embedHtml(inbox) {
 <meta name="robots" content="noindex, nofollow">
 <link rel="stylesheet" href="${asset('embed.css')}">
 <script src="${asset('vibe-md.js')}" defer></script>
+<script src="${asset('support-call.js')}" defer></script>
 <script src="${asset('embed.js')}" defer></script>
 </head>
 <body style="--accent:${esc(inbox.color)}">
@@ -145,7 +146,7 @@ ${list}
         const assignForm = current ? `<form method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}/assign" class="ib-assign"><label>Answered by <select name="assignee" data-autosubmit><option value="">nobody yet</option>${team.map((m) => `<option value="${m.user_id}"${Number(current.assignee_id) === m.user_id ? ' selected' : ''}>${esc(m.user_id === Number(actor.user.id) ? 'me' : (m.display_name || m.username))}</option>`).join('')}</select></label><noscript><button type="submit">Assign</button></noscript></form>` : '';
         const actions = current ? `${assignForm}<form method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}/status" class="ib-actions">
 ${current.status !== 'resolved' ? '<button name="status" value="resolved">Resolve</button>' : '<button name="status" value="open">Reopen</button>'}
-${Number(inbox.ai_enabled) && current.status !== 'bot' && current.status !== 'resolved' ? '<button name="status" value="bot">Back to Vibe</button>' : ''}</form>` : '';
+${Number(inbox.ai_enabled) && current.status !== 'bot' && current.status !== 'resolved' ? '<button name="status" value="bot">Back to Vibe</button>' : ''}</form>${current.status !== 'resolved' && config.calls.enabled ? '<button type="button" class="ib-call-btn" id="ib-call" hidden>Call</button>' : ''}` : '';
         const body = `<div class="vb ib" id="vb" data-inbox="${esc(inbox.id)}" data-conv="${current ? esc(current.id) : ''}">
 <aside class="vb-rail" id="vb-rail" aria-label="Conversations">
 <div class="vb-rail-top"><a class="vb-new" href="/inbox/${esc(inbox.id)}/settings"><span class="ib-dot" style="background:${esc(inbox.color)}"></span><span>${esc(inbox.name)}</span></a>
@@ -162,14 +163,14 @@ ${Number(inbox.ai_enabled) && current.status !== 'bot' && current.status !== 're
 ${current ? `${Number(current.verified) ? `<p class="ib-page">Verified by your site${current.visitor_email ? ` · <a href="mailto:${esc(current.visitor_email)}">${esc(current.visitor_email)}</a>` : ''} · id ${esc(current.external_id || '')}</p>` : ''}${current.rating_comment ? `<p class="ib-page">Rated ${Number(current.rating) > 0 ? '👍' : '👎'}: “${esc(current.rating_comment)}”</p>` : ''}${current.page_url ? `<p class="ib-page">From <a href="${esc(current.page_url)}" rel="noopener nofollow" target="_blank">${esc(current.page_url)}</a></p>` : ''}<ol class="vb-thread" id="vb-thread">${msgs.map(turn).join('')}</ol>`
         : `<div class="vb-hello"><h1>${list.length ? 'Pick a conversation' : 'No conversations yet'}</h1><p class="vb-sub">${list.length ? 'Waiting ones come first: those visitors asked for a person.' : 'Paste the snippet from Settings into your site. Visitors write; Vibe answers; you take over when it matters.'}</p></div>`}
 </div>
-${current ? `<div class="vb-dock"><form class="vb-composer" id="vb-composer" method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}">
+${current ? `<div class="vb-dock"><div class="ib-callbar" id="ib-callbar" role="group" aria-label="Voice call" hidden><span class="ib-call-text" id="ib-call-text"></span><button type="button" id="ib-call-join" hidden>Join the call</button><button type="button" id="ib-call-mute" aria-pressed="false" hidden>Mute</button><button type="button" class="ib-call-end" id="ib-call-end">End call</button></div><form class="vb-composer" id="vb-composer" method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}">
 <label class="oc-sr" for="vb-input">Reply</label><textarea id="vb-input" name="message" rows="1" maxlength="4000" placeholder="Reply as ${esc(actor.user.display_name || actor.user.username)}${saved.length ? ' · / for saved replies' : ''}" required aria-autocomplete="list"></textarea>
 ${pictures.enabled() ? '<label class="ib-pic-btn" title="Send a picture"><input type="file" id="ib-pic" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" hidden><span aria-hidden="true">&#128206;</span><span class="oc-sr">Send a picture</span></label>' : ''}<button class="vb-send" type="submit" aria-label="Send">&#8593;</button></form><p class="vb-fine">Replying takes the conversation from Vibe. <label class="ib-tr-pick" hidden>Translate my reply into <select id="ib-tr-to"><option value="">a language…</option>${TR_LANGS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label></p></div>` : ''}
 </section>
 </div>`;
         await page(req, res, 200, {
-            actor, app: true, appScript: 'inbox.js', active: 'inbox', path: `/inbox/${inbox.id}`, title: `${inbox.name} · Inbox`, robots: 'noindex, nofollow', body,
-            page: { view: 'inbox', inbox: inbox.id, conversation: current ? current.id : null, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: actor.user.id, filter, saved: saved.map((r) => ({ shortcut: r.shortcut, body: r.body })) },
+            actor, app: true, appScript: 'inbox.js', scripts: ['support-call.js'], active: 'inbox', path: `/inbox/${inbox.id}`, title: `${inbox.name} · Inbox`, robots: 'noindex, nofollow', body,
+            page: { view: 'inbox', inbox: inbox.id, conversation: current ? current.id : null, call: !!(current && inboxes.convShape(current).call), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: actor.user.id, filter, saved: saved.map((r) => ({ shortcut: r.shortcut, body: r.body })) },
         });
     });
 
