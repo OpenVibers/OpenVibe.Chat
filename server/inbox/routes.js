@@ -12,6 +12,11 @@
  *   POST   /handoff          { token } → { conversation }  ("Talk to a person"; 409 when only Vibe answers)
  *   POST   /rating           { token, rating: 1 | -1, comment?, conversation? } → { conversation }  (else their latest resolved)
  *
+ * /api/chat/support — a visitor's own conversations with sites' chats (signed in to OpenVibe in the panel):
+ *   GET    /                 { conversations }: newest first, with the inbox's name
+ *   GET    /:cid/messages    ?after= → { conversation, messages }
+ *   POST   /:cid/messages    { message } → 201 { conversation, message } (a resolved one: a new conversation)
+ *
  * /api/chat/inboxes — the inbox's people (signed in; an API token acts as its person):
  *   GET    /                 { inboxes }: the inboxes they work in, with waiting and open counts
  *   POST   /                 { name, greeting?, color?, ai_enabled?, ai_instructions?, knowledge_urls?, allowed_origins? } → 201
@@ -234,4 +239,18 @@ agents.post('/:id/conversations/:cid/read', requireAuth, async (req, res) => {
     res.status(204).end();
 });
 
-module.exports = { widget, agents, embedOf };
+// ── A visitor's own support conversations (signed in to OpenVibe; an app acting with their sign-in) ─────────────────
+const support = express.Router();
+support.get('/', requireAuth, async (req, res) => { noStore(res).json({ conversations: await inboxes.mySupport(req.user, { limit: req.query.limit }) }); });
+support.get('/:cid/messages', requireAuth, async (req, res) => {
+    const conv = await inboxes.myConversation(req.user, req.params.cid);
+    if (!conv) return res.status(404).json({ error: 'No such conversation', code: 'inbox.no_conversation' });
+    noStore(res).json({ conversation: inboxes.convShape(conv), messages: await inboxes.messages(conv, { after: req.query.after }) });
+});
+support.post('/:cid/messages', requireAuth, postLimit, async (req, res) => {
+    const conv = await inboxes.myConversation(req.user, req.params.cid);
+    if (!conv) return res.status(404).json({ error: 'No such conversation', code: 'inbox.no_conversation' });
+    try { res.status(201).json(await inboxes.accountPost(req.user, conv, req.body && req.body.message)); } catch (err) { send(res, err); }
+});
+
+module.exports = { widget, agents, support, embedOf };

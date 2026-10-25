@@ -351,6 +351,9 @@ t('a visitor signed in to OpenVibe: their conversation is theirs, in their Messa
     const watcher = await h.ws({});
     watcher.sendJson({ type: 'inbox_watch', inbox: inbox.id, conversation: cid, token: carol.token });
     await watcher.next((m) => m.type === 'inbox_watching' && m.conversation === cid);
+    const apiList = (await h.http('GET', '/api/chat/support', { token: carol.token })).body.conversations;
+    assert.ok(apiList.some((c) => c.id === cid && c.inbox.name === 'Acme'), 'the same list for apps');
+    assert.strictEqual((await h.http('GET', `/api/chat/support/${cid}/messages`, { token: bob.token })).status, 404);
     const sent = await fetch(`${h.base}/support/${cid}`, { method: 'POST', redirect: 'manual', headers: { cookie: `ov_token=${carol.token}`, 'content-type': 'application/x-www-form-urlencoded', origin: SITE }, body: 'message=Following+up+from+Messages' });
     assert.strictEqual(sent.status, 303);
     await watcher.next((m) => m.type === 'inbox_message' && m.message.body === 'Following up from Messages');

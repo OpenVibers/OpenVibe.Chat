@@ -457,7 +457,8 @@ for people and for companies, with "direct live support with an agent", "fully m
   Their conversation moves to their own token for that inbox (derived from their account, never stored), so it
   follows them to every device, and every conversation they had with any site is listed under **Support** in their
   openvibe.chat Messages (`/support/:cid`: the thread, live over `inbox_watch`, and a reply box; writing to a
-  resolved one starts a new conversation with that inbox). The account comes only from the request's credentials. A
+  resolved one starts a new conversation with that inbox; apps: `GET /api/chat/support`, `GET|POST
+  /api/chat/support/:cid/messages`). The account comes only from the request's credentials. A
   site's verified identity, when there is one, still decides the token. Export lists these conversations; deletion
   leaves them with the inbox's team, without the person.
 - **Verified visitors** (for a site with its own accounts): the owner turns them on in settings, which makes an
