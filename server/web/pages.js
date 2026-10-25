@@ -845,6 +845,7 @@ ${can.manage ? `<form class="oc-form" method="post" action="/r/${esc(room.slug)}
 <label>Who can read <select name="visibility"><option value="public"${room.visibility === 'public' ? ' selected' : ''}>Anyone (public)</option><option value="private"${room.visibility === 'private' ? ' selected' : ''}>Members only (private)</option></select></label>
 ${room.kind === 'call' ? `<label>People who join <select name="join_role">${rooms.JOIN_ROLES_CALL.map((r) => `<option value="${r}"${r === addRole ? ' selected' : ''}>${{ speaker: 'can talk (speakers)', participant: 'listen and write (participants)', viewer: 'listen and read (viewers)' }[r]}</option>`).join('')}</select></label>` : ''}
 <label>Slow mode (seconds between messages, 0 = off) <input name="slow_seconds" type="number" min="0" max="600" value="${Number(room.slow_seconds) || 0}"></label>
+${room.slug !== 'staff' && (room.kind || 'community') === 'community' && Number(room.assistant) !== 1 ? `<input type="hidden" name="has_workspace" value="1"><label class="oc-check"><input type="checkbox" name="workspace" value="1"${rooms.isWorkspace(room) ? ' checked' : ''}> Work together here: a work queue beside the conversation (Vibe runs research at once; code and computer tasks go to a member or to the asker's own computer), alerts from other systems, and a shared screen</label>` : ''}
 ${rooms.isWorkspace(room) ? `<label>Shared screen <input name="screen_url" type="url" value="${esc(room.screen_url || '')}" placeholder="https://openvibe.bot/screen/…"> <span class="oc-muted">A screen share link from OpenVibe.Bot (a computer's owner makes it on its screen page). Members see the screen beside the conversation, and with a "use" link they can click and type on it. Empty: no screen.</span></label>` : ''}
 <p><button type="submit">Save</button></p></form>` : ''}
 ${hookSection}
@@ -869,8 +870,18 @@ ${attachList}`,
         if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
         req.roomBack = `/r/${room.slug}/settings`;
         const b = req.body || {};
-        await rooms.update(room, actor.user, { name: b.name, topic: b.topic, visibility: b.visibility, slow_seconds: b.slow_seconds === undefined ? undefined : Number(b.slow_seconds), join_role: room.kind === 'call' ? b.join_role : undefined,
+        const workspace = b.has_workspace ? [].concat(b.workspace || []).includes('1') : undefined;
+        const updated = await rooms.update(room, actor.user, { name: b.name, topic: b.topic, visibility: b.visibility, slow_seconds: b.slow_seconds === undefined ? undefined : Number(b.slow_seconds), join_role: room.kind === 'call' ? b.join_role : undefined,
+            ...(workspace !== undefined ? { workspace } : {}),
             ...(rooms.isWorkspace(room) && b.screen_url !== undefined ? { screen_url: b.screen_url } : {}) });
+        // A room that just became a workspace gets Vibe, who runs and announces its work, when it has room for one more.
+        if (workspace && !rooms.isWorkspace(room) && updated.workspace && aiMembers.enabled()) {
+            const ais = await aiMembers.list(room);
+            if (!ais.some((a) => a.handle === 'vibe') && ais.length < aiMembers.MAX_PER_ROOM) {
+                const can = await rooms.access(room, actor.user);
+                await aiMembers.add(room, actor.user, can, { name: 'Vibe', persona: VIBE_IN_ROOMS }).catch(() => null);
+            }
+        }
         await applyRoomChange(room);
         res.redirect(303, `/r/${room.slug}/settings?saved=1`);
     }));

@@ -198,4 +198,35 @@ t('a workspace room shows its shared screen to members only; only a Bot screen l
     assert.ok(!(await api('GET', '/rooms/staff', staff)).body.screen, 'cleared');
 });
 
+t('any community room\'s owner makes it a workspace (and Vibe joins); the staff room stays one; a call never becomes one', async () => {
+    const r = await api('POST', '/rooms', user, { name: 'Pat Builds', visibility: 'private' });
+    assert.strictEqual(r.status, 201, r.text);
+    const slug = r.body.room.slug;
+    const cookie = `ov_token=${user.token}`;
+    let page = await h.http('GET', `/r/${slug}/settings`, { headers: { cookie } });
+    assert.match(page.text, /name="workspace" value="1">/, 'the owner sees the switch, off');
+    const form = (body) => h.http('POST', `/r/${slug}/settings`, { headers: { cookie, 'content-type': 'application/x-www-form-urlencoded' }, raw: body });
+    let res = await form('name=Pat+Builds&visibility=private&slow_seconds=0&has_workspace=1&workspace=1');
+    assert.ok(res.status < 400 && /Saved\./.test(res.text), 'saved (the redirect is followed)');
+    const room = await rooms.bySlug(slug);
+    assert.ok(rooms.isWorkspace(room), 'now a workspace');
+    const ai = await h.db.getDb().prepare('SELECT handle FROM room_ai_members WHERE room_id = ?').all(room.id);
+    assert.deepStrictEqual(ai.map((a) => a.handle), ['vibe'], 'Vibe joined to run and announce the work');
+    page = await h.http('GET', `/r/${slug}`, { headers: { cookie } });
+    assert.match(page.text, /<aside class="oc-queue" id="oc-queue"/);
+    assert.strictEqual((await api('POST', `/rooms/${slug}/tasks`, user, { title: 'Plan the launch week', kind: 'other' })).status, 201, 'the owner adds work');
+    await api('PATCH', `/rooms/${slug}`, user, { screen_url: 'https://openvibe.bot/screen/abcdefghijklmnopqrstuvwxyz0123456789ABCDEF' });
+    res = await form('name=Pat+Builds&visibility=private&slow_seconds=0&has_workspace=1');
+    assert.ok(res.status < 400 && /Saved\./.test(res.text));
+    const after = await rooms.bySlug(slug);
+    assert.ok(!rooms.isWorkspace(after) && !after.screen_url, 'off again, and the screen goes with it');
+    assert.strictEqual((await api('PATCH', '/rooms/staff', staff, { workspace: false })).status, 409, 'the staff room stays a workspace');
+    const call = await api('POST', '/rooms', user, { name: 'Pat Calls', kind: 'call', visibility: 'private' });
+    assert.strictEqual(call.status, 201, call.text);
+    assert.strictEqual((await api('PATCH', `/rooms/${call.body.room.slug}`, user, { workspace: true })).status, 409, 'a call room never becomes one');
+    const kim = h.addUser('kim', { subject: ids.newId('user') });
+    await h.ctx.upsertUser(h.live.users.get(kim.id));
+    assert.ok([403, 404].includes((await api('PATCH', `/rooms/${slug}`, kim, { workspace: true })).status), 'someone else cannot');
+});
+
 t.run(async () => { if (h && h.close) await h.close(); });
