@@ -148,6 +148,26 @@
     // An answer takes up to a minute with tools; after two the dots give way to a way forward.
     waitTimer = setTimeout(function () { clearWait(); notice('Vibe did not answer this time. Send your message again, or try again in a minute.'); }, 120000);
   }
+  // The answer as it is written (room_ai_delta: the whole text so far): the waiting bubble shows it, rendered like the
+  // finished answer, until that message arrives and takes its place. Screen readers hear the finished one only.
+  function streamText(text) {
+    showWait();
+    var w = document.getElementById('vb-wait'); if (!w) return;
+    var stick = nearBottom();
+    var body = w.querySelector('.vb-body');
+    var md = body.querySelector('.vb-md');
+    if (!md) {
+      body.textContent = '';
+      md = el('div', 'vb-md vb-streaming'); md.setAttribute('aria-hidden', 'true');
+      body.appendChild(md);
+      var dots = el('span', 'vb-dots'); dots.setAttribute('aria-label', 'Vibe is writing');
+      dots.appendChild(el('i')); dots.appendChild(el('i')); dots.appendChild(el('i'));
+      body.appendChild(dots);
+    }
+    if (MD) md.innerHTML = MD.render(String(text || '')); else md.textContent = String(text || '');
+    if (waitTimer) { clearTimeout(waitTimer); waitTimer = setTimeout(function () { clearWait(); notice('Vibe did not answer this time. Send your message again, or try again in a minute.'); }, 120000); }
+    if (stick) toBottom();
+  }
   function notice(text) {
     var old = scroll.querySelector('.vb-live-notice'); if (old) old.remove();
     var p = el('p', 'oc-notice oc-error vb-live-notice', text); p.setAttribute('role', 'alert');
@@ -187,6 +207,7 @@
       if (m.type === 'room_joined') catchUp();
       else if (m.type === 'room_message' && m.room === room) add(m.message);
       else if (m.type === 'room_ai_typing' && m.room === room) { showWait(); if (nearBottom()) toBottom(); }
+      else if (m.type === 'room_ai_delta' && m.room === room) streamText(m.text);
       else if (m.type === 'room_message_deleted' && m.room === room) { var x = have(m.id); if (x) x.remove(); }
       else if (m.type === 'auth_revoked') notice('You were signed out. Sign in again to keep chatting.');
     };

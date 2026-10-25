@@ -138,6 +138,9 @@ body.oc-app-body { overflow: hidden; }
 @keyframes vbDot { 0%, 80%, 100% { opacity: .35; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
 @media (prefers-reduced-motion: reduce) { .vb-dots i { animation: none; opacity: .7; } }
 
+/* An answer as it is written (vibe.js streamText): the text, then the dots, small. */
+.vb-wait .vb-streaming + .vb-dots { margin-top: 6px; transform: scale(.8); transform-origin: left center; }
+
 /* ── A new chat ───────────────────────────────────────────────────────────── */
 .vb-hello { max-width: var(--vb-col); margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px 0 8px; }
 .vb-hello .vb-mark { width: 52px; height: 52px; margin-bottom: 14px; }
