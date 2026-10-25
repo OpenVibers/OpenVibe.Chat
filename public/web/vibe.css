@@ -77,7 +77,7 @@ body.oc-app-body { overflow: hidden; }
 
 .vb-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 16px 24px; scroll-padding-bottom: 24px; }
 .vb-scroll > .oc-notice { max-width: var(--vb-col); margin: 8px auto; }
-.vb-thread { list-style: none; margin: 0 auto; padding: 8px 0 0; max-width: var(--vb-col); display: grid; gap: 22px; }
+.vb-thread { list-style: none; margin: 0 auto; padding: 8px 0 0; max-width: var(--vb-col); display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
 .vb-turn { display: flex; gap: 14px; min-width: 0; }
 .vb-me { justify-content: flex-end; }
 .vb-bubble {
