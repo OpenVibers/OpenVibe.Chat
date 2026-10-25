@@ -15,7 +15,7 @@ a { color: var(--accent); }
 .em-x { all: unset; cursor: pointer; width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center; font-size: 22px; line-height: 1; }
 .em-x:hover { background: rgba(255, 255, 255, .18); }
 .em-x:focus-visible { outline: 2px solid currentColor; }
-.em-thread { list-style: none; margin: 0; padding: 14px 12px; flex: 1; overflow-y: auto; display: grid; align-content: start; gap: 10px; overscroll-behavior: contain; }
+.em-thread { list-style: none; margin: 0; padding: 14px 12px; flex: 1; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 10px; overscroll-behavior: contain; }
 .em-msg { display: flex; flex-direction: column; max-width: 86%; }
 .em-msg small { font-size: .72rem; color: var(--muted); margin: 0 4px 2px; }
 .em-them { justify-self: start; }
