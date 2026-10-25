@@ -51,6 +51,9 @@ const ICON = {
     messages: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H8l-4 4Z"/></svg>',
     rooms: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM2 20c0-3 3-5 6-5s6 2 6 5M14 15c3 0 8 1 8 5"/></svg>',
     globe: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18"/></svg>',
+    tasks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>',
+    computer: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
+    team: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 9h6M7 13h10"/></svg>',
 };
 
 /** The mark Vibe signs its answers with (the network's V, in the accent). */
@@ -71,6 +74,9 @@ function rail({ chats, current, signedIn, allowance }) {
 </div>
 <nav class="vb-rail-list" aria-label="Chats with Vibe">${list}</nav>
 <nav class="vb-rail-more" aria-label="More of OpenVibe.Chat">
+<a href="https://openvibe.actor/tasks" title="Every task you gave an agent, one-off or recurring, with what it cost">${ICON.tasks}<span>Tasks</span></a>
+<a href="https://openvibe.bot/machines" title="Your computers and robots: pair one, see its screen, set what agents may do on it">${ICON.computer}<span>Computers &amp; robots</span></a>
+<a href="/work" title="A room where your team and Vibe work together: a work queue, alerts and a shared screen">${ICON.team}<span>Work together</span></a>
 <a href="/messages">${ICON.messages}<span>Messages</span></a>
 <a href="/rooms">${ICON.rooms}<span>Rooms and servers</span></a>
 <a href="/">${ICON.globe}<span>Global chat</span></a>
