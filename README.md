@@ -518,7 +518,8 @@ for people and for companies, with "direct live support with an agent", "fully m
   inbox show inline (only openvibe.pics, at most four a message). **A visitor signed in to OpenVibe** sends one the
   same way from the panel's picture button (`POST /api/chat/widget/inbox/:id/picture`, the body is the picture, their
   token in `X-Visitor-Token`, a line in `X-Caption`): it goes to OpenVibe.Pics as them, and their messages carry
-  `account: true`, so only their Pics links show as pictures. Anonymous visitors are asked to sign in (403
+  `account: true`, so only their Pics links show as pictures. **Vibe sees them too:** the newest picture in a
+  signed-in visitor's latest messages (two at most) goes to the model as an image with their words. Anonymous visitors are asked to sign in (403
   `inbox.sign_in_to_attach`) until Pics scans anonymous uploads, and a link one pastes stays a link. Wherever a
   message's pictures show, their links are not repeated as text, and lists say "📷 Picture".
 - **Translation** (`server/inbox/translate.js`): "Translate" under a visitor's message puts it in the reader's

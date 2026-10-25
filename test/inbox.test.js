@@ -32,6 +32,8 @@ function startPics() {
     let n = 0;
     picsServer = require('http').createServer((req, res) => {
         req.resume();
+        // A picture itself (what Vibe is shown): a few PNG bytes.
+        if (req.method === 'GET') { res.writeHead(200, { 'content-type': 'image/png' }); return res.end(Buffer.from('89504e470d0a1a0a', 'hex')); }
         req.on('end', () => {
             const slug = `Pk${String(++n).padStart(6, '2')}`.replace(/[01]/g, '3');
             res.writeHead(201, { 'content-type': 'application/json' });
@@ -437,7 +439,7 @@ t('a signed-in visitor sends a picture from the panel (through OpenVibe.Pics as 
         .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
     const anon = (await widget('POST', '/visit', {})).body.token;
     assert.deepStrictEqual([(await picture({ 'x-visitor-token': anon })).status, (await picture({ 'x-visitor-token': anon })).body.code], [403, 'inbox.sign_in_to_attach']);
-    const pasted = await widget('POST', '/messages', { token: anon, message: 'Look https://openvibe.pics/i/Pk222222.png' });
+    const pasted = await widget('POST', '/messages', { token: anon, message: 'Look https://openvibe.pics/i/PkZZZZZZ.png' });
     assert.strictEqual(pasted.body.message.account, undefined, 'an anonymous visitor\'s link is only a link');
     const eve = h.addUser('eve', { subject: ids.newId('user') });
     await h.ctx.upsertUser(h.live.users.get(eve.id));
@@ -449,6 +451,11 @@ t('a signed-in visitor sends a picture from the panel (through OpenVibe.Pics as 
     assert.ok(/^The crack, here\nhttps:\/\/openvibe\.pics\/i\/[2-9a-km-zA-HJ-NP-Z]{8}\.png$/.test(sent.body.message.body), sent.body.message.body);
     assert.deepStrictEqual([sent.body.message.author, sent.body.message.account], ['visitor', true]);
     const cid = sent.body.conversation.id;
+    const shown = await until(async () => turns.find((x) => x.input.messages.some((m) => Array.isArray(m.content) && m.content.some((c) => c.type === 'image_url'))), 'Vibe is shown the picture');
+    const withPic = shown.input.messages.find((m) => Array.isArray(m.content));
+    assert.ok(withPic.content[0].text.includes('The crack, here') && withPic.content[0].text.includes('The picture they sent is attached.'));
+    assert.ok(/^data:image\/png;base64,/.test(withPic.content[1].image_url.url), 'as an image, not a link');
+    assert.ok(!turns.some((x) => x.input.messages.some((m) => Array.isArray(m.content) && m.content[0].text.includes('PkZZZZZZ'))), 'an anonymous visitor\'s link stays text');
     const typed = await widget('POST', '/messages', { token, message: 'And a second line' }, as);
     assert.strictEqual(typed.body.message.account, true, 'everything they write signed in is marked');
     const page = (path, u) => fetch(`${h.base}${path}`, { headers: { cookie: `ov_token=${u.token}` } }).then((x) => x.text());

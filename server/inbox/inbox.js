@@ -567,6 +567,24 @@ async function inboxTools(inbox, conv) {
     return { defs, run };
 }
 
+/**
+ * Vibe sees the pictures a signed-in visitor sent (their OpenVibe.Pics links; anyone else's stay links): in the visitor's
+ * latest messages, the newest that has any, at most two, given to the model with that message (rooms/pictures forModel).
+ */
+async function showPictures(said, transcript) {
+    const pictures = require('../rooms/pictures');
+    for (let i = said.length - 1; i >= 0 && said[i].author === 'visitor'; i--) {
+        if (said[i].author_user_id == null) continue;
+        const links = pictures.linksIn(said[i].body).slice(0, 2);
+        if (!links.length) continue;
+        const images = (await Promise.all(links.map((l) => pictures.forModel(l).catch(() => null)))).filter(Boolean);
+        if (images.length) {
+            transcript[i] = { role: 'user', content: [{ type: 'text', text: `${transcript[i].content}\n\n(${images.length === 1 ? 'The picture they sent is' : 'The pictures they sent are'} attached.)` }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] };
+        }
+        return;
+    }
+}
+
 async function aiAnswer(inbox, convId, deps = {}) {
     if (!Number(inbox.ai_enabled) || inFlight.has(convId) || !config.oauth.clientSecret) return null;
     const conv = await db.get('SELECT * FROM inbox_conversations WHERE id = ?', [convId]);
@@ -585,8 +603,9 @@ async function aiAnswer(inbox, convId, deps = {}) {
     try {
         broadcaster(deps)(inbox.id, conv.id, { type: 'inbox_typing', inbox: inbox.id, conversation: conv.id, who: 'Vibe' });
         const history = await db.all('SELECT * FROM inbox_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 20', [conv.id]);
-        const transcript = history.reverse().filter((m) => m.author !== 'system')
-            .map((m) => ({ role: m.author === 'visitor' ? 'user' : 'assistant', content: `${m.author === 'agent' ? `(${m.author_name || 'a person'} from ${inbox.name}) ` : ''}${String(m.body).slice(0, 2000)}` }));
+        const said = history.reverse().filter((m) => m.author !== 'system');
+        const transcript = said.map((m) => ({ role: m.author === 'visitor' ? 'user' : 'assistant', content: `${m.author === 'agent' ? `(${m.author_name || 'a person'} from ${inbox.name}) ` : ''}${String(m.body).slice(0, 2000)}` }));
+        await showPictures(said, transcript);
         const tools = await inboxTools(inbox, conv);
         const aiClient = deps.aiClient || require('../ai/client');
         // What Vibe may know about where the visitor is and who they are (a verified name only: anyone can type a name).
