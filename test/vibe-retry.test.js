@@ -12,6 +12,7 @@ const t = suite('vibe retry');
 const SITE = 'https://openvibe.chat';
 let h, ann, bob, aiClient, vibe;
 let n = 0;
+const keys = [];
 const vibeApi = (method, path, u, body) => h.http(method, `/api/chat/vibe${path}`, { token: u.token, body });
 const web = async (method, path, u, fields) => {
     const headers = { cookie: `ov_token=${u.token}`, ...(fields ? { 'content-type': 'application/x-www-form-urlencoded', origin: SITE } : {}) };
@@ -34,7 +35,7 @@ t('boot', async () => {
     ann = h.addUser('ann', { subject: ids.newId('user') });
     bob = h.addUser('bob', { subject: ids.newId('user') });
     for (const u of [ann, bob]) await h.ctx.upsertUser(h.live.users.get(u.id));
-    aiClient._setClient({ runs: { create: async () => { n++; return { run: { status: 'succeeded', output: { choices: [{ message: { content: `Answer ${n}\n\n\`\`\`js\nconsole.log(${n});\n\`\`\`` } }] } } }; } } });
+    aiClient._setClient({ runs: { create: async (workflow, input, o = {}) => { keys.push(o.idempotencyKey); n++; return { run: { status: 'succeeded', output: { choices: [{ message: { content: `Answer ${n}\n\n\`\`\`js\nconsole.log(${n});\n\`\`\`` } }] } } }; } } });
 });
 
 let slug;
@@ -51,6 +52,9 @@ t('Try again removes the answer and writes a new one, counted like any answer', 
     assert.notStrictEqual(after[0].id, first.id);
     assert.match(after[0].message, /^Answer 2/);
     assert.strictEqual(await vibe.repliesToday({ id: ann.id }), used + 1);
+    // AI answers once per idempotency key: the retry has its own, or AI would replay the first answer's run.
+    assert.match(keys[0], /^chat-ai-\d+-\d+-t0$/);
+    assert.strictEqual(keys[1], keys[0].replace(/-t0$/, `-r${first.id}-t0`));
 });
 
 t('only the answer to the person\'s last message; another person\'s chat is not there', async () => {

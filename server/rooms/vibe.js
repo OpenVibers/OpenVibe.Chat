@@ -204,7 +204,8 @@ async function retry(room, user) {
     if (!last) fail(409, 'vibe.nothing_to_retry', 'Only Vibe\'s answer to your last message can be tried again');
     await db.run('UPDATE room_messages SET is_deleted = 1, deleted_by = ? WHERE id = ? AND is_deleted = 0', [user.id, last.answer.id]);
     try { require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message_deleted', room: room.slug, id: Number(last.answer.id) }); } catch { /* sockets are optional */ }
-    setImmediate(() => { require('./ai-members').afterPost(room, last.asked, user).catch(() => {}); });
+    // A new key for AI (the answer it replaces names it): the same message's key would replay that answer's run.
+    setImmediate(() => { require('./ai-members').afterPost(room, last.asked, user, { retryOf: last.answer.id }).catch(() => {}); });
     return { removed: Number(last.answer.id) };
 }
 
