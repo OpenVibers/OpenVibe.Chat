@@ -48,6 +48,7 @@ const inFlight = new Set();          // room ids with an answer being written
 const personHour = new Map();        // `${room}:${user}` → [timestamps]
 
 const handleOf = (name) => String(name || '').toLowerCase().normalize('NFKD').replace(/[^\p{L}\p{N}]+/gu, '').slice(0, 24);
+const DELTA_MS = 120;   // the most often a streaming answer goes to the chat's sockets
 const clean = (v, max) => String(v == null ? '' : v).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, max);
 
 class AiMemberError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
@@ -282,7 +283,7 @@ function userPrompt({ member, context, transcript, askedBy, text }) {
  * The answer through chat.member.turn with tools: up to MAX_TOOL_ROUNDS rounds of tool calls run here, then a turn
  * with tool_choice none. → the reply text, or null when a turn failed (the caller falls back to chat.member.reply).
  */
-async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], user = null, messageId = null, memory = null, called = new Set() }) {
+async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], user = null, messageId = null, memory = null, called = new Set(), onText = null }) {
     const tools = aiTools.definitions(member, room, { memory: memory !== null });
     const vibe = Number(room.assistant) === 1;
     const prompt = userPrompt({ member, context, transcript, askedBy, text });
@@ -293,8 +294,10 @@ async function answerWithTools({ room, member, context, transcript, askedBy, tex
     ];
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
         const last = round === MAX_TOOL_ROUNDS;
-        const out = await aiClient.structured('chat.member.turn', { messages, tools, tool_choice: last ? 'none' : 'auto', max_tokens: vibe ? 1500 : 600, temperature: 0.7 },
-            { ...opts, idempotencyKey: `${opts.idempotencyKey}-t${round}` });
+        const turn = { messages, tools, tool_choice: last ? 'none' : 'auto', max_tokens: vibe ? 1500 : 600, temperature: 0.7 };
+        const turnOpts = { ...opts, idempotencyKey: `${opts.idempotencyKey}-t${round}` };
+        // Vibe's answer streams (each round's text so far, to the chat as it is written); other members answer whole.
+        const out = onText ? await aiClient.stream('chat.member.turn', turn, turnOpts, onText) : await aiClient.structured('chat.member.turn', turn, turnOpts);
         const msg = out && Array.isArray(out.choices) && out.choices[0] && out.choices[0].message;
         if (!msg) return null;
         const calls = !last && Array.isArray(msg.tool_calls) ? msg.tool_calls.filter((c) => c && c.function && c.function.name).slice(0, MAX_CALLS_PER_ROUND) : [];
@@ -353,9 +356,20 @@ async function afterPost(room, message, user, deps = {}) {
         const memory = vibe && Number(room.owner_id) === Number(user.id) ? await vibeMemory.forPrompt(user) : null;
         let text = '';
         const called = new Set();   // the tools the model called while answering
+        // In a Vibe chat the answer shows as it is written: room_ai_delta { text } (the whole text so far, at most every
+        // DELTA_MS), until the finished message replaces it.
+        let lastDelta = 0;
+        let pending = null;
+        const onText = vibe ? (sofar) => {
+            pending = sofar;
+            const now = Date.now();
+            if (now - lastDelta < DELTA_MS) return;
+            lastDelta = now;
+            broadcast({ type: 'room_ai_delta', room: room.slug, name: member.name, text: String(pending).slice(0, 8000) });
+        } : null;
         if (config.ai.memberTools) {
             const images = await picturesFor(message, history, user).catch(() => []);
-            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, called }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
+            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, called, onText }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
         }
         // A plain "remember that …" is kept even when the model only promised it (small models often do).
         if (memory !== null && text && !called.has('remember')) {
