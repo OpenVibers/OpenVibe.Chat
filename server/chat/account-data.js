@@ -107,6 +107,7 @@ const ERASE_AFTER_ROOMS = [
     ['vibe_usage', 'DELETE FROM vibe_usage WHERE user_id = ANY(@ids)'],
     // Support inboxes (server/inbox/inbox.js): the inboxes they own go with every conversation in them; in others,
     // their replies stay for the visitor without their name, and their place on the team goes.
+    [null, 'DELETE FROM inbox_translations WHERE message_id IN (SELECT m.id FROM inbox_messages m JOIN inbox_conversations c ON c.id = m.conversation_id JOIN inboxes i ON i.id = c.inbox_id WHERE i.owner_subject = ANY(@s) OR i.owner_id = ANY(@ids))'],
     ['inbox_messages', 'DELETE FROM inbox_messages WHERE conversation_id IN (SELECT c.id FROM inbox_conversations c JOIN inboxes i ON i.id = c.inbox_id WHERE i.owner_subject = ANY(@s) OR i.owner_id = ANY(@ids))'],
     ['inbox_conversations', 'DELETE FROM inbox_conversations WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     ['inbox_members', 'DELETE FROM inbox_members WHERE user_id = ANY(@ids) OR inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
