@@ -127,6 +127,7 @@ t('the app page: signed out it invites a sign-in, signed in it lists the chats a
     assert.ok(!out.text.includes('id="ov-footer"'), 'the app has no footer');
     const signed = await web('GET', '/vibe', ann);
     assert.ok(signed.text.includes('What can I help with, Ann?'));
+    assert.strictEqual((signed.text.match(/<h1[\s>]/g) || []).length, 1, 'one h1 on a new chat: the greeting (the header names it in a <p>)');
     assert.ok(signed.text.includes('class="vb-chat" href="/vibe/v-'), 'the rail lists their chats');
     // The rail leads to the rest of the person's agent: their tasks, their computers and robots, team workspaces.
     assert.ok(/href="https:\/\/openvibe\.actor\/tasks"[^>]*>[\s\S]*?<span>Tasks<\/span>/.test(signed.text), 'Tasks');
@@ -138,6 +139,7 @@ t('the app page: signed out it invites a sign-in, signed in it lists the chats a
     assert.ok(/^\/vibe\/v-[0-9a-f]{12}$/.test(form.location), form.location);
     const page = await web('GET', form.location, ann);
     assert.ok(page.text.includes('hello from a form') && page.text.includes('vb-composer'));
+    assert.strictEqual((page.text.match(/<h1[\s>]/g) || []).length, 1, 'one h1 in a chat: its name');
     assert.strictEqual((await web('GET', form.location, bob)).status, 404, 'someone else\'s chat is not there');
 });
 

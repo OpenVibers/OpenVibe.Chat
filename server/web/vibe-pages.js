@@ -182,7 +182,7 @@ ${MARK}
             : '';
         const head = `<header class="vb-head">
 <button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show your chats">${ICON.menu}</button>
-<h1 class="vb-title" id="vb-title">${esc(title)}</h1>
+${room ? `<h1 class="vb-title" id="vb-title">${esc(title)}</h1>` : `<p class="vb-title" id="vb-title">${esc(title)}</p>`}
 ${room ? `<details class="vb-actions"><summary class="vb-icon" aria-label="Chat options">${ICON.more}</summary><div class="vb-pop">
 <form method="post" action="/vibe/${esc(room.slug)}/rename" class="vb-rename"><label for="vb-name">Name</label><input id="vb-name" name="name" maxlength="${vibe.TITLE_MAX}" value="${esc(room.name)}" required><button type="submit">Rename</button></form>
 <form method="post" action="/vibe/${esc(room.slug)}/delete" data-vb-delete><button type="submit" class="vb-danger">Delete this chat</button></form>
