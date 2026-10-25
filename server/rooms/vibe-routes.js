@@ -12,6 +12,13 @@
  *                      answered in the chat (server/rooms/how.js)
  *   PATCH  /:slug      { name } → { room }
  *   DELETE /:slug      204: the chat and its messages are deleted
+ *   GET    /memory     { on, notes: [{ id, text, source, created_at }], max }: what Vibe remembers about the person
+ *                      (server/rooms/vibe-memory.js)
+ *   POST   /memory     { text } → 201 { note } (a note of their own), 422 when it is empty, too long, secret-looking,
+ *                      already there, or memory is full
+ *   PUT    /memory/switch  { on } → { on }: with it off Vibe neither reads nor saves notes
+ *   DELETE /memory/:id 204, 404 when it is not theirs
+ *   DELETE /memory     { deleted }: every note goes
  */
 const express = require('express');
 const cache = require('openvibe-shared/cache-policy');
@@ -21,6 +28,7 @@ const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
 const vibe = require('./vibe');
 const how = require('./how');
+const memory = require('./vibe-memory');
 
 const router = express.Router();
 const startLimit = limits('chat.vibe.start', { minute: 10, hour: 120 });
@@ -78,6 +86,36 @@ router.post('/picture', requireAuth, personOnly, pictureLimit, (req, res, next) 
         if (room) await vibe.erase(room.id).catch(() => {});   // a picture Pics refused leaves no empty chat behind
         send(res, err);
     }
+});
+
+// Memory, registered before /:slug (a chat's slug always starts with v-, so the two never meet).
+router.get('/memory', requireAuth, personOnly, async (req, res) => {
+    try {
+        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ on: await memory.isOn(req.user), notes: await memory.list(req.user), max: memory.MAX_NOTES });
+    } catch (err) { send(res, err); }
+});
+router.post('/memory', requireAuth, personOnly, manageLimit, async (req, res) => {
+    try {
+        const out = await memory.add(req.user, req.body && req.body.text, { source: 'you' });
+        if (out.error) return res.status(422).json({ error: out.error, code: 'vibe.memory_refused' });
+        res.status(201).json(out);
+    } catch (err) { send(res, err); }
+});
+router.put('/memory/switch', requireAuth, personOnly, manageLimit, async (req, res) => {
+    try {
+        const on = req.body && req.body.on;
+        if (typeof on !== 'boolean') return res.status(422).json({ error: 'Send { "on": true } or { "on": false }', code: 'vibe.memory_switch' });
+        res.json({ on: await memory.setOn(req.user, on) });
+    } catch (err) { send(res, err); }
+});
+router.delete('/memory/:id', requireAuth, personOnly, manageLimit, async (req, res) => {
+    try {
+        if (!(await memory.remove(req.user, req.params.id))) return res.status(404).json({ error: 'No such note', code: 'vibe.memory_not_found' });
+        res.status(204).end();
+    } catch (err) { send(res, err); }
+});
+router.delete('/memory', requireAuth, personOnly, manageLimit, async (req, res) => {
+    try { res.json({ deleted: await memory.clear(req.user) }); } catch (err) { send(res, err); }
 });
 
 router.get('/:slug/how', requireAuth, personOnly, async (req, res) => {

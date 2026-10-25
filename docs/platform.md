@@ -24,7 +24,8 @@ center (MagicBrowse privacy), getstream.io (Stream vs Sendbird), rumbletalk.com,
 
 **One conversation engine, three faces**, each a module behind the same API, SDK and socket:
 
-1. **For people** (openvibe.chat): Vibe, OpenVibe's assistant (`/vibe`), direct messages, rooms with AI members,
+1. **For people** (openvibe.chat): Vibe, OpenVibe's assistant (`/vibe`; it keeps short notes you ask it to remember,
+   which you see, add, delete or switch off on `/vibe/memory`), direct messages, rooms with AI members,
    servers with voice, the global room and stream chat. One OpenVibe account.
 2. **For any website** (`<script src="https://openvibe.chat/widget.js" data-…>`), one tag with three modes:
    - **Support inbox**: a team's inbox. A visitor writes; Vibe answers first from the team's own instructions and pages

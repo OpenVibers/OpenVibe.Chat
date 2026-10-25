@@ -11,12 +11,16 @@
  *   POST /vibe/:slug            form: a message in the chat
  *   POST /vibe/:slug/rename     form: { name }
  *   POST /vibe/:slug/delete     form: the chat and its messages go
+ *   GET  /vibe/memory           what Vibe remembers about the person (server/rooms/vibe-memory.js), with forms to add a
+ *                               note (POST /vibe/memory), delete one (POST /vibe/memory/:id/delete), forget everything
+ *                               (POST /vibe/memory/clear) and switch the memory off or on (POST /vibe/memory/switch)
  */
 const md = require('../../public/web/vibe-md.js');
 const pictures = require('../rooms/pictures');
 const rooms = require('../rooms/rooms');
 const vibe = require('../rooms/vibe');
 const how = require('../rooms/how');
+const memory = require('../rooms/vibe-memory');
 const { esc } = require('./layout');
 
 const SUGGESTIONS = [
@@ -57,6 +61,7 @@ const ICON = {
     team: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 9h6M7 13h10"/></svg>',
     agents: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
     search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>',
+    memory: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h12v17l-6-4-6 4Z"/></svg>',
 };
 
 /** A search hit's message, cut to about 90 characters around the first match, with the match marked. */
@@ -72,7 +77,7 @@ function snippet(text, q) {
 /** The mark Vibe signs its answers with (the network's V, in the accent). */
 const MARK = '<span class="vb-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 5l7 14 7-14"/></svg></span>';
 
-function rail({ chats, current, signedIn, allowance, query = '' }) {
+function rail({ chats, current, signedIn, allowance, query = '', here = null }) {
     const groups = groupChats(chats);
     // The search's own words are never written back into the page (a link could carry anyone's words): the box gets
     // them from the address in the browser, and the results say only what matched in the person's own chats.
@@ -97,6 +102,7 @@ ${signedIn ? `<form class="vb-search" action="/vibe" method="get" role="search">
 <nav class="vb-rail-more" aria-label="More of OpenVibe.Chat">
 <a href="https://openvibe.actor/tasks" title="Every task you gave an agent, one-off or recurring, with what it cost">${ICON.tasks}<span>Tasks</span></a>
 <a href="https://openvibe.actor/me/agents" title="Recurring work in plain words: an agent with standing instructions, a memory you can edit, a schedule and quiet hours">${ICON.agents}<span>Your agents</span></a>
+${signedIn ? `<a href="/vibe/memory" title="What Vibe remembers about you across your chats: see, add or delete each note"${here === 'memory' ? ' aria-current="page"' : ''}>${ICON.memory}<span>Memory</span></a>` : ''}
 <a href="https://openvibe.bot/machines" title="Your computers and robots: pair one, see its screen, set what agents may do on it">${ICON.computer}<span>Computers &amp; robots</span></a>
 <a href="/work" title="A room where your team and Vibe work together: a work queue, alerts and a shared screen">${ICON.team}<span>Work together</span></a>
 <a href="/messages">${ICON.messages}<span>Messages</span></a>
@@ -215,6 +221,81 @@ ${room ? thread : hello}
     }
 
     router.get('/vibe', async (req, res) => { await render(req, res); });
+
+    // ── Memory: what Vibe remembers about the person across their chats ──
+    const dayOf = (ts) => { const at = atOf(ts); return at ? new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : ''; };
+    async function renderMemory(req, res, actor, { status = 200, error = null, draft = '' } = {}) {
+        const user = actor.user;
+        const [notes, on, chats, allowance] = await Promise.all([memory.list(user), memory.isOn(user), vibe.list(user), allowanceOf(user)]);
+        const body = `<div class="vb" id="vb">
+${rail({ chats, current: null, signedIn: true, allowance, here: 'memory' })}
+<div class="vb-scrim" data-vb-close hidden></div>
+<section class="vb-main" aria-label="What Vibe remembers about you">
+<header class="vb-head">
+<button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show your chats">${ICON.menu}</button>
+<p class="vb-title" id="vb-title">Memory</p>
+<a class="vb-icon vb-head-new" href="/vibe" aria-label="New chat">${ICON.new}</a>
+</header>
+<div class="vb-scroll" id="vb-scroll">
+${error ? notice('error', error) : ''}
+<div class="vb-page">
+<h1>What Vibe remembers about you</h1>
+<p class="vb-sub">Short notes Vibe keeps across your chats with it: what you asked it to remember, or a preference you told it. Only your own chats with Vibe read them, never a room it was added to. It never keeps passwords, keys or card numbers.</p>
+<form class="vb-mem-switch" method="post" action="/vibe/memory/switch">
+<p><b>${on ? 'Memory is on.' : 'Memory is off.'}</b> ${on ? 'Vibe reads these notes in your chats and can add to them.' : 'Vibe neither reads nor saves notes. The ones below stay until you delete them.'}</p>
+<input type="hidden" name="on" value="${on ? '0' : '1'}"><button type="submit" class="vb-btn">${on ? 'Turn memory off' : 'Turn memory on'}</button>
+</form>
+<form class="vb-mem-add" method="post" action="/vibe/memory">
+<label for="vb-note">Add a note</label>
+<input id="vb-note" name="text" maxlength="${memory.TEXT_MAX}" placeholder="I am vegetarian. Use kilometres." value="${esc(draft)}" required>
+<button type="submit" class="vb-btn vb-btn-primary">Add</button>
+</form>
+${notes.length ? `<h2 class="vb-group">${notes.length} of ${memory.MAX_NOTES} notes</h2>
+<ul class="vb-notes">${notes.map((n) => `<li><p>${esc(n.text)}</p><small>${n.source === 'you' ? 'Added by you' : 'Saved by Vibe'} · ${esc(dayOf(n.created_at))}</small>
+<form method="post" action="/vibe/memory/${n.id}/delete"><button type="submit" class="vb-btn vb-btn-quiet" aria-label="Delete the note: ${esc(n.text.slice(0, 60))}">Delete</button></form></li>`).join('')}</ul>
+<form method="post" action="/vibe/memory/clear" data-vb-confirm="Delete every note? Vibe forgets them all."><button type="submit" class="vb-btn vb-danger">Forget everything</button></form>`
+        : '<p class="vb-rail-note">Nothing yet. Tell Vibe “remember that I…” in a chat, or add a note above.</p>'}
+</div>
+</div>
+</section>
+</div>`;
+        await page(req, res, status, {
+            actor, app: true, active: 'vibe', path: '/vibe/memory', title: 'Memory · Vibe', robots: 'noindex, nofollow', body,
+            page: { view: 'vibe', memory: true, room: null, me: user.id, latest: 0, waiting: false, enabled: vibe.enabled(), signedIn: true },
+        });
+    }
+
+    router.get('/vibe/memory', async (req, res) => {
+        const actor = await viewerOf(req);
+        if (actor.kind !== 'user') return res.redirect(303, `/auth/login?next=${encodeURIComponent('/vibe/memory')}`);
+        await renderMemory(req, res, actor);
+    });
+
+    router.post('/vibe/memory', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const text = String((req.body && req.body.text) || '');
+        const out = await memory.add(actor.user, text, { source: 'you' });
+        if (out.error) return renderMemory(req, res, actor, { status: 422, error: out.error, draft: text.slice(0, memory.TEXT_MAX) });
+        res.redirect(303, '/vibe/memory');
+    });
+
+    router.post('/vibe/memory/switch', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        await memory.setOn(actor.user, String((req.body && req.body.on) || '') === '1');
+        res.redirect(303, '/vibe/memory');
+    });
+
+    router.post('/vibe/memory/clear', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        await memory.clear(actor.user);
+        res.redirect(303, '/vibe/memory');
+    });
+
+    router.post('/vibe/memory/:id/delete', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        await memory.remove(actor.user, req.params.id);
+        res.redirect(303, '/vibe/memory');
+    });
 
     router.get('/vibe/:slug', async (req, res) => {
         const actor = await viewerOf(req);
