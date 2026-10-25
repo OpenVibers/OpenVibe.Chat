@@ -405,6 +405,14 @@ member on their first visit, and nobody else reads it, whatever role they once h
 - **Results** of every task, whoever ran it, are announced in the room by its Vibe with a link to the task's page
   (`/r/:slug/tasks/:id`: details, the full result, sources, cost). Open pages refresh the panel when the chat socket
   sends `room_task`.
+- **Alerts into the room** (`server/rooms/hooks.js`, migration 0029). The room's owner makes up to five hooks on its
+  settings page: an address (`POST /api/chat/hooks/rh_…`) and a secret, shown once. A POST signed like an
+  OpenVibe.Events delivery (X-OpenVibe-Signature-V2 over the raw body, ±5 minutes; an OpenVibe.Watch webhook action with
+  the secret as a project `secret_ref` sends exactly that) becomes a message from the room's Vibe: a Watch firing
+  ("🔔 Site errors: Live home p95 fired: 2.4 (was 0.9)" and the watch's link), an OpenVibe event, or `{ "text" }`. A hook
+  can also queue a task of a chosen kind for the person who made it, while they may still post there. Wrong or stale
+  signature 401, unknown hook 404, unreadable body 422, past 60 an hour 429; a repeated X-OpenVibe-Delivery-Id changes
+  nothing. Hooks are in their maker's export and go when the account does.
 - **Cancelling** is the asker's or a moderator's. Limits: 20 tasks an hour per person, 300 a day per room.
 - **A shared screen** (migration `0028_room_screen.sql`): a room's managers set a screen share link from OpenVibe.Bot
   (`https://openvibe.bot/screen/…`, made by the computer's owner on its screen page; nothing else is accepted). Members

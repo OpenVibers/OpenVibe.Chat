@@ -27,7 +27,7 @@ const TABLES = [
     'channel_moderators', 'channel_moderation_settings', 'emotes', 'user_tags', 'chat_ai_summaries', 'chat_timeline_events',
     'ctx_users', 'ctx_streams', 'ctx_managed_streams', 'ctx_channels', 'ctx_sync', 'events_outbox', 'service_outbox',
     'chat_ingress_applied', 'audio_requests', 'import_hold', 'import_runs', 'chat_meta', 'deploy_releases',
-    'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'room_ai_members', 'room_ai_usage', 'room_tasks', 'vibe_usage', 'inboxes', 'inbox_members', 'inbox_conversations', 'inbox_messages', 'inbox_ai_usage', 'inbox_saved_replies', 'inbox_webhooks', 'inbox_actions', 'inbox_translations', 'feeds', 'feed_sessions', 'feed_events', 'chat_servers', 'chat_server_members', 'chat_server_invites', 'token_revocations', 'chat_control_log',
+    'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'room_ai_members', 'room_ai_usage', 'room_tasks', 'room_hooks', 'vibe_usage', 'inboxes', 'inbox_members', 'inbox_conversations', 'inbox_messages', 'inbox_ai_usage', 'inbox_saved_replies', 'inbox_webhooks', 'inbox_actions', 'inbox_translations', 'feeds', 'feed_sessions', 'feed_events', 'chat_servers', 'chat_server_members', 'chat_server_invites', 'token_revocations', 'chat_control_log',
     'network_blocks', 'account_data_events', 'ticket_conversations', 'ticket_messages', 'telemetry_samples',
 ];
 const INDEXES = [
