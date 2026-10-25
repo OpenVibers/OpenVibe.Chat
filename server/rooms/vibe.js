@@ -14,6 +14,11 @@
  *   rename(room, user, name)   → the room
  *   remove(room, user)         → the chat and its messages are deleted (not archived: it was the person's own)
  *   repliesToday(user) / countReply(user)   the person's answers from Vibe this UTC day, across all their chats
+ *   work(room, user, text, mode) → { message, task }: a Research, Agent or Code request (the composer's modes): the
+ *                                  message is posted without Vibe's instant answer and becomes a task of the chat
+ *                                  (server/rooms/workspace.js) on the person's own OpenVibe.Actor allowance: research
+ *                                  with sources; Agent on their computer (Node, through Bot); Code with OpenVibe.Codes
+ *                                  on their machine (through Run). Vibe says it is on it, and posts the result here.
  *
  * Limits: config.ai.vibeRepliesPerDay answers a person a day, MAX_CHATS chats kept (starting one more deletes the
  * oldest), and each message goes through the rooms' own post checks (length, spam, rate).
@@ -81,6 +86,55 @@ async function start(user, text) {
     }
 }
 
+// The composer's modes beyond Chat: each a kind of task in the chat's queue.
+const MODES = Object.freeze({ research: 'research', agent: 'computer', code: 'code' });
+const ON_IT = {
+    research: 'On it: I am researching this as an agent task, with sources. The answer comes back right here, usually within a few minutes.',
+    computer: 'On it: I am doing this on your own computer, through OpenVibe.Node, at the level you set there. I will say here what I did.',
+    code: 'On it: I sent this to OpenVibe.Codes on your own computer (through OpenVibe.Run). The pull request comes back here when it is ready.',
+};
+
+async function work(room, user, text, mode) {
+    const kind = MODES[String(mode || '')];
+    if (!kind) fail(422, 'vibe.mode', 'Pick Chat, Research, Agent or Code');
+    if (!isVibeRoom(room) || !user || Number(room.owner_id) !== Number(user.id)) fail(404, 'rooms.not_found', 'No such chat');
+    const message = await rooms.post(room, user, text, { ai: false });
+    const workspace = require('./workspace');
+    const member = await db.get("SELECT * FROM room_ai_members WHERE room_id = ? AND handle = 'vibe'", [room.id]);
+    const say = async (line) => {
+        if (!member) return null;
+        const posted = await rooms.postAsAi(room, member, line);
+        try { require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message: posted }); } catch { /* sockets are optional */ }
+        return posted;
+    };
+    let task;
+    try {
+        task = await workspace.add(room, user, { title: String(text || ''), details: String(text || ''), kind, via: 'vibe', sourceMessage: message.id });
+        if (kind !== 'research') task = await workspace.runOnComputer(room, user, task.id);
+    } catch (err) {
+        if (!(err && err.status)) throw err;
+        await say(`I could not start that: ${err.message}.`);
+        return { message, task: null };
+    }
+    // A task Actor refused at once was already answered in the chat (workspace.announce) with Actor's reason.
+    if (task.status !== 'failed') await say(`${ON_IT[kind]} ${config.web.baseUrl}${task.url}`);
+    return { message, task };
+}
+
+/** A new chat that starts with a Research, Agent or Code request. → { room, message, task } */
+async function startWork(user, text, mode) {
+    const body = String(text || '').replace(/\r\n/g, '\n').trim();
+    if (!MODES[String(mode || '')]) fail(422, 'vibe.mode', 'Pick Chat, Research, Agent or Code');
+    if (!body) fail(422, 'rooms.empty', 'Write something first');
+    const room = await createRoom(user, body);
+    let out;
+    try { out = await work(room, user, body, mode); } catch (err) {
+        if (err && err.code && String(err.code).startsWith('rooms.')) await db.tx(() => erase(room.id));   // refused first message: no empty chat
+        throw err;
+    }
+    return { room: await rooms.publicRoom(room, { role: 'owner' }), ...out };
+}
+
 async function list(user, { limit = 100 } = {}) {
     if (!user) return [];
     const lim = Math.min(MAX_CHATS, Math.max(1, Number(limit) || 100));
@@ -125,4 +179,4 @@ async function countReply(user) {
         ON CONFLICT (user_id, day) DO UPDATE SET replies = vibe_usage.replies + 1`, [user.id, today()]);
 }
 
-module.exports = { VIBE, MAX_CHATS, TITLE_MAX, DEFAULT_TITLE, VibeError, enabled, isVibeRoom, titleOf, start, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, ownChat, rename, remove, repliesToday, countReply };
+module.exports = { VIBE, MAX_CHATS, TITLE_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, ownChat, rename, remove, repliesToday, countReply };

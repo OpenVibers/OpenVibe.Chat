@@ -54,7 +54,8 @@ function shape(t, room) {
 }
 
 async function mustRead(room, user) {
-    if (!rooms.isWorkspace(room)) fail(404, 'work.not_workspace', 'This room has no work queue');
+    // A workspace room's queue, or a Vibe chat's own (its Research, Agent and Code requests, server/rooms/vibe.js).
+    if (!rooms.isWorkspace(room) && Number(room.assistant) !== 1) fail(404, 'work.not_workspace', 'This room has no work queue');
     const a = await rooms.access(room, user);
     if (!a.read) fail(404, 'rooms.not_found', 'No such room');
     return a;
@@ -263,13 +264,14 @@ async function announce(room, t, deps = {}) {
     const members = await db.all('SELECT * FROM room_ai_members WHERE room_id = ? AND enabled = 1 ORDER BY (handle = \'vibe\') DESC, id LIMIT 1', [room.id]);
     const member = members[0];
     const who = t.requester_name || t.requester_username || 'someone';
+    const asked = Number(room.assistant) === 1 ? '' : ` (asked by ${who})`;   // a Vibe chat has one person in it
     let text;
     if (t.status === 'succeeded') {
         const body = String(t.result || '').trim();
         const clip = body.length > 1500 ? `${body.slice(0, 1500).replace(/\s+\S*$/, '')}…` : body;
-        text = `✅ Done: "${t.title}" (asked by ${who})${clip ? `\n\n${clip}` : ''}${t.result_url ? `\n\n${t.result_url}` : ''}\n\nFull result: ${config.web.baseUrl}/r/${room.slug}/tasks/${Number(t.id)}`;
+        text = `✅ Done: "${t.title}"${asked}${clip ? `\n\n${clip}` : ''}${t.result_url ? `\n\n${t.result_url}` : ''}\n\nFull result: ${config.web.baseUrl}/r/${room.slug}/tasks/${Number(t.id)}`;
     } else if (t.status === 'failed') {
-        text = `⚠️ Could not finish "${t.title}" (asked by ${who}): ${t.error || 'it did not work out'}. ${config.web.baseUrl}/r/${room.slug}/tasks/${Number(t.id)}`;
+        text = `⚠️ Could not finish "${t.title}"${asked}: ${t.error || 'it did not work out'}. ${config.web.baseUrl}/r/${room.slug}/tasks/${Number(t.id)}`;
     } else {
         text = `Cancelled: "${t.title}".`;
     }

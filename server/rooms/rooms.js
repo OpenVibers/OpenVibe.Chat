@@ -260,7 +260,7 @@ async function announceDeleted(room, ids) {
     }
 }
 
-async function post(room, user, text, { now = Date.now() } = {}) {
+async function post(room, user, text, { now = Date.now(), ai = true } = {}) {
     const a = await access(room, user);
     if (!user) fail(401, 'rooms.sign_in', 'Sign in to chat');
     if (siteBanned(user)) fail(403, 'rooms.banned', 'Your account is banned from chat');
@@ -288,8 +288,9 @@ async function post(room, user, text, { now = Date.now() } = {}) {
         return Number(r.lastInsertRowid);
     });
     const row = await messageById(id);
-    // A message naming one of the room's AI members (@handle) gets its answer after this one is out.
-    setImmediate(() => { require('./ai-members').afterPost(room, row, user).catch(() => {}); });
+    // A message naming one of the room's AI members (@handle) gets its answer after this one is out. `ai: false` posts
+    // without one (a Vibe chat's Research, Agent or Code request: the answer comes from the task instead).
+    if (ai) setImmediate(() => { require('./ai-members').afterPost(room, row, user).catch(() => {}); });
     return row;
 }
 

@@ -204,6 +204,11 @@
   var del = app.querySelector('[data-vb-delete]');
   if (del) del.addEventListener('submit', function (e) { if (!window.confirm('Delete this chat? Its messages go too.')) e.preventDefault(); });
 
+  // ── Modes: the box says what the chosen one will do ──
+  if (form) [].forEach.call(form.querySelectorAll('input[name="mode"]'), function (r) {
+    r.addEventListener('change', function () { if (r.checked && input && r.getAttribute('data-placeholder') && !form.dataset.signin) input.placeholder = r.getAttribute('data-placeholder'); input.focus(); });
+  });
+
   // ── Sending ──
   if (form) form.addEventListener('submit', function (e) {
     var text = input.value.trim();
@@ -225,7 +230,12 @@
     showWait(); toBottom();
     input.value = ''; picture = null; if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; } if (fileInput) fileInput.value = ''; input.required = true; grow();
     var url, init;
-    if (sendingPicture) {
+    var modeEl = form.querySelector('input[name="mode"]:checked'), mode = modeEl ? modeEl.value : 'chat';
+    if (mode !== 'chat' && !sendingPicture) {
+      // Research, Agent or Code: an agent task of this chat; Vibe says it is on it, and the result comes back here.
+      url = room ? '/api/chat/vibe/' + encodeURIComponent(room) + '/ask' : '/api/chat/vibe';
+      init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, mode: mode }) };
+    } else if (sendingPicture) {
       // The picture is the body; the question rides in X-Caption. A new chat starts with it (/api/chat/vibe/picture).
       url = room ? '/api/chat/rooms/' + encodeURIComponent(room) + '/pictures' : '/api/chat/vibe/picture';
       init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': sendingPicture.file.type, 'X-Caption': encodeURIComponent(text) }, body: sendingPicture.file };
