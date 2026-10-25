@@ -91,6 +91,7 @@ const LIVE = 'https://openvibe.live';
 const FAQ = [
     { q: 'Do I need an account to read?', a: 'No. Global chat, public rooms and public servers read without an account. To write, sign in with your free OpenVibe account, the same one every OpenVibe site uses.' },
     { q: 'How do I start a server?', a: 'Sign in, open Servers and give it a name. It starts with text and voice channels; add more, give people roles, and share an invite link. A server can be public or private.' },
+    { q: 'What is Vibe?', a: 'OpenVibe\'s own assistant, free with your account: it searches the web and all of OpenVibe, reads pages and pictures you share, remembers what you ask it to, and sets up work that runs every day for you. Your chats with it are private.' },
     { q: 'What are AI members?', a: 'An AI you add to a room or channel, with a name, a persona and a memory of that room. It answers when someone writes its @name, with OpenVibe\'s model or one from your own AI key.' },
     { q: 'Can I send pictures?', a: 'Yes, in rooms and server channels. A picture goes to OpenVibe.Pics as yours, with its hidden location and camera details removed, and shows inline in the conversation.' },
     { q: 'How many people fit in a call?', a: 'Up to eight in a voice or video call, with mute, camera and kick controls. Call one person from your messages, or open a call room.' },
@@ -128,6 +129,13 @@ function placesSection(a) {
     ].join('\n');
 }
 
+/** Ask Vibe from the front page: the question opens a new Vibe chat with it in the box (never sent for you). */
+function vibeSection() {
+    return `<section class="oc-home-sec oc-vibe-card" aria-labelledby="oc-h-vibe"><h2 id="oc-h-vibe">Ask Vibe, OpenVibe's assistant</h2>
+<p class="oc-muted">Free with your account. It searches the web and all of OpenVibe, reads the pages and pictures you share, remembers what you ask it to, and sets up work that runs every day for you. Your chats with it are private.</p>
+<form class="oc-vibe-ask" action="/vibe" method="get" role="search"><label for="oc-vibe-q" class="oc-sr">Ask Vibe</label><input id="oc-vibe-q" name="ask" type="text" maxlength="1200" placeholder="Ask Vibe anything" autocomplete="off" enterkeyhint="go" required><button type="submit" class="oc-button">Ask</button></form></section>`;
+}
+
 function stepsSection() {
     const steps = [
         ['Sign in once', 'Your OpenVibe account works on every OpenVibe site, and your chat settings follow it.'],
@@ -151,9 +159,9 @@ function moreSection() {
     return `<section class="oc-home-sec" aria-labelledby="oc-h-more"><h2 id="oc-h-more">More on OpenVibe</h2><ul class="oc-more" role="list">${more.map(([href, name, text]) => `<li><a href="${href}/"><strong>${esc(name)}</strong><span>${esc(text)}</span></a></li>`).join('')}</ul></section>`;
 }
 
-/** Everything around global chat: the numbers, then stream chats, servers and rooms, how it works, questions, more. */
+/** Everything around global chat: the numbers, Ask Vibe, then stream chats, servers and rooms, how it works, questions, more. */
 function sections(a) {
-    return { stats: stats(a), streams: streamsSection(a), places: placesSection(a), steps: stepsSection(), faq: faqSection(), more: moreSection() };
+    return { stats: stats(a), vibe: vibeSection(), streams: streamsSection(a), places: placesSection(a), steps: stepsSection(), faq: faqSection(), more: moreSection() };
 }
 
 module.exports = { activity, sections, FAQ, _reset: () => { cached = null; } };
