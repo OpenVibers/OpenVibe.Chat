@@ -141,6 +141,25 @@ body.oc-app-body { overflow: hidden; }
 /* An answer as it is written (vibe.js streamText): the text, then the dots, small. */
 .vb-wait .vb-streaming + .vb-dots { margin-top: 6px; transform: scale(.8); transform-origin: left center; }
 
+/* Under an answer: Copy and Try again, quiet until hovered; a code block's own Copy in its corner. */
+.vb-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.vb-acts form { display: contents; }
+.vb-act {
+  padding: 4px 10px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--oc-muted);
+  font: inherit; font-size: .8rem; cursor: pointer;
+}
+.vb-act:hover { color: var(--oc-text); border-color: var(--oc-line); background: var(--oc-panel-2); }
+.vb-act:focus-visible, .vb-copy-code:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
+.vb-act.is-done, .vb-copy-code.is-done { color: var(--oc-green, var(--oc-accent)); }
+.vb-md pre { position: relative; }
+.vb-copy-code {
+  position: absolute; top: 6px; right: 6px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--oc-line);
+  background: var(--oc-panel); color: var(--oc-muted); font: inherit; font-size: .75rem; cursor: pointer;
+}
+.vb-copy-code:hover { color: var(--oc-text); }
+.vb-copy-code::before { content: 'Copy'; }
+.vb-copy-code.is-done::before { content: 'Copied'; }
+
 /* ── A new chat ───────────────────────────────────────────────────────────── */
 .vb-hello { max-width: var(--vb-col); margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px 0 8px; }
 .vb-hello .vb-mark { width: 52px; height: 52px; margin-bottom: 14px; }
