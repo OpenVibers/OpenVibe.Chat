@@ -243,6 +243,8 @@
       var head = ul.previousElementSibling; if (head && head.classList.contains('vb-group')) head.hidden = !shown;
     });
   });
+  // Forms that undo something (Memory's "Forget everything") ask first.
+  [].forEach.call(app.querySelectorAll('form[data-vb-confirm]'), function (f) { f.addEventListener('submit', function (e) { if (!window.confirm(f.getAttribute('data-vb-confirm'))) e.preventDefault(); }); });
   var del = app.querySelector('[data-vb-delete]');
   if (del) del.addEventListener('submit', function (e) { if (!window.confirm('Delete this chat? Its messages go too.')) e.preventDefault(); });
 
@@ -306,6 +308,6 @@
 
   if (cfg.waiting) showWait();
   connect();
-  toBottom();
+  if (!cfg.memory) toBottom();   // the Memory page reads from the top
   window.addEventListener('pagehide', function () { var w = ws; room = null; if (w) w.close(); });
 })();
