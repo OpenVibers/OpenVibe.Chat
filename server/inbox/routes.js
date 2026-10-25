@@ -19,6 +19,8 @@
  *   POST   /:id/members      { username } (owner)         DELETE /:id/members/:userId (owner)
  *   POST   /:id/identity     { action: on | rotate | off } (owner) → { identity_secret }: verified visitors
  *   GET    /:id/replies      { replies }: saved replies    POST /:id/replies { shortcut, body }    DELETE /:id/replies/:replyId
+ *   POST   /:id/conversations/:cid/messages/:mid/translate  { to } → { text, lang, cached }: a message in the reader's language
+ *   POST   /:id/translate    { text, to } → { text, lang }: a reply draft in the visitor's language
  *   GET    /:id/webhooks     (owner) { webhooks }    POST /:id/webhooks { url } → 201 { webhook, secret }
  *   POST   /:id/webhooks/:hookId/test → { ok, status, error }    DELETE /:id/webhooks/:hookId
  *   GET    /:id/conversations                  ?status=active|bot|waiting|open|resolved
@@ -35,9 +37,10 @@ const { requireAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const inboxes = require('./inbox');
 const webhooks = require('./webhooks');
+const translate = require('./translate');
 
 function send(res, err) {
-    if (err instanceof inboxes.InboxError || err instanceof webhooks.WebhookError) return res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof inboxes.InboxError || err instanceof webhooks.WebhookError || err instanceof translate.TranslateError) return res.status(err.status).json({ error: err.message, code: err.code });
     console.error('[Inbox]', err && err.message);
     return res.status(500).json({ error: 'Something went wrong' });
 }
@@ -143,6 +146,15 @@ agents.post('/:id/replies', requireAuth, manageLimit, async (req, res) => {
 agents.delete('/:id/replies/:replyId', requireAuth, manageLimit, async (req, res) => {
     const inbox = await agentInbox(req, res); if (!inbox) return;
     try { res.json({ replies: await inboxes.deleteReply(inbox, req.user, req.params.replyId) }); } catch (err) { send(res, err); }
+});
+const translateLimit = rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false, message: { error: 'Slow down a little', code: 'inbox.slow_down' } });
+agents.post('/:id/conversations/:cid/messages/:mid/translate', requireAuth, translateLimit, async (req, res) => {
+    const conv = await agentConversation(req, res); if (!conv) return;
+    try { noStore(res).json(await translate.message(req.inbox, conv, req.params.mid, req.body && req.body.to)); } catch (err) { send(res, err); }
+});
+agents.post('/:id/translate', requireAuth, translateLimit, async (req, res) => {
+    const inbox = await agentInbox(req, res); if (!inbox) return;
+    try { noStore(res).json(await translate.draft(inbox, req.body && req.body.text, req.body && req.body.to)); } catch (err) { send(res, err); }
 });
 agents.get('/:id/webhooks', requireAuth, async (req, res) => {
     const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;

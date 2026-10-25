@@ -47,7 +47,7 @@
     if (m.author === 'agent') { var p = thread.querySelector('.vb-me:not([data-id])'); if (p) { p.dataset.id = String(m.id); latest = Math.max(latest, Number(m.id)); return; } }
     clearTyping();
     var stick = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 160;
-    thread.appendChild(turn(m));
+    var li = turn(m); thread.appendChild(li); addTranslate(li);
     latest = Math.max(latest, Number(m.id));
     if (stick) bottom();
   }
@@ -95,6 +95,41 @@
       }
     };
     ws.onclose = function () { setTimeout(connect, delay); delay = Math.min(delay * 2, 30000); };
+  }
+
+  // Translation: a visitor's message into the reader's own language, and the reply draft into the visitor's.
+  var myLang = String((navigator.language || 'en')).toLowerCase();
+  function post(path, body) {
+    return fetch('/api/chat/inboxes/' + cfg.inbox + path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); });
+  }
+  function addTranslate(li) {
+    if (!li || !li.classList.contains('ib-visitor') || !li.dataset.id || li.querySelector('.ib-tr-btn')) return;
+    var body = li.querySelector('.vb-body'); if (!body) return;
+    var b = el('button', 'ib-tr-btn', 'Translate'); b.type = 'button';
+    b.addEventListener('click', function () {
+      b.disabled = true; b.textContent = 'Translating…';
+      post('/conversations/' + cfg.conversation + '/messages/' + li.dataset.id + '/translate', { to: myLang }).then(function (x) {
+        if (!x.ok) { b.disabled = false; b.textContent = (x.d && x.d.error) || 'Try again'; return; }
+        var p = el('p', 'ib-tr', x.d.text); p.lang = x.d.lang; b.replaceWith(p);
+      }).catch(function () { b.disabled = false; b.textContent = 'Try again'; });
+    });
+    body.appendChild(b);
+  }
+  if (thread) Array.prototype.forEach.call(thread.querySelectorAll('.ib-visitor'), addTranslate);
+  var trTo = document.getElementById('ib-tr-to');
+  if (trTo && input) {
+    trTo.closest('.ib-tr-pick').hidden = false;
+    trTo.addEventListener('change', function () {
+      var to = trTo.value, text = input.value.trim(); trTo.value = '';
+      if (!to || !text) return;
+      var was = input.value; input.disabled = true;
+      post('/translate', { text: text, to: to }).then(function (x) {
+        input.disabled = false;
+        if (!x.ok) { window.alert((x.d && x.d.error) || 'That did not translate.'); return; }
+        input.value = x.d.text; input.dataset.original = was; input.dispatchEvent(new Event('input')); input.focus();
+      }).catch(function () { input.disabled = false; });
+    });
   }
 
   // Saved replies: "/" at the start of the reply box lists them by shortcut; Enter, Tab or a click puts one in.

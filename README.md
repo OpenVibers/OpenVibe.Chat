@@ -469,6 +469,11 @@ for people and for companies, with "direct live support with an agent", "fully m
   waiting (once a conversation every 10 minutes) or rates. Delivery tries three times (now, 30 s, 5 min); each
   webhook shows its last answer, and 20 failures in a row switch it off. `GET/POST /api/chat/inboxes/:id/webhooks
   { url }`, `POST /:id/webhooks/:hookId/test`, `DELETE /:id/webhooks/:hookId`.
+- **Translation** (`server/inbox/translate.js`): "Translate" under a visitor's message puts it in the reader's
+  language (`POST /api/chat/inboxes/:id/conversations/:cid/messages/:mid/translate { to }`, kept per message and
+  language, so the next reader pays nothing), and "Translate my reply into…" turns the draft into the visitor's
+  (`POST /:id/translate { text, to }`). OpenVibe.AI translates; `CHAT_INBOX_TRANSLATIONS_PER_DAY` (300) new ones an
+  inbox a UTC day, 30 a minute a person.
 - **Saved replies:** the team's ready answers (`GET/POST /api/chat/inboxes/:id/replies { shortcut, body }`, `DELETE
   /:id/replies/:replyId`, or the settings page); typing `/` in the reply box lists them by shortcut (arrows, Enter or
   Tab). **Vibe knows the page** the visitor wrote from, and a verified visitor's name.

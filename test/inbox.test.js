@@ -270,6 +270,30 @@ t('webhooks: signed JSON for every event, a line for Slack when a visitor waits;
     } finally { webhooks._setSend(null); }
 });
 
+t('translation: a visitor\'s message into the reader\'s language (kept for the next reader), a reply draft into theirs', async () => {
+    reply = 'Hola, ¿en qué te ayudo?';
+    const v = (await widget('POST', '/visit', {})).body.token;
+    await widget('POST', '/messages', { token: v, message: 'Mi lámpara parpadea' });
+    const seen = await until(async () => { const m = (await widget('GET', `/messages?token=${v}`)).body; return m.messages.some((x) => x.author === 'ai') && m; }, 'Vibe answers');
+    const cid = seen.conversation.id;
+    const mid = seen.messages.find((x) => x.author === 'visitor').id;
+    reply = 'My lamp flickers';
+    turns.length = 0;
+    const r = await agentsApi('POST', `/${inbox.id}/conversations/${cid}/messages/${mid}/translate`, bob, { to: 'en' });
+    assert.deepStrictEqual([r.status, r.body.text, r.body.cached], [200, 'My lamp flickers', false]);
+    assert.ok(turns[0].input.messages[0].content.includes('into English'));
+    const again = await agentsApi('POST', `/${inbox.id}/conversations/${cid}/messages/${mid}/translate`, ann, { to: 'en' });
+    assert.ok(again.body.cached && turns.length === 1, 'the next reader pays nothing');
+    assert.strictEqual((await agentsApi('POST', `/${inbox.id}/conversations/${cid}/messages/${mid}/translate`, bob, { to: 'not a language' })).status, 422);
+    const outsider = h.addUser('eve', { subject: ids.newId('user') });
+    assert.strictEqual((await agentsApi('POST', `/${inbox.id}/conversations/${cid}/messages/${mid}/translate`, outsider, { to: 'en' })).status, 404);
+    reply = 'Hola, te mando una nueva hoy.';
+    const d = await agentsApi('POST', `/${inbox.id}/translate`, bob, { text: 'Hi, I will send you a new one today.', to: 'es' });
+    assert.deepStrictEqual([d.status, d.body.text, d.body.lang], [200, 'Hola, te mando una nueva hoy.', 'es']);
+    const app = await fetch(`${h.base}/inbox/${inbox.id}?c=${cid}`, { headers: { cookie: `ov_token=${bob.token}` } }).then((x) => x.text());
+    assert.ok(app.includes('id="ib-tr-to"') && app.includes('Translate my reply into'));
+});
+
 t('the embed page and the loader: frame-ancestors follow the allowed sites', async () => {
     let r = await fetch(`${h.base}/embed/inbox/${inbox.id}`);
     assert.strictEqual(r.status, 200);

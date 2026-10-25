@@ -20,6 +20,7 @@ const { embedOf } = require('../inbox/routes');
 const { esc, asset } = require('./layout');
 
 const WIDGET = path.join(__dirname, '..', '..', 'public', 'web', 'widget.js');
+const TR_LANGS = [['en', 'English'], ['es', 'Spanish'], ['pt', 'Portuguese'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'], ['nl', 'Dutch'], ['pl', 'Polish'], ['tr', 'Turkish'], ['ru', 'Russian'], ['uk', 'Ukrainian'], ['ar', 'Arabic'], ['hi', 'Hindi'], ['id', 'Indonesian'], ['vi', 'Vietnamese'], ['th', 'Thai'], ['ja', 'Japanese'], ['ko', 'Korean'], ['zh', 'Chinese'], ['sv', 'Swedish']];
 const STATUS = { bot: ['Vibe', 'vb-st-bot'], waiting: ['Waiting', 'vb-st-wait'], open: ['Open', 'vb-st-open'], resolved: ['Resolved', 'vb-st-done'] };
 const json = (v, d) => { if (Array.isArray(v)) return v; try { return JSON.parse(v || 'null') || d; } catch { return d; } };
 const ago = (ts) => {
@@ -154,7 +155,7 @@ ${current ? `${Number(current.verified) ? `<p class="ib-page">Verified by your s
 </div>
 ${current ? `<div class="vb-dock"><form class="vb-composer" id="vb-composer" method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}">
 <label class="oc-sr" for="vb-input">Reply</label><textarea id="vb-input" name="message" rows="1" maxlength="4000" placeholder="Reply as ${esc(actor.user.display_name || actor.user.username)}${saved.length ? ' · / for saved replies' : ''}" required aria-autocomplete="list"></textarea>
-<button class="vb-send" type="submit" aria-label="Send">&#8593;</button></form><p class="vb-fine">Replying takes the conversation from Vibe.</p></div>` : ''}
+<button class="vb-send" type="submit" aria-label="Send">&#8593;</button></form><p class="vb-fine">Replying takes the conversation from Vibe. <label class="ib-tr-pick" hidden>Translate my reply into <select id="ib-tr-to"><option value="">a language…</option>${TR_LANGS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label></p></div>` : ''}
 </section>
 </div>`;
         await page(req, res, 200, {
