@@ -136,6 +136,16 @@ t('the app page: signed out it invites a sign-in, signed in it lists the chats a
     assert.strictEqual((await web('GET', form.location, bob)).status, 404, 'someone else\'s chat is not there');
 });
 
+t('Ask Vibe from any OpenVibe site: the selection and the page fill a new chat\'s box, never send it', async () => {
+    let r = await web('GET', `/vibe?ask=${encodeURIComponent('What is <b>WHIP</b>?')}&from=${encodeURIComponent('https://openvibe.live/docs/whip#top')}`, ann);
+    assert.strictEqual(r.status, 200);
+    assert.match(r.text, /<textarea id="vb-input"[^>]*autofocus[^>]*>About this, on https:\/\/openvibe\.live\/docs\/whip:\n\nWhat is &lt;b&gt;WHIP&lt;\/b&gt;\?<\/textarea>/);
+    r = await web('GET', `/vibe?from=${encodeURIComponent('https://evil.test/x')}`, ann);
+    assert.match(r.text, /<textarea id="vb-input"[^>]*><\/textarea>/, 'only an OpenVibe site\'s address is taken');
+    r = await web('GET', `/vibe?ask=${encodeURIComponent('hello')}`);
+    assert.match(r.text, /name="next" value="\/vibe\?ask=hello"/, 'signed out, the question survives the sign-in');
+});
+
 t('answers render as escaped Markdown with http(s) links only', () => {
     assert.strictEqual(md.render('**hi** `<b>`'), '<p><strong>hi</strong> <code>&lt;b&gt;</code></p>');
     assert.ok(!md.render('<script>alert(1)</script>').includes('<script'));

@@ -86,7 +86,7 @@ function turn(m, me) {
     return `<li class="vb-turn vb-me" data-id="${Number(m.id) || 0}"><div class="vb-bubble"><p class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</p>${esc(m.message).replace(/\n/g, '<br>')}${pictures.pageHtml(m.message)}</div></li>`;
 }
 
-function composer({ slug, signedIn, enabled }) {
+function composer({ slug, signedIn, enabled, prefill = '' }) {
     const action = !signedIn ? `/auth/login` : slug ? `/vibe/${esc(slug)}` : '/vibe';
     // A picture (public/web/vibe.js): it goes to OpenVibe.Pics as the person, and Vibe sees it with the question.
     const attach = signedIn && enabled && pictures.enabled()
@@ -94,10 +94,10 @@ function composer({ slug, signedIn, enabled }) {
         : '';
     return `<div class="vb-preview" id="vb-preview" hidden></div>
 <form class="vb-composer" id="vb-composer" method="${signedIn ? 'post' : 'get'}" action="${action}"${signedIn ? '' : ' data-signin="1"'}>
-${signedIn ? '' : `<input type="hidden" name="next" value="${slug ? `/vibe/${esc(slug)}` : '/vibe'}">`}
+${signedIn ? '' : `<input type="hidden" name="next" value="${slug ? `/vibe/${esc(slug)}` : (prefill ? `/vibe?ask=${encodeURIComponent(prefill)}` : '/vibe')}">`}
 ${attach}
 <label class="oc-sr" for="vb-input">Message Vibe</label>
-<textarea id="vb-input" name="message" rows="1" maxlength="2000" placeholder="${signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)'}"${enabled ? '' : ' disabled'} required></textarea>
+<textarea id="vb-input" name="message" rows="${prefill ? 3 : 1}" maxlength="2000" placeholder="${signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)'}"${enabled ? '' : ' disabled'}${prefill ? ' autofocus' : ''} required>${esc(prefill)}</textarea>
 <button class="vb-send" type="submit" aria-label="Send"${enabled ? '' : ' disabled'}>${ICON.send}</button>
 </form>
 <p class="vb-fine">${enabled ? 'Vibe can get things wrong. Check what matters.' : 'Vibe is resting right now. Try again later.'}</p>`;
@@ -105,6 +105,21 @@ ${attach}
 
 function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit, notice }) {
     const allowanceOf = async (user) => ({ per_day: require('../config').ai.vibeRepliesPerDay, used_today: await vibe.repliesToday(user) });
+
+    /**
+     * "Ask Vibe" from any OpenVibe site (the shared navbar): ?ask=<the text they selected> and ?from=<the page's https
+     * address> fill a new chat's box, never send it. Only the text and an https address of an OpenVibe site are taken.
+     */
+    function prefillOf(q) {
+        const ask = String(q.ask || '').replace(/\r\n?/g, '\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '').trim().slice(0, 1200);
+        let from = '';
+        try {
+            const u = new URL(String(q.from || ''));
+            if (u.protocol === 'https:' && /(^|\.)(openvibe\.[a-z]+|openre\.stream)$/.test(u.hostname)) from = `${u.origin}${u.pathname}${u.search}`.slice(0, 400);
+        } catch { /* not an address */ }
+        if (!ask && !from) return '';
+        return [ask ? (from ? `About this, on ${from}:\n\n${ask}` : ask) : `About this page: ${from}\n\n`].join('').slice(0, 2000);
+    }
 
     async function render(req, res, { room = null, status = 200, error = null } = {}) {
         const actor = await viewerOf(req);
@@ -141,7 +156,7 @@ ${head}
 ${error ? notice('error', error) : ''}
 ${room ? thread : hello}
 </div>
-<div class="vb-dock">${composer({ slug: room && room.slug, signedIn: !!user, enabled })}</div>
+<div class="vb-dock">${composer({ slug: room && room.slug, signedIn: !!user, enabled, prefill: room ? '' : prefillOf(req.query || {}) })}</div>
 </section>
 </div>`;
         await page(req, res, status, {
