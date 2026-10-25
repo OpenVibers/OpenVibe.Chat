@@ -261,7 +261,7 @@ ${saved.length ? `<ul class="oc-members">${saved.map((r) => `<li><b>/${esc(r.sho
             page: { view: 'support', inbox: inbox.id, conversation: conv.id, latest: msgs.length ? msgs[msgs.length - 1].id : 0 },
             scripts: ['vibe-md.js', 'support.js'],
             body: `<p><a href="/messages">&larr; Messages</a></p>
-<h1><span class="ib-dot" style="background:${esc(inbox.color)}"></span> ${esc(inbox.name)} ${statusChip(conv.status)}</h1>
+<h1><span class="ib-dot" style="background:${esc(inbox.color)}"></span> ${esc(inbox.name)} <span class="oc-badge">${esc(STATUS[conv.status] ? STATUS[conv.status][0] : conv.status)}</span></h1>
 <p class="oc-muted">Your conversation with ${esc(inbox.name)}${conv.page_url ? `, from <a href="${esc(conv.page_url)}" rel="noopener nofollow" target="_blank">${esc(conv.page_url.replace(/^https?:\/\//, '').slice(0, 60))}</a>` : ''}. Replies show here and in the chat on their site.</p>
 <ol class="sp-thread" id="sp-thread" aria-live="polite">${msgs.map(line).join('')}</ol>
 <form class="oc-compose" method="post" action="/support/${esc(conv.id)}" id="sp-form"><label for="sp-input" class="oc-sr">Your message</label><textarea id="sp-input" name="message" maxlength="4000" rows="2" required placeholder="${conv.status === 'resolved' ? 'Write to start a new conversation' : 'Write a message'}"></textarea><button type="submit">Send</button></form>`,

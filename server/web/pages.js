@@ -303,7 +303,7 @@ ${parts.more}`,
         const unread = convs.reduce((n, c) => n + (Number(c.unread_count) || 0), 0);
         // Support conversations with sites' chats, where they signed in to OpenVibe (server/inbox/: theirs to follow up).
         const support = await require('../inbox/inbox').mySupport(me, { limit: 20 }).catch(() => []);
-        const supportList = support.length ? `<h2>Support</h2><ul class="oc-convs">${support.map((c) => { const t = hhmm(c.last_message_at); return `<li class="oc-conv"><a href="/support/${esc(c.id)}"><strong>${esc(c.inbox.name)}</strong> <span class="oc-badge">${esc({ bot: 'Vibe', waiting: 'Waiting', open: 'Open', resolved: 'Resolved' }[c.status] || c.status)}</span><span class="oc-muted oc-last">${esc(c.preview || '')}</span></a>${t.text ? `<time class="oc-time" datetime="${t.iso}">${t.iso.slice(0, 10)}</time>` : ''}</li>`; }).join('')}</ul>` : '';
+        const supportList = support.length ? `<h2>Support</h2><ul class="oc-convs">${support.map((c) => { const t = hhmm(c.last_message_at); return `<li class="oc-conv"><a href="/support/${esc(c.id)}"><strong>${esc(c.inbox.name)} <span class="oc-badge">${esc({ bot: 'Vibe', waiting: 'Waiting', open: 'Open', resolved: 'Resolved' }[c.status] || c.status)}</span></strong><span class="oc-muted oc-last">${esc(c.preview || '')}</span></a>${t.text ? `<time class="oc-time" datetime="${t.iso}">${t.iso.slice(0, 10)}</time>` : ''}</li>`; }).join('')}</ul>` : '';
         await page(req, res, 200, {
             actor, title: 'Messages', path: '/messages', active: 'messages', robots: 'noindex, nofollow', script: true,
             page: { view: 'inbox', unread, me: me.id },
