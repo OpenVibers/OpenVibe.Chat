@@ -128,18 +128,24 @@ const MODES = [
     ['code', 'Code', 'OpenVibe.Codes writes it on your computer and opens a pull request', 'What should I build or fix? Name the repository'],
 ];
 
+// The text files the attach button takes (read in the browser, vibe.js readText).
+const TEXT_FILES = 'text/plain,text/markdown,text/csv,application/json,.txt,.md,.markdown,.csv,.tsv,.json,.log,.xml,.yaml,.yml,.toml,.ini,.html,.css,.js,.mjs,.ts,.py,.go,.rs,.java,.c,.h,.cpp,.rb,.php,.sh,.sql';
+
 function composer({ slug, signedIn, enabled, prefill = '' }) {
     const action = !signedIn ? `/auth/login` : slug ? `/vibe/${esc(slug)}` : '/vibe';
-    // A picture (public/web/vibe.js): it goes to OpenVibe.Pics as the person, and Vibe sees it with the question.
-    const attach = signedIn && enabled && pictures.enabled()
-        ? `<input type="file" id="vb-file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" hidden><button class="vb-icon vb-attach" type="button" data-vb-attach aria-label="Add a picture" title="Add a picture">${ICON.attach}</button>`
+    // A picture (public/web/vibe.js): it goes to OpenVibe.Pics as the person, and Vibe sees it with the question. A text
+    // file (notes, a CSV, code) is read in the browser and goes into the message itself.
+    const pics = pictures.enabled();
+    const label = pics ? 'Add a picture or a text file' : 'Add a text file';
+    const attach = signedIn && enabled
+        ? `<input type="file" id="vb-file" accept="${pics ? 'image/jpeg,image/png,image/gif,image/webp,image/avif,' : ''}${TEXT_FILES}" hidden><button class="vb-icon vb-attach" type="button" data-vb-attach aria-label="${label}" title="${label}">${ICON.attach}</button>`
         : '';
     return `<div class="vb-preview" id="vb-preview" hidden></div>
 <form class="vb-composer" id="vb-composer" method="${signedIn ? 'post' : 'get'}" action="${action}"${signedIn ? '' : ' data-signin="1"'}>
 ${signedIn ? '' : `<input type="hidden" name="next" value="${slug ? `/vibe/${esc(slug)}` : (prefill ? `/vibe?ask=${encodeURIComponent(prefill)}` : '/vibe')}">`}
 ${attach}
 <label class="oc-sr" for="vb-input">Message Vibe</label>
-<textarea id="vb-input" name="message" rows="${prefill ? 3 : 1}" maxlength="2000" placeholder="${signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)'}"${enabled ? '' : ' disabled'}${prefill ? ' autofocus' : ''} required>${esc(prefill)}</textarea>
+<textarea id="vb-input" name="message" rows="${prefill ? 3 : 1}" maxlength="12000" placeholder="${signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)'}"${enabled ? '' : ' disabled'}${prefill ? ' autofocus' : ''} required>${esc(prefill)}</textarea>
 <button class="vb-send" type="submit" aria-label="Send"${enabled ? '' : ' disabled'}>${ICON.send}</button>
 <fieldset class="vb-modes" aria-label="What Vibe does with it">${MODES.map(([value, label, hint, placeholder], i) => `<label title="${esc(hint)}"><input type="radio" name="mode" value="${value}" data-placeholder="${esc(placeholder)}"${i ? '' : ' checked'}><span>${label}</span></label>`).join('')}</fieldset>
 </form>

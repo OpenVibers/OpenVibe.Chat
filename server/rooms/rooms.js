@@ -71,6 +71,7 @@ const ROLE_ORDER = { owner: 0, mod: 1, speaker: 2, participant: 3, member: 4, vi
 /** Services a room can be attached to, and what names the resource there. */
 const ATTACH_SERVICES = Object.freeze({ community: { resource: /^[a-z0-9][a-z0-9-]{1,39}$/, noun: 'space' } });
 const MAX_TEXT = 2000;
+const MAX_TEXT_VIBE = 12000;   // a person's message in their own Vibe chat: room for a pasted page, a file's text, code
 const MAX_AI_TEXT_VIBE = 8000;
 const MAX_ROOMS_PER_OWNER = 10;
 const RATE = { max: 6, windowMs: 10_000 };
@@ -271,8 +272,11 @@ async function post(room, user, text, { now = Date.now(), ai = true } = {}) {
     }
     const body = String(text || '').replace(/\r\n/g, '\n').trim();
     if (!body) fail(422, 'rooms.empty', 'Write something first');
-    if (body.length > MAX_TEXT) fail(422, 'rooms.too_long', `Messages are at most ${MAX_TEXT} characters`);
-    if (wordFilter.isSpam(body)) fail(422, 'rooms.spam', 'That looks like spam');
+    // A person's own Vibe chat has no other reader: longer messages, and no spam guess (pasted text has rows of = and links).
+    const ownVibe = Number(room.assistant) === 1 && Number(room.owner_id) === Number(user.id);
+    const max = ownVibe ? MAX_TEXT_VIBE : MAX_TEXT;
+    if (body.length > max) fail(422, 'rooms.too_long', `Messages are at most ${max} characters`);
+    if (!ownVibe && wordFilter.isSpam(body)) fail(422, 'rooms.spam', 'That looks like spam');
     if (!rateOk(`${room.id}:${user.id}`, now)) fail(429, 'rooms.slow_down', 'Slow down a little');
     if (room.slow_seconds > 0 && !a.moderate) {
         const last = await db.get('SELECT created_at FROM room_messages WHERE room_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1', [room.id, user.id]);
