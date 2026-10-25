@@ -13,6 +13,10 @@
  *   roll_dice         N dice of S sides
  *   pick_one          one of the options given, at random
  *   household_pantry  a Food household's pantry and plan (only for a member linked to one)
+ *   queue_task        in a workspace room (server/rooms/workspace.js): put work on the room's queue for the person who
+ *                     asked — research, a web answer or an answer run at once on OpenVibe.Actor; code, computer and
+ *                     other work waits for a worker to take it
+ *   queue_status      in a workspace room: what is queued, running and recently done
  *
  *   definitions(member)          → the OpenAI-style tool list for this member
  *   run(name, args, ctx)         → the result as a string (JSON, at most RESULT_MAX characters), never throws
@@ -41,11 +45,21 @@ const PANTRY = fn('household_pantry', 'What is in this household\'s pantry and i
 const WEB = fn('web_search', 'Search the open web and get a short answer with its sources (OpenVibe\'s web agent; takes up to a minute). Use it for current events, prices, schedules and facts that OpenVibe search does not have.',
     { query: { type: 'string', description: 'The question or search, in plain words' } }, ['query']);
 
+const QUEUE = fn('queue_task', 'Put a piece of work on this room\'s work queue, for the person who asked you. research (a short report with sources), web (a current answer from the web) and answer run at once and their result comes back into the room in a minute or two; code (a change to an OpenVibe repository, done by a coding agent and handed in as a pull request for review), computer (something done on a computer) and other wait for a worker to take them. Queue only what someone asked to have done, one task per job.',
+    {
+        title: { type: 'string', description: 'What to do, one short line' },
+        details: { type: 'string', description: 'Everything the worker needs: what exactly, where, constraints, what done looks like' },
+        kind: { type: 'string', enum: ['research', 'web', 'answer', 'code', 'computer', 'other'] },
+    }, ['title', 'kind']);
+const QUEUE_STATUS = fn('queue_status', 'What is on this room\'s work queue: what is waiting, being worked on, and recently done or stuck, with who asked.');
+
 const isVibe = (member) => !!member && member.handle === 'vibe';
-const definitions = (member) => [
+const isWorkspace = (room) => !!room && Number(room.workspace) === 1;
+const definitions = (member, room = null) => [
     ...BASE,
     ...(member && member.link_service === 'food' && member.link_resource ? [PANTRY] : []),
     ...(isVibe(member) ? [WEB] : []),
+    ...(isWorkspace(room) ? [QUEUE, QUEUE_STATUS] : []),
 ];
 
 const clip = (o) => { const s = typeof o === 'string' ? o : JSON.stringify(o); return s.length > RESULT_MAX ? `${s.slice(0, RESULT_MAX - 1)}…` : s; };
@@ -123,12 +137,29 @@ async function webSearch(args, ctx) {
     return await require('./web-search').search({ subject: ctx.subject, query: args.query, idempotencyKey: ctx.idempotencyKey }, ctx.webSearchOpts || {});
 }
 
-const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry };
+async function queueTask(args, ctx) {
+    if (!isWorkspace(ctx.room) || !ctx.user) return { error: 'this room has no work queue' };
+    try {
+        const t = await require('./workspace').add(ctx.room, ctx.user, { title: args.title, details: args.details || '', kind: args.kind, via: 'vibe', sourceMessage: ctx.messageId || null });
+        return { queued: { id: t.id, title: t.title, kind: t.kind, status: t.status, runs: t.quick ? 'now, on OpenVibe.Actor; the result comes back into the room' : 'when a worker takes it' } };
+    } catch (err) { return { error: String((err && err.message) || 'it could not be queued').slice(0, 200) }; }
+}
+
+async function queueStatus(_args, ctx) {
+    if (!isWorkspace(ctx.room)) return { error: 'this room has no work queue' };
+    try {
+        const list = await require('./workspace').list(ctx.room, ctx.user, { limit: 20 });
+        return { tasks: list.map((t) => ({ id: t.id, title: t.title, kind: t.kind, status: t.status, asked_by: t.requested_by.name, runner: t.runner, finished_at: t.finished_at, error: t.error })) };
+    } catch (err) { return { error: String((err && err.message) || 'the queue could not be read').slice(0, 200) }; }
+}
+
+const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus };
 
 /** Runs one tool call. `raw` is the model's JSON argument string. Unknown tools and bad JSON come back as errors. */
 async function run(name, raw, ctx = {}) {
     const runner = RUNNERS[name];
-    if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food')) || (name === 'web_search' && !isVibe(ctx.member))) return clip({ error: `no tool called ${String(name).slice(0, 64)}` });
+    if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food')) || (name === 'web_search' && !isVibe(ctx.member))
+        || ((name === 'queue_task' || name === 'queue_status') && !isWorkspace(ctx.room))) return clip({ error: `no tool called ${String(name).slice(0, 64)}` });
     let args = {};
     if (raw) { try { args = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return clip({ error: 'the arguments were not valid JSON' }); } }
     if (!args || typeof args !== 'object' || Array.isArray(args)) args = {};

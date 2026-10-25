@@ -326,3 +326,34 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .sp-msg.sp-me { background: color-mix(in srgb, var(--oc-accent) 12%, var(--oc-panel)); }
 .sp-text p { display: inline; margin: 0; }
 .sp-sys { font-size: .85rem; text-align: center; }
+
+/* Workspace rooms (the staff room): the conversation and the work queue side by side; stacked on phones. */
+.oc-ws { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 360px); gap: 16px; align-items: start; }
+.oc-queue { position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow: auto; padding: 12px 14px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; }
+.oc-queue h2 { margin: 0 0 4px; font-size: 1.05rem; }
+.oc-queue-how { margin: 0 0 8px; font-size: 13px; }
+.oc-queue-add { margin: 6px 0 10px; }
+.oc-queue-add summary { cursor: pointer; font-weight: 600; }
+.oc-queue-add .oc-form label { display: block; margin: 6px 0; }
+.oc-queue-add .oc-form input, .oc-queue-add .oc-form select, .oc-queue-add .oc-form textarea { width: 100%; box-sizing: border-box; }
+.oc-tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.oc-task { padding: 8px 10px; border: 1px solid var(--oc-line); border-left: 3px solid var(--oc-line); border-radius: 8px; background: var(--oc-panel-2); }
+.oc-task-title { display: block; color: var(--oc-text); text-decoration: none; font-weight: 600; overflow-wrap: anywhere; }
+.oc-task-title:hover { text-decoration: underline; }
+.oc-task-state { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 999px; font-size: 11.5px; font-weight: 700; background: var(--oc-line); color: var(--oc-text); vertical-align: 1px; }
+.oc-task-meta { display: block; margin-top: 2px; font-size: 12.5px; color: var(--oc-muted); }
+.oc-task-result, .oc-task-error { margin: 4px 0 0; font-size: 13.5px; overflow-wrap: anywhere; }
+.oc-task-error { color: var(--oc-red); }
+.oc-task-actions { display: flex; gap: 10px; margin-top: 4px; font-size: 13px; }
+.oc-task-actions form { margin: 0; }
+.oc-task-running { border-left-color: var(--oc-accent); }
+.oc-task-running .oc-task-state { background: var(--oc-accent); color: var(--oc-on-accent); animation: oc-work 1.6s ease-in-out infinite; }
+.oc-task-succeeded { border-left-color: var(--oc-ok); }
+.oc-task-succeeded .oc-task-state { background: color-mix(in srgb, var(--oc-ok) 30%, transparent); }
+.oc-task-failed { border-left-color: var(--oc-red); }
+.oc-task-failed .oc-task-state { background: color-mix(in srgb, var(--oc-red) 30%, transparent); }
+.oc-task-cancelled { opacity: .7; }
+.oc-task-full p, .oc-task-details { overflow-wrap: anywhere; }
+@keyframes oc-work { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+@media (prefers-reduced-motion: reduce) { .oc-task-running .oc-task-state { animation: none; } }
+@media (max-width: 900px) { .oc-ws { grid-template-columns: minmax(0, 1fr); } .oc-queue { position: static; max-height: none; order: -1; } }

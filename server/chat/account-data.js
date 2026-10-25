@@ -59,6 +59,8 @@ const EXPORTS = [
     ['sounds.json', `SELECT * FROM channel_sounds WHERE created_by_subject_id = ANY(@s) OR created_by = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['moderation_on_you.json', `SELECT * FROM moderation_actions WHERE target_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['ai_members_added.json', `SELECT * FROM room_ai_members WHERE created_by_subject = ANY(@s) ORDER BY id DESC LIMIT ${LIMIT}`],
+    // Work they put on a workspace room's queue (server/rooms/workspace.js), with its results.
+    ['room_tasks.json', `SELECT t.id, r.slug AS room, t.title, t.details, t.kind, t.status, t.via, t.result, t.result_url, t.sources, t.error, t.created_at, t.finished_at FROM room_tasks t JOIN rooms r ON r.id = t.room_id WHERE t.requested_subject = ANY(@s) OR t.requested_by = ANY(@ids) ORDER BY t.id DESC LIMIT ${LIMIT}`],
     ['vibe_usage.json', `SELECT * FROM vibe_usage WHERE user_id = ANY(@ids) ORDER BY day DESC LIMIT ${LIMIT}`],
     ['inboxes_owned.json', `SELECT * FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['inbox_memberships.json', `SELECT * FROM inbox_members WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
@@ -129,6 +131,9 @@ const ERASE_AFTER_ROOMS = [
     ['feeds', 'DELETE FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)'],
     // An AI member belongs to its room, not to whoever added it: it stays, without their name on it.
     [null, 'UPDATE room_ai_members SET created_by_subject = NULL WHERE created_by_subject = ANY(@s)'],
+    // A workspace room's queue keeps the work the team relies on, without who asked or who took it.
+    [null, "UPDATE room_tasks SET requested_by = 0, requested_subject = NULL WHERE requested_subject = ANY(@s) OR requested_by = ANY(@ids)"],
+    [null, "UPDATE room_tasks SET runner = 'a former member' WHERE runner ~ '^user:[0-9]+$' AND substr(runner, 6)::bigint = ANY(@ids)"],
     // Their own AI key is gone with them (OpenVibe.AI erases it): members that thought with it go back to OpenVibe's model.
     [null, "UPDATE room_ai_members SET engine = 'openvibe', engine_subject = NULL, engine_label = NULL WHERE engine_subject = ANY(@s)"],
 ];

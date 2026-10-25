@@ -18,6 +18,14 @@
  *   GET    /:slug/attachments       managers: where the room is attached (a Community space)
  *   POST   /:slug/attachments       managers, with their own Network token: { service: 'community', resource: <space slug>, title? }
  *   DELETE /:slug/attachments/:service/:resource   managers or whoever attached it (both idempotent)
+ *   GET    /:slug/tasks             a workspace room's work queue (server/rooms/workspace.js): ?status=&limit=
+ *   POST   /:slug/tasks             { title, details?, kind: answer | research | web | code | computer | other }: anyone who
+ *                                   may post; the quick kinds run at once on OpenVibe.Actor as the caller
+ *   GET    /:slug/tasks/:id         one task with its result
+ *   POST   /:slug/tasks/:id/cancel  the person who asked, or a moderator
+ *   POST   /:slug/tasks/:id/claim   { runner? }: a worker (a member, or an agent with a member's API token) takes a code,
+ *                                   computer or other task
+ *   POST   /:slug/tasks/:id/report  { status: succeeded | failed, result?, result_url? (https), error? }: whoever took it
  *
  * Role and room changes reach a running call at once (call-server.js applyRoomAccess): a new speaker
  * may talk, a demoted one is muted, a blocked person is dropped.
@@ -227,6 +235,41 @@ router.delete('/:slug/attachments/:service/:resource', requireAuth, personOnly, 
 
 // ── AI members (server/rooms/ai-members.js) ──
 // Anyone who may read the room sees who its AI members are; its managers see and change how they are set up.
+// ── Work queue (workspace rooms) ──
+const workspace = require('./workspace');
+// Adding, cancelling, claiming and reporting: a person (or their agent) works through a handful at a time.
+const workLimit = limits('chat.room.task', { minute: 20, hour: 300 });
+function workSend(res, err) {
+    if (err instanceof workspace.WorkError || err instanceof rooms.RoomError) return res.status(err.status).json({ error: err.message, code: err.code });
+    return send(res, err);
+}
+const workRoom = async (req) => {
+    const room = await rooms.bySlug(req.params.slug);
+    if (!room) throw new workspace.WorkError(404, 'rooms.not_found', 'No such room');
+    return room;
+};
+router.get('/:slug/tasks', optionalAuth, async (req, res) => {
+    try { res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ tasks: await workspace.list(await workRoom(req), req.user || null, { limit: req.query.limit, status: req.query.status }) }); } catch (err) { workSend(res, err); }
+});
+router.post('/:slug/tasks', requireAuth, workLimit, async (req, res) => {
+    try {
+        const b = req.body || {};
+        res.status(201).json({ task: await workspace.add(await workRoom(req), req.user, { title: b.title, details: b.details, kind: b.kind, via: req.authSource === 'api_token' ? 'api' : 'person' }) });
+    } catch (err) { workSend(res, err); }
+});
+router.get('/:slug/tasks/:id', optionalAuth, async (req, res) => {
+    try { res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ task: await workspace.get(await workRoom(req), req.user || null, req.params.id) }); } catch (err) { workSend(res, err); }
+});
+router.post('/:slug/tasks/:id/cancel', requireAuth, workLimit, async (req, res) => {
+    try { res.json({ task: await workspace.cancel(await workRoom(req), req.user, req.params.id) }); } catch (err) { workSend(res, err); }
+});
+router.post('/:slug/tasks/:id/claim', requireAuth, workLimit, async (req, res) => {
+    try { res.json({ task: await workspace.claim(await workRoom(req), req.user, req.params.id, { runner: (req.body || {}).runner || null }) }); } catch (err) { workSend(res, err); }
+});
+router.post('/:slug/tasks/:id/report', requireAuth, workLimit, async (req, res) => {
+    try { res.json({ task: await workspace.report(await workRoom(req), req.user, req.params.id, req.body || {}) }); } catch (err) { workSend(res, err); }
+});
+
 const aiMembers = require('./ai-members');
 function aiSend(res, err) {
     if (err instanceof aiMembers.AiMemberError) return res.status(err.status).json({ error: err.message, code: err.code });

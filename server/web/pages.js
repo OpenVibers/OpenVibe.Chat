@@ -646,6 +646,9 @@ ${create}
         return { actor, me, room, can };
     };
 
+    // Workspace rooms' work queue (server/web/workspace-pages.js): the panel beside the conversation and its pages.
+    const { queuePanel } = require('./workspace-pages').createWorkspacePages({ router, page, loadRoom, needUser, sameSite, formLimit, esc, linkify, hhmm, notice });
+
     /** A call room's call: who is in, and the button public/web/call.js turns into the call. */
     function callPanel(room, can, me) {
         const call = roomRoutes.callOf(room) || { enabled: false, participants: 0, people: [] };
@@ -694,6 +697,7 @@ ${people}
         const ais = aiMembers.enabled() ? (await aiMembers.list(room)).filter((a) => Number(a.enabled)) : [];
         // A feed the owner shows here (server/feeds/): its card above the messages.
         const feed = await require('../feeds/feeds').forRoom(room.id);
+        const work = rooms.isWorkspace(room) ? await require('../rooms/workspace').list(room, me, { limit: 40 }) : null;
         const aiHere = ais.length ? `<p class="oc-ai-here">${ais.map((a) => `<span class="oc-badge oc-ai">AI</span> <strong>${esc(a.name)}</strong> <span class="oc-muted oc-ai-model">(${esc(aiMembers.modelOf(a))})</span>`).join(' · ')} <span class="oc-muted">· write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask${ais.length > 1 ? ' one of them' : ''} something</span></p>` : '';
         await page(req, res, 200, {
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady, feedView: !!feed,
@@ -706,8 +710,8 @@ ${people}
 ${aiHere}${error}
 ${isCall ? callPanel(room, can, me) : ''}
 ${feed ? `<div class="fv oc-room-fv" data-feed="${esc(feed.id)}"></div>` : ''}
-<ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
-${composer}${tools}`,
+${work ? '<div class="oc-ws"><div class="oc-ws-main">' : ''}<ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
+${composer}${tools}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         });
     });
 
