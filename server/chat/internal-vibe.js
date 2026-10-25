@@ -13,6 +13,16 @@
  * next question starts a new one). The answer counts against the person's daily allowance like any of theirs, and comes
  * back as plain text to speak (Markdown taken off). The same idempotency key from the same caller answers once: asked
  * again, the first answer (kept 7 days). A person Chat has not seen, Vibe resting or the allowance spent: refused, with why.
+ *
+ *   POST /internal/chat/vibe/deliver  { subject, source: { kind: 'agent', id, name? }, text, url?, idempotency_key }
+ *     → 201 { chat, url, repeated: false } | 200 { chat, url, repeated: true }
+ *
+ * Each run is a chat you can open (capability chat.vibe.deliver; chat.vibe-deliver-request@1 / -result@1): OpenVibe.Actor
+ * posts each passed run of one of the person's agents, as Vibe's message, into their Vibe chat named after the agent
+ * (one per agent, marked like the voice chats), with a link to the whole run. No AI answer is made and nothing counts
+ * against their allowance; they can reply in the chat and Vibe answers knowing the result. One post per caller's key
+ * (vibe_deliveries, kept 30 days). A person Chat has not seen is 422. They get one OpenVibe notification per post
+ * ("<agent> has a new result", category chat, which they can switch off on the Network), sent after the answer.
  */
 const express = require('express');
 const config = require('../config');
@@ -59,12 +69,12 @@ function spoken(md) {
         .slice(0, 4000);
 }
 
-/** The person's chat for this source: the marked one when it is still theirs, else a new "Voice on <name>". */
+/** The person's chat for this source: the marked one when it is still theirs, else a new one ("Voice on <name>", or the agent's name). */
 async function chatFor(user, source) {
     const mark = `${source.kind}:${source.id}`;
     const room = await db.get('SELECT * FROM rooms WHERE owner_id = ? AND assistant = 1 AND assistant_source = ? AND archived_at IS NULL', [user.id, mark]);
     if (room) return room;
-    const made = await vibe.createRoom(user, `Voice on ${source.name || 'your computer'}`);
+    const made = await vibe.createRoom(user, source.kind === 'agent' ? (source.name || 'Your agent') : `Voice on ${source.name || 'your computer'}`);
     await db.run('UPDATE rooms SET assistant_source = ? WHERE id = ?', [mark, made.id]);
     return { ...made, assistant_source: mark };
 }
@@ -104,7 +114,69 @@ function answered(text, roomId, slug = null) {
 }
 const refused = (text, code) => ({ state: 'refused', text, code });
 
+/** chat.vibe-deliver-request@1, checked as the schema says. */
+function deliveryOf(b) {
+    if (!b || typeof b !== 'object' || Array.isArray(b)) fail(400, 'A JSON object is required');
+    if (Object.keys(b).some((k) => !['subject', 'source', 'text', 'url', 'idempotency_key'].includes(k))) fail(400, 'Invalid fields');
+    if (!SUBJECT.test(String(b.subject || ''))) fail(400, 'subject is a person (usr_…)');
+    const s = b.source;
+    if (!s || typeof s !== 'object' || s.kind !== 'agent' || !SOURCE_ID.test(String(s.id || '')) || Object.keys(s).some((k) => !['kind', 'id', 'name'].includes(k))) fail(400, 'source is { kind: agent, id, name? }');
+    const text = typeof b.text === 'string' ? b.text.replace(/\r\n?/g, '\n').trim() : '';
+    if (!text || text.length > 8000) fail(400, 'text is 1 to 8000 characters');
+    let url = null;
+    if (b.url != null) {
+        try { const u = new URL(String(b.url)); if (u.protocol === 'https:') url = u.href; } catch { /* checked below */ }
+        if (!url) fail(400, 'url is an https address');
+    }
+    if (!KEY.test(String(b.idempotency_key || ''))) fail(400, 'idempotency_key is 1 to 128 of A-Z a-z 0-9 _ . : -');
+    const name = typeof s.name === 'string' ? s.name.replace(/\s+/g, ' ').trim().slice(0, 40) : '';
+    return { subject: b.subject, source: { kind: 'agent', id: s.id, name }, text, url, key: b.idempotency_key };
+}
+
+const chatUrl = (slug) => `${config.web.baseUrl}/vibe/${slug}`;
+
+/** "<agent> has a new result", with its first line, to the chat (never holds up the answer to the caller). */
+async function notifyResult(user, room, d) {
+    if (!user.subject_id || (!config.oauth.clientSecret && !require('../inbox/notify')._hasTestPush())) return;
+    const name = d.source.name || 'Your agent';
+    await require('../inbox/notify').pushOne({
+        subjectId: user.subject_id, type: 'AGENT_RESULT', category: 'chat', service: 'chat', icon: '🤖', sender_name: name, priority: 'normal',
+        title: `${name} has a new result`, message: spoken(d.text).split('\n')[0].slice(0, 160) || 'Open the chat to read it.', url: chatUrl(room.slug),
+    });
+}
+async function deliver(req) {
+    const d = deliveryOf(req.body);
+    const caller = String((req.principal && req.principal.sub) || '');
+    const key = `${caller}|${d.key}`;
+    const seen = await db.get('SELECT d.room_id, r.slug FROM vibe_deliveries d LEFT JOIN rooms r ON r.id = d.room_id WHERE d.idempotency_key = ?', [key]);
+    if (seen && seen.slug) return { status: 200, body: { chat: seen.slug, url: chatUrl(seen.slug), repeated: true } };
+    const user = await db.get('SELECT * FROM ctx_users WHERE subject_id = ? ORDER BY id LIMIT 1', [d.subject]);
+    if (!user || Number(user.is_banned)) fail(422, 'This account has no Vibe chats yet: they sign in on openvibe.chat once first');
+    const room = await chatFor(user, d.source);
+    const member = await db.get("SELECT * FROM room_ai_members WHERE room_id = ? AND handle = 'vibe'", [room.id]);
+    if (!member) fail(409, 'That Vibe chat has no Vibe in it');
+    const link = d.url ? `\n\n[See the whole run on OpenVibe Agents](${d.url})` : '';
+    const message = await rooms.postAsAi(room, member, `${d.text.slice(0, 8000 - link.length)}${link}`);
+    try { require('./chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message }); } catch { /* sockets are optional */ }
+    if (Math.random() < 0.05) await db.run('DELETE FROM vibe_deliveries WHERE created_at < ?', [sqlTime(Date.now() - 30 * 24 * 3600 * 1000)]);
+    await db.run('INSERT INTO vibe_deliveries (idempotency_key, caller, user_id, room_id, message_id) VALUES (?, ?, ?, ?, ?) ON CONFLICT (idempotency_key) DO NOTHING',
+        [key, caller, user.id, room.id, message ? message.id : null]);
+    notifyResult(user, room, d).catch((err) => console.warn(`[Vibe deliver] notify: ${err && err.message}`));
+    return { status: 201, body: { chat: room.slug, url: chatUrl(room.slug), repeated: false } };
+}
+
 const router = express.Router();
+router.post('/vibe/deliver', serviceAuth.guard('chat.vibe.deliver'), async (req, res) => {
+    try {
+        const out = await deliver(req);
+        res.status(out.status).json(out.body);
+    } catch (err) {
+        const status = err && err.status && err.status < 500 ? err.status : 500;
+        if (status >= 500) console.error('[Vibe deliver]', err && err.message);
+        res.status(status).json({ error: status >= 500 ? 'Something went wrong' : err.message, code: err && err.code });
+    }
+});
+
 router.post('/vibe/ask', serviceAuth.guard('chat.vibe.ask'), async (req, res) => {
     try {
         const out = await ask(req);

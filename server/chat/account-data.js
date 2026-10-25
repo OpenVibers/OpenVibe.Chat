@@ -68,6 +68,8 @@ const EXPORTS = [
     ['vibe_memory.json', `SELECT id, text, source, created_at FROM vibe_memory WHERE user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['vibe_memory_off.json', `SELECT since FROM vibe_memory_off WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     // What they asked Vibe by voice on their machines, the last 7 days (server/chat/internal-vibe.js).
+    // Which of their agents' runs were posted into their Vibe chats (server/chat/internal-vibe.js).
+    ['vibe_deliveries.json', `SELECT room_id, message_id, created_at FROM vibe_deliveries WHERE user_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['vibe_asks.json', `SELECT idempotency_key, room_id, state, answer, code, created_at FROM vibe_asks WHERE user_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['inboxes_owned.json', `SELECT * FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['inbox_memberships.json', `SELECT * FROM inbox_members WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
@@ -120,6 +122,7 @@ const ERASE_AFTER_ROOMS = [
     ['vibe_memory', 'DELETE FROM vibe_memory WHERE user_id = ANY(@ids)'],
     ['vibe_memory_off', 'DELETE FROM vibe_memory_off WHERE user_id = ANY(@ids)'],
     ['vibe_asks', 'DELETE FROM vibe_asks WHERE user_id = ANY(@ids)'],
+    ['vibe_deliveries', 'DELETE FROM vibe_deliveries WHERE user_id = ANY(@ids)'],
     // Support inboxes (server/inbox/inbox.js): the inboxes they own go with every conversation in them; in others,
     // their replies stay for the visitor without their name, and their place on the team goes.
     [null, 'DELETE FROM inbox_translations WHERE message_id IN (SELECT m.id FROM inbox_messages m JOIN inbox_conversations c ON c.id = m.conversation_id JOIN inboxes i ON i.id = c.inbox_id WHERE i.owner_subject = ANY(@s) OR i.owner_id = ANY(@ids))'],
