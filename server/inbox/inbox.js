@@ -72,6 +72,11 @@ function validate(input = {}, current = null) {
     if (input.ai_enabled !== undefined) out.ai_enabled = bool(input.ai_enabled) ? 1 : 0;
     if (input.handoff !== undefined) out.handoff = bool(input.handoff) ? 1 : 0;
     if (input.hours !== undefined) out.hours = require('./hours').normalize(input.hours, fail);
+    if (input.retention_days !== undefined) {
+        const d = input.retention_days === null || input.retention_days === '' ? null : Number(input.retention_days);
+        if (d !== null && !(Number.isInteger(d) && d >= 7 && d <= 3650)) fail(422, 'inbox.retention', 'Keep conversations for 7 to 3650 days, or null to keep them');
+        out.retention_days = d;
+    }
     if (input.route !== undefined) {
         if (!['none', 'round_robin'].includes(String(input.route))) fail(422, 'inbox.route', 'Routing is none or round_robin');
         out.route = String(input.route);
@@ -130,8 +135,8 @@ async function update(inbox, user, input = {}) {
     const v = validate(input, inbox);
     const next = { ...inbox, ...v };
     const hoursJson = (h) => (h == null ? null : typeof h === 'string' ? h : JSON.stringify(h));
-    await db.run(`UPDATE inboxes SET name = ?, greeting = ?, color = ?, ai_enabled = ?, handoff = ?, ai_instructions = ?, knowledge_urls = ?, allowed_origins = ?, hours = ?, route = ? WHERE id = ?`,
-        [next.name, next.greeting, next.color, Number(next.ai_enabled) ? 1 : 0, Number(next.handoff ?? 1) ? 1 : 0, next.ai_instructions, JSON.stringify(json(next.knowledge_urls, [])), JSON.stringify(json(next.allowed_origins, [])), hoursJson(next.hours), next.route || 'none', inbox.id]);
+    await db.run(`UPDATE inboxes SET name = ?, greeting = ?, color = ?, ai_enabled = ?, handoff = ?, ai_instructions = ?, knowledge_urls = ?, allowed_origins = ?, hours = ?, route = ?, retention_days = ? WHERE id = ?`,
+        [next.name, next.greeting, next.color, Number(next.ai_enabled) ? 1 : 0, Number(next.handoff ?? 1) ? 1 : 0, next.ai_instructions, JSON.stringify(json(next.knowledge_urls, [])), JSON.stringify(json(next.allowed_origins, [])), hoursJson(next.hours), next.route || 'none', next.retention_days == null ? null : Number(next.retention_days), inbox.id]);
     return await get(inbox.id);
 }
 
@@ -154,7 +159,7 @@ async function mine(user) {
 function shape(r) {
     return {
         id: r.id, name: r.name, greeting: r.greeting, color: r.color, ai_enabled: !!Number(r.ai_enabled), handoff: peopleAnswer(r), ai_instructions: r.ai_instructions,
-        verified_visitors: !!r.identity_secret, hours: hoursOf(r), route: r.route || 'none',
+        verified_visitors: !!r.identity_secret, hours: hoursOf(r), route: r.route || 'none', retention_days: r.retention_days == null ? null : Number(r.retention_days),
         knowledge_urls: json(r.knowledge_urls, []), allowed_origins: json(r.allowed_origins, []), created_at: r.created_at,
     };
 }
