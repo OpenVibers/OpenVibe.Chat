@@ -231,6 +231,9 @@ t('any community room\'s owner makes it a workspace (and Vibe joins); the staff 
 
 t('starting a room: the Workspace kind (preselected from ?new=workspace) makes a workspace with Vibe in it', async () => {
     const cookie = `ov_token=${user.token}`;
+    const go = await fetch(`${h.base}/work`, { redirect: 'manual' });
+    assert.deepStrictEqual([go.status, go.headers.get('location')], [302, '/rooms?new=workspace#oc-new-room'], 'the navbar\'s Work together');
+    assert.match((await h.http('GET', '/rooms?new=workspace')).text, /next=%2Frooms%3Fnew%3Dworkspace/, 'signed out: sign in, then back to it');
     const list = await h.http('GET', '/rooms?new=workspace&name=Launch%20week%00', { headers: { cookie } });
     assert.match(list.text, /name="kind" value="workspace" checked/);
     assert.match(list.text, /value="Launch week"/, 'the name is filled in, without control characters');

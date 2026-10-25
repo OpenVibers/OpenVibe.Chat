@@ -605,7 +605,7 @@ ${key ? `<form class="oc-inline" method="post" action="/settings/ai-key/delete">
         const preName = wantWork && typeof req.query.name === 'string' ? req.query.name.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 40) : '';
         const create = me ? `<form class="oc-form oc-create" id="oc-new-room" method="post" action="/rooms/new">
 <h2>Start a room</h2>
-<label>Name <input name="name" required minlength="3" maxlength="40" placeholder="Night Owls" value="${esc(preName)}"></label>
+<label>Name <input name="name" required minlength="3" maxlength="40" placeholder="Night Owls" value="${esc(preName)}"${wantWork ? ' autofocus' : ''}></label>
 <label>Topic <input name="topic" maxlength="200" placeholder="What it is about (optional)"></label>
 <fieldset class="oc-fieldset"><legend>Kind</legend>
 <label class="oc-check"><input type="radio" name="kind" value="community"${wantWork ? '' : ' checked'}> Chat room: people write to each other</label>
@@ -616,7 +616,7 @@ ${staff ? '<label class="oc-check"><input type="radio" name="kind" value="system
 <label>In a call room, people who join <select name="join_role"><option value="participant">listen and write (participants)</option><option value="speaker">can talk (speakers)</option><option value="viewer">listen and read (viewers)</option></select></label>
 <label class="oc-check"><input type="checkbox" name="private" value="1"> Private: only people you invite can read and post</label>
 <p><button type="submit">Create room</button></p>
-</form>` : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=%2Frooms">Sign in with OpenVibe</a> to start or join a room.</p>`;
+</form>` : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${wantWork ? '%2Frooms%3Fnew%3Dworkspace' : '%2Frooms'}">Sign in with OpenVibe</a> to start or join a room.</p>`;
         await page(req, res, 200, {
             actor, title: 'Rooms', path: '/rooms', active: 'rooms', robots: 'index, follow',
             description: 'Chat and call rooms on OpenVibe: start one about anything, invite people, or join a public room.',
@@ -632,6 +632,9 @@ ${create}
 <p class="oc-muted">Building something? A <a href="/feeds">feed</a> shows your coding session live in a room, on your Live channel or on your site.</p>`,
         });
     });
+
+    // "Work together" in every OpenVibe site's account menu (openvibe-shared navbar): start a workspace room.
+    router.get('/work', (req, res) => res.redirect(302, '/rooms?new=workspace#oc-new-room'));
 
     router.post('/rooms/new', formLimit, sameSite, roomsOrError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
