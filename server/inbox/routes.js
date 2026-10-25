@@ -31,6 +31,7 @@
  *   POST   /:id/conversations/:cid/picture   the body is a picture, an optional line in X-Caption → 201 { message, picture }
  *   GET    /:id/webhooks     (owner) { webhooks }    POST /:id/webhooks { url } → 201 { webhook, secret }
  *   POST   /:id/webhooks/:hookId/test → { ok, status, error }    DELETE /:id/webhooks/:hookId
+ *   GET    /:id/export       ?format=json|csv (owner): every conversation with its messages (5,000 newest), as a download
  *   GET    /:id/actions      (owner) { actions }    POST /:id/actions { name, description, url, params? } → 201 { action, secret }
  *   POST   /:id/actions/:actionId/test { arguments } → { ok, status, error, result }    DELETE /:id/actions/:actionId
  *   GET    /:id/conversations                  ?status=active|mine|bot|waiting|open|resolved
@@ -227,6 +228,22 @@ agents.delete('/:id/webhooks/:hookId', requireAuth, manageLimit, async (req, res
     const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
     await webhooks.remove(inbox, req.params.hookId); res.status(204).end();
 });
+agents.get('/:id/export', requireAuth, manageLimit, async (req, res) => {
+    const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
+    await sendExport(res, inbox, req.query.format);
+});
+/** The inbox's conversations as a download (the API and the settings page's links). */
+async function sendExport(res, inbox, format) {
+    const records = require('./records');
+    const name = `${inbox.name.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'inbox'}-conversations`;
+    res.set('Cache-Control', 'no-store');
+    if (format === 'csv') {
+        res.set('Content-Disposition', `attachment; filename="${name}.csv"`);
+        return res.type('text/csv; charset=utf-8').send(await records.csv(inbox));
+    }
+    res.set('Content-Disposition', `attachment; filename="${name}.json"`);
+    return res.json({ inbox: { id: inbox.id, name: inbox.name }, exported_at: new Date().toISOString(), conversations: await records.conversations(inbox) });
+}
 agents.get('/:id/actions', requireAuth, async (req, res) => {
     const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
     noStore(res).json({ actions: await actions.list(inbox) });
@@ -302,4 +319,4 @@ support.post('/:cid/messages', requireAuth, postLimit, async (req, res) => {
     try { res.status(201).json(await inboxes.accountPost(req.user, conv, req.body && req.body.message)); } catch (err) { send(res, err); }
 });
 
-module.exports = { widget, agents, support, embedOf };
+module.exports = { widget, agents, support, embedOf, sendExport };

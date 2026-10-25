@@ -458,6 +458,54 @@ t('a signed-in visitor sends a picture from the panel (through OpenVibe.Pics as 
     assert.ok((await fetch(`${h.base}/embed/inbox/${inbox.id}`).then((x) => x.text())).includes('id="em-attach"'), 'the panel has the picture button');
 });
 
+t('records: finished conversations go after the owner\'s retention, waiting and open ones never; the owner exports CSV and JSON', async () => {
+    const records = require('../server/inbox/records');
+    const fen = h.addUser('fen', { subject: ids.newId('user') });
+    await h.ctx.upsertUser(h.live.users.get(fen.id));
+    const ib = (await agentsApi('POST', '', fen, { name: 'Records Co', ai_enabled: false })).body.inbox;
+    await agentsApi('POST', `/${ib.id}/members`, fen, { username: 'bob' });
+    assert.strictEqual((await agentsApi('PATCH', `/${ib.id}`, fen, { retention_days: 3 })).status, 422, 'a week at least');
+    assert.strictEqual((await agentsApi('PATCH', `/${ib.id}`, bob, { retention_days: 30 })).status, 403, 'the owner\'s call');
+    assert.strictEqual((await agentsApi('PATCH', `/${ib.id}`, fen, { retention_days: 30 })).body.inbox.retention_days, 30);
+    const say = (path, body) => fetch(`${h.base}/api/chat/widget/inbox/${ib.id}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }).then((r) => r.json());
+    const made = {};
+    for (const [label, line] of [['resolved', '=HYPERLINK("http://evil.example","click")'], ['bot', 'only Vibe'], ['waiting', 'still waiting'], ['open', 'a person has it'], ['recent', 'resolved yesterday']]) {
+        const token = (await say('/visit', {})).token;
+        made[label] = (await say('/messages', { token, message: line })).conversation.id;
+    }
+    const old = '2026-01-01 00:00:00';
+    await h.db.run("UPDATE inbox_conversations SET status = 'resolved', last_message_at = ? WHERE id = ?", [old, made.resolved]);
+    await h.db.run("UPDATE inbox_conversations SET status = 'bot', last_message_at = ? WHERE id = ?", [old, made.bot]);
+    await h.db.run("UPDATE inbox_conversations SET status = 'waiting', last_message_at = ? WHERE id = ?", [old, made.waiting]);
+    await h.db.run("UPDATE inbox_conversations SET status = 'open', last_message_at = ? WHERE id = ?", [old, made.open]);
+    await h.db.run("UPDATE inbox_conversations SET status = 'resolved', last_message_at = ? WHERE id = ?", ['2026-03-01 00:00:00', made.recent]);
+
+    // Exports first, while everything is there: the owner's, a spreadsheet cell can never run as a formula.
+    assert.strictEqual((await agentsApi('GET', `/${ib.id}/export?format=csv`, bob)).status, 403, 'the owner\'s');
+    const csvRes = await fetch(`${h.base}/api/chat/inboxes/${ib.id}/export?format=csv`, { headers: { authorization: `Bearer ${fen.token}` } });
+    assert.ok(/text\/csv/.test(csvRes.headers.get('content-type')) && /attachment; filename="Records-Co-conversations\.csv"/.test(csvRes.headers.get('content-disposition')));
+    const csv = await csvRes.text();
+    assert.ok(csv.startsWith('conversation_id,status,visitor_name,visitor_email,verified,page_url,rating,rating_comment,message_id,author,author_name,body,created_at\r\n'));
+    assert.ok(csv.includes(`"'=HYPERLINK(""http://evil.example"",""click"")"`) && !csv.includes('",=HYPERLINK'), 'a formula is quoted and defused');
+    const json = (await agentsApi('GET', `/${ib.id}/export?format=json`, fen)).body;
+    assert.strictEqual(json.inbox.id, ib.id);
+    assert.strictEqual(json.conversations.length, 5);
+    assert.ok(json.conversations.every((c) => Array.isArray(c.messages) && c.messages.length >= 1));
+    const page = await fetch(`${h.base}/inbox/${ib.id}/export.json`, { headers: { cookie: `ov_token=${fen.token}` } });
+    assert.ok(page.status === 200 && /attachment/.test(page.headers.get('content-disposition')), 'the settings page\'s link');
+    const settings = await fetch(`${h.base}/inbox/${ib.id}/settings`, { headers: { cookie: `ov_token=${fen.token}` } }).then((r) => r.text());
+    assert.ok(settings.includes('<h2>Records</h2>') && settings.includes('<option value="30" selected>30 days</option>') && settings.includes(`/inbox/${ib.id}/export.csv`));
+
+    // The sweep, on 2026-03-15 with 30 days: the old resolved and Vibe-only ones go, with their messages.
+    const out = await records.sweep({ now: new Date('2026-03-15T12:00:00Z') });
+    assert.ok(out.deleted >= 2);
+    const left = (await h.db.all('SELECT id FROM inbox_conversations WHERE inbox_id = ?', [ib.id])).map((r) => r.id).sort();
+    assert.deepStrictEqual(left, [made.waiting, made.open, made.recent].sort(), 'waiting and open stay, and the recent one');
+    assert.strictEqual(Number((await h.db.get('SELECT COUNT(*) AS n FROM inbox_messages WHERE conversation_id = ANY(?)', [[made.resolved, made.bot]])).n), 0, 'their messages go too');
+    await agentsApi('PATCH', `/${ib.id}`, fen, { retention_days: null });
+    assert.strictEqual((await records.sweep({ now: new Date('2027-01-01T00:00:00Z') })).deleted, 0, 'forever: nothing goes');
+});
+
 t('business hours: outside them the panel says when the team is back, a handoff says so, and Vibe knows', async () => {
     assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}`, ann, { hours: { tz: 'Mars/Olympus', days: [1], start: '09:00', end: '17:00' } })).status, 422);
     assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}`, ann, { hours: { tz: 'UTC', days: [1], start: '17:00', end: '09:00' } })).status, 422, 'a start before an end');

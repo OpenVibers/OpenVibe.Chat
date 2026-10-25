@@ -495,6 +495,13 @@ for people and for companies, with "direct live support with an agent", "fully m
   `{ "text": "…" }` or plain text within 8 seconds (4 KB), goes back to Vibe as data, never instructions. `GET/POST
   /api/chat/inboxes/:id/actions { name, description, url, params }`, `POST /:id/actions/:actionId/test { arguments }`
   ("Try it" in the settings), `DELETE /:id/actions/:actionId`.
+- **Records** (`server/inbox/records.js`): how long finished conversations stay, set in the settings ("Keep finished
+  conversations": forever, 30 or 90 days, 6 months, 1 or 2 years) or with `PATCH /api/chat/inboxes/:id { retention_days:
+  7…3650 | null }`. Every hour, the conversations that are resolved or that only Vibe answered and that have been quiet
+  longer than that go, with their messages and translations; a visitor waiting for a person or a conversation a person
+  has open never does. The owner downloads everything (the 5,000 newest conversations with their messages): `GET
+  /api/chat/inboxes/:id/export?format=csv|json`, or the settings page's links. In the CSV, one row per message, a cell
+  that would run as a spreadsheet formula starts with `'`.
 - **Pictures:** one of the inbox's people sends a picture from the reply box (`POST
   /api/chat/inboxes/:id/conversations/:cid/picture`, the body is the picture, a line in `X-Caption`); it goes to
   OpenVibe.Pics as them, like a room's picture, and the message carries its link, which the visitor's panel and the

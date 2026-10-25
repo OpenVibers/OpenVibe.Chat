@@ -18,7 +18,8 @@ const inboxes = require('../inbox/inbox');
 const webhooks = require('../inbox/webhooks');
 const actions = require('../inbox/actions');
 const pictures = require('../rooms/pictures');
-const { embedOf } = require('../inbox/routes');
+const { embedOf, sendExport } = require('../inbox/routes');
+const records = require('../inbox/records');
 const { esc, asset } = require('./layout');
 
 const WIDGET = path.join(__dirname, '..', '..', 'public', 'web', 'widget.js');
@@ -241,6 +242,12 @@ ${acts.length < actions.MAX_ACTIONS ? `<form class="oc-form" method="post" actio
 <label>What it needs, one a line (name: what it is) <textarea name="params" maxlength="1500" rows="2" placeholder="order_id: the order number from the confirmation email"></textarea></label>
 <label>Address (https) <input name="url" type="url" required maxlength="1000" placeholder="https://example.com/api/vibe/order"></label>
 <p><button type="submit">Add the action</button></p></form>` : ''}
+${owner ? `<h2>Records</h2>
+<p class="oc-muted">How long finished conversations stay: resolved ones, and ones only Vibe answered, go once they have been quiet this long, with their messages. A visitor waiting for a person or a conversation one of your people has open never goes.</p>
+<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/retention"><label>Keep finished conversations <select name="retention_days">
+<option value=""${shape.retention_days == null ? ' selected' : ''}>forever</option>${records.RETENTION_CHOICES.map((d) => `<option value="${d}"${shape.retention_days === d ? ' selected' : ''}>${d >= 365 ? `${d / 365} year${d >= 730 ? 's' : ''}` : `${d} days`}</option>`).join('')}${shape.retention_days != null && !records.RETENTION_CHOICES.includes(shape.retention_days) ? `<option value="${shape.retention_days}" selected>${shape.retention_days} days</option>` : ''}
+</select></label><p><button type="submit">Save</button></p></form>
+<p>Download every conversation with its messages (the ${records.EXPORT_MAX.toLocaleString('en-US')} newest): <a href="/inbox/${esc(inbox.id)}/export.csv">a spreadsheet (CSV)</a> · <a href="/inbox/${esc(inbox.id)}/export.json">JSON</a></p>` : ''}
 <h2>How it looks and what Vibe knows</h2>
 <form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/settings">
 <label>Name <input name="name" required minlength="2" maxlength="60" value="${esc(shape.name)}"></label>
@@ -331,6 +338,17 @@ ${notice('ok', 'Here is its signing secret. Copy it now: it is shown only this o
         const a = await agentInbox(req, res); if (!a) return;
         if (a.role === 'owner') await webhooks.remove(a.inbox, req.params.wid);
         res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
+    });
+    router.post('/inbox/:id/retention', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        if (a.role !== 'owner') return res.redirect(303, `/inbox/${a.inbox.id}/settings`);
+        try { await inboxes.update(a.inbox, a.actor.user, { retention_days: (req.body && req.body.retention_days) || null }); res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`); }
+        catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not save')}`); }
+    });
+    router.get('/inbox/:id/export.:format(csv|json)', async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        if (a.role !== 'owner') return res.redirect(303, `/inbox/${a.inbox.id}`);
+        await sendExport(res, a.inbox, req.params.format);
     });
     router.post('/inbox/:id/actions', formLimit, sameSite, async (req, res) => {
         const a = await agentInbox(req, res); if (!a) return;

@@ -112,6 +112,7 @@ class ChatServer {
         /** @type {Map<number, {count: number, windowStart: number}>} streamId → stream-level soundboard rate window */
         this.soundboardStreamLimits = new Map();
         this._autoDeleteSweepInterval = null;
+        this._inboxRetentionInterval = null;
     }
 
     normalizeIp(ip) {
@@ -234,6 +235,12 @@ class ChatServer {
             await this._sweepExpiredChatMessages();
         }, CHAT_AUTO_DELETE_SWEEP_MS);
         await this._sweepExpiredChatMessages();
+        // Support inboxes keep finished conversations as long as their owners say (server/inbox/records.js): hourly.
+        if (this._inboxRetentionInterval) clearInterval(this._inboxRetentionInterval);
+        this._inboxRetentionInterval = setInterval(() => {
+            require('../inbox/records').sweep().then((r) => { if (r.deleted) console.log(`[Inbox] retention: ${r.deleted} finished conversations removed`); }).catch((e) => console.warn('[Inbox] retention sweep:', e && e.message));
+        }, 60 * 60 * 1000);
+        if (this._inboxRetentionInterval.unref) this._inboxRetentionInterval.unref();
 
         this.wss.on('connection', (ws, req) => {
             this.handleConnection(ws, req);
@@ -2952,6 +2959,10 @@ class ChatServer {
             if (this._autoDeleteSweepInterval) {
                 clearInterval(this._autoDeleteSweepInterval);
                 this._autoDeleteSweepInterval = null;
+            }
+            if (this._inboxRetentionInterval) {
+                clearInterval(this._inboxRetentionInterval);
+                this._inboxRetentionInterval = null;
             }
             // The queue's work in flight (a clip being made or delivered) ends before the sockets and the database close.
             await audioQueue.stop();
