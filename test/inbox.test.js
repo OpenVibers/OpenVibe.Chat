@@ -386,6 +386,28 @@ t('business hours: outside them the panel says when the team is back, a handoff 
     assert.strictEqual((await widget('GET', '')).body.inbox.away, null, 'no hours: always open');
 });
 
+t('routing: taking turns hands each waiting visitor to the next person; anyone of the people assigns; Mine lists theirs', async () => {
+    assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}`, ann, { route: 'random' })).status, 422);
+    assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}`, ann, { route: 'round_robin' })).status, 200);
+    await h.db.run('UPDATE inbox_members SET last_assigned_at = NULL WHERE inbox_id = ?', [inbox.id]);
+    const waiting = async (msg) => {
+        const v = (await widget('POST', '/visit', {})).body.token;
+        const cid = (await widget('POST', '/messages', { token: v, message: msg })).body.conversation.id;
+        await widget('POST', '/handoff', { token: v });
+        return (await h.db.get('SELECT id, assignee_id FROM inbox_conversations WHERE id = ?', [cid]));
+    };
+    const one = await waiting('First in line'), two = await waiting('Second in line'), three = await waiting('Third in line');
+    assert.deepStrictEqual([one, two, three].map((c) => Number(c.assignee_id)), [ann.id, bob.id, ann.id], 'turns go round the people');
+    const mine = (await agentsApi('GET', `/${inbox.id}/conversations?status=mine`, bob)).body.conversations.map((c) => c.id);
+    assert.ok(mine.includes(two.id) && !mine.includes(one.id), 'Mine is what was handed to them');
+    assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}/conversations/${one.id}`, bob, { assignee_id: bob.id })).body.conversation.assignee_id, bob.id, 'one of the people takes it');
+    assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}/conversations/${one.id}`, bob, { assignee_id: 424242 })).status, 422, 'only to one of the people');
+    assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}/conversations/${one.id}`, ann, { assignee_id: null })).body.conversation.assignee_id, null);
+    const app = await fetch(`${h.base}/inbox/${inbox.id}?f=mine&c=${two.id}`, { headers: { cookie: `ov_token=${bob.token}` } }).then((x) => x.text());
+    assert.ok(app.includes('Answered by') && app.includes(`data-conv="${two.id}"`) && app.includes('aria-current="page">Mine</a>'));
+    await agentsApi('PATCH', `/${inbox.id}`, ann, { route: 'none' });
+});
+
 t('the embed page and the loader: frame-ancestors follow the allowed sites', async () => {
     let r = await fetch(`${h.base}/embed/inbox/${inbox.id}`);
     assert.strictEqual(r.status, 200);

@@ -120,22 +120,25 @@ ${list}
     router.get('/inbox/:id', async (req, res) => {
         const a = await agentInbox(req, res); if (!a) return;
         const { actor, inbox } = a;
-        const filter = ['active', 'waiting', 'resolved'].includes(req.query.f) ? req.query.f : 'active';
-        const list = await inboxes.conversations(inbox, { status: filter });
+        const filter = ['active', 'mine', 'waiting', 'resolved'].includes(req.query.f) ? req.query.f : 'active';
+        const list = await inboxes.conversations(inbox, { status: filter, user: actor.user });
+        const team = await inboxes.members(inbox);
+        const nameOf = (id) => { const m = team.find((x) => x.user_id === Number(id)); return m ? (m.display_name || m.username) : null; };
         const current = req.query.c ? await inboxes.conversation(inbox, req.query.c) : null;
         const saved = await inboxes.savedReplies(inbox);
         const msgs = current ? await inboxes.messages(current) : [];
         if (current) await inboxes.markRead(inbox, current);
         const item = (c) => `<li><a class="vb-chat ib-conv" href="/inbox/${esc(inbox.id)}?c=${esc(c.id)}&amp;f=${filter}"${current && c.id === current.id ? ' aria-current="page"' : ''} data-conv="${esc(c.id)}">
 <span class="ib-row"><b>${esc(c.visitor_name || 'Visitor')}</b>${c.verified ? '<span class="ib-ok" title="Verified by your site">✓</span>' : ''}${statusChip(c.status)}${c.rating ? `<span class="ib-rate" title="${esc(c.rating_comment || '')}">${c.rating > 0 ? '👍' : '👎'}</span>` : ''}<time>${esc(ago(c.last_message_at))}</time></span>
-<span class="ib-prev">${esc(c.preview || '')}</span></a></li>`;
+<span class="ib-prev">${c.assignee_id && c.status !== 'resolved' ? `<span class="ib-who-has">${esc(Number(c.assignee_id) === Number(actor.user.id) ? 'You' : nameOf(c.assignee_id) || 'Someone')}</span> · ` : ''}${esc(c.preview || '')}</span></a></li>`;
         const turn = (m) => {
             if (m.author === 'system') return `<li class="ib-sys" data-id="${m.id}">${esc(m.body)}</li>`;
             if (m.author === 'visitor') return `<li class="vb-turn vb-ai ib-visitor" data-id="${m.id}"><span class="ib-av" aria-hidden="true">${esc((current.visitor_name || 'V').slice(0, 1).toUpperCase())}</span><div class="vb-body"><p class="ib-who">${esc(current.visitor_name || 'Visitor')}</p><div class="vb-md">${esc(m.body).replace(/\n/g, '<br>')}</div></div></li>`;
             return `<li class="vb-turn vb-me" data-id="${m.id}"><div class="vb-bubble${m.author === 'ai' ? ' ib-ai' : ''}"><p class="ib-who">${m.author === 'ai' ? 'Vibe (AI)' : esc(m.author_name || 'Agent')}</p>${m.author === 'ai' ? `<div class="vb-md">${md.render(m.body)}</div>` : esc(m.body).replace(/\n/g, '<br>')}${m.author === 'agent' ? pictures.pageHtml(m.body) : ''}</div></li>`;
         };
-        const tabs = [['active', 'Active'], ['waiting', 'Waiting'], ['resolved', 'Resolved']].map(([k, l]) => `<a href="/inbox/${esc(inbox.id)}?f=${k}"${k === filter ? ' aria-current="page"' : ''}>${l}</a>`).join('');
-        const actions = current ? `<form method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}/status" class="ib-actions">
+        const tabs = [['active', 'Active'], ['mine', 'Mine'], ['waiting', 'Waiting'], ['resolved', 'Resolved']].map(([k, l]) => `<a href="/inbox/${esc(inbox.id)}?f=${k}"${k === filter ? ' aria-current="page"' : ''}>${l}</a>`).join('');
+        const assignForm = current ? `<form method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}/assign" class="ib-assign"><label>Answered by <select name="assignee" data-autosubmit><option value="">nobody yet</option>${team.map((m) => `<option value="${m.user_id}"${Number(current.assignee_id) === m.user_id ? ' selected' : ''}>${esc(m.user_id === Number(actor.user.id) ? 'me' : (m.display_name || m.username))}</option>`).join('')}</select></label><noscript><button type="submit">Assign</button></noscript></form>` : '';
+        const actions = current ? `${assignForm}<form method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}/status" class="ib-actions">
 ${current.status !== 'resolved' ? '<button name="status" value="resolved">Resolve</button>' : '<button name="status" value="open">Reopen</button>'}
 ${Number(inbox.ai_enabled) && current.status !== 'bot' && current.status !== 'resolved' ? '<button name="status" value="bot">Back to Vibe</button>' : ''}</form>` : '';
         const body = `<div class="vb ib" id="vb" data-inbox="${esc(inbox.id)}" data-conv="${current ? esc(current.id) : ''}">
@@ -171,6 +174,12 @@ ${pictures.enabled() ? '<label class="ib-pic-btn" title="Send a picture"><input 
         if (!conv) return res.redirect(303, `/inbox/${a.inbox.id}`);
         try { await inboxes.agentPost(a.inbox, conv, a.actor.user, req.body && req.body.message); } catch { /* the page shows the thread as it is */ }
         res.redirect(303, `/inbox/${a.inbox.id}?c=${conv.id}`);
+    });
+    router.post('/inbox/:id/c/:cid/assign', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        const conv = await inboxes.conversation(a.inbox, req.params.cid);
+        if (conv) { try { await inboxes.assign(a.inbox, conv, a.actor.user, req.body && req.body.assignee); } catch { /* unchanged */ } }
+        res.redirect(303, `/inbox/${a.inbox.id}${conv ? `?c=${conv.id}` : ''}`);
     });
     router.post('/inbox/:id/c/:cid/status', formLimit, sameSite, async (req, res) => {
         const a = await agentInbox(req, res); if (!a) return;
@@ -222,6 +231,7 @@ ${hooks.length < webhooks.MAX_WEBHOOKS ? `<form class="oc-form" method="post" ac
 <label>Greeting <input name="greeting" maxlength="300" value="${esc(shape.greeting)}"></label>
 <label>Colour <input name="color" type="color" value="${esc(shape.color)}"></label>
 <label class="oc-check"><input type="checkbox" name="ai_enabled" value="1"${shape.ai_enabled ? ' checked' : ''}> Vibe answers first</label>
+<label class="oc-check"><input type="checkbox" name="route" value="round_robin"${shape.route === 'round_robin' ? ' checked' : ''}> Take turns: a visitor waiting for a person goes to the next of your people, and only they are told</label>
 <label class="oc-check"><input type="checkbox" name="handoff" value="1"${shape.handoff ? ' checked' : ''}> People answer here too (visitors can ask for a person; off: a site assistant where only Vibe answers)</label>
 <fieldset class="oc-fieldset"><legend>Hours your people answer</legend>
 <label class="oc-check"><input type="checkbox" name="hours_on" value="1"${shape.hours ? ' checked' : ''}> Set hours: outside them, visitors see when you are back, and Vibe tells them</label>
@@ -250,7 +260,7 @@ ${saved.length ? `<ul class="oc-members">${saved.map((r) => `<li><b>/${esc(r.sho
         const b = req.body || {};
         try {
             const hours = b.hours_on === '1' ? { tz: b.hours_tz, days: [].concat(b.hours_days || []), start: b.hours_start, end: b.hours_end } : null;
-            await inboxes.update(a.inbox, a.actor.user, { name: b.name, greeting: b.greeting, color: b.color, ai_enabled: b.ai_enabled === '1', handoff: b.handoff === '1', hours, ai_instructions: b.ai_instructions, knowledge_urls: b.knowledge_urls, allowed_origins: b.allowed_origins });
+            await inboxes.update(a.inbox, a.actor.user, { name: b.name, greeting: b.greeting, color: b.color, ai_enabled: b.ai_enabled === '1', handoff: b.handoff === '1', route: b.route === 'round_robin' ? 'round_robin' : 'none', hours, ai_instructions: b.ai_instructions, knowledge_urls: b.knowledge_urls, allowed_origins: b.allowed_origins });
             res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
         } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not save')}`); }
     });

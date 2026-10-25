@@ -72,6 +72,10 @@ function validate(input = {}, current = null) {
     if (input.ai_enabled !== undefined) out.ai_enabled = bool(input.ai_enabled) ? 1 : 0;
     if (input.handoff !== undefined) out.handoff = bool(input.handoff) ? 1 : 0;
     if (input.hours !== undefined) out.hours = require('./hours').normalize(input.hours, fail);
+    if (input.route !== undefined) {
+        if (!['none', 'round_robin'].includes(String(input.route))) fail(422, 'inbox.route', 'Routing is none or round_robin');
+        out.route = String(input.route);
+    }
     if (input.ai_instructions !== undefined) out.ai_instructions = clean(input.ai_instructions, LIMITS.instructions);
     const list = (v) => (Array.isArray(v) ? v : String(v || '').split(/[\s,]+/)).map((x) => String(x).trim()).filter(Boolean);
     if (input.knowledge_urls !== undefined) {
@@ -126,8 +130,8 @@ async function update(inbox, user, input = {}) {
     const v = validate(input, inbox);
     const next = { ...inbox, ...v };
     const hoursJson = (h) => (h == null ? null : typeof h === 'string' ? h : JSON.stringify(h));
-    await db.run(`UPDATE inboxes SET name = ?, greeting = ?, color = ?, ai_enabled = ?, handoff = ?, ai_instructions = ?, knowledge_urls = ?, allowed_origins = ?, hours = ? WHERE id = ?`,
-        [next.name, next.greeting, next.color, Number(next.ai_enabled) ? 1 : 0, Number(next.handoff ?? 1) ? 1 : 0, next.ai_instructions, JSON.stringify(json(next.knowledge_urls, [])), JSON.stringify(json(next.allowed_origins, [])), hoursJson(next.hours), inbox.id]);
+    await db.run(`UPDATE inboxes SET name = ?, greeting = ?, color = ?, ai_enabled = ?, handoff = ?, ai_instructions = ?, knowledge_urls = ?, allowed_origins = ?, hours = ?, route = ? WHERE id = ?`,
+        [next.name, next.greeting, next.color, Number(next.ai_enabled) ? 1 : 0, Number(next.handoff ?? 1) ? 1 : 0, next.ai_instructions, JSON.stringify(json(next.knowledge_urls, [])), JSON.stringify(json(next.allowed_origins, [])), hoursJson(next.hours), next.route || 'none', inbox.id]);
     return await get(inbox.id);
 }
 
@@ -150,7 +154,7 @@ async function mine(user) {
 function shape(r) {
     return {
         id: r.id, name: r.name, greeting: r.greeting, color: r.color, ai_enabled: !!Number(r.ai_enabled), handoff: peopleAnswer(r), ai_instructions: r.ai_instructions,
-        verified_visitors: !!r.identity_secret, hours: hoursOf(r),
+        verified_visitors: !!r.identity_secret, hours: hoursOf(r), route: r.route || 'none',
         knowledge_urls: json(r.knowledge_urls, []), allowed_origins: json(r.allowed_origins, []), created_at: r.created_at,
     };
 }
@@ -204,11 +208,27 @@ async function addMessage(conv, { author, body, userId = null, name = null }, de
     return message;
 }
 
+/** Turns: a waiting conversation nobody has yet goes to the person whose turn it is (they are then the one told). */
+async function takeTurn(conv, deps = {}) {
+    const fresh = await db.get('SELECT assignee_id FROM inbox_conversations WHERE id = ?', [conv.id]);
+    if (!fresh || fresh.assignee_id != null) return;
+    const routing = require('./routing');
+    const next = await routing.nextInTurn(await get(conv.inbox_id) || {});
+    if (next == null) return;
+    await db.run('UPDATE inbox_conversations SET assignee_id = ? WHERE id = ? AND assignee_id IS NULL', [next, conv.id]);
+    await routing.noteAssigned(conv.inbox_id, next);
+    broadcaster(deps)(conv.inbox_id, null, { type: 'inbox_assigned', inbox: conv.inbox_id, conversation: conv.id, assignee: next });
+}
+
 async function setStatusRow(conv, status, deps = {}, extra = {}) {
     await db.run(`UPDATE inbox_conversations SET status = ?${extra.assignee ? ', assignee_id = COALESCE(assignee_id, ?)' : ''} WHERE id = ?`,
         extra.assignee ? [status, extra.assignee, conv.id] : [status, conv.id]);
     broadcaster(deps)(conv.inbox_id, conv.id, { type: 'inbox_status', inbox: conv.inbox_id, conversation: conv.id, status });
-    if (status === 'waiting' && conv.status !== 'waiting') { require('./notify').later(conv, 'waiting'); require('./webhooks').later(conv.inbox_id, 'conversation.waiting', { conversationId: conv.id }); }
+    if (status === 'waiting' && conv.status !== 'waiting') {
+        await takeTurn(conv, deps);
+        require('./notify').later(conv, 'waiting');
+        require('./webhooks').later(conv.inbox_id, 'conversation.waiting', { conversationId: conv.id });
+    }
     if (status === 'resolved' && conv.status !== 'resolved') require('./webhooks').later(conv.inbox_id, 'conversation.resolved', { conversationId: conv.id });
     return { ...conv, status };
 }
@@ -341,6 +361,7 @@ async function visitorPost(inbox, token, { message, page_url = null, name = null
     const filtered = wordFilter.check(body);
     const posted = await addMessage(conv, { author: 'visitor', body: filtered.safe ? body : filtered.filtered, name: conv.visitor_name }, deps);
     // A person is needed: a new conversation with Vibe off starts waiting, and a visitor writing to people is news.
+    if (started && conv.status === 'waiting') await takeTurn(conv, deps);
     if (conv.status === 'waiting' || conv.status === 'open') require('./notify').later(conv, started ? 'waiting' : 'message');
     if (conv.status === 'bot') {
         const run = () => aiAnswer(inbox, conv.id, deps).catch((e) => console.warn(`[Inbox] ${inbox.id}: ${e && e.message}`));
@@ -410,9 +431,10 @@ async function accountPost(account, conv, text, deps = {}) {
 
 // ── Agents ─────────────────────────────────────────────────────────────────────────────────────────────────────────
 
-async function conversations(inbox, { status = null, limit = 100 } = {}) {
-    const where = status === 'active' ? "AND c.status IN ('bot', 'waiting', 'open')" : STATUSES.includes(status) ? 'AND c.status = ?' : '';
-    const params = [inbox.id, ...(STATUSES.includes(status) ? [status] : []), Math.min(200, Number(limit) || 100)];
+async function conversations(inbox, { status = null, limit = 100, user = null } = {}) {
+    const mine = status === 'mine' && user;
+    const where = status === 'active' ? "AND c.status IN ('bot', 'waiting', 'open')" : mine ? "AND c.status IN ('waiting', 'open') AND c.assignee_id = ?" : STATUSES.includes(status) ? 'AND c.status = ?' : '';
+    const params = [inbox.id, ...(mine ? [user.id] : STATUSES.includes(status) ? [status] : []), Math.min(200, Number(limit) || 100)];
     const rows = await db.all(`SELECT c.*, (SELECT body FROM inbox_messages m WHERE m.conversation_id = c.id AND m.author <> 'system' ORDER BY m.id DESC LIMIT 1) AS last_body
         FROM inbox_conversations c WHERE c.inbox_id = ? ${where}
         ORDER BY CASE c.status WHEN 'waiting' THEN 0 WHEN 'open' THEN 1 WHEN 'bot' THEN 2 ELSE 3 END, COALESCE(c.last_message_at, c.created_at) DESC LIMIT ?`, params);
@@ -441,6 +463,17 @@ async function setStatus(inbox, conv, user, status, deps = {}) {
     const next = await setStatusRow(conv, status, deps);
     if (status === 'resolved') await addMessage(conv, { author: 'system', body: 'This conversation was marked resolved. Write again any time to reopen it.' }, deps);
     return convShape(next);
+}
+
+/** One of the inbox's people (or nobody: null) answers this conversation; any of them may assign it. */
+async function assign(inbox, conv, user, assigneeId, deps = {}) {
+    if (!(await access(inbox, user)).role) fail(403, 'inbox.not_agent', 'Only the inbox\'s people assign conversations');
+    const id = assigneeId == null || assigneeId === '' ? null : Number(assigneeId);
+    if (id != null && !(await db.get('SELECT 1 FROM inbox_members WHERE inbox_id = ? AND user_id = ?', [inbox.id, id]))) fail(422, 'inbox.assignee', 'Assign it to one of the inbox\'s people');
+    await db.run('UPDATE inbox_conversations SET assignee_id = ? WHERE id = ?', [id, conv.id]);
+    if (id != null) await require('./routing').noteAssigned(inbox.id, id);
+    broadcaster(deps)(inbox.id, null, { type: 'inbox_assigned', inbox: inbox.id, conversation: conv.id, assignee: id });
+    return convShape(await db.get('SELECT * FROM inbox_conversations WHERE id = ?', [conv.id]));
 }
 
 async function markRead(inbox, conv) { await db.run('UPDATE inbox_conversations SET agent_unread = 0 WHERE id = ?', [conv.id]); }
@@ -543,6 +576,6 @@ function _reset() { inFlight.clear(); }
 module.exports = {
     InboxError, INBOX_RE, CONV_RE, LIMITS, MAX_INBOXES, AI_PER_CONVERSATION, hashToken,
     create, update, remove, get, access, mine, members, addMember, removeMember, shape, publicConfig, plainText, peopleAnswer,
-    visit, visitorPost, handoff, rate, setIdentity, verifiedIdentity, savedReplies, saveReply, deleteReply, mySupport, myConversation, accountPost, conversations, conversation, messages, agentPost, setStatus, markRead, convShape,
+    visit, visitorPost, handoff, rate, assign, setIdentity, verifiedIdentity, savedReplies, saveReply, deleteReply, mySupport, myConversation, accountPost, conversations, conversation, messages, agentPost, setStatus, markRead, convShape,
     aiAnswer, inboxPrompt, _reset,
 };
