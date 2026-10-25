@@ -6,7 +6,7 @@
  */
 const { esc } = require('./layout');
 
-const code = (s) => `<pre class="ib-snippet"><code>${esc(s)}</code></pre>`;
+const code = (s) => `<pre class="ib-snippet" tabindex="0"><code>${esc(s)}</code></pre>`;
 
 function body(base) {
     return `<h1>Build with OpenVibe Chat</h1>
