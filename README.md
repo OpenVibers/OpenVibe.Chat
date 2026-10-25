@@ -501,7 +501,9 @@ for people and for companies, with "direct live support with an agent", "fully m
   (`public/web/support-call.js`), at most four people. The visitor joins with their visitor token (a `support-visitor`
   message); the inbox's people join as themselves; anyone else gets "not found". Either side ends it for everyone
   (`DELETE …/call`, or the visitor's `POST /api/chat/widget/inbox/:id/call/end { token }`), and resolving the
-  conversation ends it too. A conversation carries `call: true` while one is open. The widget's frame may ask for the
+  conversation ends it too. In the call the visitor may **share their screen** (the browser's own picker; not on
+  phones): the team sees it above the call bar, with a full-screen button. A conversation carries `call: true` while one
+  is open. The widget's frame may ask for the
   microphone (the browser still asks the visitor).
 - **Records** (`server/inbox/records.js`): how long finished conversations stay, set in the settings ("Keep finished
   conversations": forever, 30 or 90 days, 6 months, 1 or 2 years) or with `PATCH /api/chat/inboxes/:id { retention_days:
