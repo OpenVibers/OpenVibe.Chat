@@ -1,7 +1,9 @@
 /* OpenVibe Chat on any website (docs/platform.md): one tag, served at https://openvibe.chat/widget.js.
- *   <script src="https://openvibe.chat/widget.js" data-inbox="inb_…" async></script>
+ *   <script src="https://openvibe.chat/widget.js" data-inbox="inb_…" async></script>      a support inbox
+ *   <script src="https://openvibe.chat/widget.js" data-room="<slug>" async></script>       a public chat room
  *   data-position="left" puts the bubble on the left; data-color="#ff7a1a" colours it before the inbox's own colour loads;
- *   data-open="1" opens the panel at once.
+ *   data-open="1" opens the panel at once. data-target="#chat" (a room) puts the room in that element instead of a
+ *   bubble, data-height="480" tall.
  * It draws a bubble in a shadow root (the site's CSS cannot reach it, it cannot reach the site's) and, on the first open,
  * an iframe of openvibe.chat/embed/inbox/<id>: the conversation lives there, on openvibe.chat's own origin, so the site
  * never sees the visitor's token and openvibe.chat never sees the site's cookies. The page may drive it:
@@ -12,8 +14,26 @@
   var me = document.currentScript;
   if (!me || window.OpenVibeChat) return;
   var inbox = me.getAttribute('data-inbox') || '';
-  if (!/^inb_[0-9A-HJKMNP-TV-Z]{26}$/.test(inbox)) { console.warn('OpenVibe Chat: data-inbox is not an inbox id'); return; }
+  var room = String(me.getAttribute('data-room') || '').toLowerCase();
+  var isRoom = !inbox && /^[a-z0-9][a-z0-9-]{1,48}$/.test(room);
+  if (!isRoom && !/^inb_[0-9A-HJKMNP-TV-Z]{26}$/.test(inbox)) { console.warn('OpenVibe Chat: data-inbox is not an inbox id (or data-room a room)'); return; }
   var base = new URL(me.src).origin;
+  // A room in an element of the page: just the frame, no bubble.
+  var target = isRoom && me.getAttribute('data-target');
+  if (target) {
+    var mountInline = function () {
+      var box = document.querySelector(target);
+      if (!box) { console.warn('OpenVibe Chat: no element matches ' + target); return; }
+      var f = document.createElement('iframe');
+      f.title = 'Chat'; f.loading = 'lazy'; f.allow = 'clipboard-write';
+      f.src = base + '/embed/room/' + encodeURIComponent(room);
+      f.style.cssText = 'display:block;width:100%;height:' + Math.min(1200, Math.max(240, parseInt(me.getAttribute('data-height'), 10) || 480)) + 'px;border:0;border-radius:14px;color-scheme:normal';
+      box.appendChild(f);
+    };
+    window.OpenVibeChat = { open: function () {}, close: function () {}, toggle: function () {} };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mountInline); else mountInline();
+    return;
+  }
   var left = me.getAttribute('data-position') === 'left';
   var color = /^#[0-9a-fA-F]{6}$/.test(me.getAttribute('data-color') || '') ? me.getAttribute('data-color') : '#3b82f6';
 
@@ -49,7 +69,8 @@
     frame = document.createElement('iframe');
     frame.title = 'Chat';
     frame.allow = 'clipboard-write';
-    frame.src = base + '/embed/inbox/' + inbox + '?page=' + encodeURIComponent(location.href.slice(0, 500));
+    frame.src = isRoom ? base + '/embed/room/' + encodeURIComponent(room) + '?bubble=1'
+      : base + '/embed/inbox/' + inbox + '?page=' + encodeURIComponent(location.href.slice(0, 500));
     panel.appendChild(frame);
   }
   function setOpen(v) {

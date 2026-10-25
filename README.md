@@ -473,6 +473,21 @@ for people and for companies, with "direct live support with an agent", "fully m
 - Export and account deletion cover inboxes: the owner's inboxes go with their conversations; an agent's replies in
   other inboxes stay, signed "A former agent".
 
+### A chat room on any website (the widget's room mode)
+
+The same tag puts a **public room** on any site (`server/web/room-embed-pages.js`, `public/web/room-embed.js`): as a
+bubble, `<script src="https://openvibe.chat/widget.js" data-room="<slug>" async></script>`, or inside an element of the
+page, `data-target="#chat" data-height="520"`. The owner's room settings give both tags. Only public rooms embed (not
+private ones, Vibe chats or a server's channels), and the frame may sit on any site. Anyone reads, live over the chat
+socket (`join_room`); people sign in with OpenVibe to write, and the room's moderation and OpenVibe's global standard
+apply because posting goes through `rooms.post`.
+
+Signing in from a frame: browsers give a frame on another site no openvibe.chat cookies, and the sign-in window loses
+its link to the frame on openvibe.network (Cross-Origin-Opener-Policy). So the frame makes a random ticket, opens
+`/embed/signin?ticket=…`, and asks `POST /embed/ticket` until the window has bound the ticket to the person's session
+(two minutes, once). The token lives in the frame's own storage, which the browser partitions by the embedding site.
+"Sign out" forgets it.
+
 ### Feeds: vibe coding, live (openvibe.chat/feeds)
 
 The owner, 2026-10-24: "improve the vibe coding feed feature on live and migrate that whole entire feature so it's built

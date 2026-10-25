@@ -55,7 +55,8 @@ center (MagicBrowse privacy), getstream.io (Stream vs Sendbird), rumbletalk.com,
    room, any site (an iframe card), Claude Code's own `http` hooks with no extension to install, publishing over plain
    HTTP, secrets and home folders scrubbed on the way in, the delay kept on the server. Live's channel chat shows
    Chat's card; Live's tables are copied (`scripts/import-live-feeds.js`), verified and dropped (convert-verify-delete).
-3. **Community room and site assistant modes** of the widget; pictures, video and files in the embed (signed-in
+3. **Community room** (built: `data-room`, bubble or inline, sign-in by ticket) **and site assistant** (built: an inbox
+   whose people do not answer) **modes** of the widget; pictures, video and files in the embed (signed-in
    visitors first, then anonymous once Pics/Video take anonymous uploads); call escalation from a support conversation.
 4. **Developer platform**: capabilities in OpenVibe.Contracts (`chat.inbox.*`, `chat.conversation.*`, `chat.feed.*`),
    `openvibe-sdk/chat`, Events types (`chat.conversation.created`, `.handoff_requested`, `.resolved`), webhooks.
