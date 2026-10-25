@@ -86,6 +86,8 @@ async function ensureSchema() {}
 const isStaff = (user) => !!user && permissions.can(user, 'staff.moderation.chat');
 const roleOf = async (roomId, userId) => (userId ? (await db.get('SELECT role FROM room_members WHERE room_id = ? AND user_id = ?', [roomId, userId]) || {}).role || null : null);
 const siteBanned = (user) => !!user && (user.is_banned || (() => { try { return ctx.isUserBanned(user.id, null); } catch { return false; } })());
+const isWorkspace = (room) => !!room && Number(room.workspace) === 1;
+const isStaffRoom = (room) => isWorkspace(room) && room.slug === 'staff';
 const kindOf = (room) => (KINDS.includes(room && room.kind) ? room.kind : 'community');
 const joinRoleOf = (room) => (kindOf(room) === 'call' && JOIN_ROLES_CALL.includes(room.join_role) ? room.join_role : JOIN_ROLE[kindOf(room)]);
 
@@ -101,6 +103,7 @@ async function publicRoom(r, extra = {}) {
         slow_seconds: r.slow_seconds, message_count: r.message_count, last_message_at: r.last_message_at,
         created_at: r.created_at, members: (await db.get("SELECT COUNT(*) AS n FROM room_members WHERE room_id = ? AND role != 'blocked'", [r.id]) || {}).n || 0,
         ...(Number(r.assistant) === 1 ? { assistant: true } : {}),
+        ...(isWorkspace(r) ? { workspace: true } : {}),
         ...(r.server_id ? { server: { slug: (await db.get('SELECT slug FROM chat_servers WHERE id = ?', [r.server_id]) || {}).slug || null, channel: r.channel_slug } } : {}),
         ...extra,
     };
@@ -119,8 +122,14 @@ async function access(room, user) {
     // A server's channel: the server decides (server/rooms/servers.js).
     if (room.server_id) return await require('./servers').channelAccess(room, user);
     const kind = kindOf(room);
-    const role = user ? await roleOf(room.id, user.id) : null;
     const staff = isStaff(user);
+    // The staff room (a workspace, migrations/0027_workspaces.sql) is OpenVibe staff's own: every member of staff is a
+    // member (added on their first visit), and nobody else reads it, whatever role they once had.
+    if (isStaffRoom(room)) {
+        if (!staff) return { role: null, kind, read: false, post: false, join: false, talk: false, moderate: false, manage: false };
+        if (!(await roleOf(room.id, user.id))) await db.run("INSERT INTO room_members (room_id, user_id, role, last_seen_at) VALUES (?, ?, 'member', ov_now()) ON CONFLICT (room_id, user_id) DO NOTHING", [room.id, user.id]);
+    }
+    const role = user ? await roleOf(room.id, user.id) : null;
     const blocked = role === 'blocked';
     const member = !!role && !blocked;
     const banned = siteBanned(user);
@@ -461,6 +470,7 @@ async function attachments(room) {
 function _reset() { _rate.clear(); }
 
 module.exports = {
+    isWorkspace, isStaffRoom,
     postAsAi,
     ensureSchema, create, list, bySlug, access, join, leave, post, history, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
     attach, detach, attachments, joinRoleOf, unreadTotal, isStaff, siteBanned, POSTERS, TALKERS,

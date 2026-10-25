@@ -131,6 +131,19 @@
   function startGlobal() {
     var live = document.getElementById('oc-live');
     var ws = null, delay = 1000, opened = false;
+    // A workspace room's queue (server/web/workspace-pages.js): its panel reloads when the socket says it changed.
+    var queueBox = document.getElementById('oc-queue'), queueTimer = null;
+    function refreshQueue() {
+      if (!queueBox || queueTimer) return;
+      queueTimer = setTimeout(function () {
+        queueTimer = null;
+        if (queueBox.querySelector('form :focus, details[open] input:not(:placeholder-shown), details[open] textarea:not(:placeholder-shown)')) return;
+        fetch(queueBox.getAttribute('data-queue'), { credentials: 'same-origin', cache: 'no-store' })
+          .then(function (r) { return r.ok ? r.text() : null; })
+          .then(function (html) { if (html) queueBox.innerHTML = html; })
+          .catch(function () {});
+      }, 400);
+    }
     function connect() {
       ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
       ws.onopen = function () {
@@ -308,6 +321,8 @@
           latest = Math.max(latest, Number(m.message.id) || 0);
           append(roomItem(m.message), m.message.id);
           if (!document.hidden && cfg.me) fetch(api + '/read', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ last_id: latest }) }).catch(function () {});
+        } else if (m.type === 'room_task' && m.room === cfg.room) {
+          refreshQueue();
         } else if (m.type === 'room_ai_typing' && m.room === cfg.room) {
           showThinking(m.name);
         } else if (m.type === 'room_message_deleted' && m.room === cfg.room) {

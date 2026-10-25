@@ -383,6 +383,32 @@ and the `ctx_users` projection, pages read Chat's own tables, cosmetics are wait
 the only openvibe.live URLs are profile links. `test/live-down.test.js` renders every page and uses the
 forms, the core APIs and the socket with Live refusing connections and with Live hanging.
 
+### Workspace rooms and the staff room (openvibe.chat/r/staff)
+
+A workspace room has a **work queue** beside its conversation ([server/rooms/workspace.js](server/rooms/workspace.js),
+[server/web/workspace-pages.js](server/web/workspace-pages.js), migration `0027_workspaces.sql`): the team talks, asks
+`@vibe`, and everyone sees what is queued, being worked on and done. The **staff room** (`/r/staff`, seeded by the
+migration with Vibe in it) is OpenVibe staff's own: every member of staff (chat staff, `staff.moderation.chat`) becomes a
+member on their first visit, and nobody else reads it, whatever role they once had.
+
+- **Adding work:** anyone who may post adds a task (title, kind, details) from the panel or the API, or asks Vibe, which
+  queues it with its `queue_task` tool (one task per job) and answers what is going on with `queue_status`.
+- **Quick kinds** (`answer`, `research`, `web`) run at once as OpenVibe.Actor tasks of the person who asked: Chat's
+  service token names them in `X-OV-Subject` (their allowance, their task list; Actor records Chat as `via`). A poller
+  follows them every 10 s.
+- **Other kinds** (`code`, `computer`, `other`) wait for a worker: a member (or an agent working with a member's API
+  token, such as the agent harness) claims one, then reports how it went and where it landed (an https link, such as a
+  pull request).
+- **Results** of every task, whoever ran it, are announced in the room by its Vibe with a link to the task's page
+  (`/r/:slug/tasks/:id`: details, the full result, sources, cost). Open pages refresh the panel when the chat socket
+  sends `room_task`.
+- **Cancelling** is the asker's or a moderator's. Limits: 20 tasks an hour per person, 300 a day per room.
+- **Account data:** a person's tasks are in their export (`room_tasks.json`); on deletion the room keeps the work
+  without who asked or who took it.
+
+API (`/api/chat/rooms`, also in openvibe-sdk): `GET|POST /:slug/tasks`, `GET /:slug/tasks/:id`,
+`POST /:slug/tasks/:id/cancel|claim|report`.
+
 ### Vibe, OpenVibe's assistant (openvibe.chat/vibe)
 
 The owner, 2026-10-24: "turn openvibe.chat into the main chat app", familiar like ChatGPT (plan track K,

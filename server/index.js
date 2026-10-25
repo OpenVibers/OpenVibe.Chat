@@ -64,6 +64,8 @@ async function start() {
     // The chat-AI job (Live's server/ai/chat-ai.js, now Chat's): off unless CHAT_AI_ENABLED=1; it
     // writes Chat's own chat_ai_summaries/chat_timeline_events rows directly (C-04 done).
     chatAi.start();
+    // Workspace rooms' queues (server/rooms/workspace.js): the OpenVibe.Actor tasks they started, followed every 10 s.
+    require('./rooms/workspace').start();
 
     // Zero-downtime restarts (as OpenVibe.Live): when systemd owns the listener (deploy/systemd/openvibe-chat.socket) it
     // hands it over as file descriptor 3, and connections that arrive during a restart wait in the kernel's accept queue
@@ -100,6 +102,7 @@ async function start() {
             async () => { await relay.stop(); serviceOutbox.reset(); },
             () => events.stop(),
             () => chatAi.stop(),
+            () => require('./rooms/workspace').stop(),
             () => subs.stop(),
             () => { if (valkey) return valkey.close(); },
             () => chatServer.close(),
