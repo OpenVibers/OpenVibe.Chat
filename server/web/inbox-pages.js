@@ -210,13 +210,13 @@ ${pictures.enabled() ? '<label class="ib-pic-btn" title="Send a picture"><input 
 ${req.query.made ? notice('ok', 'Your inbox is ready. Paste the snippet into your site, before </body>.') : ''}${req.query.saved ? notice('ok', 'Saved.') : ''}${req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : ''}
 <h2>Add it to your site</h2>
 <p>Paste this before <code>&lt;/body&gt;</code> on every page that should show the chat bubble:</p>
-<pre class="ib-snippet"><code>${esc(embed.script)}</code></pre>
+<pre class="ib-snippet" tabindex="0"><code>${esc(embed.script)}</code></pre>
 <p class="oc-muted">Your page can open it with <code>OpenVibeChat.open()</code>. Try it: <a href="${esc(embed.panel)}" target="_blank" rel="noopener">open the chat panel</a>.</p>
 ${owner ? `<h2>Verified visitors</h2>
 ${shape.verified_visitors ? `<p>On. Your site signs who its signed-in visitor is, and Chat trusts the name and email that come with it; their conversation follows them to every device. Keep this secret on your server only:</p>
-<pre class="ib-snippet"><code>${esc(inbox.identity_secret)}</code></pre>
+<pre class="ib-snippet" tabindex="0"><code>${esc(inbox.identity_secret)}</code></pre>
 <p>For a signed-in visitor, add <code>data-user-id</code>, <code>data-user-name</code>, <code>data-user-email</code> and <code>data-user-hash</code> to the tag (or call <code>OpenVibeChat.identify({ id, name, email, hash })</code>), where the hash is the HMAC-SHA256 of the id with the secret, in hex:</p>
-<pre class="ib-snippet"><code>${esc(`// Node
+<pre class="ib-snippet" tabindex="0"><code>${esc(`// Node
 crypto.createHmac('sha256', SECRET).update(String(user.id)).digest('hex')
 # Python
 hmac.new(SECRET.encode(), str(user.id).encode(), hashlib.sha256).hexdigest()
@@ -326,7 +326,7 @@ ${saved.length ? `<ul class="oc-members">${saved.map((r) => `<li><b>/${esc(r.sho
             // The secret is shown on this answer only (never in a URL: addresses end up in histories and logs).
             await page(req, res, 201, { actor: a.actor, title: `${a.inbox.name}: webhook`, path: `/inbox/${a.inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
                 body: `<p><a href="/inbox/${esc(a.inbox.id)}/settings">&larr; ${esc(a.inbox.name)} settings</a></p><h1>Webhook added</h1>
-${notice('ok', 'Here is its signing secret. Copy it now: it is shown only this once.')}<pre class="ib-snippet"><code>${esc(secret)}</code></pre>
+${notice('ok', 'Here is its signing secret. Copy it now: it is shown only this once.')}<pre class="ib-snippet" tabindex="0"><code>${esc(secret)}</code></pre>
 <p class="oc-muted">Check each delivery with it: <code>parseDelivery(rawBody, headers, secret, { requireV2: true })</code> from <code>openvibe-sdk/events</code> (X-OpenVibe-Timestamp and X-OpenVibe-Signature-V2).</p>` });
         } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not work')}`); }
     });
@@ -361,9 +361,9 @@ ${notice('ok', 'Here is its signing secret. Copy it now: it is shown only this o
                 conversation: { id: 'cv_…', page_url: '…', verified: true, visitor_id: 'your id for them', visitor_email: '…' } } } }, null, 2);
             await page(req, res, 201, { actor: a.actor, title: `${a.inbox.name}: action`, path: `/inbox/${a.inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
                 body: `<p><a href="/inbox/${esc(a.inbox.id)}/settings">&larr; ${esc(a.inbox.name)} settings</a></p><h1>Action added</h1>
-${notice('ok', 'Here is its signing secret. Copy it now: it is shown only this once.')}<pre class="ib-snippet"><code>${esc(secret)}</code></pre>
+${notice('ok', 'Here is its signing secret. Copy it now: it is shown only this once.')}<pre class="ib-snippet" tabindex="0"><code>${esc(secret)}</code></pre>
 <p>Each time Vibe uses <b>${esc(action.name)}</b>, your address gets a POST like this:</p>
-<pre class="ib-snippet"><code>${esc(sample)}</code></pre>
+<pre class="ib-snippet" tabindex="0"><code>${esc(sample)}</code></pre>
 <p class="oc-muted">Check it with <code>parseDelivery(rawBody, headers, secret, { requireV2: true })</code> from <code>openvibe-sdk/events</code>. <code>visitor_id</code> is set only for a visitor your site verified: look up their own orders with it, never with what they typed alone. Answer within 8 seconds with <code>{ "text": "Order 1042 ships Tuesday." }</code> or plain text (4 KB at most).</p>` });
         } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not work')}`); }
     });
@@ -375,7 +375,7 @@ ${notice('ok', 'Here is its signing secret. Copy it now: it is shown only this o
             // The answer is shown on this page, never put in a URL.
             await page(req, res, 200, { actor: a.actor, title: `${a.inbox.name}: action test`, path: `/inbox/${a.inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
                 body: `<p><a href="/inbox/${esc(a.inbox.id)}/settings">&larr; ${esc(a.inbox.name)} settings</a></p><h1>Action test</h1>
-${r.ok ? `${notice('ok', `Your address answered ${r.status}. Vibe would read:`)}<pre class="ib-snippet"><code>${esc(r.result || '(nothing)')}</code></pre>` : notice('error', `It did not work: ${r.error}`)}` });
+${r.ok ? `${notice('ok', `Your address answered ${r.status}. Vibe would read:`)}<pre class="ib-snippet" tabindex="0"><code>${esc(r.result || '(nothing)')}</code></pre>` : notice('error', `It did not work: ${r.error}`)}` });
         } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not work')}`); }
     });
     router.post('/inbox/:id/actions/:xid/delete', formLimit, sameSite, async (req, res) => {

@@ -72,7 +72,7 @@ function mountFeedPages(router, { page, needUser, sameSite, formLimit, notice, c
     }
     function keyPanel(feed, key) {
         return `${notice('ok', 'Here is the feed\'s key. Copy it now: it is shown only this once.')}
-<pre class="ib-snippet fd-key"><code>${esc(key)}</code></pre>
+<pre class="ib-snippet fd-key" tabindex="0"><code>${esc(key)}</code></pre>
 <p class="oc-muted">Put it where your tools read it, for example <code>export OPENVIBE_FEED_KEY=${esc(key.slice(0, 8))}…</code> in your shell profile. Anyone with the key can post to this feed; make a new one any time.</p>
 <p><a class="oc-button" href="/feeds/${esc(feed.id)}">Set up publishing</a></p>`;
     }
@@ -126,14 +126,14 @@ ${req.query.saved ? notice('ok', 'Saved.') : ''}${req.query.error ? notice('erro
 <div class="fv fd-preview" data-feed="${esc(feed.id)}"></div>
 <h2>Publish from Claude Code</h2>
 <p>Add this to <code>.claude/settings.json</code> in a project (or <code>~/.claude/settings.json</code> for every project), and set <code>OPENVIBE_FEED_KEY</code> in the shell you start Claude Code from. Each prompt, tool used and answer becomes a step; nothing is read from your files or transcript.</p>
-<pre class="ib-snippet"><code>${esc(claudeCodeSnippet(base, feed.id))}</code></pre>
+<pre class="ib-snippet" tabindex="0"><code>${esc(claudeCodeSnippet(base, feed.id))}</code></pre>
 <h2>Publish from anything else</h2>
 <p>Send events to the API with the key; <code>eventType</code> is one of ${feeds.TYPES.map((t) => `<code>${t}</code>`).join(', ')} (up to 50 at once as <code>{ "events": [...] }</code>). The OpenVibe Copilot companion speaks the same events.</p>
-<pre class="ib-snippet"><code>${esc(curlSnippet(base, feed.id))}</code></pre>
+<pre class="ib-snippet" tabindex="0"><code>${esc(curlSnippet(base, feed.id))}</code></pre>
 <p class="oc-muted">Key ending in <code>${esc(feed.key_hint || '????')}</code>.</p>
 <form method="post" action="/feeds/${esc(feed.id)}/key" class="oc-inline"><button type="submit">Make a new key</button></form> <span class="oc-muted">(the old one stops working)</span>
 <h2>Show it on your site</h2>
-<pre class="ib-snippet"><code>${esc(iframeSnippet(base, feed.id))}</code></pre>
+<pre class="ib-snippet" tabindex="0"><code>${esc(iframeSnippet(base, feed.id))}</code></pre>
 <h2>Where it shows and what viewers see</h2>
 <form class="oc-form" method="post" action="/feeds/${esc(feed.id)}/settings">
 <label>Title <input name="title" required minlength="2" maxlength="80" value="${esc(feed.title)}"></label>

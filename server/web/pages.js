@@ -849,9 +849,9 @@ ${hookList.length < roomHooks.MAX_PER_ROOM ? `<form class="oc-form" method="post
             body: `<p><a href="/r/${esc(room.slug)}">← ${esc(room.name)}</a></p><h1>Room settings</h1>${saved}${error}
 ${can.manage && await require('./room-embed-pages').embeddable(room) ? `<h2>Put this room on your site</h2>
 <p>Anyone can read it there; people sign in with OpenVibe to write, and the room's moderation applies. A chat bubble:</p>
-<pre class="ib-snippet"><code>${esc(`<script src="${config.web.baseUrl}/widget.js" data-room="${room.slug}" async></script>`)}</code></pre>
+<pre class="ib-snippet" tabindex="0"><code>${esc(`<script src="${config.web.baseUrl}/widget.js" data-room="${room.slug}" async></script>`)}</code></pre>
 <p>Or in a part of your page (an element with id="chat"):</p>
-<pre class="ib-snippet"><code>${esc(`<script src="${config.web.baseUrl}/widget.js" data-room="${room.slug}" data-target="#chat" data-height="520" async></script>`)}</code></pre>` : ''}
+<pre class="ib-snippet" tabindex="0"><code>${esc(`<script src="${config.web.baseUrl}/widget.js" data-room="${room.slug}" data-target="#chat" data-height="520" async></script>`)}</code></pre>` : ''}
 ${can.manage ? `<form class="oc-form" method="post" action="/r/${esc(room.slug)}/settings">
 <label>Name <input name="name" required minlength="3" maxlength="40" value="${esc(room.name)}"></label>
 <label>Topic <input name="topic" maxlength="200" value="${esc(room.topic || '')}"></label>
