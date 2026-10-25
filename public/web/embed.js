@@ -19,6 +19,19 @@
   var token = null, conv = null, latest = 0, ws = null, delay = 1000, aiOn = root.getAttribute('data-ai') === '1', typingEl = null;
   var people = root.getAttribute('data-people') !== '0', rateEl = null;
 
+  // A person's reply may hold OpenVibe.Pics pictures (sent from the inbox): shown inline, only that host, at most four.
+  var picsBase = root.getAttribute('data-pics') || 'https://openvibe.pics';
+  var PICS = new RegExp(picsBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/i/([2-9a-km-zA-HJ-NP-Z]{8})\\.(?:jpg|png|gif|webp|avif)(?![\\w/.-])', 'g');
+  function picsOf(text) {
+    var box = null, m, n = 0; PICS.lastIndex = 0;
+    while ((m = PICS.exec(String(text || ''))) && n < 4) {
+      if (!box) box = el('div', 'em-pics');
+      var a = el('a', 'em-pic'); a.href = picsBase + '/i/' + m[1]; a.target = '_blank'; a.rel = 'noopener';
+      var img = el('img'); img.src = picsBase + '/i/' + m[1] + '/thumb.webp'; img.alt = 'A picture'; img.loading = 'lazy';
+      a.appendChild(img); box.appendChild(a); n++;
+    }
+    return box;
+  }
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function store(fn) { try { return fn(window.localStorage); } catch (e) { return null; } }
   function toParent(msg) { try { window.parent.postMessage(Object.assign({ ov: 'chat' }, msg), '*'); } catch (e) { /* not embedded */ } }
@@ -82,6 +95,7 @@
       var b = el('div', 'em-bubble');
       if (m.author === 'ai' && window.VibeMarkdown) b.innerHTML = window.VibeMarkdown.render(m.body); else b.textContent = m.body;
       li.appendChild(b);
+      if (m.author === 'agent') { var pics = picsOf(m.body); if (pics) li.appendChild(pics); }
       if (!mine) { clearTyping(); toParent({ type: 'message', author: m.author }); }
     }
     if (m.id) li.dataset.id = String(m.id);

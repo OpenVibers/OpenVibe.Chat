@@ -18,6 +18,18 @@
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function token() { var m = /(?:^|;\s*)ov_token=([^;]+)/.exec(document.cookie || ''); return m ? decodeURIComponent(m[1]) : undefined; }
   function chip(s) { var c = el('span', 'vb-st ' + (STATUS[s] ? STATUS[s][1] : ''), STATUS[s] ? STATUS[s][0] : s); return c; }
+  // OpenVibe.Pics direct links in a person's reply show as pictures (only that host, at most four), like in rooms.
+  var PICS = /https:\/\/openvibe\.pics\/i\/([2-9a-km-zA-HJ-NP-Z]{8})\.(?:jpg|png|gif|webp|avif)(?![\w\/.-])/g;
+  function picsOf(text) {
+    var box = null, m, n = 0; PICS.lastIndex = 0;
+    while ((m = PICS.exec(String(text || ''))) && n < 4) {
+      if (!box) box = el('span', 'oc-pics');
+      var a = el('a', 'oc-pic'); a.href = 'https://openvibe.pics/i/' + m[1]; a.target = '_blank'; a.rel = 'noopener';
+      var img = el('img'); img.src = 'https://openvibe.pics/i/' + m[1] + '/thumb.webp'; img.alt = 'A picture on OpenVibe.Pics'; img.loading = 'lazy';
+      a.appendChild(img); box.appendChild(a); n++;
+    }
+    return box;
+  }
   function plain(t) { return String(t || '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`~]+|^#+\s*|^>\s*/gm, '').replace(/\s+/g, ' ').trim(); }
   function bottom() { if (scroll) scroll.scrollTop = scroll.scrollHeight; }
   function clearTyping() { if (typingEl) { typingEl.remove(); typingEl = null; } }
@@ -36,7 +48,9 @@
       b.appendChild(el('p', 'ib-who', m.author === 'ai' ? 'Vibe (AI)' : (m.author_name || 'Agent')));
       var text = el('div', 'vb-md');
       if (m.author === 'ai' && window.VibeMarkdown) text.innerHTML = window.VibeMarkdown.render(m.body); else text.textContent = m.body;
-      b.appendChild(text); li.appendChild(b);
+      b.appendChild(text);
+      var pics = m.author === 'agent' ? picsOf(m.body) : null; if (pics) b.appendChild(pics);
+      li.appendChild(b);
     }
     li.dataset.id = String(m.id);
     return li;
@@ -117,6 +131,21 @@
     body.appendChild(b);
   }
   if (thread) Array.prototype.forEach.call(thread.querySelectorAll('.ib-visitor'), addTranslate);
+  var picIn = document.getElementById('ib-pic');
+  if (picIn && input) {
+    picIn.addEventListener('change', function () {
+      var f = picIn.files && picIn.files[0]; picIn.value = '';
+      if (!f) return;
+      var caption = input.value.trim();
+      fetch('/api/chat/inboxes/' + cfg.inbox + '/conversations/' + cfg.conversation + '/picture', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': f.type, 'X-Caption': encodeURIComponent(caption) }, body: f })
+        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+        .then(function (x) {
+          if (!x.ok) { window.alert((x.d && x.d.error) || 'That picture did not send.'); return; }
+          input.value = ''; input.dispatchEvent(new Event('input'));
+          appendToThread(x.d.message); touchList(cfg.conversation, x.d.message.body, 'open');
+        }).catch(function () { window.alert('You seem to be offline.'); });
+    });
+  }
   var trTo = document.getElementById('ib-tr-to');
   if (trTo && input) {
     trTo.closest('.ib-tr-pick').hidden = false;

@@ -26,8 +26,23 @@ async function until(fn, label) {
 }
 const visitorMessages = async () => (await widget('GET', `/messages?token=${token}`)).body.messages;
 
+// A stand-in OpenVibe.Pics that takes any picture and answers its links.
+let picsServer = null;
+function startPics() {
+    let n = 0;
+    picsServer = require('http').createServer((req, res) => {
+        req.resume();
+        req.on('end', () => {
+            const slug = `Pk${String(++n).padStart(6, '2')}`.replace(/[01]/g, '3');
+            res.writeHead(201, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ slug, links: { direct: `https://openvibe.pics/i/${slug}.png`, page: `https://openvibe.pics/i/${slug}` } }));
+        });
+    });
+    return new Promise((r) => picsServer.listen(0, '127.0.0.1', () => r(`http://127.0.0.1:${picsServer.address().port}`)));
+}
+
 t('boot', async () => {
-    h = await boot({ env: { CHAT_WEB_URL: SITE, CHAT_INBOX_POSTS_PER_MINUTE: '500' } });
+    h = await boot({ env: { CHAT_WEB_URL: SITE, CHAT_INBOX_POSTS_PER_MINUTE: '500', CHAT_PICS_INTERNAL_URL: await startPics() } });
     aiClient = require('../server/ai/client');
     inboxes = require('../server/inbox/inbox');
     ann = h.addUser('ann', { subject: ids.newId('user') });
@@ -294,6 +309,25 @@ t('translation: a visitor\'s message into the reader\'s language (kept for the n
     assert.ok(app.includes('id="ib-tr-to"') && app.includes('Translate my reply into'));
 });
 
+t('pictures: one of the people sends a picture (through OpenVibe.Pics as them); the visitor and the people see it', async () => {
+    const v = (await widget('POST', '/visit', {})).body.token;
+    const cid = (await widget('POST', '/messages', { token: v, message: 'Here is the box it came in' })).body.conversation.id;
+    const PNG = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex');
+    const send = (u, headers) => fetch(`${h.base}/api/chat/inboxes/${inbox.id}/conversations/${cid}/picture`, { method: 'POST', headers: { authorization: `Bearer ${u.token}`, 'content-type': 'image/png', ...headers }, body: PNG })
+        .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+    const r = await send(bob, { 'x-caption': encodeURIComponent('Like this one?') });
+    assert.strictEqual(r.status, 201, JSON.stringify(r.body));
+    assert.ok(/^Like this one\?\nhttps:\/\/openvibe\.pics\/i\/[2-9a-km-zA-HJ-NP-Z]{8}\.png$/.test(r.body.message.body), r.body.message.body);
+    assert.strictEqual(r.body.message.author, 'agent');
+    assert.ok((await widget('GET', `/messages?token=${v}`)).body.messages.some((m) => m.id === r.body.message.id), 'the visitor gets it');
+    const outsider = h.addUser('fay', { subject: ids.newId('user') });
+    assert.strictEqual((await send(outsider)).status, 404);
+    const app = await fetch(`${h.base}/inbox/${inbox.id}?c=${cid}`, { headers: { cookie: `ov_token=${bob.token}` } }).then((x) => x.text());
+    assert.ok(app.includes('class="oc-pic"') && app.includes('/thumb.webp') && app.includes('id="ib-pic"'), 'the people see it inline, and the reply box has a picture button');
+    const panel = await fetch(`${h.base}/embed/inbox/${inbox.id}`).then((x) => x.text());
+    assert.ok(panel.includes('data-pics="https://openvibe.pics"'), 'the visitor\'s panel knows where pictures come from');
+});
+
 t('the embed page and the loader: frame-ancestors follow the allowed sites', async () => {
     let r = await fetch(`${h.base}/embed/inbox/${inbox.id}`);
     assert.strictEqual(r.status, 200);
@@ -326,4 +360,4 @@ t('the people\'s pages: the list, a conversation and the settings with the snipp
     assert.strictEqual((await page(`/inbox/${inbox.id}`, h.addUser('cat', { subject: ids.newId('user') }))).status, 404);
 });
 
-t.run(async () => { if (aiClient) aiClient._setClient(null); if (h && h.close) await h.close(); });
+t.run(async () => { if (aiClient) aiClient._setClient(null); if (h && h.close) await h.close(); if (picsServer) picsServer.close(); });

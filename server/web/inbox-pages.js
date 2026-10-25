@@ -16,6 +16,7 @@ const path = require('path');
 const md = require('../../public/web/vibe-md.js');
 const inboxes = require('../inbox/inbox');
 const webhooks = require('../inbox/webhooks');
+const pictures = require('../rooms/pictures');
 const { embedOf } = require('../inbox/routes');
 const { esc, asset } = require('./layout');
 
@@ -43,7 +44,7 @@ function embedHtml(inbox) {
 <script src="${asset('embed.js')}" defer></script>
 </head>
 <body style="--accent:${esc(inbox.color)}">
-<div class="em" id="em" data-inbox="${esc(inbox.id)}" data-ai="${Number(inbox.ai_enabled) ? '1' : '0'}" data-people="${inboxes.peopleAnswer(inbox) ? '1' : '0'}">
+<div class="em" id="em" data-inbox="${esc(inbox.id)}" data-ai="${Number(inbox.ai_enabled) ? '1' : '0'}" data-people="${inboxes.peopleAnswer(inbox) ? '1' : '0'}" data-pics="${esc(pictures.publicUrl())}">
 <header class="em-head"><span class="em-mark" aria-hidden="true">${esc(inbox.name.slice(0, 1).toUpperCase())}</span>
 <div><b>${esc(inbox.name)}</b><span id="em-state">${!Number(inbox.ai_enabled) ? 'We usually reply within a few hours.' : inboxes.peopleAnswer(inbox) ? 'Vibe answers right away. Ask for a person any time.' : 'Vibe, the assistant, answers right away.'}</span></div>
 <button class="em-x" type="button" data-close aria-label="Close the chat">&times;</button></header>
@@ -131,7 +132,7 @@ ${list}
         const turn = (m) => {
             if (m.author === 'system') return `<li class="ib-sys" data-id="${m.id}">${esc(m.body)}</li>`;
             if (m.author === 'visitor') return `<li class="vb-turn vb-ai ib-visitor" data-id="${m.id}"><span class="ib-av" aria-hidden="true">${esc((current.visitor_name || 'V').slice(0, 1).toUpperCase())}</span><div class="vb-body"><p class="ib-who">${esc(current.visitor_name || 'Visitor')}</p><div class="vb-md">${esc(m.body).replace(/\n/g, '<br>')}</div></div></li>`;
-            return `<li class="vb-turn vb-me" data-id="${m.id}"><div class="vb-bubble${m.author === 'ai' ? ' ib-ai' : ''}"><p class="ib-who">${m.author === 'ai' ? 'Vibe (AI)' : esc(m.author_name || 'Agent')}</p>${m.author === 'ai' ? `<div class="vb-md">${md.render(m.body)}</div>` : esc(m.body).replace(/\n/g, '<br>')}</div></li>`;
+            return `<li class="vb-turn vb-me" data-id="${m.id}"><div class="vb-bubble${m.author === 'ai' ? ' ib-ai' : ''}"><p class="ib-who">${m.author === 'ai' ? 'Vibe (AI)' : esc(m.author_name || 'Agent')}</p>${m.author === 'ai' ? `<div class="vb-md">${md.render(m.body)}</div>` : esc(m.body).replace(/\n/g, '<br>')}${m.author === 'agent' ? pictures.pageHtml(m.body) : ''}</div></li>`;
         };
         const tabs = [['active', 'Active'], ['waiting', 'Waiting'], ['resolved', 'Resolved']].map(([k, l]) => `<a href="/inbox/${esc(inbox.id)}?f=${k}"${k === filter ? ' aria-current="page"' : ''}>${l}</a>`).join('');
         const actions = current ? `<form method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}/status" class="ib-actions">
@@ -155,7 +156,7 @@ ${current ? `${Number(current.verified) ? `<p class="ib-page">Verified by your s
 </div>
 ${current ? `<div class="vb-dock"><form class="vb-composer" id="vb-composer" method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}">
 <label class="oc-sr" for="vb-input">Reply</label><textarea id="vb-input" name="message" rows="1" maxlength="4000" placeholder="Reply as ${esc(actor.user.display_name || actor.user.username)}${saved.length ? ' · / for saved replies' : ''}" required aria-autocomplete="list"></textarea>
-<button class="vb-send" type="submit" aria-label="Send">&#8593;</button></form><p class="vb-fine">Replying takes the conversation from Vibe. <label class="ib-tr-pick" hidden>Translate my reply into <select id="ib-tr-to"><option value="">a language…</option>${TR_LANGS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label></p></div>` : ''}
+${pictures.enabled() ? '<label class="ib-pic-btn" title="Send a picture"><input type="file" id="ib-pic" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" hidden><span aria-hidden="true">&#128206;</span><span class="oc-sr">Send a picture</span></label>' : ''}<button class="vb-send" type="submit" aria-label="Send">&#8593;</button></form><p class="vb-fine">Replying takes the conversation from Vibe. <label class="ib-tr-pick" hidden>Translate my reply into <select id="ib-tr-to"><option value="">a language…</option>${TR_LANGS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label></p></div>` : ''}
 </section>
 </div>`;
         await page(req, res, 200, {
