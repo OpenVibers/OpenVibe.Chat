@@ -363,7 +363,7 @@ async function rate(inbox, token, { rating, comment = '', conversation: convId =
 async function conversations(inbox, { status = null, limit = 100 } = {}) {
     const where = status === 'active' ? "AND c.status IN ('bot', 'waiting', 'open')" : STATUSES.includes(status) ? 'AND c.status = ?' : '';
     const params = [inbox.id, ...(STATUSES.includes(status) ? [status] : []), Math.min(200, Number(limit) || 100)];
-    const rows = await db.all(`SELECT c.*, (SELECT body FROM inbox_messages m WHERE m.conversation_id = c.id ORDER BY m.id DESC LIMIT 1) AS last_body
+    const rows = await db.all(`SELECT c.*, (SELECT body FROM inbox_messages m WHERE m.conversation_id = c.id AND m.author <> 'system' ORDER BY m.id DESC LIMIT 1) AS last_body
         FROM inbox_conversations c WHERE c.inbox_id = ? ${where}
         ORDER BY CASE c.status WHEN 'waiting' THEN 0 WHEN 'open' THEN 1 WHEN 'bot' THEN 2 ELSE 3 END, COALESCE(c.last_message_at, c.created_at) DESC LIMIT ?`, params);
     return rows.map((r) => ({ ...convShape(r), preview: plainText(r.last_body).slice(0, 140) }));

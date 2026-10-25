@@ -73,6 +73,7 @@ button[disabled] { opacity: .6; cursor: default; }
 .oc-fieldset { border: 1px solid var(--oc-line); border-radius: 12px; padding: 8px 12px; display: grid; gap: 6px; }
 .oc-form h2 { font-size: 1rem; margin: 18px 0 4px; }
 .oc-form select { margin-left: 8px; max-width: calc(100% - 8px); }   /* its margin counts too: a full-width select stuck 8 px out on phones */
+.oc-form input[type=url], .oc-form textarea { display: block; width: 100%; margin-top: 4px; }   /* an address or a paragraph needs the width to be read */
 @media (max-width: 560px) {
   .oc-main { padding: 12px 12px 40px; }
   .oc-feed { max-height: 60vh; }
