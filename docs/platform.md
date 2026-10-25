@@ -49,10 +49,12 @@ center (MagicBrowse privacy), getstream.io (Stream vs Sendbird), rumbletalk.com,
 
 ## Order of work
 
-1. **Support inbox + widget (first)**: inboxes, agents, visitor conversations, Vibe as first responder with handoff,
+1. **Support inbox + widget (first; Chat#143)**: inboxes, agents, visitor conversations, Vibe as first responder with handoff,
    the agent inbox page, `widget.js` + `/embed/inbox/:id`, allowed sites (frame-ancestors), the API.
-2. **Feeds**: Live's vibe coding feed moves into Chat as the first feed type (publisher socket, settings, viewer cards in
-   any room and in Live's channel chat); Live's tables are copied, verified and dropped (convert-verify-delete).
+2. **Feeds** (built): Live's vibe coding feed moves into Chat as the first feed type, and gets better on the way: any
+   room, any site (an iframe card), Claude Code's own `http` hooks with no extension to install, publishing over plain
+   HTTP, secrets and home folders scrubbed on the way in, the delay kept on the server. Live's channel chat shows
+   Chat's card; Live's tables are copied (`scripts/import-live-feeds.js`), verified and dropped (convert-verify-delete).
 3. **Community room and site assistant modes** of the widget; pictures, video and files in the embed (signed-in
    visitors first, then anonymous once Pics/Video take anonymous uploads); call escalation from a support conversation.
 4. **Developer platform**: capabilities in OpenVibe.Contracts (`chat.inbox.*`, `chat.conversation.*`, `chat.feed.*`),

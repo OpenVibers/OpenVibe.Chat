@@ -462,6 +462,43 @@ for people and for companies, with "direct live support with an agent", "fully m
 - Export and account deletion cover inboxes: the owner's inboxes go with their conversations; an agent's replies in
   other inboxes stay, signed "A former agent".
 
+### Feeds: vibe coding, live (openvibe.chat/feeds)
+
+The owner, 2026-10-24: "improve the vibe coding feed feature on live and migrate that whole entire feature so it's built
+into the openvibe.chat system". A **feed** (`server/feeds/`, `migrations/0017_feeds.sql`) is live activity a person
+publishes into Chat; vibe coding, moved from OpenVibe.Live (its `server/vibe-coding/`, same canonical events), is the
+first kind. Viewers see a card (`public/web/feed-view.js`): turns of a prompt, the steps taken (tools used, files
+changed) and the answer, the newest open, a live dot while steps arrive.
+
+- **Where it shows:** in a room its owner owns (above the messages), on the owner's Live channel slot while it is live
+  (as Live's `vibe-coding` frame on the stream's chat, which Live's channel widget reads), and on any site:
+  `<iframe src="https://openvibe.chat/embed/feed/fed_…">` (`?theme=light|dark`; it tells the parent its height,
+  `{ ov: 'chat', type: 'feed-height' }`).
+- **Publishing** with the feed's key (`ovf_…`, shown once, stored as its SHA-256; a new one on request):
+  - **Claude Code**: the feed page gives a `.claude/settings.json` block of `http` hooks (SessionStart,
+    UserPromptSubmit, PostToolUse, Stop, SessionEnd) that post each hook's JSON as it is to
+    `POST /api/chat/feeds/:id/hooks/claude-code` with `Authorization: Bearer $OPENVIBE_FEED_KEY`. A prompt, a tool
+    used (an edit is a file event), the turn's answer (`last_assistant_message`); paths become relative to the
+    session's folder; nothing is read from the transcript; the answer is always `{}`, so it never blocks Claude Code.
+  - **Anything else**: `POST /api/chat/feeds/:id/events` with one event, `{ events: [...] }` (at most 50) or Live's
+    `vibe-coding.event` envelopes; `POST /:id/hello { sessionKey, publisher }`. `eventType` is `session.status`,
+    `prompt`, `response`, `thinking`, `tool.call`, `file.change` or `file.save`; a short `{ eventType, text }` works.
+    600 events a minute a feed.
+- **Safety:** every event is scrubbed on the way in: API keys and tokens (OpenAI/Anthropic, GitHub, Slack, AWS,
+  Google, JWTs, OpenVibe's own), `Bearer …`, `PASSWORD=`-style values, credentials in URLs, private keys, and home
+  folders (`/home/<name>` → `~`). What a viewer sees is decided when they see it by the feed's settings (Live's
+  projection): prompts, answers, tools, what the tools were given (off by default), files (names only by default),
+  thinking (off by default), detail, paused. The **delay** is the server's: neither the socket nor the history shows
+  a step before it (Live sent the delay to the browser).
+- **API:** anyone: `GET /api/chat/feeds/:id` (what a viewer sees now), `GET /api/chat/feeds?channel=<username>` or
+  `?slot=<id,…>` (the feeds on Live channel slots, what Live's chat asks); the owner: `GET /api/chat/feeds/mine`,
+  `POST /api/chat/feeds { title, room?, slot?, settings? }` → `{ feed, key }`, `PATCH /:id`, `POST /:id/key`,
+  `DELETE /:id`. The public and publishing routes answer any site without cookies. Socket: `{ type: 'feed_watch',
+  feed }`, then `feed_event { feed, event }`. A feed keeps its newest 5,000 events; at most 10 feeds a person.
+- **From Live:** `scripts/import-live-feeds.js --file <export.jsonl> [--apply]` copies each slot's feed (settings,
+  sessions, its newest 5,000 events, scrubbed) and verifies the copy; Live then drops `vibe_coding_*`.
+- Export and account deletion cover feeds (never the key's hash).
+
 ### VIP member badges
 
 A member's messages in a creator's room (stream or offline channel chat) carry that creator's VIP

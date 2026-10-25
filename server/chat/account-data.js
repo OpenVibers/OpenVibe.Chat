@@ -63,6 +63,9 @@ const EXPORTS = [
     ['inboxes_owned.json', `SELECT * FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['inbox_memberships.json', `SELECT * FROM inbox_members WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['inbox_replies.json', `SELECT * FROM inbox_messages WHERE author = 'agent' AND author_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    // Feeds (server/feeds/feeds.js): the feeds, without their key's hash, and what was published to them.
+    ['feeds.json', `SELECT id, kind, title, room_id, managed_stream_id, settings, key_hint, legacy_source, created_at, last_event_at FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
+    ['feed_events.json', `SELECT e.feed_id, e.session_key, e.event_id, e.type, e.summary, e.payload, e.created_at FROM feed_events e JOIN feeds f ON f.id = e.feed_id WHERE f.owner_subject = ANY(@s) OR f.owner_id = ANY(@ids) ORDER BY e.id DESC LIMIT ${LIMIT}`],
 ];
 
 async function exportPart(d, subject) {
@@ -110,6 +113,10 @@ const ERASE_AFTER_ROOMS = [
     [null, 'DELETE FROM inbox_ai_usage WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     ['inboxes', 'DELETE FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)'],
     [null, "UPDATE inbox_messages SET author_user_id = NULL, author_name = 'A former agent' WHERE author = 'agent' AND author_user_id = ANY(@ids)"],
+    // Feeds (server/feeds/feeds.js): a person's feeds go with everything published to them.
+    ['feed_events', 'DELETE FROM feed_events WHERE feed_id IN (SELECT id FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
+    [null, 'DELETE FROM feed_sessions WHERE feed_id IN (SELECT id FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
+    ['feeds', 'DELETE FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)'],
     // An AI member belongs to its room, not to whoever added it: it stays, without their name on it.
     [null, 'UPDATE room_ai_members SET created_by_subject = NULL WHERE created_by_subject = ANY(@s)'],
     // Their own AI key is gone with them (OpenVibe.AI erases it): members that thought with it go back to OpenVibe's model.
