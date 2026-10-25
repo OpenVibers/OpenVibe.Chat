@@ -295,11 +295,11 @@ async function post(room, user, text, { now = Date.now(), ai = true } = {}) {
 }
 
 /** A message from one of the room's AI members (server/rooms/ai-members.js): user_id 0, the member's id. */
-async function postAsAi(room, member, text, { now = Date.now() } = {}) {
+async function postAsAi(room, member, text, { now = Date.now(), how = null } = {}) {
     // Vibe's answers in its own chats may run longer than a person's message (a recipe, a plan, code).
     const message = String(text || '').trim().slice(0, Number(room.assistant) === 1 ? MAX_AI_TEXT_VIBE : MAX_TEXT);
     const id = await db.tx(async () => {
-        const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, ai_member_id) VALUES (?, 0, NULL, ?, ?)', [room.id, message, member.id]);
+        const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, ai_member_id, how) VALUES (?, 0, NULL, ?, ?, ?)', [room.id, message, member.id, how ? JSON.stringify(how) : null]);
         await db.run('UPDATE rooms SET message_count = message_count + 1, last_message_at = ov_now() WHERE id = ?', [room.id]);
         await announceMessage(room, { subject_id: null, username: member.handle, display_name: member.name }, Number(r.lastInsertRowid), message, now);
         return Number(r.lastInsertRowid);
@@ -308,7 +308,7 @@ async function postAsAi(room, member, text, { now = Date.now() } = {}) {
 }
 
 // A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
-const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.created_at, m.is_deleted, m.ai_member_id,
+const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.created_at, m.is_deleted, m.ai_member_id, m.how,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle ELSE u.username END AS username,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.name ELSE u.display_name END AS display_name,
         u.profile_color, u.role AS user_role
