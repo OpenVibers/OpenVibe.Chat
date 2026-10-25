@@ -28,6 +28,7 @@ async function publicPages() {
     const pages = (await rooms.list(null, { limit: 100 })).public;
     const out = [
         { path: '/', changefreq: 'hourly', priority: 1.0, lastmod: async () => await newestGlobalMessage() },
+        { path: '/vibe', changefreq: 'weekly', priority: 0.9 },
         { path: '/rooms', changefreq: 'daily', priority: 0.8, lastmod: () => newestRoomActivity(pages) },
         { path: '/servers', changefreq: 'daily', priority: 0.8 },
         { path: '/updates', changefreq: 'daily', priority: 0.5 },
@@ -68,7 +69,7 @@ function homeJsonLd(config) {
         seo.jsonLd.website({ name, url: site, description }),
         seo.jsonLd.softwareApp({
             name, url: site, description, category: 'SocialNetworkingApplication',
-            keywords: 'chat, chat rooms, community servers, voice channels, video calls, direct messages, AI chat members, openvibe',
+            keywords: 'AI assistant, chat, chat rooms, community servers, voice channels, video calls, direct messages, AI chat members, openvibe',
         }),
         seo.jsonLd.webPage({ name: 'Global chat', url: `${site}/`, description, siteUrl: site }),
     ];
@@ -84,18 +85,20 @@ function createDiscoveryRoutes({ config }) {
         // the sitemap. Every previous Disallow is kept.
         res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.robotsTxt({
             sitemaps: [abs('/sitemap.xml')],
-            allow: ['/', '/updates', '/developers', '/rooms', '/r/', '/servers', '/s/'],
-            disallow: ['/r/*/settings', '/s/*/settings', '/join/', '/messages', '/settings', '/auth/', '/api/'],
+            allow: ['/', '/vibe', '/updates', '/developers', '/rooms', '/r/', '/servers', '/s/'],
+            // A person's own Vibe chats and memory (/vibe/…) are theirs: never crawled. /vibe itself is the app's front.
+            disallow: ['/r/*/settings', '/s/*/settings', '/join/', '/messages', '/settings', '/auth/', '/api/', '/vibe/'],
         }));
     });
 
     router.get('/llms.txt', (req, res) => {
         res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.llmsTxt({
             name: 'OpenVibe.Chat',
-            summary: 'OpenVibe.Chat: global chat for the whole OpenVibe network, the chat of every stream on OpenVibe.Live, servers with text and voice channels, rooms, direct messages, calls and AI members.',
+            summary: 'OpenVibe.Chat: Vibe, OpenVibe\'s free assistant, global chat for the whole OpenVibe network, the chat of every stream on OpenVibe.Live, servers with text and voice channels, rooms, direct messages, calls and AI members.',
             details: 'One OpenVibe account works here and on every other OpenVibe site. Anyone can read the global chat and the public rooms without an account; posting needs a signed-in person. The global chat and the public room pages are readable as plain HTML without JavaScript and update live over the site\'s own WebSocket. Direct messages, room settings and the API are per-person and are never listed here.',
             sections: [
                 { title: 'Start here', links: [
+                    { title: 'Vibe', url: abs('/vibe'), note: 'OpenVibe\'s assistant: searches the web and OpenVibe, reads pages and pictures, remembers what it is asked to, sets up recurring work; chats are private to the signed-in person' },
                     { title: 'Global chat', url: abs('/'), note: 'one room for everyone on OpenVibe, newest messages at the end' },
                     { title: 'Rooms', url: abs('/rooms'), note: 'every public room, with its topic and activity' },
                     { title: 'Servers', url: abs('/servers'), note: 'public servers: groups with text and voice channels, roles and invites' },

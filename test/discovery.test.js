@@ -49,10 +49,10 @@ t('/robots.txt keeps every Disallow and welcomes the search and AI crawlers', as
     const r = await req('/robots.txt');
     assert.strictEqual(r.status, 200);
     assert.match(r.type, /^text\/plain/);
-    for (const d of ['/r/*/settings', '/messages', '/settings', '/auth/', '/api/']) {
+    for (const d of ['/r/*/settings', '/messages', '/settings', '/auth/', '/api/', '/vibe/']) {
         assert.ok(r.text.includes(`Disallow: ${d}`), `still disallows ${d}`);
     }
-    for (const a of ['/', '/updates', '/rooms', '/r/']) assert.ok(r.text.includes(`Allow: ${a}`), `allows ${a}`);
+    for (const a of ['/', '/vibe', '/updates', '/rooms', '/r/']) assert.ok(r.text.includes(`Allow: ${a}`), `allows ${a}`);
     assert.match(r.text, /Sitemap: https:\/\/openvibe\.chat\/sitemap\.xml/);
     assert.match(r.text, /User-agent: GPTBot/);
     assert.match(r.text, /User-agent: ClaudeBot/);
@@ -63,7 +63,7 @@ t('/sitemap.xml is the public pages with a real lastmod, never today', async () 
     assert.strictEqual(r.status, 200);
     assert.match(r.type, /^application\/xml/);
     assert.match(r.text, /^<\?xml version="1\.0" encoding="UTF-8"\?>/);
-    for (const p of ['/', '/rooms', '/updates', '/r/night-owls']) {
+    for (const p of ['/', '/vibe', '/rooms', '/updates', '/r/night-owls']) {
         assert.ok(r.text.includes(`<loc>${SITE}${p === '/' ? '/' : p}</loc>`), `lists ${p}`);
     }
     assert.ok(!r.text.includes('private-room'), 'a private room is not in the sitemap');
