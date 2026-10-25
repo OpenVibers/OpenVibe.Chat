@@ -710,6 +710,7 @@ ${people}
 ${aiHere}${error}
 ${isCall ? callPanel(room, can, me) : ''}
 ${feed ? `<div class="fv oc-room-fv" data-feed="${esc(feed.id)}"></div>` : ''}
+${work && room.screen_url && can.role ? `<details class="oc-screen" open><summary>Shared screen</summary><iframe src="${esc(room.screen_url)}" title="The room's shared screen" loading="lazy" referrerpolicy="no-referrer" allow="clipboard-write; fullscreen"></iframe></details>` : ''}
 ${work ? '<div class="oc-ws"><div class="oc-ws-main">' : ''}<ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
 ${composer}${tools}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         });
@@ -835,6 +836,7 @@ ${can.manage ? `<form class="oc-form" method="post" action="/r/${esc(room.slug)}
 <label>Who can read <select name="visibility"><option value="public"${room.visibility === 'public' ? ' selected' : ''}>Anyone (public)</option><option value="private"${room.visibility === 'private' ? ' selected' : ''}>Members only (private)</option></select></label>
 ${room.kind === 'call' ? `<label>People who join <select name="join_role">${rooms.JOIN_ROLES_CALL.map((r) => `<option value="${r}"${r === addRole ? ' selected' : ''}>${{ speaker: 'can talk (speakers)', participant: 'listen and write (participants)', viewer: 'listen and read (viewers)' }[r]}</option>`).join('')}</select></label>` : ''}
 <label>Slow mode (seconds between messages, 0 = off) <input name="slow_seconds" type="number" min="0" max="600" value="${Number(room.slow_seconds) || 0}"></label>
+${rooms.isWorkspace(room) ? `<label>Shared screen <input name="screen_url" type="url" value="${esc(room.screen_url || '')}" placeholder="https://openvibe.bot/screen/…"> <span class="oc-muted">A screen share link from OpenVibe.Bot (a computer's owner makes it on its screen page). Members see the screen beside the conversation, and with a "use" link they can click and type on it. Empty: no screen.</span></label>` : ''}
 <p><button type="submit">Save</button></p></form>` : ''}
 <h2>Members</h2>
 <p class="oc-muted">${esc(roleHelp(room.kind))}</p>
@@ -857,7 +859,8 @@ ${attachList}`,
         if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
         req.roomBack = `/r/${room.slug}/settings`;
         const b = req.body || {};
-        await rooms.update(room, actor.user, { name: b.name, topic: b.topic, visibility: b.visibility, slow_seconds: b.slow_seconds === undefined ? undefined : Number(b.slow_seconds), join_role: room.kind === 'call' ? b.join_role : undefined });
+        await rooms.update(room, actor.user, { name: b.name, topic: b.topic, visibility: b.visibility, slow_seconds: b.slow_seconds === undefined ? undefined : Number(b.slow_seconds), join_role: room.kind === 'call' ? b.join_role : undefined,
+            ...(rooms.isWorkspace(room) && b.screen_url !== undefined ? { screen_url: b.screen_url } : {}) });
         await applyRoomChange(room);
         res.redirect(303, `/r/${room.slug}/settings?saved=1`);
     }));

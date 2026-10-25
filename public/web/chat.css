@@ -357,3 +357,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 @keyframes oc-work { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .oc-task-running .oc-task-state { animation: none; } }
 @media (max-width: 900px) { .oc-ws { grid-template-columns: minmax(0, 1fr); } .oc-queue { position: static; max-height: none; order: -1; } }
+/* A workspace room's shared screen (rooms.screen_url, a screen share page from OpenVibe.Bot), above the conversation. */
+.oc-screen { margin: 10px 0 14px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); overflow: hidden; }
+.oc-screen summary { cursor: pointer; padding: 8px 12px; font-weight: 600; }
+.oc-screen iframe { display: block; width: 100%; aspect-ratio: 16 / 10; min-height: 260px; max-height: 78vh; border: 0; background: #000; }

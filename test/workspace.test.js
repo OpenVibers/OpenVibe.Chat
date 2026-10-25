@@ -152,4 +152,20 @@ t('the room page shows the queue beside the conversation; the task page has the 
     assert.strictEqual((await h.http('GET', `/r/staff/tasks/${id}`, { headers: { cookie: `ov_token=${user.token}` } })).status, 404);
 });
 
+t('a workspace room shows its shared screen to members only; only a Bot screen link is taken', async () => {
+    const link = 'https://openvibe.bot/screen/' + 'a'.repeat(43);
+    let r = await api('PATCH', '/rooms/staff', staff, { screen_url: 'https://evil.test/screen/x' });
+    assert.strictEqual(r.status, 422);
+    r = await api('PATCH', '/rooms/staff', staff, { screen_url: link });
+    assert.strictEqual(r.status, 200, r.text);
+    r = await api('GET', '/rooms/staff', staff2);
+    assert.strictEqual(r.body.screen.url, link);
+    const page = await h.http('GET', '/r/staff', { headers: { cookie: `ov_token=${staff.token}` } });
+    assert.match(page.text, new RegExp(`<iframe src="${link.replace(/\//g, '\\/')}"`));
+    assert.match(page.headers.get('content-security-policy'), /frame-src 'self' https:\/\/openvibe\.bot/);
+    assert.strictEqual((await api('GET', '/rooms/staff', user)).status, 404, 'others never see the link');
+    assert.strictEqual((await api('PATCH', '/rooms/staff', staff, { screen_url: '' })).status, 200);
+    assert.ok(!(await api('GET', '/rooms/staff', staff)).body.screen, 'cleared');
+});
+
 t.run(async () => { if (h && h.close) await h.close(); });
