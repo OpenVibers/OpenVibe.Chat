@@ -86,6 +86,9 @@ t('resolving ends a call; a resolved conversation cannot be called; the pages ca
     assert.strictEqual(visitor.first.type, 'welcome');
     const page = await fetch(`${h.base}/inbox/${inbox.id}?c=${cid}`, { headers: { cookie: `ov_token=${bob.token}` } }).then((r) => r.text());
     assert.ok(page.includes('id="ib-call"') && page.includes('id="ib-callbar"') && page.includes('support-call.js') && page.includes('"call":true'));
+    assert.ok(page.includes('id="ib-screen"') && page.includes('id="ib-screen-video"'), 'and the place where a visitor\'s shared screen shows');
+    const client = await fetch(`${h.base}/web/support-call.js`).then((r) => r.text());
+    assert.ok(client.includes('getDisplayMedia') && client.includes("cameraOff: false"), 'the client shares a screen and says so');
     assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}/conversations/${cid}`, bob, { status: 'resolved' })).status, 200);
     await visitor.wait((m) => m.type === 'call-ended');
     visitor.close();

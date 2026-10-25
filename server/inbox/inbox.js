@@ -123,7 +123,7 @@ async function create(user, input = {}) {
     const id = newId('inb');
     await db.tx(async () => {
         await db.run(`INSERT INTO inboxes (id, owner_id, owner_subject, name, greeting, color, ai_enabled, handoff, ai_instructions, knowledge_urls, allowed_origins, hours)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, user.id, user.subject_id || null, v.name, v.greeting || `Hi! Ask us anything about ${v.name}.`, v.color || '#3b82f6',
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [id, user.id, user.subject_id || null, v.name, v.greeting || `Hi! Ask us anything about ${v.name}${/[.!?]$/.test(v.name) ? '' : '.'}`, v.color || '#3b82f6',
             v.ai_enabled == null ? 1 : v.ai_enabled, v.handoff == null ? 1 : v.handoff, v.ai_instructions || '', JSON.stringify(v.knowledge_urls || []), JSON.stringify(v.allowed_origins || []), v.hours ? JSON.stringify(v.hours) : null]);
         await db.run("INSERT INTO inbox_members (inbox_id, user_id, role) VALUES (?, ?, 'owner')", [id, user.id]);
     });

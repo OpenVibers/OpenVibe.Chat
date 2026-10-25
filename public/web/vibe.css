@@ -246,6 +246,11 @@ body.oc-app-body { overflow: hidden; }
 .ib-call-text { flex: 1 1 200px; font-weight: 600; }
 .ib-callbar button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--oc-line); background: transparent; color: var(--oc-text); font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; }
 .ib-callbar .ib-call-end { border-color: transparent; background: #dc2626; color: #fff; }
+.ib-screen { margin: 0 0 8px; padding: 8px; border-radius: 12px; border: 1px solid var(--oc-line); background: #000; display: grid; gap: 6px; }
+.ib-screen[hidden] { display: none; }
+.ib-screen figcaption { color: #e5e7eb; font-size: .85rem; font-weight: 600; }
+.ib-screen video { width: 100%; max-height: 50vh; border-radius: 8px; background: #000; object-fit: contain; }
+.ib-screen button { justify-self: end; padding: 4px 10px; border-radius: 999px; border: 1px solid #374151; background: transparent; color: #e5e7eb; font: inherit; font-size: .8rem; cursor: pointer; }
 .ib-sys { text-align: center; color: var(--oc-muted); font-size: .82rem; }
 .ib-who { margin: 0 0 2px; font-size: .74rem; font-weight: 700; color: var(--oc-muted); }
 .ib-av { flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--oc-panel-2); color: var(--oc-text); font-weight: 700; }

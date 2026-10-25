@@ -276,11 +276,16 @@
     var row = el('div', 'em-call-row');
     var mute = el('button', 'em-call-no', 'Mute'); mute.type = 'button'; mute.setAttribute('aria-pressed', 'false');
     var hang = el('button', 'em-call-hang', 'Hang up'); hang.type = 'button';
-    row.appendChild(mute); row.appendChild(hang); callEl.appendChild(row);
+    var shareBtn = el('button', 'em-call-no', 'Share my screen'); shareBtn.type = 'button';
+    row.appendChild(mute);
+    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) row.appendChild(shareBtn);   // not on phones
+    row.appendChild(hang); callEl.appendChild(row);
+    shareBtn.addEventListener('click', function () { if (!call) return; if (call.sharing) call.stopSharing(); else call.share(); });
     call = window.OVSupportCall.join({
       channel: 'support-' + conv.id, visitorToken: token,
       onState: function (s, t) { if (s === 'in') text.textContent = t || 'You are in the call.'; else if (s === 'ended' || s === 'error') { call = null; endCallCard(t); } else text.textContent = t; },
       onPeople: function (names) { text.textContent = names.length ? 'In the call with ' + names.join(', ') + '.' : 'Waiting for the team to join…'; },
+      onSharing: function (on) { shareBtn.textContent = on ? 'Stop sharing' : 'Share my screen'; shareBtn.setAttribute('aria-pressed', on ? 'true' : 'false'); },
     });
     mute.addEventListener('click', function () { if (!call) return; call.mute(!call.muted); mute.textContent = call.muted ? 'Unmute' : 'Mute'; mute.setAttribute('aria-pressed', call.muted ? 'true' : 'false'); });
     hang.addEventListener('click', function () { post('/call/end').catch(function () {}); if (call) call.leave(); });
