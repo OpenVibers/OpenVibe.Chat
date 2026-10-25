@@ -449,6 +449,12 @@ for people and for companies, with "direct live support with an agent", "fully m
   replies on Enter. The owner's settings page shows the tag, the greeting, colour, Vibe's instructions and pages, and
   **allowed sites**: once named, only those sites may frame the panel (`frame-ancestors`) or call the visitor API;
   until then any site may.
+- **A site assistant** is an inbox whose people do not answer (`handoff` off in its settings): Vibe answers alone, there
+  is no "Talk to a person", Vibe is told nobody else answers (it points to the contact details in the instructions
+  instead of handing off), and when it cannot go on the visitor is told plainly. An inbox needs Vibe or its people.
+- **Ratings:** a resolved conversation asks the visitor "How was this?" (👍 / 👎, then a line if they like:
+  `POST /rating { token, rating: 1 | -1, comment?, conversation? }`); the people see it in the list and the
+  conversation, live (`inbox_rating`).
 - **Nobody misses a visitor:** when a conversation starts waiting (the visitor asked for a person, Vibe handed off,
   or Vibe is off) or a visitor writes while it waits or is open, and none of the inbox's people has it open live, each
   of them (or only whoever took the conversation) gets an OpenVibe notification through the Network
