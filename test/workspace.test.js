@@ -3,7 +3,8 @@
  * Workspace rooms and the staff room (server/rooms/workspace.js, server/web/workspace-pages.js, migration 0027):
  * the staff room exists, only staff read it and each member of staff becomes a member; anyone who may post adds work;
  * quick kinds run at once as OpenVibe.Actor tasks of the person who asked and their results come back into the room
- * from Vibe; code work waits for a worker to claim it and report; cancel is the asker's or a moderator's; Vibe queues
+ * from Vibe; code work waits for a worker to claim it and report, or the asker runs it on their own computer through
+ * Actor; cancel is the asker's or a moderator's; Vibe queues
  * work with queue_task in a workspace room and nowhere else; the room page shows the queue beside the conversation.
  */
 const assert = require('assert');
@@ -108,6 +109,35 @@ t('code work waits for a worker: claim, report, the room hears it', async () => 
     assert.strictEqual(r.body.task.status, 'succeeded');
     const msgs = (await api('GET', '/rooms/staff/messages', staff)).body.messages;
     assert.match(msgs[msgs.length - 1].message, /^✅ Done: "Add a dark favicon to Tools"[\s\S]*https:\/\/github\.com\/OpenVibers\/OpenVibe\.Tools\/pull\/1/);
+});
+
+t('run on my computer: the asker hands their code task to Actor, which runs it on their own machine', async () => {
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, o) => (String(url).startsWith('http://127.0.0.1:4950') ? actorFetch(url, o) : realFetch(url, o));
+    try {
+        let r = await api('POST', '/rooms/staff/tasks', staff, { title: 'Fix the Tools favicon on dark tabs', kind: 'code', details: 'OpenVibe.Tools, public/favicon.svg' });
+        const id = r.body.task.id;
+        assert.strictEqual((await api('POST', `/rooms/staff/tasks/${id}/run`, staff2)).status, 403, 'only the person who asked');
+        const research = (await api('GET', '/rooms/staff/tasks?status=succeeded', staff)).body.tasks.find((x) => x.kind === 'research').id;
+        assert.strictEqual((await api('POST', `/rooms/staff/tasks/${research}/run`, staff)).status, 409, 'code and computer work only');
+        const cookie = `ov_token=${staff.token}`;
+        assert.match((await h.http('GET', '/r/staff/queue', { headers: { cookie } })).text, new RegExp(`/r/staff/tasks/${id}/run"`), 'the asker sees the button');
+        assert.ok(!(await h.http('GET', '/r/staff/queue', { headers: { cookie: `ov_token=${staff2.token}` } })).text.includes(`/tasks/${id}/run"`), 'nobody else does');
+        actorTask = { id: 'tsk_2', state: 'queued' };
+        actorCalls.length = 0;
+        r = await api('POST', `/rooms/staff/tasks/${id}/run`, staff);
+        assert.strictEqual(r.status, 200, r.text);
+        assert.deepStrictEqual([r.body.task.status, r.body.task.runner], ['running', 'actor'], 'taken while Actor holds it');
+        const create = actorCalls.find((c) => c.method === 'POST');
+        assert.strictEqual(create.subject, h.live.users.get(staff.id).subject_id);
+        assert.match(create.body.task, /^Make this code change with OpenVibe\.Codes on my own computer[^:]*: Fix the Tools favicon on dark tabs\n\nOpenVibe\.Tools, public\/favicon\.svg$/);
+        assert.strictEqual((await api('POST', `/rooms/staff/tasks/${id}/claim`, staff2)).status, 409, 'nobody claims it twice');
+        assert.strictEqual((await api('POST', `/rooms/staff/tasks/${id}/run`, staff)).status, 409, 'once');
+        actorTask = { id: 'tsk_2', state: 'succeeded', result: { answer: 'Opened a pull request with the dark favicon.' } };
+        await workspace.poll();
+        r = await api('GET', `/rooms/staff/tasks/${id}`, staff);
+        assert.deepStrictEqual([r.body.task.status, r.body.task.result], ['succeeded', 'Opened a pull request with the dark favicon.']);
+    } finally { globalThis.fetch = realFetch; }
 });
 
 t('cancel: the asker or a moderator; others not', async () => {

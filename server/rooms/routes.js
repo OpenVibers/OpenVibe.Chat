@@ -26,6 +26,8 @@
  *   POST   /:slug/tasks/:id/claim   { runner? }: a worker (a member, or an agent with a member's API token) takes a code,
  *                                   computer or other task
  *   POST   /:slug/tasks/:id/report  { status: succeeded | failed, result?, result_url? (https), error? }: whoever took it
+ *   POST   /:slug/tasks/:id/run     the asker runs their code or computer task on their own computer (OpenVibe.Actor:
+ *                                   Codes on their Run workers, or their computer through Bot)
  *
  * Role and room changes reach a running call at once (call-server.js applyRoomAccess): a new speaker
  * may talk, a demoted one is muted, a blocked person is dropped.
@@ -267,6 +269,9 @@ router.post('/:slug/tasks/:id/cancel', requireAuth, workLimit, async (req, res) 
 });
 router.post('/:slug/tasks/:id/claim', requireAuth, workLimit, async (req, res) => {
     try { res.json({ task: await workspace.claim(await workRoom(req), req.user, req.params.id, { runner: (req.body || {}).runner || null }) }); } catch (err) { workSend(res, err); }
+});
+router.post('/:slug/tasks/:id/run', requireAuth, workLimit, async (req, res) => {
+    try { res.json({ task: await workspace.runOnComputer(await workRoom(req), req.user, req.params.id) }); } catch (err) { workSend(res, err); }
 });
 router.post('/:slug/tasks/:id/report', requireAuth, workLimit, async (req, res) => {
     try { res.json({ task: await workspace.report(await workRoom(req), req.user, req.params.id, req.body || {}) }); } catch (err) { workSend(res, err); }

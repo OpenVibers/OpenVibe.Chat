@@ -9,6 +9,7 @@
  *   GET  /r/:slug/tasks/:id             one task: details, state, the full result and its sources
  *   POST /r/:slug/tasks/:id/cancel      the person who asked, or a moderator
  *   POST /r/:slug/tasks/:id/claim       take a code, computer or other task
+ *   POST /r/:slug/tasks/:id/run         the asker runs their code or computer task on their own computer (Actor, Codes, Run)
  *   POST /r/:slug/tasks/:id/report      say how it went (whoever took it)
  */
 const rooms = require('../rooms/rooms');
@@ -35,6 +36,7 @@ function createWorkspacePages({ router, page, loadRoom, needUser, sameSite, form
         const actions = [];
         if ((t.status === 'queued' || t.status === 'running') && (mine || can.moderate)) actions.push(`<form method="post" action="/r/${esc(room.slug)}/tasks/${t.id}/cancel"><button type="submit" class="oc-link">Cancel</button></form>`);
         if (t.status === 'queued' && !t.quick && can.post) actions.push(`<form method="post" action="/r/${esc(room.slug)}/tasks/${t.id}/claim"><button type="submit" class="oc-link">I'll take it</button></form>`);
+        if (t.status === 'queued' && mine && (t.kind === 'code' || t.kind === 'computer')) actions.push(`<form method="post" action="/r/${esc(room.slug)}/tasks/${t.id}/run" title="OpenVibe.Actor does it on your own computer (OpenVibe.Codes for code, through OpenVibe.Run)"><button type="submit" class="oc-link">Run on my computer</button></form>`);
         const result = t.status === 'succeeded' && t.result ? `<p class="oc-task-result">${linkify(t.result.length > 280 ? `${t.result.slice(0, 280).replace(/\s+\S*$/, '')}…` : t.result)}</p>` : '';
         const err = t.status === 'failed' && t.error ? `<p class="oc-task-error">${esc(t.error)}</p>` : '';
         return `<li class="oc-task oc-task-${esc(t.status)}" data-task="${t.id}">
@@ -55,7 +57,7 @@ ${result}${err}${actions.length ? `<span class="oc-task-actions">${actions.join(
 <label>Details <textarea name="details" rows="3" maxlength="6000" placeholder="Where, constraints, what done looks like"></textarea></label>
 <p><button type="submit">Add to the queue</button></p></form></details>` : '';
         return `<h2 id="oc-queue-h">Work queue <span class="oc-muted">${working ? `· ${working} working` : ''}${waiting ? ` · ${waiting} waiting` : ''}</span></h2>
-<p class="oc-muted oc-queue-how">Ask <code>@vibe</code> to look into or do something, or add it here. Research and web answers run at once; code and computer work waits for a worker to take it. Results come back into the room.</p>
+<p class="oc-muted oc-queue-how">Ask <code>@vibe</code> to look into or do something, or add it here. Research and web answers run at once; code and computer work waits for a worker to take it, or for the person who asked to run it on their own computer. Results come back into the room.</p>
 ${form}
 ${tasks.length ? `<ol class="oc-tasks">${tasks.map((t) => taskItem(t, room, can, me)).join('\n')}</ol>` : '<p class="oc-muted">Nothing queued yet.</p>'}`;
     }
@@ -78,12 +80,12 @@ ${tasks.length ? `<ol class="oc-tasks">${tasks.map((t) => taskItem(t, room, can,
         res.redirect(303, `/r/${room.slug}#oc-queue`);
     }));
 
-    for (const op of ['cancel', 'claim']) {
+    for (const op of ['cancel', 'claim', 'run']) {
         router.post(`/r/:slug/tasks/:id/${op}`, formLimit, sameSite, workOrError(async (req, res) => {
             const actor = await needUser(req, res); if (!actor) return;
             const room = await rooms.bySlug(req.params.slug);
             if (!room) return res.redirect(303, '/rooms');
-            const t = await workspace[op](room, actor.user, req.params.id);
+            const t = await (op === 'run' ? workspace.runOnComputer : workspace[op])(room, actor.user, req.params.id);
             res.redirect(303, op === 'claim' ? `${t.url}#oc-report` : `/r/${room.slug}#oc-queue`);
         }));
     }
