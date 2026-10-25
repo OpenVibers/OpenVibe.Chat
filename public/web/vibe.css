@@ -140,7 +140,7 @@ body.oc-app-body { overflow: hidden; }
 /* ── The composer ─────────────────────────────────────────────────────────── */
 .vb-dock { padding: 0 16px max(10px, env(safe-area-inset-bottom)); }
 .vb-composer {
-  max-width: var(--vb-col); margin: 0 auto; display: flex; align-items: flex-end; gap: 8px;
+  max-width: var(--vb-col); margin: 0 auto; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px;
   padding: 8px 8px 8px 18px; border-radius: var(--vb-radius); border: 1px solid var(--oc-line);
   background: var(--oc-panel); box-shadow: 0 10px 34px rgba(0, 0, 0, .22);
   transition: border-color .15s, box-shadow .15s;
@@ -161,6 +161,15 @@ body.oc-app-body { overflow: hidden; }
 .vb-send:hover { transform: translateY(-1px); }
 .vb-send:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
 .vb-send[disabled], .vb-composer.is-empty .vb-send { opacity: .4; cursor: default; transform: none; }
+/* The modes: a row of chips under the box (Chat · Research · Agent · Code); the checked one is lit. */
+.vb-modes { order: 3; flex-basis: 100%; display: flex; gap: 6px; margin: 0 0 0 -10px; padding: 2px 0 0; border: 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.vb-modes::-webkit-scrollbar { display: none; }
+.vb-modes label { position: relative; flex: none; }
+.vb-modes input { position: absolute; opacity: 0; pointer-events: none; }
+.vb-modes span { display: inline-flex; align-items: center; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--oc-line); color: var(--oc-muted); font-size: .8rem; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background-color .15s, border-color .15s, color .15s; }
+.vb-modes input:checked + span { background: color-mix(in srgb, var(--oc-accent) 16%, transparent); border-color: color-mix(in srgb, var(--oc-accent) 55%, var(--oc-line)); color: var(--oc-text); }
+.vb-modes input:focus-visible + span { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+@media (hover: hover) { .vb-modes span:hover { color: var(--oc-text); } }
 .vb-fine { max-width: var(--vb-col); margin: 6px auto 0; text-align: center; font-size: .76rem; color: var(--oc-muted); }
 
 /* ── Phones and narrow windows: the rail slides in over the chat ──────────── */

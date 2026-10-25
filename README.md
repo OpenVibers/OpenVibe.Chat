@@ -439,6 +439,12 @@ chat, and the rest of Chat (Messages, Rooms and servers, Global chat) under the 
 (forms post; the page shows Vibe's answer once written); `public/web/vibe.js` starts a chat in place, follows the room
 socket, sends on Enter and keeps a draft typed while signed out through the sign-in.
 
+- **Modes** (the composer's chips, plan track K): **Chat** answers here and now. **Research**, **Agent** and **Code** post
+  the message without Vibe's instant answer and make it a task of the chat (`vibe.work`, the workspace queue's machinery
+  in `server/rooms/workspace.js`) on the person's own OpenVibe.Actor allowance: research with sources at once; Agent on
+  their own computer through Node and Bot; Code with OpenVibe.Codes on their machine through Run. Vibe says it is on it
+  with the task's link, and the result comes back into the chat. `POST /api/chat/vibe { message, mode }` starts a chat
+  that way; `POST /api/chat/vibe/:slug/ask { message, mode }` asks in one; the forms post `mode` too.
 - **A chat is a private room** (`server/rooms/vibe.js`, `migrations/0015_vibe_chats.sql`: `rooms.assistant = 1`) the
   person owns, with one AI member, Vibe, who answers every message without being named (`ai-members.js` afterPost).
   Messages, pictures, the socket (`join_room`, `room_message`, `room_ai_typing`), export and account deletion are the

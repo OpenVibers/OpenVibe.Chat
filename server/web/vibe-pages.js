@@ -86,6 +86,14 @@ function turn(m, me) {
     return `<li class="vb-turn vb-me" data-id="${Number(m.id) || 0}"><div class="vb-bubble"><p class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</p>${esc(m.message).replace(/\n/g, '<br>')}${pictures.pageHtml(m.message)}</div></li>`;
 }
 
+// The composer's modes (plan track K): Chat answers here and now; the others are agent tasks that answer here when done.
+const MODES = [
+    ['chat', 'Chat', 'Talk it through: Vibe answers here and now', 'Message Vibe'],
+    ['research', 'Research', 'An agent researches it and answers here with its sources', 'What should I research?'],
+    ['agent', 'Agent', 'An agent does it on your own computer (OpenVibe.Node), at the level you set there', 'What should I do on your computer?'],
+    ['code', 'Code', 'OpenVibe.Codes writes it on your computer and opens a pull request', 'What should I build or fix? Name the repository'],
+];
+
 function composer({ slug, signedIn, enabled, prefill = '' }) {
     const action = !signedIn ? `/auth/login` : slug ? `/vibe/${esc(slug)}` : '/vibe';
     // A picture (public/web/vibe.js): it goes to OpenVibe.Pics as the person, and Vibe sees it with the question.
@@ -99,6 +107,7 @@ ${attach}
 <label class="oc-sr" for="vb-input">Message Vibe</label>
 <textarea id="vb-input" name="message" rows="${prefill ? 3 : 1}" maxlength="2000" placeholder="${signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)'}"${enabled ? '' : ' disabled'}${prefill ? ' autofocus' : ''} required>${esc(prefill)}</textarea>
 <button class="vb-send" type="submit" aria-label="Send"${enabled ? '' : ' disabled'}>${ICON.send}</button>
+<fieldset class="vb-modes" aria-label="What Vibe does with it">${MODES.map(([value, label, hint, placeholder], i) => `<label title="${esc(hint)}"><input type="radio" name="mode" value="${value}" data-placeholder="${esc(placeholder)}"${i ? '' : ' checked'}><span>${label}</span></label>`).join('')}</fieldset>
 </form>
 <p class="vb-fine">${enabled ? 'Vibe can get things wrong. Check what matters.' : 'Vibe is resting right now. Try again later.'}</p>`;
 }
@@ -186,7 +195,8 @@ ${room ? thread : hello}
     router.post('/vibe', formLimit, sameSite, async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         try {
-            const out = await vibe.start(actor.user, req.body && req.body.message);
+            const b = req.body || {};
+            const out = b.mode && b.mode !== 'chat' ? await vibe.startWork(actor.user, b.message, b.mode) : await vibe.start(actor.user, b.message);
             res.redirect(303, `/vibe/${out.room.slug}`);
         } catch (err) {
             await render(req, res, { status: err.status || 500, error: err.status ? err.message : 'Something went wrong. Try again.' });
@@ -198,8 +208,12 @@ ${room ? thread : hello}
         const room = await vibe.ownChat(req.params.slug, actor.user);
         if (!room) return res.redirect(303, '/vibe');
         try {
-            const message = await rooms.post(room, actor.user, req.body && req.body.message);
-            require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
+            const b = req.body || {};
+            if (b.mode && b.mode !== 'chat') await vibe.work(room, actor.user, b.message, b.mode);
+            else {
+                const message = await rooms.post(room, actor.user, b.message);
+                require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
+            }
             res.redirect(303, `/vibe/${room.slug}`);
         } catch (err) {
             await render(req, res, { room, status: err.status || 500, error: err.status ? err.message : 'Your message could not be sent.' });

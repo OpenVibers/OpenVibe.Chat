@@ -41,10 +41,21 @@ router.get('/', requireAuth, personOnly, async (req, res) => {
     } catch (err) { send(res, err); }
 });
 
+const modeOf = (b) => (b && b.mode && b.mode !== 'chat' ? String(b.mode) : null);
 router.post('/', requireAuth, personOnly, startLimit, async (req, res) => {
     try {
-        const out = await vibe.start(req.user, req.body && req.body.message);
+        const b = req.body || {};
+        const out = modeOf(b) ? await vibe.startWork(req.user, b.message, modeOf(b)) : await vibe.start(req.user, b.message);
         res.status(201).json(out);
+    } catch (err) { send(res, err); }
+});
+
+/** A Research, Agent or Code request in an existing chat: { message, mode }. → { message, task } */
+router.post('/:slug/ask', requireAuth, personOnly, startLimit, async (req, res) => {
+    try {
+        const room = await vibe.ownChat(req.params.slug, req.user);
+        if (!room) return res.status(404).json({ error: 'No such chat', code: 'rooms.not_found' });
+        res.status(201).json(await vibe.work(room, req.user, req.body && req.body.message, req.body && req.body.mode));
     } catch (err) { send(res, err); }
 });
 
