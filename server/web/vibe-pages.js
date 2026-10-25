@@ -72,10 +72,12 @@ const MARK = '<span class="vb-mark" aria-hidden="true"><svg viewBox="0 0 24 24">
 
 function rail({ chats, current, signedIn, allowance, query = '' }) {
     const groups = groupChats(chats);
+    // The search's own words are never written back into the page (a link could carry anyone's words): the box gets
+    // them from the address in the browser, and the results say only what matched in the person's own chats.
     const found = query
         ? (chats.length
-            ? `<p class="vb-group">Chats with “${esc(query)}”</p><ul class="vb-chats">${chats.map((c) => `<li><a class="vb-chat vb-hit" href="/vibe/${esc(c.slug)}"${c.slug === current ? ' aria-current="page"' : ''}><span>${esc(c.name)}</span>${c.hit ? `<small>${snippet(c.hit, query)}</small>` : ''}</a></li>`).join('')}</ul>`
-            : `<p class="vb-rail-note">No chat mentions “${esc(query)}”.</p>`) + '<p class="vb-rail-note"><a href="/vibe">All your chats</a></p>'
+            ? `<p class="vb-group">Chats that match</p><ul class="vb-chats">${chats.map((c) => `<li><a class="vb-chat vb-hit" href="/vibe/${esc(c.slug)}"${c.slug === current ? ' aria-current="page"' : ''}><span>${esc(c.name)}</span>${c.hit ? `<small>${snippet(c.hit, query)}</small>` : ''}</a></li>`).join('')}</ul>`
+            : '<p class="vb-rail-note">No chat matches your search.</p>') + '<p class="vb-rail-note"><a href="/vibe">All your chats</a></p>'
         : null;
     const list = !signedIn
         ? '<p class="vb-rail-note">Sign in to keep your chats. They are private to you.</p>'
@@ -88,7 +90,7 @@ function rail({ chats, current, signedIn, allowance, query = '' }) {
 <a class="vb-new" href="/vibe">${ICON.new}<span>New chat</span></a>
 <button class="vb-icon vb-rail-close" type="button" data-vb-close aria-label="Close the chat list">${ICON.close}</button>
 </div>
-${signedIn ? `<form class="vb-search" action="/vibe" method="get" role="search">${ICON.search}<label class="oc-sr" for="vb-q">Search your chats</label><input id="vb-q" name="q" type="search" maxlength="${vibe.SEARCH_MAX}" placeholder="Search chats" value="${esc(query)}" autocomplete="off" enterkeyhint="search"></form>` : ''}
+${signedIn ? `<form class="vb-search" action="/vibe" method="get" role="search">${ICON.search}<label class="oc-sr" for="vb-q">Search your chats</label><input id="vb-q" name="q" type="search" maxlength="${vibe.SEARCH_MAX}" placeholder="Search chats" autocomplete="off" enterkeyhint="search"></form>` : ''}
 <nav class="vb-rail-list" aria-label="Chats with Vibe">${list}</nav>
 <nav class="vb-rail-more" aria-label="More of OpenVibe.Chat">
 <a href="https://openvibe.actor/tasks" title="Every task you gave an agent, one-off or recurring, with what it cost">${ICON.tasks}<span>Tasks</span></a>
