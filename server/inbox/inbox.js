@@ -43,7 +43,7 @@ function cleanOrigin(o) { try { const u = new URL(String(o).trim()); return /^ht
 function cleanUrl(u) { try { const x = new URL(String(u).trim()); return x.protocol === 'https:' ? x.href : null; } catch { return null; } }
 // A message as one line of plain text, for a list's preview: Vibe writes Markdown, which would show as ** and [](…).
 function plainText(body) {
-    return String(body || '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`~]+|^#+\s*|^>\s*/gm, '').replace(/\s+/g, ' ').trim();
+    return require('../rooms/pictures').withoutLinks(body, '📷 Picture').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`~]+|^#+\s*|^>\s*/gm, '').replace(/\s+/g, ' ').trim();
 }
 /** The page a visitor wrote from (http or https, at most 500 characters), or null. */
 function pageUrlOf(u) { try { const x = new URL(String(u || '').trim()); return /^https?:$/.test(x.protocol) ? x.href.slice(0, 500) : null; } catch { return null; } }
@@ -196,7 +196,8 @@ const convShape = (c) => c && ({
     verified: !!Number(c.verified), visitor_email: c.visitor_email || null, external_id: c.external_id || null,
     created_at: c.created_at, last_message_at: c.last_message_at || c.created_at,
 });
-const msgShape = (m) => m && ({ id: Number(m.id), conversation_id: m.conversation_id, author: m.author, author_name: m.author_name || null, body: m.body, created_at: m.created_at });
+// account: a visitor's message written signed in to OpenVibe, whose OpenVibe.Pics links show as pictures (anyone else's stay links).
+const msgShape = (m) => m && ({ id: Number(m.id), conversation_id: m.conversation_id, author: m.author, author_name: m.author_name || null, body: m.body, created_at: m.created_at, ...(m.author === 'visitor' && m.author_user_id != null ? { account: true } : {}) });
 
 async function addMessage(conv, { author, body, userId = null, name = null }, deps = {}) {
     const row = await db.get(`INSERT INTO inbox_messages (conversation_id, author, author_user_id, author_name, body) VALUES (?, ?, ?, ?, ?) RETURNING *`,
@@ -359,7 +360,8 @@ async function visitorPost(inbox, token, { message, page_url = null, name = null
         require('./webhooks').later(inbox.id, 'conversation.created', { conversationId: conv.id });
     }
     const filtered = wordFilter.check(body);
-    const posted = await addMessage(conv, { author: 'visitor', body: filtered.safe ? body : filtered.filtered, name: conv.visitor_name }, deps);
+    const signedIn = !!account && (accountToken(inbox, account) === String(token) || Number(conv.visitor_user_id) === Number(account.id));
+    const posted = await addMessage(conv, { author: 'visitor', body: filtered.safe ? body : filtered.filtered, name: conv.visitor_name, userId: signedIn ? account.id : null }, deps);
     // A person is needed: a new conversation with Vibe off starts waiting, and a visitor writing to people is news.
     if (started && conv.status === 'waiting') await takeTurn(conv, deps);
     if (conv.status === 'waiting' || conv.status === 'open') require('./notify').later(conv, started ? 'waiting' : 'message');

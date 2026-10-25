@@ -56,8 +56,8 @@ center (MagicBrowse privacy), getstream.io (Stream vs Sendbird), rumbletalk.com,
    HTTP, secrets and home folders scrubbed on the way in, the delay kept on the server. Live's channel chat shows
    Chat's card; Live's tables are copied (`scripts/import-live-feeds.js`), verified and dropped (convert-verify-delete).
 3. **Community room** (built: `data-room`, bubble or inline, sign-in by ticket) **and site assistant** (built: an inbox
-   whose people do not answer) **modes** of the widget; pictures, video and files in the embed (signed-in
-   visitors first, then anonymous once Pics/Video take anonymous uploads); call escalation from a support conversation.
+   whose people do not answer) **modes** of the widget; pictures in the embed (built for signed-in visitors;
+   anonymous ones once Pics scans anonymous uploads), then video and files; call escalation from a support conversation.
 4. **Developer platform**: `openvibe-sdk/chat` (built, SDK#78: inboxes, feeds, Vibe, `createInboxVisitor`,
    `createFeedPublisher`), inbox webhooks (built: `chat.inbox.*` events signed like Events deliveries, Slack and
    Discord lines). Next: capabilities in OpenVibe.Contracts (`chat.inbox.*`, `chat.feed.*`) so developer apps act for an

@@ -431,6 +431,33 @@ t('a visitor signed in to OpenVibe: their conversation is theirs, in their Messa
     intruder.close();
 });
 
+t('a signed-in visitor sends a picture from the panel (through OpenVibe.Pics as them); anyone else is asked to sign in, and their links stay links', async () => {
+    const PNG = Buffer.from('89504e470d0a1a0a0000000d4948445200000001000000010806000000', 'hex');
+    const picture = (headers) => fetch(`${h.base}/api/chat/widget/inbox/${inbox.id}/picture`, { method: 'POST', headers: { 'content-type': 'image/png', ...headers }, body: PNG })
+        .then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }));
+    const anon = (await widget('POST', '/visit', {})).body.token;
+    assert.deepStrictEqual([(await picture({ 'x-visitor-token': anon })).status, (await picture({ 'x-visitor-token': anon })).body.code], [403, 'inbox.sign_in_to_attach']);
+    const pasted = await widget('POST', '/messages', { token: anon, message: 'Look https://openvibe.pics/i/Pk222222.png' });
+    assert.strictEqual(pasted.body.message.account, undefined, 'an anonymous visitor\'s link is only a link');
+    const eve = h.addUser('eve', { subject: ids.newId('user') });
+    await h.ctx.upsertUser(h.live.users.get(eve.id));
+    const as = { authorization: `Bearer ${eve.token}` };
+    const token = (await widget('POST', '/visit', {}, as)).body.token;
+    assert.strictEqual((await picture({ ...as, 'x-visitor-token': 'short' })).status, 401);
+    const sent = await picture({ ...as, 'x-visitor-token': token, 'x-caption': encodeURIComponent('The crack, here') });
+    assert.strictEqual(sent.status, 201, JSON.stringify(sent.body));
+    assert.ok(/^The crack, here\nhttps:\/\/openvibe\.pics\/i\/[2-9a-km-zA-HJ-NP-Z]{8}\.png$/.test(sent.body.message.body), sent.body.message.body);
+    assert.deepStrictEqual([sent.body.message.author, sent.body.message.account], ['visitor', true]);
+    const cid = sent.body.conversation.id;
+    const typed = await widget('POST', '/messages', { token, message: 'And a second line' }, as);
+    assert.strictEqual(typed.body.message.account, true, 'everything they write signed in is marked');
+    const page = (path, u) => fetch(`${h.base}${path}`, { headers: { cookie: `ov_token=${u.token}` } }).then((x) => x.text());
+    assert.ok((await page(`/inbox/${inbox.id}?c=${cid}`, bob)).includes('class="oc-pic"'), 'the people see it inline');
+    assert.ok(!(await page(`/inbox/${inbox.id}?c=${pasted.body.conversation.id}`, bob)).includes('class="oc-pic"'), 'and the pasted link as text');
+    assert.ok((await page(`/support/${cid}`, eve)).includes('class="oc-pic"'), 'the visitor sees it in their Messages too');
+    assert.ok((await fetch(`${h.base}/embed/inbox/${inbox.id}`).then((x) => x.text())).includes('id="em-attach"'), 'the panel has the picture button');
+});
+
 t('business hours: outside them the panel says when the team is back, a handoff says so, and Vibe knows', async () => {
     assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}`, ann, { hours: { tz: 'Mars/Olympus', days: [1], start: '09:00', end: '17:00' } })).status, 422);
     assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}`, ann, { hours: { tz: 'UTC', days: [1], start: '17:00', end: '09:00' } })).status, 422, 'a start before an end');

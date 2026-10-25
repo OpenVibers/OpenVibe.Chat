@@ -121,7 +121,7 @@ const ERASE_AFTER_ROOMS = [
     ['inboxes', 'DELETE FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)'],
     [null, "UPDATE inbox_messages SET author_user_id = NULL, author_name = 'A former agent' WHERE author = 'agent' AND author_user_id = ANY(@ids)"],
     // As a visitor of others' inboxes: their conversations stay with those teams, without them.
-    [null, "UPDATE inbox_messages SET author_name = NULL WHERE author = 'visitor' AND conversation_id IN (SELECT id FROM inbox_conversations WHERE visitor_user_id = ANY(@ids))"],
+    [null, "UPDATE inbox_messages SET author_name = NULL, author_user_id = NULL WHERE author = 'visitor' AND (author_user_id = ANY(@ids) OR conversation_id IN (SELECT id FROM inbox_conversations WHERE visitor_user_id = ANY(@ids)))"],
     [null, "UPDATE inbox_conversations SET visitor_user_id = NULL, visitor_subject = NULL, visitor_name = 'A former visitor', visitor_email = NULL, external_id = NULL WHERE visitor_user_id = ANY(@ids)"],
     // Feeds (server/feeds/feeds.js): a person's feeds go with everything published to them.
     ['feed_events', 'DELETE FROM feed_events WHERE feed_id IN (SELECT id FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],

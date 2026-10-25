@@ -47,6 +47,11 @@ function linksIn(text) {
     return out;
 }
 
+/** The text without its Pics links (shown as pictures instead), each replaced by `instead`. */
+function withoutLinks(text, instead = '') {
+    return String(text || '').replace(linkPattern(), instead).replace(/[ \t]+$/gm, '').trim();
+}
+
 /** The inline thumbnails for a message, as HTML (empty when it links no Pics picture). */
 function pageHtml(text) {
     const pics = linksIn(text);
@@ -114,4 +119,4 @@ function forModel({ slug, ext }) {
     });
 }
 
-module.exports = { enabled, upload, linksIn, pageHtml, publicUrl, forModel, TYPES, MAX_INLINE, MODEL_MAX_BYTES };
+module.exports = { enabled, upload, linksIn, withoutLinks, pageHtml, publicUrl, forModel, TYPES, MAX_INLINE, MODEL_MAX_BYTES };

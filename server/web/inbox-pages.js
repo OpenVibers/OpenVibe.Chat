@@ -52,6 +52,7 @@ function embedHtml(inbox) {
 <ol class="em-thread" id="em-thread" aria-live="polite"><li class="em-msg em-them"><small>${esc(inbox.name)}</small><div class="em-bubble">${esc(inbox.greeting)}</div></li></ol>
 <div class="em-handoff"><button type="button" id="em-person" hidden>Talk to a person</button></div>
 <form class="em-composer" id="em-form"><label class="em-sr" for="em-input" hidden>Your message</label>
+${pictures.enabled() ? '<button type="button" class="em-attach" id="em-attach" aria-label="Send a picture" title="Send a picture"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg></button><input type="file" id="em-file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" hidden>' : ''}
 <textarea id="em-input" rows="1" maxlength="4000" placeholder="Write a message" aria-label="Your message"></textarea>
 <button type="submit" aria-label="Send">&#8593;</button></form>
 <p class="em-foot">Chat by <a href="https://openvibe.chat" target="_blank" rel="noopener">OpenVibe</a>${Number(inbox.ai_enabled) ? ' · Vibe can get things wrong' : ''}<span id="em-account"></span></p>
@@ -132,10 +133,12 @@ ${list}
         const item = (c) => `<li><a class="vb-chat ib-conv" href="/inbox/${esc(inbox.id)}?c=${esc(c.id)}&amp;f=${filter}"${current && c.id === current.id ? ' aria-current="page"' : ''} data-conv="${esc(c.id)}">
 <span class="ib-row"><b>${esc(c.visitor_name || 'Visitor')}</b>${c.verified ? '<span class="ib-ok" title="Verified by your site">✓</span>' : ''}${statusChip(c.status)}${c.rating ? `<span class="ib-rate" title="${esc(c.rating_comment || '')}">${c.rating > 0 ? '👍' : '👎'}</span>` : ''}<time>${esc(ago(c.last_message_at))}</time></span>
 <span class="ib-prev">${c.assignee_id && c.status !== 'resolved' ? `<span class="ib-who-has">${esc(Number(c.assignee_id) === Number(actor.user.id) ? 'You' : nameOf(c.assignee_id) || 'Someone')}</span> · ` : ''}${esc(c.preview || '')}</span></a></li>`;
+        // A person's or a signed-in visitor's message shows its pictures inline, not their links as text.
+        const shown = (m) => (m.author === 'agent' || m.account ? pictures.withoutLinks(m.body) : m.body);
         const turn = (m) => {
             if (m.author === 'system') return `<li class="ib-sys" data-id="${m.id}">${esc(m.body)}</li>`;
-            if (m.author === 'visitor') return `<li class="vb-turn vb-ai ib-visitor" data-id="${m.id}"><span class="ib-av" aria-hidden="true">${esc((current.visitor_name || 'V').slice(0, 1).toUpperCase())}</span><div class="vb-body"><p class="ib-who">${esc(current.visitor_name || 'Visitor')}</p><div class="vb-md">${esc(m.body).replace(/\n/g, '<br>')}</div></div></li>`;
-            return `<li class="vb-turn vb-me" data-id="${m.id}"><div class="vb-bubble${m.author === 'ai' ? ' ib-ai' : ''}"><p class="ib-who">${m.author === 'ai' ? 'Vibe (AI)' : esc(m.author_name || 'Agent')}</p>${m.author === 'ai' ? `<div class="vb-md">${md.render(m.body)}</div>` : esc(m.body).replace(/\n/g, '<br>')}${m.author === 'agent' ? pictures.pageHtml(m.body) : ''}</div></li>`;
+            if (m.author === 'visitor') return `<li class="vb-turn vb-ai ib-visitor" data-id="${m.id}"><span class="ib-av" aria-hidden="true">${esc((current.visitor_name || 'V').slice(0, 1).toUpperCase())}</span><div class="vb-body"><p class="ib-who">${esc(current.visitor_name || 'Visitor')}</p>${shown(m) ? `<div class="vb-md">${esc(shown(m)).replace(/\n/g, '<br>')}</div>` : ''}${m.account ? pictures.pageHtml(m.body) : ''}</div></li>`;
+            return `<li class="vb-turn vb-me" data-id="${m.id}"><div class="vb-bubble${m.author === 'ai' ? ' ib-ai' : ''}"><p class="ib-who">${m.author === 'ai' ? 'Vibe (AI)' : esc(m.author_name || 'Agent')}</p>${m.author === 'ai' ? `<div class="vb-md">${md.render(m.body)}</div>` : esc(shown(m)).replace(/\n/g, '<br>')}${m.author === 'agent' ? pictures.pageHtml(m.body) : ''}</div></li>`;
         };
         const tabs = [['active', 'Active'], ['mine', 'Mine'], ['waiting', 'Waiting'], ['resolved', 'Resolved']].map(([k, l]) => `<a href="/inbox/${esc(inbox.id)}?f=${k}"${k === filter ? ' aria-current="page"' : ''}>${l}</a>`).join('');
         const assignForm = current ? `<form method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}/assign" class="ib-assign"><label>Answered by <select name="assignee" data-autosubmit><option value="">nobody yet</option>${team.map((m) => `<option value="${m.user_id}"${Number(current.assignee_id) === m.user_id ? ' selected' : ''}>${esc(m.user_id === Number(actor.user.id) ? 'me' : (m.display_name || m.username))}</option>`).join('')}</select></label><noscript><button type="submit">Assign</button></noscript></form>` : '';
@@ -286,7 +289,7 @@ ${saved.length ? `<ul class="oc-members">${saved.map((r) => `<li><b>/${esc(r.sho
         const msgs = await inboxes.messages(conv);
         const who = (m) => (m.author === 'visitor' ? 'You' : m.author === 'ai' ? 'Vibe' : m.author === 'system' ? '' : (m.author_name || inbox.name));
         const line = (m) => (m.author === 'system' ? `<li class="oc-muted sp-sys" data-id="${m.id}">${esc(m.body)}</li>`
-            : `<li class="sp-msg${m.author === 'visitor' ? ' sp-me' : ''}" data-id="${m.id}"><b>${esc(who(m))}</b> <span class="sp-text">${m.author === 'ai' ? md.render(m.body) : esc(m.body).replace(/\n/g, '<br>')}</span>${m.author === 'agent' ? pictures.pageHtml(m.body) : ''}</li>`);
+            : `<li class="sp-msg${m.author === 'visitor' ? ' sp-me' : ''}" data-id="${m.id}"><b>${esc(who(m))}</b> <span class="sp-text">${m.author === 'ai' ? md.render(m.body) : esc(m.author === 'agent' || m.account ? pictures.withoutLinks(m.body) : m.body).replace(/\n/g, '<br>')}</span>${m.author === 'agent' || m.account ? pictures.pageHtml(m.body) : ''}</li>`);
         await page(req, res, 200, {
             actor, title: `${inbox.name}: support`, path: `/support/${conv.id}`, active: 'messages', robots: 'noindex, nofollow',
             page: { view: 'support', inbox: inbox.id, conversation: conv.id, latest: msgs.length ? msgs[msgs.length - 1].id : 0 },
