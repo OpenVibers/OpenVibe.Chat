@@ -4,16 +4,19 @@
 
      var call = OVSupportCall.join({ channel: 'support-cnv_…', visitorToken: '…' | token: '…',
                                      onState: function (state, text) {},      // joining | in | ended | error
-                                     onPeople: function (names) {} });
-     call.mute(true); call.leave();
+                                     onPeople: function (names) {},
+                                     onScreen: function (stream | null, name) {} });   // someone's shared screen
+     call.mute(true); call.share(); call.stopSharing(); call.leave();
 
-   Audio only; the microphone is asked for when joining (no microphone: you listen). */
+   Voice, and a shared screen: the visitor may share theirs (the browser's own picker decides what), shown to the team;
+   the microphone is asked for when joining (no microphone: you listen). The screen rides the same peer connections
+   (renegotiated); camera-off false/true tells the others it started or stopped. */
 (function () {
   'use strict';
   if (!window.RTCPeerConnection || !window.WebSocket) return;
 
   function join(opts) {
-    var ws = null, localStream = null, myPeerId = null, ended = false, muted = false;
+    var ws = null, localStream = null, myPeerId = null, ended = false, muted = false, screen = null;
     var iceServers = [{ urls: 'stun:stun.l.google.com:19302' }];
     var peers = new Map(), people = new Map();
     var state = function (s, text) { if (opts.onState) opts.onState(s, text || ''); };
@@ -37,17 +40,25 @@
       peers.set(id, p);
       if (localStream) localStream.getTracks().forEach(function (t) { pc.addTrack(t, localStream); });
       else if (initiator) pc.addTransceiver('audio', { direction: 'recvonly' });
+      if (screen) p.screenSender = pc.addTrack(screen.getVideoTracks()[0], screen);
       pc.onicecandidate = function (e) { if (e.candidate) send({ type: 'ice-candidate', targetPeerId: id, candidate: e.candidate.toJSON ? e.candidate.toJSON() : e.candidate }); };
       pc.ontrack = function (e) {
+        if (e.track.kind === 'video') {
+          var who = people.get(id);
+          if (opts.onScreen) opts.onScreen(new MediaStream([e.track]), (who && (who.displayName || who.username)) || 'Someone');
+          e.track.addEventListener('ended', function () { if (opts.onScreen) opts.onScreen(null); });
+          return;
+        }
         if (!p.audio) { p.audio = document.createElement('audio'); p.audio.autoplay = true; p.audio.hidden = true; document.body.appendChild(p.audio); }
         p.audio.srcObject = (e.streams && e.streams[0]) || new MediaStream([e.track]);
       };
-      if (initiator) {
-        pc.createOffer().then(function (o) { return pc.setLocalDescription(o); })
-          .then(function () { send({ type: 'offer', targetPeerId: id, sdp: { type: pc.localDescription.type, sdp: pc.localDescription.sdp } }); })
-          .catch(function () { state('error', 'Could not start the call.'); });
-      }
+      if (initiator) offer(id, p);
       return p;
+    }
+    function offer(id, p) {
+      p.pc.createOffer().then(function (o) { return p.pc.setLocalDescription(o); })
+        .then(function () { send({ type: 'offer', targetPeerId: id, sdp: { type: p.pc.localDescription.type, sdp: p.pc.localDescription.sdp } }); })
+        .catch(function () { state('error', 'Could not start the call.'); });
     }
     function flush(p) { var c; while ((c = p.pending.shift())) p.pc.addIceCandidate(c).catch(function () {}); }
 
@@ -59,7 +70,8 @@
           state('in', localStream ? '' : 'No microphone: you can listen.'); names();
           break;
         case 'peer-joined': people.set(m.peerId, m); peer(m.peerId, false); names(); break;
-        case 'peer-left': people.delete(m.peerId); closePeer(m.peerId); names(); break;
+        case 'peer-left': people.delete(m.peerId); closePeer(m.peerId); names(); if (opts.onScreen) opts.onScreen(null); break;
+        case 'peer-camera': if (m.cameraOff && opts.onScreen) opts.onScreen(null); break;
         case 'offer': {
           var p = peers.get(m.fromPeerId) || peer(m.fromPeerId, false);
           p.pc.setRemoteDescription(m.sdp).then(function () { flush(p); return p.pc.createAnswer(); })
@@ -80,8 +92,31 @@
       }
     }
 
+    function stopSharing() {
+      if (!screen) return;
+      screen.getTracks().forEach(function (t) { t.stop(); });
+      screen = null;
+      peers.forEach(function (p, id) { if (p.screenSender) { try { p.pc.removeTrack(p.screenSender); } catch (e) { /* */ } p.screenSender = null; offer(id, p); } });
+      send({ type: 'camera-off', cameraOff: true });
+      if (opts.onSharing) opts.onSharing(false);
+    }
+    function share() {
+      if (screen || ended || !navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) return Promise.resolve(false);
+      return navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 10 }, audio: false }).then(function (s) {
+        if (ended) { s.getTracks().forEach(function (t) { t.stop(); }); return false; }
+        screen = s;
+        var track = s.getVideoTracks()[0];
+        track.addEventListener('ended', stopSharing);   // the browser's own "Stop sharing"
+        peers.forEach(function (p, id) { p.screenSender = p.pc.addTrack(track, s); offer(id, p); });
+        send({ type: 'camera-off', cameraOff: false });
+        if (opts.onSharing) opts.onSharing(true);
+        return true;
+      }, function () { return false; });
+    }
+
     function stop(s, text) {
       if (ended) return;
+      if (screen) { screen.getTracks().forEach(function (t) { t.stop(); }); screen = null; }
       ended = true;
       peers.forEach(function (p, id) { closePeer(id); });
       people.clear();
@@ -110,6 +145,9 @@
     return {
       mute: function (on) { muted = !!on; if (localStream) localStream.getAudioTracks().forEach(function (t) { t.enabled = !muted; }); send({ type: 'mute', muted: muted }); },
       leave: function () { stop('ended', 'You left the call.'); },
+      share: share,
+      stopSharing: stopSharing,
+      get sharing() { return !!screen; },
       get muted() { return muted; },
     };
   }

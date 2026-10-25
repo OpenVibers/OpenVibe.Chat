@@ -252,11 +252,23 @@
       channel: 'support-' + cfg.conversation, token: token(),
       onState: function (s, t) { if (s === 'ended' || s === 'error') { call = null; callGone(t); } else if (t) callText.textContent = t; },
       onPeople: function (names) { callText.textContent = names.length ? 'In the call with ' + names.join(', ') + '.' : 'Calling… the visitor sees an invitation in their chat.'; },
+      onScreen: showScreen,
     });
   }
+  // The visitor's shared screen, above the call bar.
+  var screenBox = document.getElementById('ib-screen'), screenVideo = document.getElementById('ib-screen-video'), screenWho = document.getElementById('ib-screen-who');
+  function showScreen(stream, name) {
+    if (!screenBox) return;
+    if (!stream) { screenBox.hidden = true; screenVideo.srcObject = null; return; }
+    screenWho.textContent = (name || 'The visitor') + ' is sharing their screen';
+    screenVideo.srcObject = stream; screenBox.hidden = false;
+  }
+  var fullBtn = document.getElementById('ib-screen-full');
+  if (fullBtn) fullBtn.addEventListener('click', function () { if (screenVideo.requestFullscreen) screenVideo.requestFullscreen().catch(function () {}); });
   function callOffered(by) { if (call) return; showBar(by ? by + ' started a voice call.' : 'A voice call with this visitor is open.'); callJoin.hidden = false; callMute.hidden = true; }
   function callGone(text) {
     if (call) { var c = call; call = null; c.leave(); }
+    showScreen(null);
     if (!callBar) return;
     callBar.hidden = true;
     if (callBtn) callBtn.hidden = false;
