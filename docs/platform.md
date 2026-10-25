@@ -63,6 +63,7 @@ center (MagicBrowse privacy), getstream.io (Stream vs Sendbird), rumbletalk.com,
    Discord lines). Next: capabilities in OpenVibe.Contracts (`chat.inbox.*`, `chat.feed.*`) so developer apps act for an
    inbox's people, and the same events on OpenVibe.Events once it scopes event types to their owner.
 5. **Enterprise**: built: verified visitors (an HMAC of the site's user id, like Intercom's identity verification),
-   saved replies (the canned replies of other tools), ratings (CSAT), page context for Vibe, notifications. Next:
-   teams and routing, retention and export settings, translation, sharing the page with the visitor's permission
-   (co-browsing-lite), procedures (Vibe calls a site's webhook to look up an order).
+   saved replies (the canned replies of other tools), ratings (CSAT), page context for Vibe, notifications,
+   translation, business hours, routing (assigning, taking turns) and actions (Vibe calls the team's own endpoints,
+   signed, with the verified visitor, to look up an order: Intercom's "data connectors", Zendesk's "actions"). Next:
+   retention and export settings, sharing the page with the visitor's permission (co-browsing-lite).

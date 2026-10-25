@@ -29,6 +29,8 @@
  *   POST   /:id/conversations/:cid/picture   the body is a picture, an optional line in X-Caption → 201 { message, picture }
  *   GET    /:id/webhooks     (owner) { webhooks }    POST /:id/webhooks { url } → 201 { webhook, secret }
  *   POST   /:id/webhooks/:hookId/test → { ok, status, error }    DELETE /:id/webhooks/:hookId
+ *   GET    /:id/actions      (owner) { actions }    POST /:id/actions { name, description, url, params? } → 201 { action, secret }
+ *   POST   /:id/actions/:actionId/test { arguments } → { ok, status, error, result }    DELETE /:id/actions/:actionId
  *   GET    /:id/conversations                  ?status=active|mine|bot|waiting|open|resolved
  *   GET    /:id/conversations/:cid/messages    ?after=
  *   POST   /:id/conversations/:cid/messages    { message } → 201: a person's answer (the conversation becomes open)
@@ -43,10 +45,11 @@ const { requireAuth, requestUser } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const inboxes = require('./inbox');
 const webhooks = require('./webhooks');
+const actions = require('./actions');
 const translate = require('./translate');
 
 function send(res, err) {
-    if (err instanceof inboxes.InboxError || err instanceof webhooks.WebhookError || err instanceof translate.TranslateError) return res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof inboxes.InboxError || err instanceof webhooks.WebhookError || err instanceof actions.ActionError || err instanceof translate.TranslateError) return res.status(err.status).json({ error: err.message, code: err.code });
     console.error('[Inbox]', err && err.message);
     return res.status(500).json({ error: 'Something went wrong' });
 }
@@ -200,6 +203,22 @@ agents.post('/:id/webhooks/:hookId/test', requireAuth, manageLimit, async (req, 
 agents.delete('/:id/webhooks/:hookId', requireAuth, manageLimit, async (req, res) => {
     const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
     await webhooks.remove(inbox, req.params.hookId); res.status(204).end();
+});
+agents.get('/:id/actions', requireAuth, async (req, res) => {
+    const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
+    noStore(res).json({ actions: await actions.list(inbox) });
+});
+agents.post('/:id/actions', requireAuth, manageLimit, async (req, res) => {
+    const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
+    try { noStore(res).status(201).json(await actions.add(inbox, req.user, req.body || {})); } catch (err) { send(res, err); }
+});
+agents.post('/:id/actions/:actionId/test', requireAuth, manageLimit, async (req, res) => {
+    const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
+    try { noStore(res).json(await actions.test(inbox, req.params.actionId, req.body && req.body.arguments)); } catch (err) { send(res, err); }
+});
+agents.delete('/:id/actions/:actionId', requireAuth, manageLimit, async (req, res) => {
+    const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
+    await actions.remove(inbox, req.params.actionId); res.status(204).end();
 });
 agents.post('/:id/identity', requireAuth, manageLimit, async (req, res) => {
     const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;

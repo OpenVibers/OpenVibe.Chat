@@ -121,6 +121,7 @@ t('ratchet: every file that makes an outbound request itself is reviewed', () =>
         'server/chat/soundboard-service.js': '101soundboards (host allowlist; audio via safeLookup)',
         'server/chat/tts-engine.js': 'Google / AWS TTS (fixed hosts)',
         'server/inbox/webhooks.js': "an inbox owner's webhook addresses: https only, assertPublicUrl when saved and safeLookup on every delivery, no redirects followed",
+        'server/inbox/actions.js': "an inbox owner's action addresses: https only, assertPublicUrl when saved and safeLookup on every call, no redirects followed, 8 s",
         'server/web/room-embed-pages.js': 'not the server: the sign-in window\'s own script posts to /embed/bind on this same site',
     };
     const root = path.join(__dirname, '..');

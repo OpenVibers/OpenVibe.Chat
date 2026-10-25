@@ -117,6 +117,7 @@ const ERASE_AFTER_ROOMS = [
     [null, 'DELETE FROM inbox_ai_usage WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     [null, 'DELETE FROM inbox_saved_replies WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     [null, 'DELETE FROM inbox_webhooks WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
+    [null, 'DELETE FROM inbox_actions WHERE inbox_id IN (SELECT id FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     ['inboxes', 'DELETE FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)'],
     [null, "UPDATE inbox_messages SET author_user_id = NULL, author_name = 'A former agent' WHERE author = 'agent' AND author_user_id = ANY(@ids)"],
     // As a visitor of others' inboxes: their conversations stay with those teams, without them.
