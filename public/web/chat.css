@@ -63,7 +63,7 @@ button[disabled] { opacity: .6; cursor: default; }
 .oc-signin { margin: 12px 0; }
 .oc-new { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 12px 0 16px; }
 .oc-new input { flex: 1 1 180px; }
-.oc-convs { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.oc-convs { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }   /* minmax(0, 1fr): a long preview (a pasted link) is cut with … instead of widening the page past a phone, which also pushed the navbar's menu off-screen */
 .oc-conv { display: flex; gap: 12px; align-items: center; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; padding: 10px 14px; }
 .oc-conv a { flex: 1; min-width: 0; color: var(--oc-text); text-decoration: none; display: flex; flex-direction: column; }
 .oc-conv .oc-last { font-size: .9em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -90,7 +90,7 @@ button[disabled] { opacity: .6; cursor: default; }
 .oc-link { background: none; color: var(--oc-accent); padding: 0; font-weight: 600; text-decoration: underline; }
 .oc-create { margin-top: 24px; padding: 14px 16px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; }
 .oc-create h2 { margin: 0 0 4px; font-size: 1.1rem; }
-.oc-members { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.oc-members { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
 .oc-members li { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 10px; padding: 8px 12px; }
 .oc-members form { margin-left: auto; }
 h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
@@ -158,7 +158,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-srv-desc { margin: 6px 0 0; font-size: .86rem; color: var(--oc-muted); }
 .oc-srv-channels > summary { display: none; }
 .oc-srv-group { margin: 14px 8px 4px; font-size: .7rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--oc-muted); }
-.oc-srv-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.oc-srv-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .oc-chan { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 8px; color: var(--oc-muted); text-decoration: none; }
 .oc-chan:hover, .oc-chan:focus-visible { background: var(--oc-panel-2); color: var(--oc-text); }
 .oc-chan.is-active { background: color-mix(in srgb, var(--oc-accent) 18%, transparent); color: var(--oc-text); }
@@ -185,11 +185,11 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-srv-people > details > summary { display: none; }
 .oc-srv-people .oc-srv-group { margin-top: 4px; }
 .oc-srv-people .oc-srv-group ~ .oc-srv-group { margin-top: 16px; }
-.oc-srv-people-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.oc-srv-people-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .oc-srv-people-list a { display: block; padding: 3px 8px; border-radius: 6px; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oc-srv-people-list a:hover { background: var(--oc-panel-2); }
 /* The directory, an invite, settings */
-.oc-srv-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; }
+.oc-srv-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 10px; }
 .oc-srv-card a { display: flex; align-items: center; gap: 12px; height: 100%; padding: 12px 14px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; color: var(--oc-text); text-decoration: none; }
 .oc-srv-card a:hover, .oc-srv-card a:focus-visible { border-color: var(--oc-accent); }
 .oc-srv-card-text { display: flex; flex-direction: column; min-width: 0; }
@@ -296,7 +296,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-faq p { margin: 0; padding: 11px 14px 13px; color: var(--oc-muted); }
 
 /* Support inboxes (server/web/inbox-pages.js): the list of a person's inboxes and the snippet to paste. */
-.ib-list { list-style: none; margin: 14px 0; padding: 0; display: grid; gap: 8px; }
+.ib-list { list-style: none; margin: 14px 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .ib-list a { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--oc-line); background: var(--oc-panel); color: var(--oc-text); text-decoration: none; }
 .ib-list a:hover { border-color: color-mix(in srgb, var(--oc-accent) 45%, var(--oc-line)); }
 .ib-list .oc-muted { margin-left: auto; font-size: .85rem; }
@@ -321,7 +321,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-table th, .oc-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--oc-line); vertical-align: top; }
 .oc-table th { color: var(--oc-muted); font-weight: 600; }
 /* A visitor's own support conversation (server/web/inbox-pages.js /support/:cid) */
-.sp-thread { list-style: none; margin: 14px 0; padding: 0; display: grid; gap: 8px; max-width: 760px; }
+.sp-thread { list-style: none; margin: 14px 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; max-width: 760px; }
 .sp-msg { padding: 8px 12px; border-radius: 12px; background: var(--oc-panel); border: 1px solid var(--oc-line); overflow-wrap: anywhere; }
 .sp-msg.sp-me { background: color-mix(in srgb, var(--oc-accent) 12%, var(--oc-panel)); }
 .sp-text p { display: inline; margin: 0; }
@@ -336,7 +336,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-queue-add summary { cursor: pointer; font-weight: 600; }
 .oc-queue-add .oc-form label { display: block; margin: 6px 0; }
 .oc-queue-add .oc-form input, .oc-queue-add .oc-form select, .oc-queue-add .oc-form textarea { width: 100%; box-sizing: border-box; }
-.oc-tasks { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.oc-tasks { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .oc-task { padding: 8px 10px; border: 1px solid var(--oc-line); border-left: 3px solid var(--oc-line); border-radius: 8px; background: var(--oc-panel-2); }
 .oc-task-title { display: block; color: var(--oc-text); text-decoration: none; font-weight: 600; overflow-wrap: anywhere; }
 .oc-task-title:hover { text-decoration: underline; }
