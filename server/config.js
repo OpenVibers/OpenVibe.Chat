@@ -72,7 +72,8 @@ module.exports = {
     // server-side with Chat's service token. The loopback address in production.
     food: { internalUrl: strip(process.env.CHAT_FOOD_INTERNAL_URL || 'http://127.0.0.1:4970') },
     // Support inboxes (server/inbox/inbox.js): Vibe answers at most this many visitors' messages per inbox a UTC day.
-    inbox: { aiRepliesPerDay: Math.max(1, int(process.env.CHAT_INBOX_AI_REPLIES_PER_DAY, 500)) },
+    // ...and tells the inbox's people when a visitor waits for one of them (server/inbox/notify.js; 0 turns it off).
+    inbox: { aiRepliesPerDay: Math.max(1, int(process.env.CHAT_INBOX_AI_REPLIES_PER_DAY, 500)), notify: process.env.CHAT_INBOX_NOTIFY !== '0' },
     // OpenVibe.Actor, for Vibe's web search (server/rooms/web-search.js): tasks for the person, with Chat's own token.
     actor: { internalUrl: strip(process.env.CHAT_ACTOR_INTERNAL_URL || 'http://127.0.0.1:4950') },
 
