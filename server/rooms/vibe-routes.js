@@ -8,6 +8,8 @@
  *   POST   /picture    the body is a picture (Content-Type image/*), an optional question in X-Caption (URI-encoded) →
  *                      201 { room, message, picture }: a new chat that starts with it (it goes to OpenVibe.Pics as the
  *                      person, like a room's picture), and Vibe answers seeing it
+ *   GET    /:slug/how  { how: { <message id>: { lines, sources, actor_url } } }: "How Vibe did this" for the agent tasks
+ *                      answered in the chat (server/rooms/how.js)
  *   PATCH  /:slug      { name } → { room }
  *   DELETE /:slug      204: the chat and its messages are deleted
  */
@@ -18,6 +20,7 @@ const { requireAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
 const vibe = require('./vibe');
+const how = require('./how');
 
 const router = express.Router();
 const startLimit = limits('chat.vibe.start', { minute: 10, hour: 120 });
@@ -75,6 +78,14 @@ router.post('/picture', requireAuth, personOnly, pictureLimit, (req, res, next) 
         if (room) await vibe.erase(room.id).catch(() => {});   // a picture Pics refused leaves no empty chat behind
         send(res, err);
     }
+});
+
+router.get('/:slug/how', requireAuth, personOnly, async (req, res) => {
+    try {
+        const room = await vibe.ownChat(req.params.slug, req.user);
+        if (!room) return res.status(404).json({ error: 'No such chat', code: 'vibe.not_found' });
+        return res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ how: Object.fromEntries(await how.forRoom(room)) });
+    } catch (err) { return send(res, err); }
 });
 
 router.patch('/:slug', requireAuth, personOnly, manageLimit, async (req, res) => {

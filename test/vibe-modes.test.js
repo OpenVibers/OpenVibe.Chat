@@ -32,6 +32,8 @@ t('boot', async () => {
     for (const u of [ann, bob]) await h.ctx.upsertUser(h.live.users.get(u.id));
     globalThis.fetch = async (url, o = {}) => {
         if (!String(url).startsWith('http://127.0.0.1:4950')) return realFetch(url, o);
+        // Actor's public agent catalog: the names "How Vibe did this" shows.
+        if (String(url).endsWith('/api/v1/agents')) return { ok: true, status: 200, json: async () => ({ agents: [{ id: 'openvibe-runtime', name: 'OpenVibe runtime' }] }) };
         actorCalls.push({ url: String(url), method: o.method || 'GET', subject: o.headers['X-OV-Subject'], body: o.body ? JSON.parse(o.body) : null });
         return { ok: true, status: (o.method || 'GET') === 'POST' ? 201 : 200, json: async () => actorTask };
     };
@@ -51,12 +53,25 @@ t('Research in a new chat: a task on Actor as the person, Vibe says it is on it,
     assert.match(msgs[1].message, new RegExp(`^On it: I am researching this[\\s\\S]*${SITE}/r/${slug}/tasks/${r.body.task.id}$`));
     assert.strictEqual(turns.length, 0, 'no instant answer');
     // Actor finishes: the answer comes back into the chat, without "asked by".
-    actorTask = { id: 'tsk_r1', state: 'succeeded', result: { answer: 'Browser Use Cloud is cheapest at $0.02 an hour.', sources: ['https://browser-use.com/cloud-browsers'] } };
+    actorTask = {
+        id: 'tsk_r1', state: 'succeeded', cost: { usd: 0.0042, free_allowance_used: 0.0042 },
+        result: { answer: 'Browser Use Cloud is cheapest at $0.02 an hour.', sources: ['https://browser-use.com/cloud-browsers'], agent: 'openvibe-runtime', model: 'deepseek-v4-flash', class: 'research', checked: { by: 'qwen', cross_family: true, reason: 'The sources back the answer.' } },
+    };
     await workspace.poll();
     const after = await messagesOf(slug);
     const done = after[after.length - 1];
     assert.ok(done.ai_member_id && /^✅ Done: "Compare the three cheapest cloud browsers for agents"\n\nBrowser Use Cloud/.test(done.message), done.message);
     assert.ok(!/asked by/.test(done.message), 'a Vibe chat has one person in it');
+    // "How Vibe did this", folded under the answer: what ran it, the check, time and cost, the sources, every step on Actor.
+    const page = await fetch(`${h.base}/vibe/${slug}`, { headers: { cookie: `ov_token=${ann.token}` } }).then((x) => x.text());
+    assert.ok(page.includes('<details class="vb-how"><summary>How Vibe did this</summary><ul><li>Researched by OpenVibe runtime (deepseek-v4-flash)</li>'
+        + '<li>Checked by a second model (qwen): The sources back the answer.</li><li>Took under a minute · cost $0.0042 of your daily allowance</li>'
+        + '<li>Sources: <a href="https://browser-use.com/cloud-browsers" rel="nofollow ugc noopener" target="_blank">browser-use.com</a></li>'
+        + '<li><a href="https://openvibe.actor/tasks/tsk_r1">Every step on OpenVibe Agents</a></li></ul></details>'), 'the fold under the answer');
+    const how = await vibeApi('GET', `/${slug}/how`, ann);
+    assert.strictEqual(how.status, 200);
+    assert.strictEqual(how.body.how[String(done.id)].actor_url, 'https://openvibe.actor/tasks/tsk_r1', 'the same, for an answer that arrives while the page is open');
+    assert.strictEqual((await vibeApi('GET', `/${slug}/how`, bob)).status, 404, 'someone else\'s chat is not there');
 });
 
 t('Code in an existing chat: Codes on their own computer; Agent too; Chat mode answers as before', async () => {

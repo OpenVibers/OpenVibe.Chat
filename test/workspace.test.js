@@ -74,7 +74,7 @@ t('a quick task runs on Actor as the person who asked; its result comes back fro
         assert.strictEqual(create.body.idempotency_key, `chat-room-task-${task.id}`);
         assert.strictEqual((await api('POST', `/rooms/staff/tasks/${task.id}/claim`, staff2)).status, 409, 'Actor runs it: nobody claims it');
         // Actor finishes; the poller stores the result and Vibe posts it in the room.
-        actorTask = { id: 'tsk_1', state: 'succeeded', result: { answer: 'Three large images block the first paint.', sources: ['https://example.com/a', { url: 'https://example.com/b' }, 'javascript:alert(1)'] }, cost: { total_usd: 0.0031 } };
+        actorTask = { id: 'tsk_1', state: 'succeeded', result: { answer: 'Three large images block the first paint.', sources: ['https://example.com/a', { url: 'https://example.com/b' }, 'javascript:alert(1)'] }, cost: { usd: 0.0031, free_allowance_used: 0.0031 } };
         await workspace.poll();
         r = await api('GET', `/rooms/staff/tasks/${task.id}`, staff2);
         assert.strictEqual(r.body.task.status, 'succeeded');
