@@ -5,8 +5,10 @@
  * on OpenVibe.Actor. Built from the task row (its `how`, kept by workspace.js from Actor's result) and Actor's public
  * agent catalog for the agents' names (read at most once an hour; an agent's id stands in while Actor is away).
  *
- *   forRoom(room) → Map(message id → info) for the room's announced tasks
+ *   forRoom(room) → Map(message id → info) for the room's announced tasks and Vibe's answers that kept their steps
  *   of(task, names) → info { lines: [text], sources: [url], actor_url } or null: plain text, escaped where it is shown
+ *   ofMessage(how)  → the same info from a chat answer's room_messages.how { steps, sources }, or null
+ *   step(acc, tool, args) adds what a tool call did, in plain words, to { steps, sources } (ai-members.js)
  *   html(info)      → the <details class="vb-how"> markup, escaped
  */
 const config = require('../config');
@@ -55,9 +57,44 @@ function of(t, agentNames = new Map()) {
     return { lines, sources, actor_url };
 }
 
+// A chat answer's steps (ai-members.js answerWithTools): each tool call in plain words, at most MAX_STEPS.
+const MAX_STEPS = 12;
+const quoted = (v, max = 80) => { const s = String(v || '').replace(/\s+/g, ' ').trim(); return s ? `“${s.length > max ? `${s.slice(0, max - 1)}…` : s}”` : ''; };
+const STEP = {
+    search_openvibe: (a) => `Searched OpenVibe for ${quoted(a.query)}`,
+    web_search: (a) => `Searched the web for ${quoted(a.query)}`,
+    read_page: (a) => `Read ${hostOf(String(a.url || 'a page'))}`,
+    current_time: () => 'Checked the time',
+    roll_dice: () => 'Rolled dice',
+    pick_one: () => 'Picked one at random',
+    household_pantry: () => 'Looked at the household\'s pantry',
+    remember: () => 'Saved a note to your memory',
+    forget: () => 'Deleted a note from your memory',
+    set_up_agent: (a) => `Set up an agent${a.name ? `: ${quoted(a.name, 60)}` : ''}`,
+    my_agents: () => 'Looked at your agents',
+};
+function step(acc, tool, raw = null) {
+    if (!acc || !STEP[tool] || acc.steps.length >= MAX_STEPS) return;
+    let args = {};
+    if (raw) { try { args = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { args = {}; } }
+    if (!args || typeof args !== 'object') args = {};
+    const line = STEP[tool](args);
+    if (acc.steps[acc.steps.length - 1] !== line) acc.steps.push(line);   // the same step twice in a row reads once
+    if (tool === 'read_page' && /^https?:\/\//.test(String(args.url || '')) && acc.sources.length < 6 && !acc.sources.includes(args.url)) acc.sources.push(String(args.url).slice(0, 500));
+}
+function ofMessage(raw) {
+    const how = typeof raw === 'string' ? json(raw, null) : raw;
+    if (!how || !Array.isArray(how.steps) || !how.steps.length) return null;
+    return { lines: how.steps.map((l) => String(l).slice(0, 200)).slice(0, MAX_STEPS), sources: (Array.isArray(how.sources) ? how.sources : []).filter((u) => /^https?:\/\//.test(String(u || ''))).slice(0, 6), actor_url: null };
+}
+
 async function forRoom(room) {
     const rows = await db.all('SELECT * FROM room_tasks WHERE room_id = ? AND posted_message IS NOT NULL AND status = ? ORDER BY id DESC LIMIT 200', [room.id, 'succeeded']);
     const out = new Map();
+    for (const m of await db.all('SELECT id, how FROM room_messages WHERE room_id = ? AND how IS NOT NULL AND is_deleted = 0 ORDER BY id DESC LIMIT 200', [room.id])) {
+        const info = ofMessage(m.how);
+        if (info) out.set(Number(m.id), info);
+    }
     if (!rows.length) return out;
     const agentNames = await names();
     for (const t of rows) { const info = of(t, agentNames); if (info) out.set(Number(t.posted_message), info); }
@@ -74,4 +111,4 @@ function html(info) {
         + `${info.actor_url ? `<li><a href="${esc(info.actor_url)}">Every step on OpenVibe Agents</a></li>` : ''}</ul></details>`;
 }
 
-module.exports = { names, of, forRoom, html, _reset: () => { cached = { at: 0, names: new Map() }; } };
+module.exports = { names, of, ofMessage, step, forRoom, html, _reset: () => { cached = { at: 0, names: new Map() }; } };

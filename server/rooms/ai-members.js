@@ -283,7 +283,7 @@ function userPrompt({ member, context, transcript, askedBy, text }) {
  * The answer through chat.member.turn with tools: up to MAX_TOOL_ROUNDS rounds of tool calls run here, then a turn
  * with tool_choice none. → the reply text, or null when a turn failed (the caller falls back to chat.member.reply).
  */
-async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], user = null, messageId = null, memory = null, called = new Set(), onText = null }) {
+async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], user = null, messageId = null, memory = null, called = new Set(), onText = null, steps = null }) {
     const tools = aiTools.definitions(member, room, { memory: memory !== null });
     const vibe = Number(room.assistant) === 1;
     const prompt = userPrompt({ member, context, transcript, askedBy, text });
@@ -305,6 +305,7 @@ async function answerWithTools({ room, member, context, transcript, askedBy, tex
         messages.push({ role: 'assistant', content: typeof msg.content === 'string' ? msg.content : null, tool_calls: calls });
         for (const c of calls) {
             called.add(c.function.name);
+            if (steps) require('./how').step(steps, c.function.name, c.function.arguments);
             messages.push({ role: 'tool', tool_call_id: String(c.id || `call_${round}`).slice(0, 128), content: await aiTools.run(c.function.name, c.function.arguments, { member, contextFor, subject, room, user, messageId, memory: memory !== null, idempotencyKey: `${opts.idempotencyKey}-t${round}-${c.function.name}` }) });
         }
     }
@@ -324,8 +325,8 @@ async function afterPost(room, message, user, deps = {}) {
     if (!member) return null;
     const rooms = deps.rooms || require('./rooms');
     const broadcast = deps.broadcast || ((frame) => require('../chat/chat-server').broadcastToRoom(room.id, frame));
-    const say = async (text) => {
-        const posted = await rooms.postAsAi(room, member, text);
+    const say = async (text, how = null) => {
+        const posted = await rooms.postAsAi(room, member, text, how ? { how } : {});
         broadcast({ type: 'room_message', room: room.slug, message: posted });
         return posted;
     };
@@ -356,6 +357,7 @@ async function afterPost(room, message, user, deps = {}) {
         const memory = vibe && Number(room.owner_id) === Number(user.id) ? await vibeMemory.forPrompt(user) : null;
         let text = '';
         const called = new Set();   // the tools the model called while answering
+        const steps = vibe ? { steps: [], sources: [] } : null;   // "How Vibe did this" under the answer (how.js)
         // In a Vibe chat the answer shows as it is written: room_ai_delta { text } (the whole text so far, at most every
         // DELTA_MS), until the finished message replaces it.
         let lastDelta = 0;
@@ -369,12 +371,12 @@ async function afterPost(room, message, user, deps = {}) {
         } : null;
         if (config.ai.memberTools) {
             const images = await picturesFor(message, history, user).catch(() => []);
-            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, called, onText }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
+            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, called, onText, steps }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
         }
         // A plain "remember that …" is kept even when the model only promised it (small models often do).
         if (memory !== null && text && !called.has('remember')) {
             const note = vibeMemory.fromRequest(message.message);
-            if (note) await vibeMemory.add(user, note, { source: 'vibe', roomId: room.id }).catch(() => null);
+            if (note && (await vibeMemory.add(user, note, { source: 'vibe', roomId: room.id }).catch(() => ({}))).note && steps) require('./how').step(steps, 'remember');
         }
         if (!text) {
             const out = await aiClient.structured('chat.member.reply', {
@@ -387,7 +389,7 @@ async function afterPost(room, message, user, deps = {}) {
         if (!text) return await say(own ? 'I could not reach my model just now (its key may be out of today\'s budget, or the provider did not answer). Try again later, or the room\'s owner can switch me to OpenVibe\'s model.' : 'I could not answer just now. Try again in a minute.');
         if (!own) await countReply(room);
         if (vibe && !own) await require('./vibe').countReply(user);
-        return await say(text);
+        return await say(text, steps && steps.steps.length ? steps : null);
     } catch (err) {
         console.warn(`[Chat AI members] room ${room.id}: ${(err && err.message) || err}`);
         return null;
