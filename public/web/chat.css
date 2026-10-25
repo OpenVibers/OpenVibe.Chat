@@ -310,3 +310,10 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .fd-dot { background: var(--oc-muted); }
 .fd-dot.fd-on { background: var(--oc-ok); }
 .fd-key code { font-size: 1rem; user-select: all; }
+
+/* The developers page (server/web/developer-pages.js) */
+.oc-lead { font-size: 1.1rem; color: var(--oc-muted); max-width: 760px; }
+.oc-toc { display: flex; flex-wrap: wrap; gap: 6px 12px; padding: 10px 14px; margin: 14px 0 6px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); font-size: .92rem; }
+.oc-table { border-collapse: collapse; width: 100%; max-width: 760px; font-size: .92rem; }
+.oc-table th, .oc-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--oc-line); vertical-align: top; }
+.oc-table th { color: var(--oc-muted); font-weight: 600; }

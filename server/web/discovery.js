@@ -31,6 +31,7 @@ async function publicPages() {
         { path: '/rooms', changefreq: 'daily', priority: 0.8, lastmod: () => newestRoomActivity(pages) },
         { path: '/servers', changefreq: 'daily', priority: 0.8 },
         { path: '/updates', changefreq: 'daily', priority: 0.5 },
+        { path: '/developers', changefreq: 'weekly', priority: 0.6 },
     ];
     for (const r of pages) {
         out.push({ path: `/r/${r.slug}`, changefreq: 'daily', priority: 0.6, lastmod: () => dayOf(r.last_message_at || r.created_at) });
@@ -83,7 +84,7 @@ function createDiscoveryRoutes({ config }) {
         // the sitemap. Every previous Disallow is kept.
         res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.robotsTxt({
             sitemaps: [abs('/sitemap.xml')],
-            allow: ['/', '/updates', '/rooms', '/r/', '/servers', '/s/'],
+            allow: ['/', '/updates', '/developers', '/rooms', '/r/', '/servers', '/s/'],
             disallow: ['/r/*/settings', '/s/*/settings', '/join/', '/messages', '/settings', '/auth/', '/api/'],
         }));
     });
@@ -99,6 +100,9 @@ function createDiscoveryRoutes({ config }) {
                     { title: 'Rooms', url: abs('/rooms'), note: 'every public room, with its topic and activity' },
                     { title: 'Servers', url: abs('/servers'), note: 'public servers: groups with text and voice channels, roles and invites' },
                     { title: 'What shipped on OpenVibe.Chat', url: abs('/updates') },
+                ] },
+                { title: 'Build with it', links: [
+                    { title: 'Developers', url: abs('/developers'), note: 'a support inbox or a room on any website with one tag, the visitor API, openvibe-sdk/chat, feeds from Claude Code, signed webhooks, the limits' },
                 ] },
                 { title: 'Machine-readable', links: [
                     { title: 'Sitemap', url: abs('/sitemap.xml'), note: 'the public pages above' },
