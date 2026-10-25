@@ -495,6 +495,14 @@ for people and for companies, with "direct live support with an agent", "fully m
   `{ "text": "…" }` or plain text within 8 seconds (4 KB), goes back to Vibe as data, never instructions. `GET/POST
   /api/chat/inboxes/:id/actions { name, description, url, params }`, `POST /:id/actions/:actionId/test { arguments }`
   ("Try it" in the settings), `DELETE /:id/actions/:actionId`.
+- **Voice calls** (call escalation; `CHAT_CALLS` on): one of the inbox's people presses Call on a conversation (`POST
+  /api/chat/inboxes/:id/conversations/:cid/call` → `{ channel }`). The thread says so, and the visitor's panel offers
+  "Join the call" or "Not now". The call is `support-<conversation id>` on `/ws/call`, audio and peer to peer
+  (`public/web/support-call.js`), at most four people. The visitor joins with their visitor token (a `support-visitor`
+  message); the inbox's people join as themselves; anyone else gets "not found". Either side ends it for everyone
+  (`DELETE …/call`, or the visitor's `POST /api/chat/widget/inbox/:id/call/end { token }`), and resolving the
+  conversation ends it too. A conversation carries `call: true` while one is open. The widget's frame may ask for the
+  microphone (the browser still asks the visitor).
 - **Records** (`server/inbox/records.js`): how long finished conversations stay, set in the settings ("Keep finished
   conversations": forever, 30 or 90 days, 6 months, 1 or 2 years) or with `PATCH /api/chat/inboxes/:id { retention_days:
   7…3650 | null }`. Every hour, the conversations that are resolved or that only Vibe answered and that have been quiet

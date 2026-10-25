@@ -110,6 +110,8 @@
       } else if (m.type === 'inbox_rating') {
         var item = listItem(m.conversation), row = item && item.querySelector('.ib-row');
         if (row) { var old = row.querySelector('.ib-rate'); if (old) old.remove(); var r = el('span', 'ib-rate', m.rating > 0 ? '👍' : '👎'); if (m.comment) r.title = m.comment; row.insertBefore(r, row.querySelector('time')); }
+      } else if (m.type === 'inbox_call' && m.conversation === cfg.conversation) {
+        if (m.state === 'ringing') callOffered(m.by); else callGone();
       } else if (m.type === 'inbox_status') {
         touchList(m.conversation, null, m.status);
         if (m.conversation === cfg.conversation) { var h = document.querySelector('.vb-title .vb-st'); if (h) h.replaceWith(chip(m.status)); }
@@ -230,4 +232,46 @@
   app.addEventListener('click', function (e) { if (e.target.closest('[data-vb-open]')) setRail(true); else if (e.target.closest('[data-vb-close]')) setRail(false); });
   bottom();
   connect();
+
+  // A voice call with the visitor (server/inbox/inbox.js startCall, support-call.js): Call starts it and joins; anyone
+  // else of the team on this conversation is offered to join; End call ends it for everyone, the visitor included.
+  var callBtn = document.getElementById('ib-call'), callBar = document.getElementById('ib-callbar');
+  var callText = document.getElementById('ib-call-text'), callJoin = document.getElementById('ib-call-join');
+  var callMute = document.getElementById('ib-call-mute'), callEnd = document.getElementById('ib-call-end');
+  var call = null;
+  function callApi(method) {
+    return fetch('/api/chat/inboxes/' + cfg.inbox + '/conversations/' + cfg.conversation + '/call', { method: method, credentials: 'same-origin' })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: {} }; }); });
+  }
+  function showBar(text) { callBar.hidden = false; callText.textContent = text; if (callBtn) callBtn.hidden = true; }
+  function joinCall() {
+    if (call) return;
+    callJoin.hidden = true; callMute.hidden = false; callMute.textContent = 'Mute'; callMute.setAttribute('aria-pressed', 'false');
+    showBar('Joining the call…');
+    call = window.OVSupportCall.join({
+      channel: 'support-' + cfg.conversation, token: token(),
+      onState: function (s, t) { if (s === 'ended' || s === 'error') { call = null; callGone(t); } else if (t) callText.textContent = t; },
+      onPeople: function (names) { callText.textContent = names.length ? 'In the call with ' + names.join(', ') + '.' : 'Calling… the visitor sees an invitation in their chat.'; },
+    });
+  }
+  function callOffered(by) { if (call) return; showBar(by ? by + ' started a voice call.' : 'A voice call with this visitor is open.'); callJoin.hidden = false; callMute.hidden = true; }
+  function callGone(text) {
+    if (call) { var c = call; call = null; c.leave(); }
+    if (!callBar) return;
+    callBar.hidden = true;
+    if (callBtn) callBtn.hidden = false;
+    if (text && text !== 'You left the call.' && text !== 'The call ended.') alert(text);
+  }
+  if (callBtn && callBar && window.OVSupportCall) {
+    callBtn.hidden = false;
+    if (cfg.call) callOffered(null);
+    callBtn.addEventListener('click', function () {
+      callBtn.disabled = true;
+      callApi('POST').then(function (x) { if (x.ok) joinCall(); else alert((x.d && x.d.error) || 'The call did not start.'); })
+        .catch(function () { alert('You seem to be offline.'); }).then(function () { callBtn.disabled = false; });
+    });
+    callJoin.addEventListener('click', joinCall);
+    callMute.addEventListener('click', function () { if (!call) return; call.mute(!call.muted); callMute.textContent = call.muted ? 'Unmute' : 'Mute'; callMute.setAttribute('aria-pressed', call.muted ? 'true' : 'false'); });
+    callEnd.addEventListener('click', function () { callApi('DELETE').catch(function () {}); callGone(); });
+  }
 })();

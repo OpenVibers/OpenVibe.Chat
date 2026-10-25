@@ -194,11 +194,14 @@ async function removeMember(inbox, user, userId) {
 
 // ── Conversations and messages ─────────────────────────────────────────────────────────────────────────────────────
 
+/** Whether a conversation has a voice call open now (the call server keeps calls in memory). */
+function callOpen(id) { try { return require('../calls/call-server').supportCallOpen(id); } catch { return false; } }
+
 const convShape = (c) => c && ({
     id: c.id, inbox_id: c.inbox_id, status: c.status, visitor_name: c.visitor_name || null, page_url: c.page_url || null,
     assignee_id: c.assignee_id ? Number(c.assignee_id) : null, agent_unread: Number(c.agent_unread) || 0,
     rating: c.rating == null ? null : Number(c.rating), rating_comment: c.rating_comment || null, account: c.visitor_user_id != null,
-    verified: !!Number(c.verified), visitor_email: c.visitor_email || null, external_id: c.external_id || null,
+    verified: !!Number(c.verified), visitor_email: c.visitor_email || null, external_id: c.external_id || null, call: callOpen(c.id),
     created_at: c.created_at, last_message_at: c.last_message_at || c.created_at,
 });
 // account: a visitor's message written signed in to OpenVibe, whose OpenVibe.Pics links show as pictures (anyone else's stay links).
@@ -468,8 +471,40 @@ async function setStatus(inbox, conv, user, status, deps = {}) {
     if (!['open', 'resolved', 'bot'].includes(status)) fail(422, 'inbox.status', 'A conversation is open, resolved, or back with Vibe');
     if (status === 'bot' && !Number(inbox.ai_enabled)) fail(409, 'inbox.ai_off', 'Vibe is off for this inbox');
     const next = await setStatusRow(conv, status, deps);
-    if (status === 'resolved') await addMessage(conv, { author: 'system', body: 'This conversation was marked resolved. Write again any time to reopen it.' }, deps);
+    if (status === 'resolved') {
+        await endCall(inbox, conv, user, deps).catch(() => {});
+        await addMessage(conv, { author: 'system', body: 'This conversation was marked resolved. Write again any time to reopen it.' }, deps);
+    }
     return convShape(next);
+}
+
+// ── Calls (docs/platform.md: call escalation) ──────────────────────────────────────────────────────────────────────
+// One of the inbox's people starts a voice call from a conversation (server/calls/call-server.js support-<cid>); the
+// visitor's panel offers to join it, peer to peer, no account needed. Either side ends it; resolving ends it too.
+const nameOf = (user) => (user && (user.display_name || user.username)) || 'Someone';
+
+async function startCall(inbox, conv, user, deps = {}) {
+    if (!(await access(inbox, user)).role) fail(403, 'inbox.not_agent', 'Only the inbox\'s people call visitors');
+    if (conv.status === 'resolved') fail(409, 'inbox.resolved', 'Reopen the conversation to call');
+    if (!config.calls.enabled && !deps.calls) fail(409, 'inbox.calls_off', 'Calls are not available here right now');
+    const calls = deps.calls || require('../calls/call-server');
+    const already = calls.supportCallOpen(conv.id);
+    const channel = calls.startSupportCall({ inboxId: inbox.id, inboxName: inbox.name, convId: conv.id, userId: user.id });
+    if (!already) {
+        await addMessage(conv, { author: 'system', body: `${nameOf(user)} started a voice call.` }, deps);
+        broadcaster(deps)(inbox.id, conv.id, { type: 'inbox_call', inbox: inbox.id, conversation: conv.id, state: 'ringing', channel, by: nameOf(user) });
+    }
+    return { channel, conversation: convShape(conv) };
+}
+
+/** user: one of the inbox's people, or null for the visitor (their panel's "Not now" or hang up). */
+async function endCall(inbox, conv, user, deps = {}) {
+    if (user && !(await access(inbox, user)).role) fail(403, 'inbox.not_agent', 'Only the inbox\'s people end calls');
+    const calls = deps.calls || require('../calls/call-server');
+    if (!(await calls.endSupportCall(conv.id))) return { ended: false };
+    await addMessage(conv, { author: 'system', body: user ? `${nameOf(user)} ended the call.` : 'The visitor ended the call.' }, deps);
+    broadcaster(deps)(inbox.id, conv.id, { type: 'inbox_call', inbox: inbox.id, conversation: conv.id, state: 'ended' });
+    return { ended: true };
 }
 
 /** One of the inbox's people (or nobody: null) answers this conversation; any of them may assign it. */
@@ -590,5 +625,5 @@ module.exports = {
     InboxError, INBOX_RE, CONV_RE, LIMITS, MAX_INBOXES, AI_PER_CONVERSATION, hashToken,
     create, update, remove, get, access, mine, members, addMember, removeMember, shape, publicConfig, plainText, peopleAnswer,
     visit, visitorPost, handoff, rate, assign, setIdentity, verifiedIdentity, savedReplies, saveReply, deleteReply, mySupport, myConversation, accountPost, conversations, conversation, messages, agentPost, setStatus, markRead, convShape,
-    aiAnswer, inboxPrompt, _reset,
+    startCall, endCall, aiAnswer, inboxPrompt, _reset,
 };
