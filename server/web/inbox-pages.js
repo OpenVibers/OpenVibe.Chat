@@ -15,6 +15,7 @@
 const path = require('path');
 const md = require('../../public/web/vibe-md.js');
 const inboxes = require('../inbox/inbox');
+const webhooks = require('../inbox/webhooks');
 const { embedOf } = require('../inbox/routes');
 const { esc, asset } = require('./layout');
 
@@ -184,6 +185,7 @@ ${current ? `<div class="vb-dock"><form class="vb-composer" id="vb-composer" met
         const embed = embedOf(inbox);
         const owner = role === 'owner';
         const saved = await inboxes.savedReplies(inbox);
+        const hooks = owner ? await webhooks.list(inbox) : [];
         await page(req, res, 200, {
             actor, title: `${inbox.name}: settings`, path: `/inbox/${inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
             body: `<p><a href="/inbox/${esc(inbox.id)}">&larr; ${esc(inbox.name)}</a></p><h1>${esc(inbox.name)}</h1>
@@ -206,6 +208,12 @@ hash_hmac('sha256', (string) $user->id, $secret)`)}</code></pre>
 <form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/identity"><button class="oc-link" name="action" value="off">Turn it off</button></form>`
         : `<p class="oc-muted">Off: every visitor is anonymous to you unless they give a name. When your site has its own accounts, turn this on and your server signs who each visitor is; you see their verified name and email, and they find their conversation on any device.</p>
 <form method="post" action="/inbox/${esc(inbox.id)}/identity"><button name="action" value="on">Turn on verified visitors</button></form>`}
+<h2>Webhooks</h2>
+<p class="oc-muted">Your systems hear what happens: a Slack or Discord webhook address gets a line when a visitor waits for a person, writes while waiting, or rates a conversation; any other https address gets every event as signed JSON (verify it with <code>openvibe-sdk/events</code> <code>parseDelivery</code>).</p>
+${hooks.length ? `<ul class="oc-members">${hooks.map((w) => `<li><b>${esc(w.format === 'openvibe' ? 'JSON' : w.format === 'slack' ? 'Slack' : 'Discord')}</b> <span class="oc-muted">${esc(w.url.replace(/^https:\/\//, '').slice(0, 60))}${w.url.length > 68 ? '…' : ''} · ${w.on ? (w.last_status ? `last answer ${w.last_status}${w.last_error ? ` (${esc(w.last_error)})` : ''}` : 'nothing sent yet') : 'off after repeated failures: add it again to switch it on'}</span>
+<form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/webhooks/${w.id}/test"><button class="oc-link" type="submit">Send a test</button></form>
+<form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/webhooks/${w.id}/delete"><button class="oc-link" type="submit">Remove</button></form></li>`).join('')}</ul>` : ''}
+${hooks.length < webhooks.MAX_WEBHOOKS ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/webhooks"><label>Address (https) <input name="url" type="url" required maxlength="1000" placeholder="https://hooks.slack.com/services/…"></label><p><button type="submit">Add the webhook</button></p></form>` : ''}
 <h2>How it looks and what Vibe knows</h2>
 <form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/settings">
 <label>Name <input name="name" required minlength="2" maxlength="60" value="${esc(shape.name)}"></label>
@@ -235,6 +243,29 @@ ${saved.length ? `<ul class="oc-members">${saved.map((r) => `<li><b>/${esc(r.sho
             await inboxes.update(a.inbox, a.actor.user, { name: b.name, greeting: b.greeting, color: b.color, ai_enabled: b.ai_enabled === '1', handoff: b.handoff === '1', ai_instructions: b.ai_instructions, knowledge_urls: b.knowledge_urls, allowed_origins: b.allowed_origins });
             res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
         } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not save')}`); }
+    });
+    router.post('/inbox/:id/webhooks', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        if (a.role !== 'owner') return res.redirect(303, `/inbox/${a.inbox.id}/settings`);
+        try {
+            const { secret } = await webhooks.add(a.inbox, a.actor.user, req.body && req.body.url);
+            if (!secret) return res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
+            // The secret is shown on this answer only (never in a URL: addresses end up in histories and logs).
+            await page(req, res, 201, { actor: a.actor, title: `${a.inbox.name}: webhook`, path: `/inbox/${a.inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
+                body: `<p><a href="/inbox/${esc(a.inbox.id)}/settings">&larr; ${esc(a.inbox.name)} settings</a></p><h1>Webhook added</h1>
+${notice('ok', 'Here is its signing secret. Copy it now: it is shown only this once.')}<pre class="ib-snippet"><code>${esc(secret)}</code></pre>
+<p class="oc-muted">Check each delivery with it: <code>parseDelivery(rawBody, headers, secret, { requireV2: true })</code> from <code>openvibe-sdk/events</code> (X-OpenVibe-Timestamp and X-OpenVibe-Signature-V2).</p>` });
+        } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not work')}`); }
+    });
+    router.post('/inbox/:id/webhooks/:wid/test', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a || a.role !== 'owner') return a && res.redirect(303, `/inbox/${a.inbox.id}/settings`);
+        try { const r = await webhooks.test(a.inbox, req.params.wid); res.redirect(303, `/inbox/${a.inbox.id}/settings?${r.ok ? 'saved=1' : `error=${encodeURIComponent(`The test got ${r.error}`)}`}`); }
+        catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not work')}`); }
+    });
+    router.post('/inbox/:id/webhooks/:wid/delete', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        if (a.role === 'owner') await webhooks.remove(a.inbox, req.params.wid);
+        res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
     });
     router.post('/inbox/:id/replies', formLimit, sameSite, async (req, res) => {
         const a = await agentInbox(req, res); if (!a) return;

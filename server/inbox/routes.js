@@ -19,6 +19,8 @@
  *   POST   /:id/members      { username } (owner)         DELETE /:id/members/:userId (owner)
  *   POST   /:id/identity     { action: on | rotate | off } (owner) → { identity_secret }: verified visitors
  *   GET    /:id/replies      { replies }: saved replies    POST /:id/replies { shortcut, body }    DELETE /:id/replies/:replyId
+ *   GET    /:id/webhooks     (owner) { webhooks }    POST /:id/webhooks { url } → 201 { webhook, secret }
+ *   POST   /:id/webhooks/:hookId/test → { ok, status, error }    DELETE /:id/webhooks/:hookId
  *   GET    /:id/conversations                  ?status=active|bot|waiting|open|resolved
  *   GET    /:id/conversations/:cid/messages    ?after=
  *   POST   /:id/conversations/:cid/messages    { message } → 201: a person's answer (the conversation becomes open)
@@ -32,9 +34,10 @@ const config = require('../config');
 const { requireAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const inboxes = require('./inbox');
+const webhooks = require('./webhooks');
 
 function send(res, err) {
-    if (err instanceof inboxes.InboxError) return res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof inboxes.InboxError || err instanceof webhooks.WebhookError) return res.status(err.status).json({ error: err.message, code: err.code });
     console.error('[Inbox]', err && err.message);
     return res.status(500).json({ error: 'Something went wrong' });
 }
@@ -44,7 +47,7 @@ const tokenOf = (req) => String((req.body && req.body.token) || req.get('x-visit
 // ── Visitors ───────────────────────────────────────────────────────────────────────────────────────────────────────
 const widget = express.Router({ mergeParams: true });
 const visitLimit = rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true, legacyHeaders: false });
-const postLimit = rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false, message: { error: 'Slow down a little', code: 'inbox.slow_down' } });
+const postLimit = rateLimit({ windowMs: 60_000, max: () => config.inbox.postsPerMinute, standardHeaders: true, legacyHeaders: false, message: { error: 'Slow down a little', code: 'inbox.slow_down' } });
 
 // An inbox that names its sites answers only them (and its own panel on openvibe.chat); a call with no Origin (a server)
 // is let through, since a browser always sends one across sites.
@@ -140,6 +143,22 @@ agents.post('/:id/replies', requireAuth, manageLimit, async (req, res) => {
 agents.delete('/:id/replies/:replyId', requireAuth, manageLimit, async (req, res) => {
     const inbox = await agentInbox(req, res); if (!inbox) return;
     try { res.json({ replies: await inboxes.deleteReply(inbox, req.user, req.params.replyId) }); } catch (err) { send(res, err); }
+});
+agents.get('/:id/webhooks', requireAuth, async (req, res) => {
+    const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
+    noStore(res).json({ webhooks: await webhooks.list(inbox) });
+});
+agents.post('/:id/webhooks', requireAuth, manageLimit, async (req, res) => {
+    const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
+    try { noStore(res).status(201).json(await webhooks.add(inbox, req.user, req.body && req.body.url)); } catch (err) { send(res, err); }
+});
+agents.post('/:id/webhooks/:hookId/test', requireAuth, manageLimit, async (req, res) => {
+    const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
+    try { res.json(await webhooks.test(inbox, req.params.hookId)); } catch (err) { send(res, err); }
+});
+agents.delete('/:id/webhooks/:hookId', requireAuth, manageLimit, async (req, res) => {
+    const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
+    await webhooks.remove(inbox, req.params.hookId); res.status(204).end();
 });
 agents.post('/:id/identity', requireAuth, manageLimit, async (req, res) => {
     const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;

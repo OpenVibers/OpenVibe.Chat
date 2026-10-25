@@ -195,6 +195,7 @@ async function addMessage(conv, { author, body, userId = null, name = null }, de
     await db.run(`UPDATE inbox_conversations SET last_message_at = ov_now()${author === 'visitor' ? ', agent_unread = agent_unread + 1' : ''} WHERE id = ?`, [conv.id]);
     const message = msgShape(row);
     broadcaster(deps)(conv.inbox_id, conv.id, { type: 'inbox_message', inbox: conv.inbox_id, conversation: conv.id, message });
+    if (author !== 'system') require('./webhooks').later(conv.inbox_id, 'message.created', { conversationId: conv.id, message });
     return message;
 }
 
@@ -202,7 +203,8 @@ async function setStatusRow(conv, status, deps = {}, extra = {}) {
     await db.run(`UPDATE inbox_conversations SET status = ?${extra.assignee ? ', assignee_id = COALESCE(assignee_id, ?)' : ''} WHERE id = ?`,
         extra.assignee ? [status, extra.assignee, conv.id] : [status, conv.id]);
     broadcaster(deps)(conv.inbox_id, conv.id, { type: 'inbox_status', inbox: conv.inbox_id, conversation: conv.id, status });
-    if (status === 'waiting' && conv.status !== 'waiting') require('./notify').later(conv, 'waiting');
+    if (status === 'waiting' && conv.status !== 'waiting') { require('./notify').later(conv, 'waiting'); require('./webhooks').later(conv.inbox_id, 'conversation.waiting', { conversationId: conv.id }); }
+    if (status === 'resolved' && conv.status !== 'resolved') require('./webhooks').later(conv.inbox_id, 'conversation.resolved', { conversationId: conv.id });
     return { ...conv, status };
 }
 
@@ -309,6 +311,7 @@ async function visitorPost(inbox, token, { message, page_url = null, name = null
         if (who && identityToken(inbox, who) === String(token)) await stampIdentity(id, who);
         conv = await db.get('SELECT * FROM inbox_conversations WHERE id = ?', [id]);
         broadcaster(deps)(inbox.id, conv.id, { type: 'inbox_conversation', inbox: inbox.id, conversation: convShape(conv) });
+        require('./webhooks').later(inbox.id, 'conversation.created', { conversationId: conv.id });
     }
     const filtered = wordFilter.check(body);
     const posted = await addMessage(conv, { author: 'visitor', body: filtered.safe ? body : filtered.filtered, name: conv.visitor_name }, deps);
@@ -351,6 +354,7 @@ async function rate(inbox, token, { rating, comment = '', conversation: convId =
     await db.run('UPDATE inbox_conversations SET rating = ?, rating_comment = ?, rated_at = ov_now() WHERE id = ?', [r, (filtered.safe ? clean(comment, 500) : filtered.filtered) || null, conv.id]);
     const shaped = convShape(await db.get('SELECT * FROM inbox_conversations WHERE id = ?', [conv.id]));
     broadcaster(deps)(inbox.id, null, { type: 'inbox_rating', inbox: inbox.id, conversation: conv.id, rating: shaped.rating, comment: shaped.rating_comment });
+    require('./webhooks').later(inbox.id, 'conversation.rated', { conversationId: conv.id });
     return shaped;
 }
 

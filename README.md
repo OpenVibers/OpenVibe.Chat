@@ -460,6 +460,15 @@ for people and for companies, with "direct live support with an agent", "fully m
   token is derived from their id (`CHAT_INBOX_IDENTITY_KEY`, else Chat's OAuth secret; never stored), so their
   conversation follows them to every device. A wrong or missing hash is just an anonymous visitor. Agents never see the
   secret.
+- **Webhooks** (`server/inbox/webhooks.js`; up to three an inbox, the owner's; https on the public internet only):
+  any address gets every event as JSON, `{ event: { id, type, source: 'chat', occurred_at, data } }` with `type`
+  `chat.inbox.conversation.created | .waiting | .resolved | .rated` or `chat.inbox.message.created`. Each is signed like
+  an OpenVibe.Events delivery with the webhook's secret (shown once), so `parseDelivery(raw, headers, secret,
+  { requireV2: true })` from `openvibe-sdk/events` checks it. A Slack (`hooks.slack.com`) or Discord
+  (`discord.com/api/webhooks`) address gets a readable line instead, when a visitor waits for a person, writes while
+  waiting (once a conversation every 10 minutes) or rates. Delivery tries three times (now, 30 s, 5 min); each
+  webhook shows its last answer, and 20 failures in a row switch it off. `GET/POST /api/chat/inboxes/:id/webhooks
+  { url }`, `POST /:id/webhooks/:hookId/test`, `DELETE /:id/webhooks/:hookId`.
 - **Saved replies:** the team's ready answers (`GET/POST /api/chat/inboxes/:id/replies { shortcut, body }`, `DELETE
   /:id/replies/:replyId`, or the settings page); typing `/` in the reply box lists them by shortcut (arrows, Enter or
   Tab). **Vibe knows the page** the visitor wrote from, and a verified visitor's name.

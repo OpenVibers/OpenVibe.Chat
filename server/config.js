@@ -75,7 +75,8 @@ module.exports = {
     // ...and tells the inbox's people when a visitor waits for one of them (server/inbox/notify.js; 0 turns it off).
     // A verified visitor's token is derived with CHAT_INBOX_IDENTITY_KEY (else Chat's OAuth secret): rotating it moves
     // verified visitors to new conversations.
-    inbox: { aiRepliesPerDay: Math.max(1, int(process.env.CHAT_INBOX_AI_REPLIES_PER_DAY, 500)), notify: process.env.CHAT_INBOX_NOTIFY !== '0', identityKey: process.env.CHAT_INBOX_IDENTITY_KEY || '' },
+    inbox: { aiRepliesPerDay: Math.max(1, int(process.env.CHAT_INBOX_AI_REPLIES_PER_DAY, 500)), notify: process.env.CHAT_INBOX_NOTIFY !== '0', identityKey: process.env.CHAT_INBOX_IDENTITY_KEY || '',
+        postsPerMinute: Math.max(1, int(process.env.CHAT_INBOX_POSTS_PER_MINUTE, 20)) },   // a visitor's address, widget writes
     // OpenVibe.Actor, for Vibe's web search (server/rooms/web-search.js): tasks for the person, with Chat's own token.
     actor: { internalUrl: strip(process.env.CHAT_ACTOR_INTERNAL_URL || 'http://127.0.0.1:4950') },
 
