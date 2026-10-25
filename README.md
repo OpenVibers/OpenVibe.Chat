@@ -403,6 +403,11 @@ member on their first visit, and nobody else reads it, whatever role they once h
   (`/r/:slug/tasks/:id`: details, the full result, sources, cost). Open pages refresh the panel when the chat socket
   sends `room_task`.
 - **Cancelling** is the asker's or a moderator's. Limits: 20 tasks an hour per person, 300 a day per room.
+- **A shared screen** (migration `0028_room_screen.sql`): a room's managers set a screen share link from OpenVibe.Bot
+  (`https://openvibe.bot/screen/…`, made by the computer's owner on its screen page; nothing else is accepted). Members
+  see that computer's screen live above the conversation, and with a "use" link they can start it and click and type on
+  it (at the level the owner set on the computer). The link is a key to the screen, so only members get it (the page,
+  and `screen.url` in `GET /api/chat/rooms/:slug`). Pages allow `frame-src https://openvibe.bot`.
 - **Account data:** a person's tasks are in their export (`room_tasks.json`); on deletion the room keeps the work
   without who asked or who took it.
 

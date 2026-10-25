@@ -120,6 +120,8 @@ router.get('/:slug', optionalAuth, async (req, res) => {
     res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({
         room: await rooms.publicRoom(room, { role: a.role }),
         can: { read: a.read, post: a.post, join: a.join, talk: a.talk, moderate: a.moderate, manage: a.manage },
+        // A workspace room's shared screen link is a key to that screen: members only.
+        ...(rooms.isWorkspace(room) && a.role && room.screen_url ? { screen: { url: room.screen_url } } : {}),
         ...(room.kind === 'call' ? { call: callOf(room) } : {}),
     });
 });

@@ -383,7 +383,16 @@ async function setRole(room, actor, targetUserId, role) {
     return role;
 }
 
-async function update(room, actor, { name, topic, visibility, slow_seconds, join_role } = {}, { fromServer = false, minName = 3 } = {}) {
+/** A screen share link from OpenVibe.Bot (screen_url), or null to clear; anything else is refused. */
+const SCREEN_RE = /^https:\/\/openvibe\.bot\/screen\/[A-Za-z0-9_-]{40,60}$/;
+function screenUrlOf(v) {
+    const s = String(v == null ? '' : v).trim();
+    if (!s) return null;
+    if (!SCREEN_RE.test(s)) fail(422, 'rooms.screen_url', 'A shared screen is a link from OpenVibe.Bot: https://openvibe.bot/screen/…');
+    return s;
+}
+
+async function update(room, actor, { name, topic, visibility, slow_seconds, join_role, screen_url } = {}, { fromServer = false, minName = 3 } = {}) {
     if (!(await access(room, actor)).manage) fail(403, 'rooms.not_owner', 'Only the owner changes the room');
     // A server's channel follows the server's visibility, and is changed through the server (servers.js).
     if (room.server_id && !fromServer && visibility != null && visibility !== room.visibility) fail(409, 'rooms.server_channel', 'A channel is as public as its server: change the server instead');
@@ -397,8 +406,12 @@ async function update(room, actor, { name, topic, visibility, slow_seconds, join
         if (kindOf(room) !== 'call' || !JOIN_ROLES_CALL.includes(join_role)) fail(422, 'rooms.join_role', 'People join a call room as speakers, participants or viewers');
         next.join_role = join_role;
     }
+    if (screen_url !== undefined) {
+        if (!isWorkspace(room)) fail(409, 'rooms.not_workspace', 'Only a workspace room shows a shared screen');
+        next.screen_url = screenUrlOf(screen_url);
+    }
     await db.tx(async () => {
-        await db.run('UPDATE rooms SET name = ?, topic = ?, visibility = ?, slow_seconds = ?, join_role = ? WHERE id = ?', [next.name, next.topic, next.visibility, next.slow_seconds, next.join_role == null ? null : next.join_role, room.id]);
+        await db.run('UPDATE rooms SET name = ?, topic = ?, visibility = ?, slow_seconds = ?, join_role = ?, screen_url = ? WHERE id = ?', [next.name, next.topic, next.visibility, next.slow_seconds, next.join_role == null ? null : next.join_role, next.screen_url == null ? null : next.screen_url, room.id]);
         // Public → private: everything the room published stops being replayable on the realtime plane.
         if (room.visibility === 'public' && next.visibility === 'private') {
             await announceDeleted(room, (await db.all('SELECT id FROM room_messages WHERE room_id = ? AND is_deleted = 0 ORDER BY id', [room.id])).map((r) => r.id));

@@ -84,6 +84,8 @@ function contentSecurityPolicy(nonce) {
         "media-src 'self' blob: https:",
         "font-src 'self' data:",
         "connect-src 'self' wss://openvibe.chat https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com",
+        // A workspace room's shared screen: a screen share page from OpenVibe.Bot (rooms.screen_url).
+        "frame-src 'self' https://openvibe.bot",
         "frame-ancestors 'self'",
         "base-uri 'self'",
         "object-src 'none'",
