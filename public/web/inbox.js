@@ -18,7 +18,7 @@
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function token() { var m = /(?:^|;\s*)ov_token=([^;]+)/.exec(document.cookie || ''); return m ? decodeURIComponent(m[1]) : undefined; }
   function chip(s) { var c = el('span', 'vb-st ' + (STATUS[s] ? STATUS[s][1] : ''), STATUS[s] ? STATUS[s][0] : s); return c; }
-  // OpenVibe.Pics direct links in a person's reply show as pictures (only that host, at most four), like in rooms.
+  // OpenVibe.Pics direct links in a person's reply, or a signed-in visitor's, show as pictures (only that host, at most four).
   var PICS = /https:\/\/openvibe\.pics\/i\/([2-9a-km-zA-HJ-NP-Z]{8})\.(?:jpg|png|gif|webp|avif)(?![\w\/.-])/g;
   function picsOf(text) {
     var box = null, m, n = 0; PICS.lastIndex = 0;
@@ -30,6 +30,7 @@
     }
     return box;
   }
+  function bare(t) { return String(t || '').replace(PICS, '').replace(/[ \t]+$/gm, '').trim(); }
   function plain(t) { return String(t || '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`~]+|^#+\s*|^>\s*/gm, '').replace(/\s+/g, ' ').trim(); }
   function bottom() { if (scroll) scroll.scrollTop = scroll.scrollHeight; }
   function clearTyping() { if (typingEl) { typingEl.remove(); typingEl = null; } }
@@ -41,15 +42,20 @@
       li = el('li', 'vb-turn vb-ai ib-visitor');
       li.appendChild(el('span', 'ib-av', (m.author_name || 'V').slice(0, 1).toUpperCase()));
       var body = el('div', 'vb-body'); body.appendChild(el('p', 'ib-who', m.author_name || 'Visitor'));
-      body.appendChild(el('div', 'vb-md', m.body)); li.appendChild(body);
+      var vp = m.account ? picsOf(m.body) : null;   // a signed-in visitor's pictures show, not their links
+      var said = vp ? bare(m.body) : m.body;
+      if (said) body.appendChild(el('div', 'vb-md', said));
+      if (vp) body.appendChild(vp);
+      li.appendChild(body);
     } else {
       li = el('li', 'vb-turn vb-me');
       var b = el('div', 'vb-bubble' + (m.author === 'ai' ? ' ib-ai' : ''));
       b.appendChild(el('p', 'ib-who', m.author === 'ai' ? 'Vibe (AI)' : (m.author_name || 'Agent')));
       var text = el('div', 'vb-md');
-      if (m.author === 'ai' && window.VibeMarkdown) text.innerHTML = window.VibeMarkdown.render(m.body); else text.textContent = m.body;
-      b.appendChild(text);
-      var pics = m.author === 'agent' ? picsOf(m.body) : null; if (pics) b.appendChild(pics);
+      var pics = m.author === 'agent' ? picsOf(m.body) : null;
+      if (m.author === 'ai' && window.VibeMarkdown) text.innerHTML = window.VibeMarkdown.render(m.body); else text.textContent = pics ? bare(m.body) : m.body;
+      if (text.textContent) b.appendChild(text);
+      if (pics) b.appendChild(pics);
       li.appendChild(b);
     }
     li.dataset.id = String(m.id);

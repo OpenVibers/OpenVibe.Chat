@@ -12,14 +12,15 @@
   var thread = document.getElementById('em-thread');
   var form = document.getElementById('em-form');
   var input = form.querySelector('textarea');
-  var sendBtn = form.querySelector('button');
+  var sendBtn = form.querySelector('button[type=submit]');
+  var attachBtn = document.getElementById('em-attach'), fileIn = document.getElementById('em-file');
   var personBtn = document.getElementById('em-person');
   var stateEl = document.getElementById('em-state');
   var page = new URLSearchParams(location.search).get('page') || '';
   var token = null, conv = null, latest = 0, ws = null, delay = 1000, aiOn = root.getAttribute('data-ai') === '1', typingEl = null;
   var people = root.getAttribute('data-people') !== '0', rateEl = null, away = null;
 
-  // A person's reply may hold OpenVibe.Pics pictures (sent from the inbox): shown inline, only that host, at most four.
+  // A person's reply, or a signed-in visitor's message, may hold OpenVibe.Pics pictures: shown inline, only that host, at most four.
   var picsBase = root.getAttribute('data-pics') || 'https://openvibe.pics';
   var PICS = new RegExp(picsBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '/i/([2-9a-km-zA-HJ-NP-Z]{8})\\.(?:jpg|png|gif|webp|avif)(?![\\w/.-])', 'g');
   function picsOf(text) {
@@ -28,6 +29,7 @@
       if (!box) box = el('div', 'em-pics');
       var a = el('a', 'em-pic'); a.href = picsBase + '/i/' + m[1]; a.target = '_blank'; a.rel = 'noopener';
       var img = el('img'); img.src = picsBase + '/i/' + m[1] + '/thumb.webp'; img.alt = 'A picture'; img.loading = 'lazy';
+      img.addEventListener('load', function () { if (thread.scrollHeight - thread.scrollTop - thread.clientHeight < 400) bottom(); });   // it grows the thread once loaded
       a.appendChild(img); box.appendChild(a); n++;
     }
     return box;
@@ -85,7 +87,7 @@
   function render(m) {
     if (m.id && thread.querySelector('[data-id="' + m.id + '"]')) return;
     // The visitor's own line, back over the socket before the POST answered: it is the one already shown.
-    if (m.author === 'visitor') { var waiting = thread.querySelector('.em-me:not([data-id])'); if (waiting) { waiting.dataset.id = String(m.id); latest = Math.max(latest, Number(m.id)); return; } }
+    if (m.author === 'visitor') { var waiting = thread.querySelector('.em-me:not([data-id]):not(.em-sending)'); if (waiting) { waiting.dataset.id = String(m.id); latest = Math.max(latest, Number(m.id)); return; } }
     if (m.id) latest = Math.max(latest, Number(m.id));
     var li;
     if (m.author === 'system') { li = el('li', 'em-system', m.body); }
@@ -93,10 +95,12 @@
       var mine = m.author === 'visitor';
       li = el('li', 'em-msg ' + (mine ? 'em-me' : 'em-them'));
       if (!mine) li.appendChild(el('small', null, m.author === 'ai' ? 'Vibe' : (m.author_name || 'Support')));
+      var pics = m.author === 'agent' || m.account ? picsOf(m.body) : null;
+      var text = pics ? String(m.body).replace(PICS, '').replace(/[ \t]+$/gm, '').trim() : m.body;   // the pictures show, not their links
       var b = el('div', 'em-bubble');
-      if (m.author === 'ai' && window.VibeMarkdown) b.innerHTML = window.VibeMarkdown.render(m.body); else b.textContent = m.body;
-      li.appendChild(b);
-      if (m.author === 'agent') { var pics = picsOf(m.body); if (pics) li.appendChild(pics); }
+      if (m.author === 'ai' && window.VibeMarkdown) b.innerHTML = window.VibeMarkdown.render(m.body); else b.textContent = text;
+      if (text) li.appendChild(b);
+      if (pics) li.appendChild(pics);
       if (!mine) { clearTyping(); toParent({ type: 'message', author: m.author }); }
     }
     if (m.id) li.dataset.id = String(m.id);
@@ -218,6 +222,35 @@
     }).catch(function () { pending.remove(); input.value = text; errorLine('You seem to be offline. Your message is back in the box.'); })
       .then(function () { sendBtn.disabled = false; input.focus(); });
   });
+  // A picture: signed in to OpenVibe only (it goes to OpenVibe.Pics as them); what is in the box goes with it as its line.
+  function sendPicture(file) {
+    if (!file || !token) return;
+    if (file.size > 20 * 1024 * 1024) { errorLine('That picture is too large (20 MB at most).'); return; }
+    attachBtn.disabled = true; errorLine('');
+    var caption = input.value.trim();
+    var pending = el('li', 'em-msg em-me em-sending'); pending.appendChild(el('div', 'em-bubble', 'Sending a picture…')); thread.appendChild(pending); bottom();
+    fetch(api + '/picture', { method: 'POST', headers: headers({ 'Content-Type': file.type || 'application/octet-stream', 'X-Visitor-Token': token, 'X-Caption': encodeURIComponent(caption) }), body: file })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: {} }; }); })
+      .then(function (x) {
+        pending.remove();
+        if (!x.ok) { errorLine((x.d && x.d.error) || 'That picture did not send. Try again.'); return; }
+        if (caption) { input.value = ''; grow(); }
+        render(x.d.message);
+        var fresh = !conv || conv.id !== x.d.conversation.id;
+        conv = x.d.conversation; setStatus(conv.status);
+        if (fresh) watch();
+        if (conv.status === 'bot') showTyping('Vibe');
+      })
+      .catch(function () { pending.remove(); errorLine('You seem to be offline.'); })
+      .then(function () { attachBtn.disabled = false; });
+  }
+  if (attachBtn && fileIn) {
+    attachBtn.addEventListener('click', function () {
+      if (!acctName) { errorLine('Sign in to send a picture: it goes to OpenVibe.Pics as you.'); if (!polling) signIn(); return; }
+      fileIn.click();
+    });
+    fileIn.addEventListener('change', function () { var f = fileIn.files && fileIn.files[0]; fileIn.value = ''; sendPicture(f); });
+  }
   personBtn.addEventListener('click', function () {
     personBtn.disabled = true;
     post('/handoff').then(function (x) { if (x.ok && x.d.conversation) { setStatus(x.d.conversation.status); catchUp(); } else errorLine((x.d && x.d.error) || 'Try again in a moment.'); })

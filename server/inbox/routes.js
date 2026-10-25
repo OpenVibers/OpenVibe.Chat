@@ -11,6 +11,8 @@
  *   POST   /messages         { token, message, page_url?, name?, user? } → 201 { conversation, message }
  *   POST   /handoff          { token } → { conversation }  ("Talk to a person"; 409 when only Vibe answers)
  *   POST   /rating           { token, rating: 1 | -1, comment?, conversation? } → { conversation }  (else their latest resolved)
+ *   POST   /picture          the body is a picture; X-Visitor-Token, an optional line in X-Caption → 201 { conversation, message,
+ *                             picture } (signed in to OpenVibe only: it goes to OpenVibe.Pics as them; 403 inbox.sign_in_to_attach)
  *
  * /api/chat/support — a visitor's own conversations with sites' chats (signed in to OpenVibe in the panel):
  *   GET    /                 { conversations }: newest first, with the inbox's name
@@ -178,6 +180,27 @@ agents.post('/:id/conversations/:cid/picture', requireAuth, pictureLimit, (req, 
     const out = await require('../rooms/pictures').upload({ token: bearerOf(req), buffer: Buffer.isBuffer(req.body) ? req.body : null, contentType: req.get('content-type'), title: caption, ip: req.ip });
     if (!out.ok) return res.status(out.status || 502).json({ error: out.detail || 'That picture did not send', code: out.code || 'pictures.failed' });
     try { res.status(201).json({ message: await inboxes.agentPost(req.inbox, conv, req.user, `${caption ? `${caption}\n` : ''}${out.picture.direct}`), picture: out.picture }); } catch (err) { send(res, err); }
+});
+// A signed-in visitor's picture (the panel's attach button): it goes to OpenVibe.Pics as them, the same way, and the
+// conversation gets their message with its link. Anonymous visitors cannot upload until Pics scans pictures.
+widget.post('/picture', pictureLimit, async (req, res, next) => {
+    const inbox = await inboxOr404(req, res); if (!inbox) return;
+    if (!/^[A-Za-z0-9_-]{32}$/.test(tokenOf(req))) return res.status(401).json({ error: 'Open the chat again to start a conversation', code: 'inbox.visitor' });
+    const account = await accountOf(req);
+    if (!account) return res.status(403).json({ error: 'Sign in to send a picture', code: 'inbox.sign_in_to_attach' });
+    req.inbox = inbox; req.account = account;
+    return express.raw({ type: () => true, limit: (config.pics.maxBytes || 20 * 1024 * 1024) + 1 })(req, res, (err) => {
+        if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'That picture is too large', code: 'pictures.too_large' });
+        return next(err);
+    });
+}, async (req, res) => {
+    const caption = (() => { try { return decodeURIComponent(String(req.get('x-caption') || '')).slice(0, 500); } catch { return ''; } })();
+    const out = await require('../rooms/pictures').upload({ token: bearerOf(req), buffer: Buffer.isBuffer(req.body) ? req.body : null, contentType: req.get('content-type'), title: caption, ip: req.ip });
+    if (!out.ok) return res.status(out.status || 502).json({ error: out.detail || 'That picture did not send', code: out.code || 'pictures.failed' });
+    try {
+        const posted = await inboxes.visitorPost(req.inbox, tokenOf(req), { message: `${caption ? `${caption}\n` : ''}${out.picture.direct}`, account: req.account });
+        res.status(201).json({ ...posted, picture: out.picture });
+    } catch (err) { send(res, err); }
 });
 const translateLimit = rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false, message: { error: 'Slow down a little', code: 'inbox.slow_down' } });
 agents.post('/:id/conversations/:cid/messages/:mid/translate', requireAuth, translateLimit, async (req, res) => {
