@@ -140,7 +140,10 @@ async function emit(inboxId, type, { conversationId = null, message = null } = {
         } else {
             const line = lineFor(hook, type, d);
             if (!line) continue;
-            body = JSON.stringify(hook.format === 'slack' ? { text: line } : { content: line.slice(0, 1900), allowed_mentions: { parse: [] } });
+            // What a visitor wrote never pings anyone: Slack's control characters are escaped (so "<!channel>" is text),
+            // and Discord is told to parse no mentions.
+            const slackSafe = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            body = JSON.stringify(hook.format === 'slack' ? { text: slackSafe(line) } : { content: line.slice(0, 1900), allowed_mentions: { parse: [] } });
         }
         attempt(hook, body, headers).catch(() => {});
         sent++;
