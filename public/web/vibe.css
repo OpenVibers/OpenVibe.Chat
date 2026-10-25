@@ -98,6 +98,11 @@ body.oc-app-body { overflow: hidden; }
 .vb-scroll > .oc-notice { max-width: var(--vb-col); margin: 8px auto; }
 .vb-thread { list-style: none; margin: 0 auto; padding: 8px 0 0; max-width: var(--vb-col); display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
 .vb-turn { display: flex; gap: 14px; min-width: 0; }
+/* The writing bubble's Stop (vibe.js showWait): at the bubble's end, quiet like the actions under answers. */
+.vb-stop { align-self: flex-start; margin-left: auto; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--oc-line); background: transparent; color: var(--oc-muted); font: inherit; font-size: .8rem; cursor: pointer; }
+.vb-stop:hover { color: var(--oc-text); background: var(--oc-panel-2); }
+.vb-stop:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
+.vb-stop[disabled] { opacity: .5; cursor: default; }
 .vb-me { justify-content: flex-end; }
 .vb-bubble {
   max-width: min(85%, 620px); padding: 10px 16px; border-radius: 20px 20px 6px 20px;

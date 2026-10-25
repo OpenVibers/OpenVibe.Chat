@@ -85,13 +85,17 @@ async function stream(workflow, input, opts = {}, onText = () => {}) {
     try {
         if (!_tokens) ai();
         const token = await _tokens.getToken();
+        const timeout = AbortSignal.timeout(config.ai.waitMs + 10000);
         const res = await (opts.fetchImpl || globalThis.fetch)(`${config.ai.internalUrl}/api/v1/runs?stream=1&wait=${Math.max(0, Math.floor(config.ai.waitMs))}`, {
             method: 'POST',
             headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'text/event-stream', ...(opts.idempotencyKey ? { 'Idempotency-Key': opts.idempotencyKey } : {}) },
             body: JSON.stringify({ workflow, input, ...(opts.credential ? { credential: opts.credential } : {}), ...(opts.attribution !== undefined ? { attribution: opts.attribution } : {}) }),
-            signal: AbortSignal.timeout(config.ai.waitMs + 10000),
+            signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout,
         });
         if (!res.ok) { console.warn(`[AI] ${workflow}: AI answered ${res.status}`); return null; }
+        // Stopped by the person (opts.signal): the run is cancelled at AI, so it spends nothing more.
+        const runId = res.headers.get('x-openvibe-run-id');
+        if (opts.signal && runId) opts.signal.addEventListener('abort', () => { try { const { runs } = ai(); if (runs && runs.cancel) runs.cancel(runId).catch(() => {}); } catch { /* AI away */ } }, { once: true });
         let run = null;
         if (!/event-stream/.test(String(res.headers.get('content-type') || ''))) {
             const body = await res.json();
@@ -119,7 +123,7 @@ async function stream(workflow, input, opts = {}, onText = () => {}) {
         if (!run || run.status !== 'succeeded' || run.synthetic) return null;
         return run.output || null;
     } catch (err) {
-        console.warn(`[AI] ${workflow}: ${err && err.message}`);
+        if (!(opts.signal && opts.signal.aborted)) console.warn(`[AI] ${workflow}: ${err && err.message}`);
         return null;
     }
 }
