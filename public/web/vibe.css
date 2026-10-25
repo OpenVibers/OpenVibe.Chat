@@ -36,6 +36,14 @@ body.oc-app-body { overflow: hidden; }
 .vb-icon:hover { background: var(--oc-panel-2); color: var(--oc-text); }
 .vb-icon:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
 .vb-rail-close, .vb-menu { display: none; }
+.vb-how { margin-top: 10px; font-size: .86rem; color: var(--oc-muted); }
+.vb-how summary { cursor: pointer; width: fit-content; padding: 2px 0; font-weight: 600; list-style: none; }
+.vb-how summary::-webkit-details-marker { display: none; }
+.vb-how summary::before { content: "▸"; display: inline-block; margin-right: 6px; transition: transform .15s; }
+.vb-how[open] summary::before { transform: rotate(90deg); }
+.vb-how summary:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; border-radius: 4px; }
+.vb-how ul { margin: 6px 0 0; padding: 8px 12px; list-style: none; border-left: 2px solid var(--oc-line); display: grid; gap: 4px; overflow-wrap: anywhere; }
+.vb-how a { color: var(--oc-accent); }
 .vb-search { position: relative; margin: 0 2px 6px; }
 .vb-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--oc-muted); pointer-events: none; }
 .vb-search input {

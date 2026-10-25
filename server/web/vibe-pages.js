@@ -16,6 +16,7 @@ const md = require('../../public/web/vibe-md.js');
 const pictures = require('../rooms/pictures');
 const rooms = require('../rooms/rooms');
 const vibe = require('../rooms/vibe');
+const how = require('../rooms/how');
 const { esc } = require('./layout');
 
 const SUGGESTIONS = [
@@ -104,9 +105,9 @@ ${left != null ? `<p class="vb-allow" id="vb-allow">${left} of ${allowance.per_d
 </aside>`;
 }
 
-function turn(m, me) {
+function turn(m, me, hows = new Map()) {
     const ai = !!m.ai_member_id;
-    if (ai) return `<li class="vb-turn vb-ai" data-id="${Number(m.id) || 0}">${MARK}<div class="vb-body"><p class="oc-sr">Vibe said:</p><div class="vb-md">${md.render(m.message)}</div></div></li>`;
+    if (ai) return `<li class="vb-turn vb-ai" data-id="${Number(m.id) || 0}">${MARK}<div class="vb-body"><p class="oc-sr">Vibe said:</p><div class="vb-md">${md.render(m.message)}</div>${how.html(hows.get(Number(m.id)))}</div></li>`;
     const mine = me && Number(m.user_id) === Number(me.id);
     return `<li class="vb-turn vb-me" data-id="${Number(m.id) || 0}"><div class="vb-bubble"><p class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</p>${esc(m.message).replace(/\n/g, '<br>')}${pictures.pageHtml(m.message)}</div></li>`;
 }
@@ -164,6 +165,7 @@ function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit,
         const chats = user ? (searching ? await vibe.search(user, query) : await vibe.list(user)) : [];
         const allowance = user ? await allowanceOf(user) : null;
         const messages = room ? await rooms.history(room, { limit: 200 }) : [];
+        const hows = room ? await how.forRoom(room) : new Map();   // "How Vibe did this" under agent tasks' answers
         const enabled = vibe.enabled();
         const title = room ? room.name : 'Vibe';
         const waiting = room && messages.length && !messages[messages.length - 1].ai_member_id;
@@ -174,7 +176,7 @@ ${MARK}
 <ul class="vb-suggest">${SUGGESTIONS.map((s) => `<li><button type="button" class="vb-chip" data-prompt="${esc(s.prompt)}"><b>${esc(s.title)}</b><span>${esc(s.text)}</span></button></li>`).join('')}</ul>
 </div>`;
         const thread = room
-            ? `<ol class="vb-thread" id="vb-thread">${messages.map((m) => turn(m, user)).join('')}${waiting ? `<li class="vb-turn vb-ai vb-wait" id="vb-wait">${MARK}<div class="vb-body"><span class="vb-dots" aria-label="Vibe is writing"><i></i><i></i><i></i></span><noscript><a href="/vibe/${esc(room.slug)}">Refresh to see Vibe's answer</a></noscript></div></li>` : ''}</ol>`
+            ? `<ol class="vb-thread" id="vb-thread">${messages.map((m) => turn(m, user, hows)).join('')}${waiting ? `<li class="vb-turn vb-ai vb-wait" id="vb-wait">${MARK}<div class="vb-body"><span class="vb-dots" aria-label="Vibe is writing"><i></i><i></i><i></i></span><noscript><a href="/vibe/${esc(room.slug)}">Refresh to see Vibe's answer</a></noscript></div></li>` : ''}</ol>`
             : '';
         const head = `<header class="vb-head">
 <button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show your chats">${ICON.menu}</button>

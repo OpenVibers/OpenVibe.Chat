@@ -112,6 +112,30 @@
     body.appendChild(md); li.appendChild(body);
     return li;
   }
+  // "How Vibe did this" under an agent task's answer that arrives while the page is open (the server folds it on load).
+  function attachHow(li, id) {
+    if (!room) return;
+    fetch('/api/chat/vibe/' + encodeURIComponent(room) + '/how', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+      var info = d && d.how && d.how[String(id)];
+      var body = li.querySelector('.vb-body');
+      if (!info || !body || body.querySelector('.vb-how')) return;
+      var det = el('details', 'vb-how'); det.appendChild(el('summary', null, 'How Vibe did this'));
+      var ul = el('ul');
+      (info.lines || []).forEach(function (l) { ul.appendChild(el('li', null, l)); });
+      if (info.sources && info.sources.length) {
+        var src = el('li', null, 'Sources: ');
+        info.sources.forEach(function (u, i) {
+          if (!/^https?:\/\//.test(u)) return;
+          if (i) src.appendChild(document.createTextNode(', '));
+          var a = el('a', null, u.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]); a.href = u; a.rel = 'nofollow ugc noopener'; a.target = '_blank';
+          src.appendChild(a);
+        });
+        ul.appendChild(src);
+      }
+      if (info.actor_url && /^https:\/\/openvibe\.actor\//.test(info.actor_url)) { var li2 = el('li'); var a2 = el('a', null, 'Every step on OpenVibe Agents'); a2.href = info.actor_url; li2.appendChild(a2); ul.appendChild(li2); }
+      det.appendChild(ul); body.appendChild(det);
+    }).catch(function () {});
+  }
   function clearWait() { var w = document.getElementById('vb-wait'); if (w) w.remove(); if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } }
   function showWait() {
     if (document.getElementById('vb-wait')) return;
@@ -133,7 +157,10 @@
     if (!m || have(m.id)) return;
     latest = Math.max(latest, Number(m.id) || 0);
     var stick = nearBottom();
-    if (m.ai_member_id) { clearWait(); thread().appendChild(aiTurn(m)); refreshRail(); }
+    if (m.ai_member_id) {
+      clearWait(); var turnEl = aiTurn(m); thread().appendChild(turnEl); refreshRail();
+      if (/^✅ Done:/.test(String(m.message || ''))) attachHow(turnEl, m.id);
+    }
     else {
       // The line sent from here already shows (without an id until the server answered): give it its id.
       var pending = document.querySelector('.vb-turn.vb-me:not([data-id])');

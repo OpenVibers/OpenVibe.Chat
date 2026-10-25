@@ -249,9 +249,12 @@ async function poll(deps = {}) {
         if (!DONE.has(state)) continue;
         const r = task.result || {};
         const sources = (Array.isArray(r.sources) ? r.sources : []).map((s) => (typeof s === 'string' ? s : s && s.url)).filter((u) => /^https?:\/\//.test(String(u || ''))).slice(0, 12);
-        const cost = task.cost && Number.isFinite(Number(task.cost.total_usd)) ? Number(task.cost.total_usd) : null;
+        // Actor's task (actor.task wire): cost.usd is what the task spent; the result names its agent, model and check.
+        const cost = task.cost && Number.isFinite(Number(task.cost.usd)) ? Number(task.cost.usd) : null;
+        const checked = r.checked && typeof r.checked === 'object' ? { by: oneLine(r.checked.by, 40) || null, reason: oneLine(r.checked.reason, 300) || null } : null;
+        const how = state === 'succeeded' ? JSON.stringify({ agent: oneLine(r.agent, 60) || null, model: oneLine(r.model, 80) || null, class: oneLine(r.class, 40) || null, checked, actor_task: String(task.id || t.actor_task) }) : null;
         await setStatus(room, t.id, {
-            status: state, result: state === 'succeeded' ? clean(r.answer, LIMITS.result) || null : null, sources: JSON.stringify(sources),
+            status: state, result: state === 'succeeded' ? clean(r.answer, LIMITS.result) || null : null, sources: JSON.stringify(sources), how,
             error: state === 'succeeded' ? null : oneLine((task.error && (task.error.detail || task.error.code)) || state, LIMITS.error), cost_usd: cost, finished_at: nowText(),
         });
         await announce(room, await row(room, t.id), deps).catch(() => {});
