@@ -8,7 +8,8 @@
  *   POST   /visit            { token? } → { token, inbox, conversation, messages }  (a new token when theirs is missing)
  *   GET    /messages         ?token=&after= → { conversation, messages }
  *   POST   /messages         { token, message, page_url?, name? } → 201 { conversation, message }
- *   POST   /handoff          { token } → { conversation }  ("Talk to a person")
+ *   POST   /handoff          { token } → { conversation }  ("Talk to a person"; 409 when only Vibe answers)
+ *   POST   /rating           { token, rating: 1 | -1, comment?, conversation? } → { conversation }  (else their latest resolved)
  *
  * /api/chat/inboxes — the inbox's people (signed in; an API token acts as its person):
  *   GET    /                 { inboxes }: the inboxes they work in, with waiting and open counts
@@ -77,6 +78,11 @@ widget.post('/messages', postLimit, async (req, res) => {
 widget.post('/handoff', postLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
     try { res.json({ conversation: await inboxes.handoff(inbox, tokenOf(req)) }); } catch (err) { send(res, err); }
+});
+widget.post('/rating', postLimit, async (req, res) => {
+    const inbox = await inboxOr404(req, res); if (!inbox) return;
+    const b = req.body || {};
+    try { res.json({ conversation: await inboxes.rate(inbox, tokenOf(req), { rating: b.rating, comment: b.comment, conversation: b.conversation }) }); } catch (err) { send(res, err); }
 });
 
 // ── The inbox's people ─────────────────────────────────────────────────────────────────────────────────────────────

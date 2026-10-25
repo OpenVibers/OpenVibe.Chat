@@ -17,13 +17,14 @@
   var stateEl = document.getElementById('em-state');
   var page = new URLSearchParams(location.search).get('page') || '';
   var token = null, conv = null, latest = 0, ws = null, delay = 1000, aiOn = root.getAttribute('data-ai') === '1', typingEl = null;
+  var people = root.getAttribute('data-people') !== '0', rateEl = null;
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function store(fn) { try { return fn(window.localStorage); } catch (e) { return null; } }
   function toParent(msg) { try { window.parent.postMessage(Object.assign({ ov: 'chat' }, msg), '*'); } catch (e) { /* not embedded */ } }
   function bottom() { thread.scrollTop = thread.scrollHeight; }
   var STATE = {
-    bot: 'Vibe answers right away. Ask for a person any time.',
+    bot: people ? 'Vibe answers right away. Ask for a person any time.' : 'Vibe, the assistant, answers right away.',
     waiting: 'Waiting for a person. You can leave; this conversation stays here.',
     open: 'A person is here.',
     resolved: 'Resolved. Write again any time.',
@@ -31,7 +32,31 @@
   function setStatus(s) {
     if (conv) conv.status = s;
     stateEl.textContent = STATE[s] || stateEl.textContent;
-    personBtn.hidden = !(aiOn && conv && s === 'bot');
+    personBtn.hidden = !(aiOn && people && conv && s === 'bot');
+    if (s === 'resolved') askRating(); else if (rateEl) { rateEl.remove(); rateEl = null; }
+  }
+  // A resolved conversation asks how it went: good or bad, then a line if they like.
+  function askRating() {
+    if (rateEl || !conv || conv.rating) return;
+    rateEl = el('li', 'em-rate');
+    rateEl.appendChild(el('span', null, 'How was this?'));
+    [[1, '👍', 'Good'], [-1, '👎', 'Not good']].forEach(function (r) {
+      var b = el('button', null, r[1]); b.type = 'button'; b.setAttribute('aria-label', r[2]);
+      b.addEventListener('click', function () { sendRating(r[0]); });
+      rateEl.appendChild(b);
+    });
+    thread.appendChild(rateEl); bottom();
+  }
+  function sendRating(value, comment) {
+    post('/rating', { rating: value, comment: comment || '', conversation: conv.id }).then(function (x) {
+      if (!x.ok) { errorLine((x.d && x.d.error) || 'That did not send.'); return; }
+      conv.rating = value;
+      if (comment != null) { rateEl.textContent = 'Thanks!'; return; }
+      rateEl.textContent = '';
+      var f = el('form', 'em-rate-more'); var i = el('input'); i.maxLength = 500; i.placeholder = 'Thanks! Anything to add?'; i.setAttribute('aria-label', 'Anything to add');
+      var s2 = el('button', null, 'Send'); s2.type = 'submit'; f.appendChild(i); f.appendChild(s2); rateEl.appendChild(f); i.focus();
+      f.addEventListener('submit', function (e) { e.preventDefault(); if (i.value.trim()) sendRating(value, i.value.trim()); else rateEl.textContent = 'Thanks!'; });
+    }).catch(function () { errorLine('You seem to be offline.'); });
   }
   function clearTyping() { if (typingEl) { typingEl.remove(); typingEl = null; } }
   function showTyping(who) {
@@ -99,6 +124,7 @@
     if (!x.ok) { errorLine((x.d && x.d.error) || 'This chat is not available right now.'); return; }
     token = x.d.token; store(function (s) { s.setItem(KEY, token); });
     aiOn = !!(x.d.inbox && x.d.inbox.ai);
+    people = !(x.d.inbox && x.d.inbox.people === false);
     if (x.d.inbox && x.d.inbox.color) toParent({ type: 'color', color: x.d.inbox.color });
     conv = x.d.conversation;
     (x.d.messages || []).forEach(render);

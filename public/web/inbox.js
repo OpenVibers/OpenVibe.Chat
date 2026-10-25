@@ -83,6 +83,9 @@
       else if (m.type === 'inbox_message') {
         touchList(m.conversation, m.message.body, null);
         if (m.conversation === cfg.conversation) appendToThread(m.message);
+      } else if (m.type === 'inbox_rating') {
+        var item = listItem(m.conversation), row = item && item.querySelector('.ib-row');
+        if (row) { var old = row.querySelector('.ib-rate'); if (old) old.remove(); var r = el('span', 'ib-rate', m.rating > 0 ? '👍' : '👎'); if (m.comment) r.title = m.comment; row.insertBefore(r, row.querySelector('time')); }
       } else if (m.type === 'inbox_status') {
         touchList(m.conversation, null, m.status);
         if (m.conversation === cfg.conversation) { var h = document.querySelector('.vb-title .vb-st'); if (h) h.replaceWith(chip(m.status)); }

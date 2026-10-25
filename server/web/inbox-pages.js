@@ -41,9 +41,9 @@ function embedHtml(inbox) {
 <script src="${asset('embed.js')}" defer></script>
 </head>
 <body style="--accent:${esc(inbox.color)}">
-<div class="em" id="em" data-inbox="${esc(inbox.id)}" data-ai="${Number(inbox.ai_enabled) ? '1' : '0'}">
+<div class="em" id="em" data-inbox="${esc(inbox.id)}" data-ai="${Number(inbox.ai_enabled) ? '1' : '0'}" data-people="${inboxes.peopleAnswer(inbox) ? '1' : '0'}">
 <header class="em-head"><span class="em-mark" aria-hidden="true">${esc(inbox.name.slice(0, 1).toUpperCase())}</span>
-<div><b>${esc(inbox.name)}</b><span id="em-state">${Number(inbox.ai_enabled) ? 'Vibe answers right away. Ask for a person any time.' : 'We usually reply within a few hours.'}</span></div>
+<div><b>${esc(inbox.name)}</b><span id="em-state">${!Number(inbox.ai_enabled) ? 'We usually reply within a few hours.' : inboxes.peopleAnswer(inbox) ? 'Vibe answers right away. Ask for a person any time.' : 'Vibe, the assistant, answers right away.'}</span></div>
 <button class="em-x" type="button" data-close aria-label="Close the chat">&times;</button></header>
 <ol class="em-thread" id="em-thread" aria-live="polite"><li class="em-msg em-them"><small>${esc(inbox.name)}</small><div class="em-bubble">${esc(inbox.greeting)}</div></li></ol>
 <div class="em-handoff"><button type="button" id="em-person" hidden>Talk to a person</button></div>
@@ -123,7 +123,7 @@ ${list}
         const msgs = current ? await inboxes.messages(current) : [];
         if (current) await inboxes.markRead(inbox, current);
         const item = (c) => `<li><a class="vb-chat ib-conv" href="/inbox/${esc(inbox.id)}?c=${esc(c.id)}&amp;f=${filter}"${current && c.id === current.id ? ' aria-current="page"' : ''} data-conv="${esc(c.id)}">
-<span class="ib-row"><b>${esc(c.visitor_name || 'Visitor')}</b>${statusChip(c.status)}<time>${esc(ago(c.last_message_at))}</time></span>
+<span class="ib-row"><b>${esc(c.visitor_name || 'Visitor')}</b>${statusChip(c.status)}${c.rating ? `<span class="ib-rate" title="${esc(c.rating_comment || '')}">${c.rating > 0 ? '👍' : '👎'}</span>` : ''}<time>${esc(ago(c.last_message_at))}</time></span>
 <span class="ib-prev">${esc(c.preview || '')}</span></a></li>`;
         const turn = (m) => {
             if (m.author === 'system') return `<li class="ib-sys" data-id="${m.id}">${esc(m.body)}</li>`;
@@ -145,9 +145,9 @@ ${Number(inbox.ai_enabled) && current.status !== 'bot' && current.status !== 're
 <div class="vb-scrim" data-vb-close hidden></div>
 <section class="vb-main" aria-label="Conversation">
 <header class="vb-head"><button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show conversations">&#9776;</button>
-<h1 class="vb-title">${current ? `${esc(current.visitor_name || 'Visitor')} ${statusChip(current.status)}` : esc(inbox.name)}</h1>${actions}</header>
+<h1 class="vb-title">${current ? `${esc(current.visitor_name || 'Visitor')} ${statusChip(current.status)}${current.rating ? ` <span class="ib-rate" title="${esc(current.rating_comment || 'The visitor\'s rating')}">${Number(current.rating) > 0 ? '👍' : '👎'}</span>` : ''}` : esc(inbox.name)}</h1>${actions}</header>
 <div class="vb-scroll" id="vb-scroll">
-${current ? `${current.page_url ? `<p class="ib-page">From <a href="${esc(current.page_url)}" rel="noopener nofollow" target="_blank">${esc(current.page_url)}</a></p>` : ''}<ol class="vb-thread" id="vb-thread">${msgs.map(turn).join('')}</ol>`
+${current ? `${current.rating_comment ? `<p class="ib-page">Rated ${Number(current.rating) > 0 ? '👍' : '👎'}: “${esc(current.rating_comment)}”</p>` : ''}${current.page_url ? `<p class="ib-page">From <a href="${esc(current.page_url)}" rel="noopener nofollow" target="_blank">${esc(current.page_url)}</a></p>` : ''}<ol class="vb-thread" id="vb-thread">${msgs.map(turn).join('')}</ol>`
         : `<div class="vb-hello"><h1>${list.length ? 'Pick a conversation' : 'No conversations yet'}</h1><p class="vb-sub">${list.length ? 'Waiting ones come first: those visitors asked for a person.' : 'Paste the snippet from Settings into your site. Visitors write; Vibe answers; you take over when it matters.'}</p></div>`}
 </div>
 ${current ? `<div class="vb-dock"><form class="vb-composer" id="vb-composer" method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}">
@@ -195,7 +195,8 @@ ${owner ? `<h2>How it looks and what Vibe knows</h2>
 <label>Name <input name="name" required minlength="2" maxlength="60" value="${esc(shape.name)}"></label>
 <label>Greeting <input name="greeting" maxlength="300" value="${esc(shape.greeting)}"></label>
 <label>Colour <input name="color" type="color" value="${esc(shape.color)}"></label>
-<label class="oc-check"><input type="checkbox" name="ai_enabled" value="1"${shape.ai_enabled ? ' checked' : ''}> Vibe answers first (visitors can ask for a person any time)</label>
+<label class="oc-check"><input type="checkbox" name="ai_enabled" value="1"${shape.ai_enabled ? ' checked' : ''}> Vibe answers first</label>
+<label class="oc-check"><input type="checkbox" name="handoff" value="1"${shape.handoff ? ' checked' : ''}> People answer here too (visitors can ask for a person; off: a site assistant where only Vibe answers)</label>
 <label>What Vibe should know <textarea name="ai_instructions" rows="6" maxlength="4000">${esc(shape.ai_instructions)}</textarea></label>
 <label>Pages Vibe may read (https, one per line) <textarea name="knowledge_urls" rows="3">${esc(shape.knowledge_urls.join('\n'))}</textarea></label>
 <label>Sites that may show it (one per line; empty: any site) <textarea name="allowed_origins" rows="2" placeholder="https://example.com">${esc(shape.allowed_origins.join('\n'))}</textarea></label>
@@ -210,7 +211,7 @@ ${owner ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/m
         const a = await agentInbox(req, res); if (!a) return;
         const b = req.body || {};
         try {
-            await inboxes.update(a.inbox, a.actor.user, { name: b.name, greeting: b.greeting, color: b.color, ai_enabled: b.ai_enabled === '1', ai_instructions: b.ai_instructions, knowledge_urls: b.knowledge_urls, allowed_origins: b.allowed_origins });
+            await inboxes.update(a.inbox, a.actor.user, { name: b.name, greeting: b.greeting, color: b.color, ai_enabled: b.ai_enabled === '1', handoff: b.handoff === '1', ai_instructions: b.ai_instructions, knowledge_urls: b.knowledge_urls, allowed_origins: b.allowed_origins });
             res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
         } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not save')}`); }
     });

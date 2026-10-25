@@ -49,7 +49,8 @@ t('an owner makes an inbox and gets the snippet; bad sites and pages are refused
     assert.strictEqual(r.body.embed.script, `<script src="${SITE}/widget.js" data-inbox="${inbox.id}" async></script>`);
     assert.deepStrictEqual((await agentsApi('GET', '', ann)).body.inboxes.map((i) => [i.id, i.role]), [[inbox.id, 'owner']]);
     const pub = (await widget('GET', '')).body.inbox;
-    assert.deepStrictEqual(Object.keys(pub).sort(), ['ai', 'color', 'greeting', 'id', 'name'], 'the widget learns no instructions or people');
+    assert.deepStrictEqual(Object.keys(pub).sort(), ['ai', 'color', 'greeting', 'id', 'name', 'people'], 'the widget learns no instructions or who the people are');
+    assert.strictEqual(pub.people, true);
 });
 
 t('a visitor writes with only a token, and Vibe answers from the inbox\'s instructions', async () => {
@@ -109,6 +110,37 @@ t('resolving closes it; the next message starts a new conversation', async () =>
     const p = await widget('POST', '/messages', { token, message: 'One more question' });
     assert.notStrictEqual(p.body.conversation.id, conv.id);
     assert.strictEqual(p.body.conversation.status, 'bot');
+});
+
+t('the visitor rates a resolved conversation (and may add a line); the people see it', async () => {
+    const open = (await widget('GET', `/messages?token=${token}`)).body.conversation;
+    await agentsApi('PATCH', `/${inbox.id}/conversations/${open.id}`, bob, { status: 'resolved' });
+    assert.strictEqual((await widget('POST', '/rating', { token, rating: 5 })).status, 422);
+    const r = await widget('POST', '/rating', { token, rating: -1, comment: 'Took a while', conversation: open.id });
+    assert.deepStrictEqual([r.status, r.body.conversation.rating, r.body.conversation.rating_comment], [200, -1, 'Took a while']);
+    const list = (await agentsApi('GET', `/${inbox.id}/conversations?status=resolved`, bob)).body.conversations;
+    assert.strictEqual(list.find((c) => c.id === open.id).rating, -1);
+    const fresh = (await widget('POST', '/visit', {})).body.token;
+    assert.strictEqual((await widget('POST', '/rating', { token: fresh, rating: 1 })).status, 404, 'nothing resolved to rate');
+});
+
+t('a site assistant: with people off, only Vibe answers; no handoff, and Vibe is told nobody else answers', async () => {
+    assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}`, ann, { handoff: false, ai_enabled: false })).status, 422, 'somebody has to answer');
+    assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}`, ann, { handoff: false })).status, 200);
+    assert.strictEqual((await widget('GET', '')).body.inbox.people, false);
+    reply = 'I cannot check orders here. Email help@acme.example.\n[HANDOFF]';
+    const v = (await widget('POST', '/visit', {})).body.token;
+    turns.length = 0;
+    await widget('POST', '/messages', { token: v, message: 'Where is order 77?' });
+    const msgs = await until(async () => { const m = (await widget('GET', `/messages?token=${v}`)).body; return m.messages.some((x) => x.author === 'ai') && m; }, 'Vibe answers');
+    assert.strictEqual(msgs.conversation.status, 'bot', 'it stays with Vibe: nobody to hand off to');
+    assert.strictEqual(msgs.messages.find((x) => x.author === 'ai').body, 'I cannot check orders here. Email help@acme.example.');
+    assert.ok(turns[0].input.messages[0].content.includes('Nobody from Acme answers in this chat') && !turns[0].input.messages[0].content.includes('[HANDOFF]'));
+    assert.strictEqual((await widget('POST', '/handoff', { token: v })).status, 409);
+    const page = await (await fetch(`${h.base}/embed/inbox/${inbox.id}`)).text();
+    assert.ok(page.includes('data-people="0"') && page.includes('Vibe, the assistant, answers right away.'));
+    await agentsApi('PATCH', `/${inbox.id}`, ann, { handoff: true });
+    reply = 'Happy to help again.';
 });
 
 t('the socket: the visitor hears the people, the people hear new conversations', async () => {
