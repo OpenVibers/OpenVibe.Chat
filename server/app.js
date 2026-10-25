@@ -251,6 +251,7 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     // Support inboxes (server/inbox/): the widget's visitor API, and the inbox's people.
     app.use('/api/chat/widget/inbox/:id', require('./inbox/routes').widget);
     app.use('/api/chat/inboxes', require('./inbox/routes').agents);
+    app.use('/api/chat/support', require('./inbox/routes').support);
     // Feeds (server/feeds/): live activity (vibe coding) published with a feed's key, shown in rooms, on Live, anywhere.
     app.use('/api/chat/feeds', require('./feeds/routes'));
     app.use('/api/chat/servers', require('./rooms/server-routes'));

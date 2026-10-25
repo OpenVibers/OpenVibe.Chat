@@ -452,6 +452,18 @@ for people and for companies, with "direct live support with an agent", "fully m
 - **A site assistant** is an inbox whose people do not answer (`handoff` off in its settings): Vibe answers alone, there
   is no "Talk to a person", Vibe is told nobody else answers (it points to the contact details in the instructions
   instead of handing off), and when it cannot go on the visitor is told plainly. An inbox needs Vibe or its people.
+- **The visitor has an inbox too:** in any site's panel, "Keep this conversation: sign in" signs them in to OpenVibe
+  (the same ticket window as a room on a site; the token stays in the panel's own storage, sent as `Authorization`).
+  Their conversation moves to their own token for that inbox (derived from their account, never stored), so it
+  follows them to every device, and every conversation they had with any site is listed under **Support** in their
+  openvibe.chat Messages (`/support/:cid`: the thread, live over `inbox_watch`, and a reply box; writing to a
+  resolved one starts a new conversation with that inbox; apps: `GET /api/chat/support`, `GET|POST
+  /api/chat/support/:cid/messages`). The account comes only from the request's credentials. A
+  site's verified identity, when there is one, still decides the token. Export lists these conversations; deletion
+  leaves them with the inbox's team, without the person.
+- **Business hours** (`server/inbox/hours.js`; settings, or `PATCH { hours: { tz, days, start, end } }`, null for
+  always): outside them the panel says when the team is back ("tomorrow at 9 AM (Los Angeles time)"), a handoff says
+  so, and Vibe tells visitors a person replies when the team is back. Notifications still go out.
 - **Verified visitors** (for a site with its own accounts): the owner turns them on in settings, which makes an
   identity secret (`POST /api/chat/inboxes/:id/identity { action: on | rotate | off }`) to keep on their server. For a
   signed-in visitor the site adds `data-user-id`, `data-user-name`, `data-user-email` and `data-user-hash` (the

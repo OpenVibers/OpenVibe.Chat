@@ -12,6 +12,11 @@
  *   POST   /handoff          { token } → { conversation }  ("Talk to a person"; 409 when only Vibe answers)
  *   POST   /rating           { token, rating: 1 | -1, comment?, conversation? } → { conversation }  (else their latest resolved)
  *
+ * /api/chat/support — a visitor's own conversations with sites' chats (signed in to OpenVibe in the panel):
+ *   GET    /                 { conversations }: newest first, with the inbox's name
+ *   GET    /:cid/messages    ?after= → { conversation, messages }
+ *   POST   /:cid/messages    { message } → 201 { conversation, message } (a resolved one: a new conversation)
+ *
  * /api/chat/inboxes — the inbox's people (signed in; an API token acts as its person):
  *   GET    /                 { inboxes }: the inboxes they work in, with waiting and open counts
  *   POST   /                 { name, greeting?, color?, ai_enabled?, ai_instructions?, knowledge_urls?, allowed_origins? } → 201
@@ -34,7 +39,7 @@ const express = require('express');
 const rateLimit = require('express-rate-limit');
 const cache = require('openvibe-shared/cache-policy');
 const config = require('../config');
-const { requireAuth } = require('../auth/auth');
+const { requireAuth, requestUser } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const inboxes = require('./inbox');
 const webhooks = require('./webhooks');
@@ -69,9 +74,15 @@ widget.get('/', visitLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
     noStore(res).json({ inbox: inboxes.publicConfig(inbox) });
 });
+// A visitor signed in to OpenVibe (their own sign-in in Authorization, or the cookie on openvibe.chat itself; never an
+// API token): their conversations are theirs. Only ever from the request's credentials, never from its body.
+async function accountOf(req) {
+    const u = await requestUser(req).catch(() => null);
+    return u && u.auth_source !== 'api_token' ? u : null;
+}
 widget.post('/visit', visitLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
-    try { noStore(res).json({ inbox: inboxes.publicConfig(inbox), ...(await inboxes.visit(inbox, tokenOf(req), req.body && req.body.user)) }); } catch (err) { send(res, err); }
+    try { noStore(res).json({ inbox: inboxes.publicConfig(inbox), ...(await inboxes.visit(inbox, tokenOf(req), req.body && req.body.user, await accountOf(req))) }); } catch (err) { send(res, err); }
 });
 widget.get('/messages', visitLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
@@ -83,7 +94,7 @@ widget.get('/messages', visitLimit, async (req, res) => {
 });
 widget.post('/messages', postLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
-    try { res.status(201).json(await inboxes.visitorPost(inbox, tokenOf(req), req.body || {})); } catch (err) { send(res, err); }
+    try { res.status(201).json(await inboxes.visitorPost(inbox, tokenOf(req), { ...(req.body || {}), account: await accountOf(req) })); } catch (err) { send(res, err); }
 });
 widget.post('/handoff', postLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
@@ -228,4 +239,18 @@ agents.post('/:id/conversations/:cid/read', requireAuth, async (req, res) => {
     res.status(204).end();
 });
 
-module.exports = { widget, agents, embedOf };
+// ── A visitor's own support conversations (signed in to OpenVibe; an app acting with their sign-in) ─────────────────
+const support = express.Router();
+support.get('/', requireAuth, async (req, res) => { noStore(res).json({ conversations: await inboxes.mySupport(req.user, { limit: req.query.limit }) }); });
+support.get('/:cid/messages', requireAuth, async (req, res) => {
+    const conv = await inboxes.myConversation(req.user, req.params.cid);
+    if (!conv) return res.status(404).json({ error: 'No such conversation', code: 'inbox.no_conversation' });
+    noStore(res).json({ conversation: inboxes.convShape(conv), messages: await inboxes.messages(conv, { after: req.query.after }) });
+});
+support.post('/:cid/messages', requireAuth, postLimit, async (req, res) => {
+    const conv = await inboxes.myConversation(req.user, req.params.cid);
+    if (!conv) return res.status(404).json({ error: 'No such conversation', code: 'inbox.no_conversation' });
+    try { res.status(201).json(await inboxes.accountPost(req.user, conv, req.body && req.body.message)); } catch (err) { send(res, err); }
+});
+
+module.exports = { widget, agents, support, embedOf };
