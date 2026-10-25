@@ -46,7 +46,7 @@ function embedHtml(inbox) {
 <body style="--accent:${esc(inbox.color)}">
 <div class="em" id="em" data-inbox="${esc(inbox.id)}" data-ai="${Number(inbox.ai_enabled) ? '1' : '0'}" data-people="${inboxes.peopleAnswer(inbox) ? '1' : '0'}" data-pics="${esc(pictures.publicUrl())}">
 <header class="em-head"><span class="em-mark" aria-hidden="true">${esc(inbox.name.slice(0, 1).toUpperCase())}</span>
-<div><b>${esc(inbox.name)}</b><span id="em-state">${!Number(inbox.ai_enabled) ? 'We usually reply within a few hours.' : inboxes.peopleAnswer(inbox) ? 'Vibe answers right away. Ask for a person any time.' : 'Vibe, the assistant, answers right away.'}</span></div>
+<div><b>${esc(inbox.name)}</b><span id="em-state">${(() => { const away = inboxes.publicConfig(inbox).away; return !Number(inbox.ai_enabled) ? (away ? `We're away: back ${away}.` : 'We usually reply within a few hours.') : !inboxes.peopleAnswer(inbox) ? 'Vibe, the assistant, answers right away.' : away ? `Vibe answers now; the team is back ${away}.` : 'Vibe answers right away. Ask for a person any time.'; })()}</span></div>
 <button class="em-x" type="button" data-close aria-label="Close the chat">&times;</button></header>
 <ol class="em-thread" id="em-thread" aria-live="polite"><li class="em-msg em-them"><small>${esc(inbox.name)}</small><div class="em-bubble">${esc(inbox.greeting)}</div></li></ol>
 <div class="em-handoff"><button type="button" id="em-person" hidden>Talk to a person</button></div>
@@ -223,6 +223,13 @@ ${hooks.length < webhooks.MAX_WEBHOOKS ? `<form class="oc-form" method="post" ac
 <label>Colour <input name="color" type="color" value="${esc(shape.color)}"></label>
 <label class="oc-check"><input type="checkbox" name="ai_enabled" value="1"${shape.ai_enabled ? ' checked' : ''}> Vibe answers first</label>
 <label class="oc-check"><input type="checkbox" name="handoff" value="1"${shape.handoff ? ' checked' : ''}> People answer here too (visitors can ask for a person; off: a site assistant where only Vibe answers)</label>
+<fieldset class="oc-fieldset"><legend>Hours your people answer</legend>
+<label class="oc-check"><input type="checkbox" name="hours_on" value="1"${shape.hours ? ' checked' : ''}> Set hours: outside them, visitors see when you are back, and Vibe tells them</label>
+<label>Time zone <input name="hours_tz" maxlength="64" list="ib-tzs" value="${esc((shape.hours && shape.hours.tz) || 'America/Los_Angeles')}"></label>
+<datalist id="ib-tzs">${['America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York', 'America/Sao_Paulo', 'Europe/London', 'Europe/Paris', 'Europe/Berlin', 'Africa/Lagos', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney'].map((z) => `<option value="${z}">`).join('')}</datalist>
+<p class="ib-days">${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d, i) => `<label class="oc-check"><input type="checkbox" name="hours_days" value="${i}"${(shape.hours ? shape.hours.days.includes(i) : i >= 1 && i <= 5) ? ' checked' : ''}> ${d}</label>`).join(' ')}</p>
+<p><label>From <input type="time" name="hours_start" value="${esc((shape.hours && shape.hours.start) || '09:00')}"></label> <label>to <input type="time" name="hours_end" value="${esc((shape.hours && shape.hours.end) || '17:00')}"></label></p>
+</fieldset>
 <label>What Vibe should know <textarea name="ai_instructions" rows="6" maxlength="4000">${esc(shape.ai_instructions)}</textarea></label>
 <label>Pages Vibe may read (https, one per line) <textarea name="knowledge_urls" rows="3">${esc(shape.knowledge_urls.join('\n'))}</textarea></label>
 <label>Sites that may show it (one per line; empty: any site) <textarea name="allowed_origins" rows="2" placeholder="https://example.com">${esc(shape.allowed_origins.join('\n'))}</textarea></label>
@@ -242,7 +249,8 @@ ${saved.length ? `<ul class="oc-members">${saved.map((r) => `<li><b>/${esc(r.sho
         const a = await agentInbox(req, res); if (!a) return;
         const b = req.body || {};
         try {
-            await inboxes.update(a.inbox, a.actor.user, { name: b.name, greeting: b.greeting, color: b.color, ai_enabled: b.ai_enabled === '1', handoff: b.handoff === '1', ai_instructions: b.ai_instructions, knowledge_urls: b.knowledge_urls, allowed_origins: b.allowed_origins });
+            const hours = b.hours_on === '1' ? { tz: b.hours_tz, days: [].concat(b.hours_days || []), start: b.hours_start, end: b.hours_end } : null;
+            await inboxes.update(a.inbox, a.actor.user, { name: b.name, greeting: b.greeting, color: b.color, ai_enabled: b.ai_enabled === '1', handoff: b.handoff === '1', hours, ai_instructions: b.ai_instructions, knowledge_urls: b.knowledge_urls, allowed_origins: b.allowed_origins });
             res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
         } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not save')}`); }
     });

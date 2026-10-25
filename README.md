@@ -461,6 +461,9 @@ for people and for companies, with "direct live support with an agent", "fully m
   /api/chat/support/:cid/messages`). The account comes only from the request's credentials. A
   site's verified identity, when there is one, still decides the token. Export lists these conversations; deletion
   leaves them with the inbox's team, without the person.
+- **Business hours** (`server/inbox/hours.js`; settings, or `PATCH { hours: { tz, days, start, end } }`, null for
+  always): outside them the panel says when the team is back ("tomorrow at 9 AM (Los Angeles time)"), a handoff says
+  so, and Vibe tells visitors a person replies when the team is back. Notifications still go out.
 - **Verified visitors** (for a site with its own accounts): the owner turns them on in settings, which makes an
   identity secret (`POST /api/chat/inboxes/:id/identity { action: on | rotate | off }`) to keep on their server. For a
   signed-in visitor the site adds `data-user-id`, `data-user-name`, `data-user-email` and `data-user-hash` (the

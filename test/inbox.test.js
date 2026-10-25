@@ -64,7 +64,7 @@ t('an owner makes an inbox and gets the snippet; bad sites and pages are refused
     assert.strictEqual(r.body.embed.script, `<script src="${SITE}/widget.js" data-inbox="${inbox.id}" async></script>`);
     assert.deepStrictEqual((await agentsApi('GET', '', ann)).body.inboxes.map((i) => [i.id, i.role]), [[inbox.id, 'owner']]);
     const pub = (await widget('GET', '')).body.inbox;
-    assert.deepStrictEqual(Object.keys(pub).sort(), ['ai', 'color', 'greeting', 'id', 'name', 'people'], 'the widget learns no instructions or who the people are');
+    assert.deepStrictEqual(Object.keys(pub).sort(), ['ai', 'away', 'color', 'greeting', 'id', 'name', 'people'], 'the widget learns no instructions or who the people are');
     assert.strictEqual(pub.people, true);
 });
 
@@ -363,6 +363,27 @@ t('a visitor signed in to OpenVibe: their conversation is theirs, in their Messa
     // Bob is one of the inbox's people: he follows the inbox, never as the visitor.
     await intruder.next((m) => m.type === 'inbox_watching' && m.conversation === null);
     intruder.close();
+});
+
+t('business hours: outside them the panel says when the team is back, a handoff says so, and Vibe knows', async () => {
+    assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}`, ann, { hours: { tz: 'Mars/Olympus', days: [1], start: '09:00', end: '17:00' } })).status, 422);
+    assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}`, ann, { hours: { tz: 'UTC', days: [1], start: '17:00', end: '09:00' } })).status, 422, 'a start before an end');
+    const other = (new Date().getUTCDay() + 2) % 7;   // a day that is not today: closed now
+    assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}`, ann, { hours: { tz: 'UTC', days: [other], start: '09:00', end: '17:00' } })).status, 200);
+    const pub = (await widget('GET', '')).body.inbox;
+    assert.ok(/ at 9 AM \(UTC time\)$/.test(pub.away), pub.away);
+    assert.ok((await fetch(`${h.base}/embed/inbox/${inbox.id}`).then((x) => x.text())).includes('the team is back'));
+    reply = 'Let me get a person.';
+    turns.length = 0;
+    const v = (await widget('POST', '/visit', {})).body.token;
+    await widget('POST', '/messages', { token: v, message: 'Can someone call me?' });
+    await until(async () => turns.some((x) => x.workflow === 'chat.member.turn'), 'Vibe asked');
+    assert.ok(turns[0].input.messages[0].content.includes('they are away now'), 'Vibe knows the team is away');
+    await widget('POST', '/handoff', { token: v });
+    const msgs = (await widget('GET', `/messages?token=${v}`)).body.messages;
+    assert.ok(msgs.some((m) => m.author === 'system' && m.body.includes('is away right now') && m.body.includes('9 AM')));
+    await agentsApi('PATCH', `/${inbox.id}`, ann, { hours: null });
+    assert.strictEqual((await widget('GET', '')).body.inbox.away, null, 'no hours: always open');
 });
 
 t('the embed page and the loader: frame-ancestors follow the allowed sites', async () => {

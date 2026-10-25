@@ -17,7 +17,7 @@
   var stateEl = document.getElementById('em-state');
   var page = new URLSearchParams(location.search).get('page') || '';
   var token = null, conv = null, latest = 0, ws = null, delay = 1000, aiOn = root.getAttribute('data-ai') === '1', typingEl = null;
-  var people = root.getAttribute('data-people') !== '0', rateEl = null;
+  var people = root.getAttribute('data-people') !== '0', rateEl = null, away = null;
 
   // A person's reply may hold OpenVibe.Pics pictures (sent from the inbox): shown inline, only that host, at most four.
   var picsBase = root.getAttribute('data-pics') || 'https://openvibe.pics';
@@ -39,12 +39,13 @@
   var STATE = {
     bot: people ? 'Vibe answers right away. Ask for a person any time.' : 'Vibe, the assistant, answers right away.',
     waiting: 'Waiting for a person. You can leave; this conversation stays here.',
+    away: 'The team is away: a person replies when they are back. You can leave; this conversation stays here.',
     open: 'A person is here.',
     resolved: 'Resolved. Write again any time.',
   };
   function setStatus(s) {
     if (conv) conv.status = s;
-    stateEl.textContent = STATE[s] || stateEl.textContent;
+    stateEl.textContent = (s === 'waiting' && away ? 'The team is away: a person replies ' + away + '. You can leave; this conversation stays here.' : s === 'bot' && away ? 'Vibe answers now; the team is back ' + away + '.' : STATE[s]) || stateEl.textContent;
     personBtn.hidden = !(aiOn && people && conv && s === 'bot');
     if (s === 'resolved') askRating(); else if (rateEl) { rateEl.remove(); rateEl = null; }
   }
@@ -150,6 +151,7 @@
       token = x.d.token; store(function (s) { s.setItem(KEY, token); });
       aiOn = !!(x.d.inbox && x.d.inbox.ai);
       people = !(x.d.inbox && x.d.inbox.people === false);
+      away = (x.d.inbox && x.d.inbox.away) || null;
       if (x.d.inbox && x.d.inbox.color) toParent({ type: 'color', color: x.d.inbox.color });
       if (before && before !== token) Array.prototype.forEach.call(thread.querySelectorAll('[data-id], .em-rate'), function (n) { n.remove(); });
       if (acct && !x.d.account) { acct = null; store(function (s) { s.removeItem(ACCT); }); }   // a sign-in that expired
