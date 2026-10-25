@@ -7,8 +7,10 @@
  *
  *   GET  /embed/room/:slug       the room in a frame (public rooms only; frame-ancestors any site): its latest messages,
  *                                live over the chat socket (public/web/room-embed.js); anyone reads, people sign in to write
- *   GET  /embed/signin?ticket=   the sign-in window the frame opens: OpenVibe's sign-in, then the ticket is bound to the
- *                                person's session for two minutes
+ *   GET  /embed/signin#t=…       the sign-in window the frame opens: it keeps the ticket (in the address's fragment, so
+ *                                no server or log ever sees it) in its own session storage through OpenVibe's sign-in,
+ *                                then binds it with POST /embed/bind (the person's session, same site only)
+ *   POST /embed/bind             { ticket } → the ticket is bound to the signed-in person for two minutes
  *   POST /embed/ticket           { ticket } → { token } once the window bound it (the frame asks every second or two)
  *
  * Why a ticket: a frame on another site gets no openvibe.chat cookies (browsers block or partition them), and the
@@ -70,7 +72,7 @@ function embedHtml(room, members, msgs, { bubble }) {
 </html>`;
 }
 
-function mountRoomEmbedPages(router, { needUser, config }) {
+function mountRoomEmbedPages(router, { viewerOf, sameSite, config }) {
     const base = config.web.baseUrl;
     const ticketLimit = rateLimit({ windowMs: 60_000, max: 90, standardHeaders: true, legacyHeaders: false });
 
@@ -87,21 +89,42 @@ function mountRoomEmbedPages(router, { needUser, config }) {
     });
 
     router.get('/embed/signin', async (req, res) => {
-        const ticket = String(req.query.ticket || '');
-        if (!TICKET_RE.test(ticket)) return res.status(400).type('text').send('This sign-in link is not complete. Close this window and try again.');
-        const actor = await needUser(req, res); if (!actor) return;
-        sweep();
-        if (tickets.size > 10000) return res.status(503).type('text').send('Too many sign-ins at once. Try again in a minute.');
-        tickets.set(hash(ticket), { token: actor.token, at: Date.now() });
+        const actor = await viewerOf(req);
         const nonce = crypto.randomBytes(16).toString('base64');
-        res.set('Content-Security-Policy', `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; frame-ancestors 'none'`)
-            .set('Cache-Control', 'no-store').set('X-Robots-Tag', 'noindex').type('html').send(`<!DOCTYPE html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Signed in · OpenVibe Chat</title></head>
+        const signedIn = actor.kind === 'user';
+        res.set('Content-Security-Policy', `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'`)
+            .set('Cache-Control', 'no-store').set('X-Robots-Tag', 'noindex').set('Referrer-Policy', 'no-referrer').type('html').send(`<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Sign in · OpenVibe Chat</title></head>
 <body style="font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:90vh;margin:0;text-align:center;padding:16px">
-<div><p style="font-size:1.25rem;font-weight:700;margin:0 0 6px">You're signed in as ${esc(actor.user.display_name || actor.user.username)}.</p>
-<p style="margin:0;color:#5b6577">Go back to the chat; this window closes by itself.</p></div>
-<script nonce="${nonce}">setTimeout(function () { window.close(); }, 1200);</script>
+<div><p id="say" style="font-size:1.25rem;font-weight:700;margin:0 0 6px">${signedIn ? `Signing you in as ${esc(actor.user.display_name || actor.user.username)}…` : 'Taking you to OpenVibe sign-in…'}</p>
+<p style="margin:0;color:#5b6577">Go back to the chat afterwards; this window closes by itself.</p></div>
+<script nonce="${nonce}">(function () {
+  var say = document.getElementById('say'), KEY = 'ov-embed-ticket', t = null;
+  var m = /(?:^|&)t=([A-Za-z0-9_-]{43})(?:&|$)/.exec(location.hash.slice(1));
+  try { if (m) sessionStorage.setItem(KEY, m[1]); t = sessionStorage.getItem(KEY); } catch (e) { t = m && m[1]; }
+  if (m) history.replaceState(null, '', location.pathname);
+  if (!t) { say.textContent = 'This sign-in link is not complete. Close this window and try again from the chat.'; return; }
+  if (!${signedIn ? 'true' : 'false'}) { location.replace('/auth/login?next=' + encodeURIComponent('/embed/signin')); return; }
+  fetch('/embed/bind', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ticket: t }) })
+    .then(function (r) {
+      try { sessionStorage.removeItem(KEY); } catch (e) { /* gone */ }
+      if (!r.ok) { say.textContent = 'That did not work. Close this window and try again from the chat.'; return; }
+      say.textContent = 'You\u2019re signed in. Go back to the chat.';
+      setTimeout(function () { window.close(); }, 1200);
+    }, function () { say.textContent = 'You seem to be offline. Try again from the chat.'; });
+})();</script>
 </body></html>`);
+    });
+
+    router.post('/embed/bind', ticketLimit, sameSite, async (req, res) => {
+        const ticket = String((req.body && req.body.ticket) || '');
+        if (!TICKET_RE.test(ticket)) return res.status(400).json({ error: 'No such ticket', code: 'embed.ticket' });
+        const actor = await viewerOf(req);
+        if (actor.kind !== 'user') return res.status(401).json({ error: 'Sign in first', code: 'embed.sign_in' });
+        sweep();
+        if (tickets.size > 10000) return res.status(503).json({ error: 'Too many sign-ins at once. Try again in a minute.', code: 'embed.busy' });
+        tickets.set(hash(ticket), { token: actor.token, at: Date.now() });
+        res.set('Cache-Control', 'no-store').json({ ok: true });
     });
 
     router.post('/embed/ticket', ticketLimit, (req, res) => {

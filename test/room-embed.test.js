@@ -42,19 +42,21 @@ t('only a public room embeds, on any site, with its latest messages', async () =
     assert.strictEqual((await page('/embed/room/no-such-room')).status, 404);
 });
 
-t('signing in from the frame: a window binds the ticket, the frame collects the token once', async () => {
+t('signing in from the frame: the window keeps the ticket out of every address, binds it, the frame collects the token once', async () => {
     const tk = ticket();
     assert.deepStrictEqual(await collect(tk), { status: 202, body: { pending: true } });
-    const out = await page(`/embed/signin?ticket=${tk}`);
-    assert.strictEqual(out.status, 303);
-    assert.ok(out.headers.get('location').startsWith('/auth/login?next=%2Fembed%2Fsignin%3Fticket%3D'), 'sign in first, then back');
-    const ok = await page(`/embed/signin?ticket=${tk}`, ann);
-    assert.ok(ok.status === 200 && ok.text.includes('signed in as Ann') && /frame-ancestors 'none'/.test(ok.headers.get('content-security-policy')));
-    assert.strictEqual(ok.headers.get('cache-control'), 'no-store');
+    const anon = await page('/embed/signin');
+    assert.ok(anon.status === 200 && anon.text.includes("/auth/login?next=") && anon.text.includes('location.hash'), 'the window sends a stranger to sign in, keeping the ticket itself');
+    assert.ok(/frame-ancestors 'none'/.test(anon.headers.get('content-security-policy')) && anon.headers.get('cache-control') === 'no-store');
+    assert.ok((await page('/embed/signin', ann)).text.includes('Signing you in as Ann'));
+    const bind = (u, body, origin = SITE) => page('/embed/bind', u, { method: 'POST', headers: { 'content-type': 'application/json', origin }, body: JSON.stringify(body) });
+    assert.strictEqual((await bind(null, { ticket: tk })).status, 401, 'only a signed-in person binds');
+    assert.strictEqual((await bind(ann, { ticket: tk }, 'https://elsewhere.example')).status, 403, 'and only from openvibe.chat');
+    assert.strictEqual((await bind(ann, { ticket: 'short' })).status, 400);
+    assert.strictEqual((await bind(ann, { ticket: tk })).status, 200);
     assert.deepStrictEqual(await collect(tk), { status: 200, body: { token: ann.token } });
     assert.deepStrictEqual(await collect(tk), { status: 202, body: { pending: true } }, 'once');
     assert.strictEqual((await collect('short')).status, 400);
-    assert.strictEqual((await page('/embed/signin?ticket=bad', ann)).status, 400);
 });
 
 t('with the token the socket joins as them: a newcomer joins, posts, and everyone reading sees it', async () => {
@@ -63,7 +65,7 @@ t('with the token the socket joins as them: a newcomer joins, posts, and everyon
     const r = await reader.next((m) => m.type === 'room_joined');
     assert.strictEqual(r.can.post, false, 'anyone reads, nobody anonymous writes');
     const tk = ticket();
-    await page(`/embed/signin?ticket=${tk}`, bob);
+    await page('/embed/bind', bob, { method: 'POST', headers: { 'content-type': 'application/json', origin: SITE }, body: JSON.stringify({ ticket: tk }) });
     const token = (await collect(tk)).body.token;
     const writer = await h.ws({});
     writer.sendJson({ type: 'join_room', room: 'pixel-fans', token });

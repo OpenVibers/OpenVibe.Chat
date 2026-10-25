@@ -1,6 +1,6 @@
 /* A chat room in a frame on any website (server/web/room-embed-pages.js /embed/room/:slug). Anyone reads; the room's
    messages arrive over the chat socket (join_room). To write, a person signs in through a window on openvibe.chat:
-   this frame makes a random ticket, opens /embed/signin?ticket=…, and asks /embed/ticket until the window has bound it
+   this frame makes a random ticket, opens /embed/signin#t=…, and asks /embed/ticket until the window has bound it
    to their session; the token it gets back is kept in this frame's own storage (partitioned by the site embedding
    it) and sent with join_room. Everything a person wrote is set with textContent; links are made with DOM nodes. */
 (function () {
@@ -96,7 +96,8 @@
   }
   signinBtn.addEventListener('click', function () {
     var ticket = newTicket();
-    var w = window.open('/embed/signin?ticket=' + encodeURIComponent(ticket), 'ovchat-signin', 'width=480,height=680');
+    // The ticket rides in the fragment: the window keeps it in its own storage, and no server or log sees it.
+    var w = window.open('/embed/signin#t=' + ticket, 'ovchat-signin', 'width=480,height=680');
     if (!w) { error('Allow pop-ups for this site to sign in, or open the room on OpenVibe.'); return; }
     error('');
     var started = Date.now();

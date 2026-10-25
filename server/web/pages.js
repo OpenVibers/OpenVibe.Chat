@@ -900,7 +900,8 @@ ${attachList}`,
     // ── Servers (server/rooms/servers.js): text and voice channels, roles, invites ──
     require('./vibe-pages').mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit, notice });
     require('./inbox-pages').mountInboxPages(router, { page, viewerOf, needUser, sameSite, formLimit, notice, config });
-    require('./room-embed-pages').mountRoomEmbedPages(router, { needUser, config });
+    require('./room-embed-pages').mountRoomEmbedPages(router, { viewerOf, sameSite, config });
+    require('./developer-pages').mountDeveloperPages(router, { page, config });
     require('./feed-pages').mountFeedPages(router, { page, needUser, sameSite, formLimit, notice, config });
     require('./server-pages').mountServerPages(router, { page, needUser, viewerOf, sameSite, formLimit, notice, roomMessage, callPanel, applyRoomChange, pictureComposer, config });
 
