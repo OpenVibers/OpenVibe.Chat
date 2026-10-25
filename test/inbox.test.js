@@ -191,6 +191,31 @@ t('a visitor waiting for a person tells the inbox\'s people, unless one follows 
     } finally { notify._setPush(null); }
 });
 
+t('verified visitors: a signed identity names the visitor and follows them to another device; a wrong hash stays anonymous', async () => {
+    const crypto = require('crypto');
+    assert.strictEqual((await agentsApi('POST', `/${inbox.id}/identity`, bob, { action: 'on' })).status, 403, 'the owner\'s call');
+    const secret = (await agentsApi('POST', `/${inbox.id}/identity`, ann, { action: 'on' })).body.identity_secret;
+    assert.ok(/^[0-9a-f]{64}$/.test(secret));
+    const user = { id: 'cust-42', name: 'Dana Lee', email: 'dana@shop.example', hash: crypto.createHmac('sha256', secret).update('cust-42').digest('hex') };
+    const a = await widget('POST', '/visit', { user });
+    assert.strictEqual(a.body.verified, true);
+    const posted = await widget('POST', '/messages', { token: a.body.token, message: 'Order 42 is late', user });
+    assert.deepStrictEqual([posted.body.conversation.verified, posted.body.conversation.visitor_name, posted.body.conversation.visitor_email], [true, 'Dana Lee', 'dana@shop.example']);
+    const b = await widget('POST', '/visit', { token: 'y'.repeat(32), user });
+    assert.strictEqual(b.body.token, a.body.token, 'another device: the same person, the same conversation');
+    assert.strictEqual(b.body.conversation.id, posted.body.conversation.id);
+    const forged = await widget('POST', '/visit', { user: { ...user, hash: '0'.repeat(64) } });
+    assert.ok(forged.body.verified === false && forged.body.token !== a.body.token, 'a wrong hash is just an anonymous visitor');
+    const viewPage = await fetch(`${h.base}/inbox/${inbox.id}?c=${posted.body.conversation.id}`, { headers: { cookie: `ov_token=${bob.token}` } }).then((r) => r.text());
+    assert.ok(viewPage.includes('Verified by your site') && viewPage.includes('dana@shop.example'));
+    const settings = await fetch(`${h.base}/inbox/${inbox.id}/settings`, { headers: { cookie: `ov_token=${ann.token}` } }).then((r) => r.text());
+    assert.ok(settings.includes(secret) && settings.includes('hash_hmac'), 'the owner sees the secret and how to sign');
+    const agentSettings = await fetch(`${h.base}/inbox/${inbox.id}/settings`, { headers: { cookie: `ov_token=${bob.token}` } }).then((r) => r.text());
+    assert.ok(!agentSettings.includes(secret), 'an agent never sees it');
+    await agentsApi('POST', `/${inbox.id}/identity`, ann, { action: 'off' });
+    assert.strictEqual((await widget('POST', '/visit', { user })).body.verified, false, 'off: nobody is verified');
+});
+
 t('the embed page and the loader: frame-ancestors follow the allowed sites', async () => {
     let r = await fetch(`${h.base}/embed/inbox/${inbox.id}`);
     assert.strictEqual(r.status, 200);

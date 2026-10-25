@@ -3,7 +3,9 @@
  *   <script src="https://openvibe.chat/widget.js" data-room="<slug>" async></script>       a public chat room
  *   data-position="left" puts the bubble on the left; data-color="#ff7a1a" colours it before the inbox's own colour loads;
  *   data-open="1" opens the panel at once. data-target="#chat" (a room) puts the room in that element instead of a
- *   bubble, data-height="480" tall.
+ *   bubble, data-height="480" tall. A site that knows its visitor (an inbox with verified visitors) adds data-user-id,
+ *   data-user-name, data-user-email and data-user-hash (HMAC-SHA256 of the id with the inbox's identity secret, made on
+ *   the site's server), or calls OpenVibeChat.identify({ id, name, email, hash }) once they sign in.
  * It draws a bubble in a shadow root (the site's CSS cannot reach it, it cannot reach the site's) and, on the first open,
  * an iframe of openvibe.chat/embed/inbox/<id>: the conversation lives there, on openvibe.chat's own origin, so the site
  * never sees the visitor's token and openvibe.chat never sees the site's cookies. The page may drive it:
@@ -62,6 +64,10 @@
   var bubble = root.querySelector('.b'), panel = root.querySelector('.p'), dot = root.querySelector('.d');
   host.style.setProperty('--c', color);   // custom properties cross into the shadow root (all:initial leaves them)
   var frame = null, open = false;
+  var identity = null;
+  function identityOf(u) { return u && u.id && u.hash ? { id: String(u.id), name: u.name || undefined, email: u.email || undefined, hash: String(u.hash) } : null; }
+  if (!isRoom) identity = identityOf({ id: me.getAttribute('data-user-id'), name: me.getAttribute('data-user-name'), email: me.getAttribute('data-user-email'), hash: me.getAttribute('data-user-hash') });
+  function sendIdentity() { if (identity && frame && frame.contentWindow) frame.contentWindow.postMessage({ ov: 'chat', type: 'identify', user: identity }, base); }
 
   function emit(name, detail) { try { window.dispatchEvent(new CustomEvent('openvibechat:' + name, { detail: detail })); } catch (e) { /* old browsers */ } }
   function ensureFrame() {
@@ -70,7 +76,8 @@
     frame.title = 'Chat';
     frame.allow = 'clipboard-write';
     frame.src = isRoom ? base + '/embed/room/' + encodeURIComponent(room) + '?bubble=1'
-      : base + '/embed/inbox/' + inbox + '?page=' + encodeURIComponent(location.href.slice(0, 500));
+      : base + '/embed/inbox/' + inbox + '?page=' + encodeURIComponent(location.href.slice(0, 500)) + (identity ? '&id=1' : '');
+    frame.addEventListener('load', sendIdentity);
     panel.appendChild(frame);
   }
   function setOpen(v) {
@@ -92,7 +99,10 @@
   });
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && open) setOpen(false); });
 
-  window.OpenVibeChat = { open: function () { setOpen(true); }, close: function () { setOpen(false); }, toggle: function () { setOpen(!open); } };
+  window.OpenVibeChat = {
+    open: function () { setOpen(true); }, close: function () { setOpen(false); }, toggle: function () { setOpen(!open); },
+    identify: function (u) { identity = identityOf(u); sendIdentity(); },
+  };
   function mount() { document.body.appendChild(host); if (me.getAttribute('data-open') === '1') setOpen(true); }
   if (document.body) mount(); else document.addEventListener('DOMContentLoaded', mount);
 })();

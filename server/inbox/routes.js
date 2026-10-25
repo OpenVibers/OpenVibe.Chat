@@ -5,9 +5,10 @@
  * /api/chat/widget/inbox/:id — the visitor's side, what openvibe.chat/embed/inbox/:id (the widget's panel) calls; no
  * sign-in, the visitor's token in the body (or X-Visitor-Token):
  *   GET    /                 { inbox }: name, greeting, color, whether Vibe answers
- *   POST   /visit            { token? } → { token, inbox, conversation, messages }  (a new token when theirs is missing)
+ *   POST   /visit            { token?, user? } → { token, verified, inbox, conversation, messages }  (a new token when theirs is
+ *                             missing; user = { id, name?, email?, hash } signed by the site: a verified person's own token)
  *   GET    /messages         ?token=&after= → { conversation, messages }
- *   POST   /messages         { token, message, page_url?, name? } → 201 { conversation, message }
+ *   POST   /messages         { token, message, page_url?, name?, user? } → 201 { conversation, message }
  *   POST   /handoff          { token } → { conversation }  ("Talk to a person"; 409 when only Vibe answers)
  *   POST   /rating           { token, rating: 1 | -1, comment?, conversation? } → { conversation }  (else their latest resolved)
  *
@@ -16,6 +17,7 @@
  *   POST   /                 { name, greeting?, color?, ai_enabled?, ai_instructions?, knowledge_urls?, allowed_origins? } → 201
  *   GET    /:id              { inbox, members, embed }    PATCH /:id (owner)    DELETE /:id (owner)
  *   POST   /:id/members      { username } (owner)         DELETE /:id/members/:userId (owner)
+ *   POST   /:id/identity     { action: on | rotate | off } (owner) → { identity_secret }: verified visitors
  *   GET    /:id/conversations                  ?status=active|bot|waiting|open|resolved
  *   GET    /:id/conversations/:cid/messages    ?after=
  *   POST   /:id/conversations/:cid/messages    { message } → 201: a person's answer (the conversation becomes open)
@@ -61,7 +63,7 @@ widget.get('/', visitLimit, async (req, res) => {
 });
 widget.post('/visit', visitLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
-    try { noStore(res).json({ inbox: inboxes.publicConfig(inbox), ...(await inboxes.visit(inbox, tokenOf(req))) }); } catch (err) { send(res, err); }
+    try { noStore(res).json({ inbox: inboxes.publicConfig(inbox), ...(await inboxes.visit(inbox, tokenOf(req), req.body && req.body.user)) }); } catch (err) { send(res, err); }
 });
 widget.get('/messages', visitLimit, async (req, res) => {
     const inbox = await inboxOr404(req, res); if (!inbox) return;
@@ -125,6 +127,10 @@ agents.get('/:id', requireAuth, async (req, res) => {
 agents.patch('/:id', requireAuth, manageLimit, async (req, res) => {
     const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
     try { res.json({ inbox: inboxes.shape(await inboxes.update(inbox, req.user, req.body || {})) }); } catch (err) { send(res, err); }
+});
+agents.post('/:id/identity', requireAuth, manageLimit, async (req, res) => {
+    const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;
+    try { noStore(res).json(await inboxes.setIdentity(inbox, req.user, String((req.body && req.body.action) || ''))); } catch (err) { send(res, err); }
 });
 agents.delete('/:id', requireAuth, manageLimit, async (req, res) => {
     const inbox = await agentInbox(req, res, { owner: true }); if (!inbox) return;

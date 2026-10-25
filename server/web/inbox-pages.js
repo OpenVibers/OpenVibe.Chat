@@ -123,7 +123,7 @@ ${list}
         const msgs = current ? await inboxes.messages(current) : [];
         if (current) await inboxes.markRead(inbox, current);
         const item = (c) => `<li><a class="vb-chat ib-conv" href="/inbox/${esc(inbox.id)}?c=${esc(c.id)}&amp;f=${filter}"${current && c.id === current.id ? ' aria-current="page"' : ''} data-conv="${esc(c.id)}">
-<span class="ib-row"><b>${esc(c.visitor_name || 'Visitor')}</b>${statusChip(c.status)}${c.rating ? `<span class="ib-rate" title="${esc(c.rating_comment || '')}">${c.rating > 0 ? '👍' : '👎'}</span>` : ''}<time>${esc(ago(c.last_message_at))}</time></span>
+<span class="ib-row"><b>${esc(c.visitor_name || 'Visitor')}</b>${c.verified ? '<span class="ib-ok" title="Verified by your site">✓</span>' : ''}${statusChip(c.status)}${c.rating ? `<span class="ib-rate" title="${esc(c.rating_comment || '')}">${c.rating > 0 ? '👍' : '👎'}</span>` : ''}<time>${esc(ago(c.last_message_at))}</time></span>
 <span class="ib-prev">${esc(c.preview || '')}</span></a></li>`;
         const turn = (m) => {
             if (m.author === 'system') return `<li class="ib-sys" data-id="${m.id}">${esc(m.body)}</li>`;
@@ -145,9 +145,9 @@ ${Number(inbox.ai_enabled) && current.status !== 'bot' && current.status !== 're
 <div class="vb-scrim" data-vb-close hidden></div>
 <section class="vb-main" aria-label="Conversation">
 <header class="vb-head"><button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show conversations">&#9776;</button>
-<h1 class="vb-title">${current ? `${esc(current.visitor_name || 'Visitor')} ${statusChip(current.status)}${current.rating ? ` <span class="ib-rate" title="${esc(current.rating_comment || 'The visitor\'s rating')}">${Number(current.rating) > 0 ? '👍' : '👎'}</span>` : ''}` : esc(inbox.name)}</h1>${actions}</header>
+<h1 class="vb-title">${current ? `${esc(current.visitor_name || 'Visitor')}${Number(current.verified) ? ' <span class="ib-ok" title="Verified by your site">✓</span>' : ''} ${statusChip(current.status)}${current.rating ? ` <span class="ib-rate" title="${esc(current.rating_comment || 'The visitor\'s rating')}">${Number(current.rating) > 0 ? '👍' : '👎'}</span>` : ''}` : esc(inbox.name)}</h1>${actions}</header>
 <div class="vb-scroll" id="vb-scroll">
-${current ? `${current.rating_comment ? `<p class="ib-page">Rated ${Number(current.rating) > 0 ? '👍' : '👎'}: “${esc(current.rating_comment)}”</p>` : ''}${current.page_url ? `<p class="ib-page">From <a href="${esc(current.page_url)}" rel="noopener nofollow" target="_blank">${esc(current.page_url)}</a></p>` : ''}<ol class="vb-thread" id="vb-thread">${msgs.map(turn).join('')}</ol>`
+${current ? `${Number(current.verified) ? `<p class="ib-page">Verified by your site${current.visitor_email ? ` · <a href="mailto:${esc(current.visitor_email)}">${esc(current.visitor_email)}</a>` : ''} · id ${esc(current.external_id || '')}</p>` : ''}${current.rating_comment ? `<p class="ib-page">Rated ${Number(current.rating) > 0 ? '👍' : '👎'}: “${esc(current.rating_comment)}”</p>` : ''}${current.page_url ? `<p class="ib-page">From <a href="${esc(current.page_url)}" rel="noopener nofollow" target="_blank">${esc(current.page_url)}</a></p>` : ''}<ol class="vb-thread" id="vb-thread">${msgs.map(turn).join('')}</ol>`
         : `<div class="vb-hello"><h1>${list.length ? 'Pick a conversation' : 'No conversations yet'}</h1><p class="vb-sub">${list.length ? 'Waiting ones come first: those visitors asked for a person.' : 'Paste the snippet from Settings into your site. Visitors write; Vibe answers; you take over when it matters.'}</p></div>`}
 </div>
 ${current ? `<div class="vb-dock"><form class="vb-composer" id="vb-composer" method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}">
@@ -190,7 +190,21 @@ ${req.query.made ? notice('ok', 'Your inbox is ready. Paste the snippet into you
 <p>Paste this before <code>&lt;/body&gt;</code> on every page that should show the chat bubble:</p>
 <pre class="ib-snippet"><code>${esc(embed.script)}</code></pre>
 <p class="oc-muted">Your page can open it with <code>OpenVibeChat.open()</code>. Try it: <a href="${esc(embed.panel)}" target="_blank" rel="noopener">open the chat panel</a>.</p>
-${owner ? `<h2>How it looks and what Vibe knows</h2>
+${owner ? `<h2>Verified visitors</h2>
+${shape.verified_visitors ? `<p>On. Your site signs who its signed-in visitor is, and Chat trusts the name and email that come with it; their conversation follows them to every device. Keep this secret on your server only:</p>
+<pre class="ib-snippet"><code>${esc(inbox.identity_secret)}</code></pre>
+<p>For a signed-in visitor, add <code>data-user-id</code>, <code>data-user-name</code>, <code>data-user-email</code> and <code>data-user-hash</code> to the tag (or call <code>OpenVibeChat.identify({ id, name, email, hash })</code>), where the hash is the HMAC-SHA256 of the id with the secret, in hex:</p>
+<pre class="ib-snippet"><code>${esc(`// Node
+crypto.createHmac('sha256', SECRET).update(String(user.id)).digest('hex')
+# Python
+hmac.new(SECRET.encode(), str(user.id).encode(), hashlib.sha256).hexdigest()
+// PHP
+hash_hmac('sha256', (string) $user->id, $secret)`)}</code></pre>
+<form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/identity"><button name="action" value="rotate">Make a new secret</button></form>
+<form class="oc-inline" method="post" action="/inbox/${esc(inbox.id)}/identity"><button class="oc-link" name="action" value="off">Turn it off</button></form>`
+        : `<p class="oc-muted">Off: every visitor is anonymous to you unless they give a name. When your site has its own accounts, turn this on and your server signs who each visitor is; you see their verified name and email, and they find their conversation on any device.</p>
+<form method="post" action="/inbox/${esc(inbox.id)}/identity"><button name="action" value="on">Turn on verified visitors</button></form>`}
+<h2>How it looks and what Vibe knows</h2>
 <form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/settings">
 <label>Name <input name="name" required minlength="2" maxlength="60" value="${esc(shape.name)}"></label>
 <label>Greeting <input name="greeting" maxlength="300" value="${esc(shape.greeting)}"></label>
@@ -214,6 +228,11 @@ ${owner ? `<form class="oc-form" method="post" action="/inbox/${esc(inbox.id)}/m
             await inboxes.update(a.inbox, a.actor.user, { name: b.name, greeting: b.greeting, color: b.color, ai_enabled: b.ai_enabled === '1', handoff: b.handoff === '1', ai_instructions: b.ai_instructions, knowledge_urls: b.knowledge_urls, allowed_origins: b.allowed_origins });
             res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`);
         } catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not save')}`); }
+    });
+    router.post('/inbox/:id/identity', formLimit, sameSite, async (req, res) => {
+        const a = await agentInbox(req, res); if (!a) return;
+        try { await inboxes.setIdentity(a.inbox, a.actor.user, String((req.body && req.body.action) || '')); res.redirect(303, `/inbox/${a.inbox.id}/settings?saved=1`); }
+        catch (err) { res.redirect(303, `/inbox/${a.inbox.id}/settings?error=${encodeURIComponent(err.message || 'That did not work')}`); }
     });
     router.post('/inbox/:id/members', formLimit, sameSite, async (req, res) => {
         const a = await agentInbox(req, res); if (!a) return;

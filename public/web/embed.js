@@ -116,21 +116,37 @@
   }
 
   function post(path, body) {
-    return fetch(api + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ token: token }, body || {})) })
+    return fetch(api + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ token: token, user: identity || undefined }, body || {})) })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: {} }; }); });
   }
 
-  post('/visit', { token: store(function (s) { return s.getItem(KEY); }) }).then(function (x) {
-    if (!x.ok) { errorLine((x.d && x.d.error) || 'This chat is not available right now.'); return; }
-    token = x.d.token; store(function (s) { s.setItem(KEY, token); });
-    aiOn = !!(x.d.inbox && x.d.inbox.ai);
-    people = !(x.d.inbox && x.d.inbox.people === false);
-    if (x.d.inbox && x.d.inbox.color) toParent({ type: 'color', color: x.d.inbox.color });
-    conv = x.d.conversation;
-    (x.d.messages || []).forEach(render);
-    if (conv) setStatus(conv.status);
-    connect();
-  }).catch(function () { errorLine('You seem to be offline.'); });
+  // A site that knows its visitor passes a signed identity (widget.js data-user-*, OpenVibeChat.identify()); with ?id=1
+  // the frame waits for it (three seconds at most) before its first visit, and a later one starts the visit again: a
+  // verified person's token is their own, the same on every device, so their conversation follows them.
+  var identity = null, started = false, wantId = new URLSearchParams(location.search).get('id') === '1';
+  function begin() {
+    started = true;
+    var before = token;
+    post('/visit', { token: store(function (s) { return s.getItem(KEY); }) }).then(function (x) {
+      if (!x.ok) { errorLine((x.d && x.d.error) || 'This chat is not available right now.'); return; }
+      token = x.d.token; store(function (s) { s.setItem(KEY, token); });
+      aiOn = !!(x.d.inbox && x.d.inbox.ai);
+      people = !(x.d.inbox && x.d.inbox.people === false);
+      if (x.d.inbox && x.d.inbox.color) toParent({ type: 'color', color: x.d.inbox.color });
+      if (before && before !== token) Array.prototype.forEach.call(thread.querySelectorAll('[data-id], .em-rate'), function (n) { n.remove(); });
+      conv = x.d.conversation;
+      (x.d.messages || []).forEach(render);
+      if (conv) setStatus(conv.status);
+      if (!ws) connect(); else watch();
+    }).catch(function () { errorLine('You seem to be offline.'); });
+  }
+  window.addEventListener('message', function (e) {
+    if (e.source !== window.parent || !e.data || e.data.ov !== 'chat' || e.data.type !== 'identify') return;
+    var u = e.data.user;
+    identity = u && typeof u === 'object' && u.id && u.hash ? { id: String(u.id), name: u.name ? String(u.name) : undefined, email: u.email ? String(u.email) : undefined, hash: String(u.hash) } : null;
+    if (started || wantId) begin();
+  });
+  if (wantId) setTimeout(function () { if (!started) begin(); }, 3000); else begin();
 
   function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 140) + 'px'; }
   input.addEventListener('input', grow);
