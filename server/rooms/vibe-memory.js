@@ -13,6 +13,8 @@
  *   isOn(user) / setOn(user, on)
  *   forPrompt(user)                    → the notes as "[id] text" lines for Vibe's instructions: '' when there are none,
  *                                        null when the memory is off
+ *   fromRequest(text)                  → the note in a plain "remember that …" message, else null (ai-members.js keeps
+ *                                        it when the model only promised to remember)
  */
 const db = require('../db/database');
 
@@ -66,9 +68,24 @@ async function clear(user) {
     return (await db.run('DELETE FROM vibe_memory WHERE user_id = ?', [user.id])).changes;
 }
 
+// "Remember that I am vegetarian." / "Don't forget my partner is Sam." → the rest, when it is about them (I, my, we…).
+// Not a question, a reminder ("remember to call mum") or a recollection ("remember when…"); two sentences at most.
+const REQUEST = /^\s*(?:please\s+|(?:hey\s+)?vibe,?\s+)?(?:remember|don'?t forget)\s*[:,-]?\s+(.{3,290}?)\s*[.!]*\s*$/i;
+const NOT_A_FACT = /^(?:that\s+)?(?:to|when|what|how|why|where|who|if)\b|^(?:the|that)\s+(?:time|day)\b/i;
+const ABOUT_THEM = /\b(i|i'm|i've|i'd|my|me|mine|we|we're|our|us)\b/i;
+function fromRequest(text) {
+    const flat = cleanText(text);
+    if (!flat || flat.endsWith('?') || (flat.match(/[.!?](\s|$)/g) || []).length > 2) return null;
+    const m = REQUEST.exec(flat);
+    if (!m || NOT_A_FACT.test(m[1])) return null;
+    const note = m[1].replace(/^that\s+/i, '').trim();
+    if (!note || !ABOUT_THEM.test(note)) return null;
+    return note[0].toUpperCase() + note.slice(1);
+}
+
 async function forPrompt(user) {
     if (!user || !(await isOn(user))) return null;
     return (await list(user)).map((n) => `[${n.id}] ${n.text}`).join('\n');
 }
 
-module.exports = { MAX_NOTES, TEXT_MAX, isOn, setOn, list, add, remove, clear, forPrompt };
+module.exports = { MAX_NOTES, TEXT_MAX, isOn, setOn, list, add, remove, clear, forPrompt, fromRequest };

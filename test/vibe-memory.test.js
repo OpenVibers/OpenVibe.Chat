@@ -108,7 +108,7 @@ t('in a chat Vibe saves a note when asked; the next chat\'s instructions carry i
     await vibeApi('POST', '', ann, { message: 'What should I name my cat?' });
     await answered(2);
     const sys = lastSystem();
-    assert.ok(sys.includes('- Memory: remember keeps a short note about them'), sys);
+    assert.ok(sys.includes('- Memory: when they ask you to remember something') && sys.includes('Never say you will remember something without calling remember'), sys);
     assert.ok(sys.includes(`[${notes[0].id}] Ann has a dog called Pixel`) && sys.includes(`[${notes[1].id}] Uses kilometres`), 'every note, with its id');
     assert.ok(lastTools().includes('remember') && lastTools().includes('forget'));
 
@@ -124,6 +124,7 @@ t('with the memory off Vibe neither reads nor saves; on again, it reads them', a
     await vibeApi('POST', '', ann, { message: 'Hello again' });
     await answered(4);
     assert.ok(!lastSystem().includes('Uses kilometres') && !lastSystem().includes('- Memory:'), 'nothing read');
+    assert.ok(lastSystem().includes('- Their memory is off: you keep no notes about them.'), 'and Vibe can say so');
     assert.ok(!lastTools().includes('remember'), 'nothing saved');
     assert.match((await memory.add(userOf(ann), 'Vibe tries anyway')).error, /off/);
     assert.ok((await memory.add(userOf(ann), 'Written by Ann herself', { source: 'you' })).note, 'their own notes still go in');
@@ -183,6 +184,22 @@ t('the page: the notes with Delete, add, switch, forget everything; signed out a
     assert.match((await web('GET', '/vibe/memory', ann)).text, /Nothing yet/);
     assert.match((await web('GET', '/vibe', ann)).text, /<a href="\/vibe\/memory" title="What Vibe remembers about you/, 'the rail links it from Vibe');
     assert.ok(!(await web('GET', '/vibe', null)).text.includes('href="/vibe/memory"'), 'signed out: no Memory link');
+});
+
+t('a plain "remember that …" is kept even when the model only promised it; a question, a reminder or a recollection is not', async () => {
+    const pick = (t) => memory.fromRequest(t);
+    assert.deepStrictEqual(['Please remember that my favourite colour is teal.', 'Don\'t forget I am allergic to peanuts.', 'Vibe, remember my birthday is May 3.'].map(pick),
+        ['My favourite colour is teal', 'I am allergic to peanuts', 'My birthday is May 3']);
+    assert.deepStrictEqual(['Remember to call mum tomorrow', 'Do you remember my name?', 'Remember when we met?', 'remember this', 'Don\'t forget the milk', 'Remember the time I asked about tacos', 'I remember that place.'].map(pick),
+        [null, null, null, null, null, null, null]);
+    script = [() => say('Sure, I will remember that.')];
+    await vibeApi('POST', '', ann, { message: 'Please remember that I live in Lyon.' });
+    await answered(7);
+    assert.deepStrictEqual((await memory.list(userOf(ann))).map((n) => [n.text, n.source]), [['I live in Lyon', 'vibe']], 'kept although no remember call was made');
+    await vibeApi('POST', '', ann, { message: 'Remember to call my mum tomorrow' });
+    await answered(8);
+    assert.strictEqual((await memory.list(userOf(ann))).length, 1, 'a reminder is not a note');
+    await memory.clear(userOf(ann));
 });
 
 t('the account export carries the notes; deletion takes them', async () => {

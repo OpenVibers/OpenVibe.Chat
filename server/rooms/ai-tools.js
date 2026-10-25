@@ -19,6 +19,8 @@
  *   queue_status      in a workspace room: what is queued, running and recently done
  *   remember / forget Vibe in a person's own chat with it, while their memory is on (server/rooms/vibe-memory.js):
  *                     keep a short note across their chats, or delete one by its id
+ *   set_up_agent      Vibe in a person's own chat: one of their OpenVibe Agents for recurring work, daily or weekly, once
+ *                     they agreed (server/rooms/vibe-agents.js); my_agents lists the ones they have
  *
  *   definitions(member, room, { memory })  → the OpenAI-style tool list for this member
  *   run(name, args, ctx)         → the result as a string (JSON, at most RESULT_MAX characters), never throws
@@ -57,18 +59,30 @@ const REMEMBER = fn('remember', 'Keep a short note about this person for all you
     { text: { type: 'string', description: 'The note, one short sentence about them, up to 300 characters' } }, ['text']);
 const FORGET = fn('forget', 'Delete one of your notes about this person, by the [id] shown with it, when they ask you to forget it or it is no longer true.',
     { id: { type: 'integer', minimum: 1 } }, ['id']);
+const SET_UP_AGENT = fn('set_up_agent', 'Set up recurring work for this person as one of their OpenVibe Agents: it runs by itself daily or weekly on their own free allowance, and keeps every result on its page, where they can run it now, pause, change or delete it. Use it only after they agreed to its name, what it does and when it runs. Times are UTC: when you do not know their time zone, ask for it (or their city) and convert.',
+    {
+        name: { type: 'string', description: 'A short name, up to 60 characters (Remote jobs near me)' },
+        instructions: { type: 'string', description: 'What it does each run, as standing instructions to the agent: what to look for, where, what to leave out, how to report' },
+        schedule: { type: 'string', enum: ['daily', 'weekly'] },
+        time_utc: { type: 'string', description: 'When it runs, HH:MM in UTC' },
+        weekday: { type: 'integer', minimum: 0, maximum: 6, description: 'For weekly: 0 Sunday to 6 Saturday' },
+    }, ['name', 'instructions', 'schedule', 'time_utc']);
+const MY_AGENTS = fn('my_agents', 'The OpenVibe Agents this person has: each one\'s name, when it runs, whether it is paused, its next run and its page.');
 const QUEUE_STATUS = fn('queue_status', 'What is on this room\'s work queue: what is waiting, being worked on, and recently done or stuck, with who asked.');
 
 const isVibe = (member) => !!member && member.handle === 'vibe';
 const isWorkspace = (room) => !!room && Number(room.workspace) === 1;
-// A person's own Vibe chat (rooms.assistant = 1) with their memory on: the notes are theirs and nobody else reads them.
-const hasMemory = (member, room, memory) => !!memory && isVibe(member) && !!room && Number(room.assistant) === 1;
+// A person's own Vibe chat (rooms.assistant = 1): only they write in it, so tools that act as them belong there alone.
+const ownChat = (member, room) => isVibe(member) && !!room && Number(room.assistant) === 1;
+// ...and with their memory on: the notes are theirs and nobody else reads them.
+const hasMemory = (member, room, memory) => !!memory && ownChat(member, room);
 const definitions = (member, room = null, { memory = false } = {}) => [
     ...BASE,
     ...(member && member.link_service === 'food' && member.link_resource ? [PANTRY] : []),
     ...(isVibe(member) ? [WEB] : []),
     ...(isWorkspace(room) ? [QUEUE, QUEUE_STATUS] : []),
     ...(hasMemory(member, room, memory) ? [REMEMBER, FORGET] : []),
+    ...(ownChat(member, room) ? [SET_UP_AGENT, MY_AGENTS] : []),
 ];
 
 const clip = (o) => { const s = typeof o === 'string' ? o : JSON.stringify(o); return s.length > RESULT_MAX ? `${s.slice(0, RESULT_MAX - 1)}…` : s; };
@@ -171,14 +185,23 @@ async function forget(args, ctx) {
     return (await require('./vibe-memory').remove(ctx.user, args.id)) ? { forgotten: Number(args.id) } : { error: 'there is no note with that id' };
 }
 
-const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus, remember, forget };
+const subjectOf = (ctx) => (ctx.user && ctx.user.subject_id) || ctx.subject || null;
+async function setUpAgent(args, ctx) {
+    return await require('./vibe-agents').create(subjectOf(ctx), args, { fetchImpl: ctx.fetchImpl });
+}
+async function myAgents(_args, ctx) {
+    return await require('./vibe-agents').list(subjectOf(ctx), { fetchImpl: ctx.fetchImpl });
+}
+
+const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus, remember, forget, set_up_agent: setUpAgent, my_agents: myAgents };
 
 /** Runs one tool call. `raw` is the model's JSON argument string. Unknown tools and bad JSON come back as errors. */
 async function run(name, raw, ctx = {}) {
     const runner = RUNNERS[name];
     if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food')) || (name === 'web_search' && !isVibe(ctx.member))
         || ((name === 'queue_task' || name === 'queue_status') && !isWorkspace(ctx.room))
-        || ((name === 'remember' || name === 'forget') && !(hasMemory(ctx.member, ctx.room, ctx.memory) && ctx.user))) return clip({ error: `no tool called ${String(name).slice(0, 64)}` });
+        || ((name === 'remember' || name === 'forget') && !(hasMemory(ctx.member, ctx.room, ctx.memory) && ctx.user))
+        || ((name === 'set_up_agent' || name === 'my_agents') && !(ownChat(ctx.member, ctx.room) && ctx.user))) return clip({ error: `no tool called ${String(name).slice(0, 64)}` });
     let args = {};
     if (raw) { try { args = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return clip({ error: 'the arguments were not valid JSON' }); } }
     if (!args || typeof args !== 'object' || Array.isArray(args)) args = {};
