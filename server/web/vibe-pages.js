@@ -54,6 +54,7 @@ const ICON = {
     tasks: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h11M9 12h11M9 18h11"/><path d="m3 6 1.5 1.5L7 5M3 12l1.5 1.5L7 11M3 18l1.5 1.5L7 17"/></svg>',
     computer: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>',
     team: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 9h6M7 13h10"/></svg>',
+    agents: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/></svg>',
     search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></svg>',
 };
 
@@ -94,6 +95,7 @@ ${signedIn ? `<form class="vb-search" action="/vibe" method="get" role="search">
 <nav class="vb-rail-list" aria-label="Chats with Vibe">${list}</nav>
 <nav class="vb-rail-more" aria-label="More of OpenVibe.Chat">
 <a href="https://openvibe.actor/tasks" title="Every task you gave an agent, one-off or recurring, with what it cost">${ICON.tasks}<span>Tasks</span></a>
+<a href="https://openvibe.actor/me/agents" title="Recurring work in plain words: an agent with standing instructions, a memory you can edit, a schedule and quiet hours">${ICON.agents}<span>Your agents</span></a>
 <a href="https://openvibe.bot/machines" title="Your computers and robots: pair one, see its screen, set what agents may do on it">${ICON.computer}<span>Computers &amp; robots</span></a>
 <a href="/work" title="A room where your team and Vibe work together: a work queue, alerts and a shared screen">${ICON.team}<span>Work together</span></a>
 <a href="/messages">${ICON.messages}<span>Messages</span></a>

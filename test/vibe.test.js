@@ -130,6 +130,7 @@ t('the app page: signed out it invites a sign-in, signed in it lists the chats a
     assert.ok(signed.text.includes('class="vb-chat" href="/vibe/v-'), 'the rail lists their chats');
     // The rail leads to the rest of the person's agent: their tasks, their computers and robots, team workspaces.
     assert.ok(/href="https:\/\/openvibe\.actor\/tasks"[^>]*>[\s\S]*?<span>Tasks<\/span>/.test(signed.text), 'Tasks');
+    assert.ok(/href="https:\/\/openvibe\.actor\/me\/agents"[^>]*>[\s\S]*?<span>Your agents<\/span>/.test(signed.text), 'Your agents: recurring work');
     assert.ok(/href="https:\/\/openvibe\.bot\/machines"[^>]*>[\s\S]*?<span>Computers &amp; robots<\/span>/.test(signed.text), 'Computers & robots');
     assert.ok(/href="\/work"[^>]*>[\s\S]*?<span>Work together<\/span>/.test(signed.text), 'Work together');
     const form = await web('POST', '/vibe', ann, { message: 'hello from a form' });
