@@ -78,4 +78,8 @@ function later(conv, reason) { people(conv, reason).catch((err) => console.warn(
 /** Tests: capture pushes instead of calling the Network (null restores it). */
 function _setPush(fn) { _testPush = fn; lastSent.clear(); }
 
-module.exports = { people, later, QUIET_MS, _setPush };
+/** One notification to one person (subjectId): the push itself, for other Chat features (internal-vibe.js deliver). */
+const pushOne = (notification) => (_testPush || push)(notification);
+const _hasTestPush = () => !!_testPush;
+
+module.exports = { people, later, pushOne, QUIET_MS, _setPush, _hasTestPush };
