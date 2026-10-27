@@ -502,7 +502,7 @@ ${await aiKeySection(actor, req.query || {})}`,
         const opt = (v, label, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${label}</option>`;
         const spent = key ? `$${key.spent_usd_today.toFixed(2)} of ${key.budget_usd_per_day ? `$${key.budget_usd_per_day.toFixed(2)}` : 'no cap'} used today` : '';
         // From openvibe.bot/machines, "Use these models in OpenVibe.Chat": a model on your own computer, filled in.
-        const offered = q.own === 'node' && /^dev_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(q.machine || '')) ? { machine: String(q.machine), model: /^[A-Za-z0-9._:/-]{1,120}$/.test(String(q.model || '')) ? String(q.model) : '' } : null;
+        const offered = q.own === 'node' && /^(dev_[0-9A-HJKMNP-TV-Z]{26}|any)$/.test(String(q.machine || '')) ? { machine: String(q.machine), model: /^[A-Za-z0-9._:/-]{1,120}$/.test(String(q.model || '')) ? String(q.model) : '' } : null;
         const provider = offered ? 'node' : key ? key.provider : 'openai';
         const machineValue = offered ? offered.machine : (key && key.machine) || '';
         const modelValue = offered && offered.model ? offered.model : (key && key.model) || '';
@@ -511,7 +511,7 @@ ${await aiKeySection(actor, req.query || {})}`,
         const vibeBox = require('../rooms/vibe').enabled() ? `<label class="oc-check"><input type="checkbox" name="vibe" value="1"${vibeOwn || offered ? ' checked' : ''}> Vibe thinks with it too (in all your chats with Vibe; its answers then have no daily limit)</label>` : '';
         return `<h2 id="oc-ai-key">Your AI key</h2>
 <p class="oc-muted">AI members you add to a room, your Vibe among them, can think with your own provider and model instead of OpenVibe's: OpenAI, Anthropic, any OpenAI-compatible endpoint (OpenRouter, Groq, Together, your own server), or <strong>a model on your own computer</strong> (Ollama, LM Studio or llama.cpp through the OpenVibe Node, free, with no port opened: turn on "Let my AI use this computer's models" for it on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a>). A key is kept encrypted in OpenVibe.AI and never shown again; the room's messages go to your provider or your computer when one of those members answers, and a key's replies count against your daily budget, not the room's limit.</p>
-${offered ? notice('ok', `Save to let your AI members think with ${offered.model || 'a model'} on your own computer.`) : ''}
+${offered ? notice('ok', `Save to let your AI members think with ${offered.model || 'a model'} on ${offered.machine === 'any' ? 'whichever of your computers is on' : 'your own computer'}.`) : ''}
 ${unreachable ? notice('error', 'OpenVibe.AI did not answer, so your key cannot be shown or changed right now.') : `${key ? `<p><strong>${esc(credentials.label(key))}</strong> <span class="oc-muted">· ${keyLine}${vibeOwn ? ' · Vibe thinks with it' : ''}</span></p>` : '<p class="oc-muted">No key yet.</p>'}
 <form class="oc-form oc-ai-form" method="post" action="/settings/ai-key">
 <label>Provider <select name="provider">${opt('openai', 'OpenAI or OpenAI-compatible', provider)}${opt('anthropic', 'Anthropic', provider)}${opt('node', 'A model on my own computer', provider)}</select></label>

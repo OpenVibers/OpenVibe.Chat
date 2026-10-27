@@ -184,6 +184,9 @@ t('a model on your own computer: the machine and no key; the settings form comes
     const anyPage = (await web('GET', '/settings', cy)).text;
     assert.ok(anyPage.includes('name="machine_any" value="1" checked') && anyPage.includes('on whichever of your computers is on, the fastest first'), 'the box, checked, and the saved line');
     assert.strictEqual((await api('PUT', '/me/ai-key', cy, { provider: 'node', machine: 'anyone', model: 'llama3.1:8b' })).status, 422);
+    // From openvibe.bot when the person has several computers with models: any of them, the box checked.
+    const anyLink = (await web('GET', '/settings?own=node&machine=any&model=qwen2.5:7b', cy)).text;
+    assert.ok(anyLink.includes('think with qwen2.5:7b on whichever of your computers is on') && anyLink.includes('name="machine_any" value="1" checked'), 'any, from the link');
     const bad = await web('GET', '/settings?own=node&machine=../x&model=<b>', cy);
     assert.ok(!bad.text.includes('Save to let your AI members'), 'a bad link fills nothing');
     assert.strictEqual((await api('DELETE', '/me/ai-key', cy)).status, 200);
