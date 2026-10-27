@@ -176,6 +176,14 @@ t('a model on your own computer: the machine and no key; the settings form comes
     assert.ok(sect.includes('value="qwen2.5:7b"'), 'the model from the link');
     assert.ok(sect.includes('Save to let your AI members think with qwen2.5:7b on your own computer.'));
     assert.ok(sect.includes('your own computer · llama3.1:8b') && sect.includes('nothing spent'), 'what is saved now');
+    // Any of their computers (contracts 0.221.0): the box, the label, what a room sees.
+    const any = await web('POST', '/settings/ai-key', cy, { provider: 'node', machine: '', machine_any: '1', model: 'llama3.1:8b' });
+    assert.strictEqual(any.status, 303);
+    const anyKey = (await api('GET', '/me/ai-key', cy)).body.key;
+    assert.deepStrictEqual([anyKey.machine, label(anyKey), memberLabel(anyKey, 'Cy')], ['any', 'any of your own computers · llama3.1:8b', 'llama3.1:8b on Cy\'s computers']);
+    const anyPage = (await web('GET', '/settings', cy)).text;
+    assert.ok(anyPage.includes('name="machine_any" value="1" checked') && anyPage.includes('on whichever of your computers is on, the fastest first'), 'the box, checked, and the saved line');
+    assert.strictEqual((await api('PUT', '/me/ai-key', cy, { provider: 'node', machine: 'anyone', model: 'llama3.1:8b' })).status, 422);
     const bad = await web('GET', '/settings?own=node&machine=../x&model=<b>', cy);
     assert.ok(!bad.text.includes('Save to let your AI members'), 'a bad link fills nothing');
     assert.strictEqual((await api('DELETE', '/me/ai-key', cy)).status, 200);

@@ -398,8 +398,8 @@ async function afterPost(room, message, user, deps = {}) {
             }, opts);
             text = out && typeof out.text === 'string' ? clean(out.text, 2000) : '';
         }
-        // A model on someone's own computer (credential provider node): its label reads "<model> on Fran's computer".
-        const onComputer = own && /'s computer$/.test(String(member.engine_label || ''));
+        // A model on someone's own computer (credential provider node): its label reads "<model> on Fran's computer(s)".
+        const onComputer = own && /'s computers?$/.test(String(member.engine_label || ''));
         if (!text) {
             if (!own) return await say('I could not answer just now. Try again in a minute.');
             if (onComputer) return await say(vibe
