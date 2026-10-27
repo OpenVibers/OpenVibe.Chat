@@ -26,6 +26,12 @@ a { color: var(--accent); }
 .em-bubble ul, .em-bubble ol { margin: .2em 0 .5em; padding-left: 1.2em; }
 .em-bubble code { font: .88em ui-monospace, Menlo, Consolas, monospace; background: rgba(127, 127, 127, .15); padding: .1em .3em; border-radius: 5px; }
 .em-bubble pre { white-space: pre-wrap; background: rgba(127, 127, 127, .12); padding: 8px 10px; border-radius: 10px; }
+.em-bubble .md-table { overflow-x: auto; margin: .3em 0 .6em; border: 1px solid rgba(127, 127, 127, .3); border-radius: 8px; }
+.em-bubble .md-table table { border-collapse: collapse; width: 100%; font-size: .92em; }
+.em-bubble .md-table th, .em-bubble .md-table td { padding: 5px 8px; border-bottom: 1px solid rgba(127, 127, 127, .25); text-align: left; vertical-align: top; }
+.em-bubble .md-table thead th { background: rgba(127, 127, 127, .12); }
+.em-bubble .md-table .al-c { text-align: center; }
+.em-bubble .md-table .al-r { text-align: right; }
 .em-system { justify-self: center; max-width: 92%; text-align: center; font-size: .8rem; color: var(--muted); }
 .em-typing .em-bubble { color: var(--muted); }
 .em-dots { display: inline-flex; gap: 4px; } .em-dots i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .4; animation: emDot 1.2s infinite; }
