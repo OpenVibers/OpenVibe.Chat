@@ -17,6 +17,10 @@
  *   retry(room, user)          → { removed }: "Try again": Vibe's last answer goes and it answers the person's last
  *                                message anew (in the background, like any answer; it counts against the allowance)
  *   repliesToday(user) / countReply(user)   the person's answers from Vibe this UTC day, across all their chats
+ *   engineOf(user) → { own, label }; setEngine(user, own) → the same: Vibe thinks with the person's own AI key or
+ *                    computer (their credential in OpenVibe.AI, server/ai/credentials.js) in every chat of theirs, new
+ *                    ones too, or with OpenVibe's model again; own needs a stored credential (409 otherwise). Answers
+ *                    on their own model do not count against the free allowance.
  *   work(room, user, text, mode) → { message, task }: a Research, Agent or Code request (the composer's modes): the
  *                                  message is posted without Vibe's instant answer and becomes a task of the chat
  *                                  (server/rooms/workspace.js) on the person's own OpenVibe.Actor allowance: research
@@ -31,6 +35,7 @@ const db = require('../db/database');
 const config = require('../config');
 const wordFilter = require('../chat/word-filter');
 const rooms = require('./rooms');
+const credentials = require('../ai/credentials');
 
 const VIBE = { name: 'Vibe', handle: 'vibe' };
 const MAX_CHATS = 500;
@@ -58,9 +63,39 @@ function titleOf(text) {
 
 const newSlug = () => `v-${crypto.randomBytes(8).toString('hex').slice(0, 12)}`;
 
+/** The person's choice of model for Vibe: their own credential when they chose it and it is still stored. */
+async function engineOf(user) {
+    if (!user || !user.subject_id || !(await db.get('SELECT 1 AS own FROM vibe_own_engine WHERE user_id = ?', [user.id]))) return { own: false, label: null };
+    let cred = null;
+    try { cred = await credentials.get(user.subject_id); } catch { cred = null; }
+    return cred ? { own: true, label: credentials.memberLabel(cred, user.display_name || user.username), cred } : { own: false, label: null };
+}
+
+async function setEngine(user, own) {
+    if (!user || !user.subject_id) fail(403, 'vibe.engine', 'Sign in with an OpenVibe account to give Vibe your own model');
+    if (own) {
+        let cred;
+        try { cred = await credentials.get(user.subject_id); } catch (err) { fail(err.status || 502, err.code || 'credentials.unreachable', err.message); }
+        if (!cred) fail(409, 'vibe.no_key', 'Add your own AI key or computer in Settings first');
+        const label = credentials.memberLabel(cred, user.display_name || user.username);
+        await db.tx(async () => {
+            await db.run('INSERT INTO vibe_own_engine (user_id) VALUES (?) ON CONFLICT (user_id) DO NOTHING', [user.id]);
+            await db.run("UPDATE room_ai_members SET engine = 'own', engine_subject = ?, engine_label = ?, updated_at = ov_now() WHERE room_id IN (SELECT id FROM rooms WHERE owner_id = ? AND assistant = 1)",
+                [String(user.subject_id), label, user.id]);
+        });
+        return { own: true, label };
+    }
+    await db.tx(async () => {
+        await db.run('DELETE FROM vibe_own_engine WHERE user_id = ?', [user.id]);
+        await db.run("UPDATE room_ai_members SET engine = 'openvibe', engine_subject = NULL, engine_label = NULL, updated_at = ov_now() WHERE room_id IN (SELECT id FROM rooms WHERE owner_id = ? AND assistant = 1)", [user.id]);
+    });
+    return { own: false, label: null };
+}
+
 async function createRoom(user, title) {
     if (!user) fail(401, 'vibe.sign_in', 'Sign in to chat with Vibe');
     if (!enabled()) fail(503, 'vibe.off', 'Vibe is resting right now. Try again later.');
+    const engine = await engineOf(user);
     const id = await db.tx(async () => {
         // The oldest chats beyond the limit go, so starting one never fails on it.
         const extra = await db.all('SELECT id FROM rooms WHERE owner_id = ? AND assistant = 1 ORDER BY COALESCE(last_message_at, created_at) DESC OFFSET ?', [user.id, MAX_CHATS - 1]);
@@ -69,8 +104,8 @@ async function createRoom(user, title) {
             [newSlug(), titleOf(title), user.id, user.subject_id || null]);
         const roomId = Number(r.lastInsertRowid);
         await db.run("INSERT INTO room_members (room_id, user_id, role, last_seen_at) VALUES (?, ?, 'owner', ov_now())", [roomId, user.id]);
-        await db.run("INSERT INTO room_ai_members (room_id, name, handle, persona, memory, created_by_subject, engine) VALUES (?, ?, ?, '', '', ?, 'openvibe')",
-            [roomId, VIBE.name, VIBE.handle, user.subject_id || null]);
+        await db.run('INSERT INTO room_ai_members (room_id, name, handle, persona, memory, created_by_subject, engine, engine_subject, engine_label) VALUES (?, ?, ?, \'\', \'\', ?, ?, ?, ?)',
+            [roomId, VIBE.name, VIBE.handle, user.subject_id || null, engine.own ? 'own' : 'openvibe', engine.own ? String(user.subject_id) : null, engine.own ? engine.label : null]);
         return roomId;
     });
     return await db.get('SELECT * FROM rooms WHERE id = ?', [id]);
@@ -218,4 +253,4 @@ async function countReply(user) {
         ON CONFLICT (user_id, day) DO UPDATE SET replies = vibe_usage.replies + 1`, [user.id, today()]);
 }
 
-module.exports = { VIBE, MAX_CHATS, TITLE_MAX, SEARCH_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, search, ownChat, rename, remove, retry, lastExchange, repliesToday, countReply };
+module.exports = { VIBE, MAX_CHATS, TITLE_MAX, SEARCH_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, search, ownChat, rename, remove, retry, lastExchange, repliesToday, countReply, engineOf: async (user) => { const e = await engineOf(user); return { own: e.own, label: e.label }; }, setEngine };

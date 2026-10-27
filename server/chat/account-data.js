@@ -67,6 +67,7 @@ const EXPORTS = [
     // What Vibe remembers about them (server/rooms/vibe-memory.js), and whether they switched it off.
     ['vibe_memory.json', `SELECT id, text, source, created_at FROM vibe_memory WHERE user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['vibe_memory_off.json', `SELECT since FROM vibe_memory_off WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
+    ['vibe_own_engine.json', `SELECT since FROM vibe_own_engine WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     // What they asked Vibe by voice on their machines, the last 7 days (server/chat/internal-vibe.js).
     // Which of their agents' runs were posted into their Vibe chats (server/chat/internal-vibe.js).
     ['vibe_deliveries.json', `SELECT room_id, message_id, created_at FROM vibe_deliveries WHERE user_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
@@ -121,6 +122,7 @@ const ERASE_AFTER_ROOMS = [
     ['vibe_usage', 'DELETE FROM vibe_usage WHERE user_id = ANY(@ids)'],
     ['vibe_memory', 'DELETE FROM vibe_memory WHERE user_id = ANY(@ids)'],
     ['vibe_memory_off', 'DELETE FROM vibe_memory_off WHERE user_id = ANY(@ids)'],
+    ['vibe_own_engine', 'DELETE FROM vibe_own_engine WHERE user_id = ANY(@ids)'],
     ['vibe_asks', 'DELETE FROM vibe_asks WHERE user_id = ANY(@ids)'],
     ['vibe_deliveries', 'DELETE FROM vibe_deliveries WHERE user_id = ANY(@ids)'],
     // Support inboxes (server/inbox/inbox.js): the inboxes they own go with every conversation in them; in others,

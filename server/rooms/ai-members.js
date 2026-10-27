@@ -133,6 +133,8 @@ async function remove(room, can, id) {
 /** A person's key is gone (they removed it, or their account was erased): their members go back to OpenVibe's model. */
 async function dropKey(subject) {
     if (!subject) return 0;
+    // Vibe thinking with it (server/rooms/vibe.js setEngine) ends with it.
+    await db.run('DELETE FROM vibe_own_engine WHERE user_id IN (SELECT id FROM ctx_users WHERE subject_id = ?)', [String(subject)]);
     const r = await db.run("UPDATE room_ai_members SET engine = 'openvibe', engine_subject = NULL, engine_label = NULL, updated_at = ov_now() WHERE engine_subject = ?", [String(subject)]);
     return r.changes || 0;
 }
