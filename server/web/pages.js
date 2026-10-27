@@ -489,26 +489,34 @@ ${volume('tts_sound_volume', 'Chat sound volume', tts.sound_volume)}
 <h2>Your chat history</h2>
 <p>Download every message you have sent that is still visible, in Live chat and here.</p>
 <p><a class="oc-button" href="/api/chat/me/export" download>Download (JSON)</a> <a class="oc-button" href="/api/chat/me/export?format=csv" download>Download (CSV)</a></p>
-${await aiKeySection(actor)}`,
+${await aiKeySection(actor, req.query || {})}`,
         });
     });
 
     // ── Your own AI key (server/ai/credentials.js): AI members you set up can think with your provider and model ──
     const credentials = require('../ai/credentials');
-    async function aiKeySection(actor) {
+    async function aiKeySection(actor, q = {}) {
         if (!require('../rooms/ai-members').enabled()) return '';
         let key = null, unreachable = false;
         try { key = await credentials.get(actor.user.subject_id); } catch { unreachable = true; }
         const opt = (v, label, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${label}</option>`;
         const spent = key ? `$${key.spent_usd_today.toFixed(2)} of ${key.budget_usd_per_day ? `$${key.budget_usd_per_day.toFixed(2)}` : 'no cap'} used today` : '';
+        // From openvibe.bot/machines, "Use these models in OpenVibe.Chat": a model on your own computer, filled in.
+        const offered = q.own === 'node' && /^dev_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(q.machine || '')) ? { machine: String(q.machine), model: /^[A-Za-z0-9._:/-]{1,120}$/.test(String(q.model || '')) ? String(q.model) : '' } : null;
+        const provider = offered ? 'node' : key ? key.provider : 'openai';
+        const machineValue = offered ? offered.machine : (key && key.machine) || '';
+        const modelValue = offered && offered.model ? offered.model : (key && key.model) || '';
+        const keyLine = key && key.provider === 'node' ? `on your computer <code>${esc(key.machine || '')}</code> · nothing spent` : key ? `key ending ${esc(key.key_hint || '····')} · ${esc(spent)}` : '';
         return `<h2 id="oc-ai-key">Your AI key</h2>
-<p class="oc-muted">AI members you add to a room can think with your own provider and model instead of OpenVibe's: OpenAI, Anthropic, or any OpenAI-compatible endpoint (OpenRouter, Groq, Together, your own server). The key is kept encrypted in OpenVibe.AI and never shown again; the room's messages go to your provider when one of those members answers, and its replies count against your daily budget, not the room's limit.</p>
-${unreachable ? notice('error', 'OpenVibe.AI did not answer, so your key cannot be shown or changed right now.') : `${key ? `<p><strong>${esc(credentials.label(key))}</strong> <span class="oc-muted">· key ending ${esc(key.key_hint || '····')} · ${esc(spent)}</span></p>` : '<p class="oc-muted">No key yet.</p>'}
+<p class="oc-muted">AI members you add to a room, your Vibe among them, can think with your own provider and model instead of OpenVibe's: OpenAI, Anthropic, any OpenAI-compatible endpoint (OpenRouter, Groq, Together, your own server), or <strong>a model on your own computer</strong> (Ollama, LM Studio or llama.cpp through the OpenVibe Node, free, with no port opened: turn on "Let my AI use this computer's models" for it on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a>). A key is kept encrypted in OpenVibe.AI and never shown again; the room's messages go to your provider or your computer when one of those members answers, and a key's replies count against your daily budget, not the room's limit.</p>
+${offered ? notice('ok', `Save to let your AI members think with ${offered.model || 'a model'} on your own computer.`) : ''}
+${unreachable ? notice('error', 'OpenVibe.AI did not answer, so your key cannot be shown or changed right now.') : `${key ? `<p><strong>${esc(credentials.label(key))}</strong> <span class="oc-muted">· ${keyLine}</span></p>` : '<p class="oc-muted">No key yet.</p>'}
 <form class="oc-form" method="post" action="/settings/ai-key">
-<label>Provider <select name="provider">${opt('openai', 'OpenAI or OpenAI-compatible', key ? key.provider : 'openai')}${opt('anthropic', 'Anthropic', key ? key.provider : '')}</select></label>
+<label>Provider <select name="provider">${opt('openai', 'OpenAI or OpenAI-compatible', provider)}${opt('anthropic', 'Anthropic', provider)}${opt('node', 'A model on my own computer', provider)}</select></label>
+<label>Computer <input name="machine" maxlength="40" pattern="dev_[0-9A-Z]{26}" placeholder="dev_… (a model on your own computer only)" value="${esc(machineValue)}" autocomplete="off" spellcheck="false"></label>
 <label>Endpoint <input name="base_url" type="url" maxlength="300" inputmode="url" placeholder="https://openrouter.ai/api/v1 (leave empty for OpenAI itself)" value="${esc((key && key.base_url) || '')}"></label>
-<label>Model <input name="model" required maxlength="120" placeholder="gpt-4o-mini" value="${esc((key && key.model) || '')}" autocomplete="off" spellcheck="false"></label>
-<label>API key <input name="api_key" type="password" maxlength="400" autocomplete="off" spellcheck="false" placeholder="${key ? 'Leave empty to keep the current key' : 'sk-…'}"${key ? '' : ' required'}></label>
+<label>Model <input name="model" required maxlength="120" placeholder="gpt-4o-mini, or llama3.1:8b on your computer" value="${esc(modelValue)}" autocomplete="off" spellcheck="false"></label>
+<label>API key <input name="api_key" type="password" maxlength="400" autocomplete="off" spellcheck="false" placeholder="${key ? 'Leave empty to keep the current key' : 'sk-… (none for your own computer)'}"></label>
 <label>Daily budget, US dollars <input name="budget_usd_per_day" type="number" min="0" max="1000" step="0.5" value="${key && key.budget_usd_per_day != null ? key.budget_usd_per_day : 1}"> <span class="oc-muted">0 means no cap</span></label>
 <p><button type="submit">${key ? 'Save' : 'Add key'}</button></p>
 </form>
@@ -518,7 +526,7 @@ ${key ? `<form class="oc-inline" method="post" action="/settings/ai-key/delete">
         const actor = await needUser(req, res); if (!actor) return;
         const b = req.body || {};
         try {
-            const key = await credentials.put(actor.user.subject_id, { provider: b.provider, base_url: b.base_url, api_key: b.api_key, model: b.model, budget_usd_per_day: b.budget_usd_per_day });
+            const key = await credentials.put(actor.user.subject_id, { provider: b.provider, base_url: b.base_url, api_key: b.api_key, model: b.model, budget_usd_per_day: b.budget_usd_per_day, machine: b.machine });
             await require('../rooms/ai-members').relabelKey(actor.user.subject_id, key, actor.user);
             return res.redirect(303, '/settings?saved=1#oc-ai-key');
         } catch (err) { return res.redirect(303, `/settings?error=${encodeURIComponent(err.message || 'Could not save your key right now')}#oc-ai-key`); }
