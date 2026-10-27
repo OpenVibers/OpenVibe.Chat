@@ -92,6 +92,18 @@ router.post('/picture', requireAuth, personOnly, pictureLimit, (req, res, next) 
 });
 
 // Memory, registered before /:slug (a chat's slug always starts with v-, so the two never meet).
+// Which model Vibe thinks with: OpenVibe's, or the person's own AI key or computer (Settings, "Your AI key"). { own }
+router.get('/engine', requireAuth, personOnly, async (req, res) => {
+    try { res.set('Cache-Control', cache.htmlHeaders({ private: true })).json(await vibe.engineOf(req.user)); } catch (err) { send(res, err); }
+});
+router.put('/engine', requireAuth, personOnly, manageLimit, async (req, res) => {
+    try {
+        const own = req.body && req.body.own;
+        if (typeof own !== 'boolean') return res.status(422).json({ error: 'Send { "own": true } or { "own": false }', code: 'vibe.engine' });
+        res.json(await vibe.setEngine(req.user, own));
+    } catch (err) { send(res, err); }
+});
+
 router.get('/memory', requireAuth, personOnly, async (req, res) => {
     try {
         res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ on: await memory.isOn(req.user), notes: await memory.list(req.user), max: memory.MAX_NOTES });

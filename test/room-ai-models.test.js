@@ -180,6 +180,48 @@ t('a model on your own computer: the machine and no key; the settings form comes
     assert.strictEqual((await api('DELETE', '/me/ai-key', cy)).status, 200);
 });
 
+t('Vibe thinks with your own key or computer when you choose it: every chat of yours, new ones too, until the key goes', async () => {
+    const MACHINE = 'dev_01M5YGM39VC2RRGDQPRD6D4SHD';
+    const di = h.addUser('di', { subject: ids.newId('user') });
+    await h.ctx.upsertUser(h.live.users.get(di.id));
+    const vibeApi = (method, path, body) => h.http(method, `/api/chat/vibe${path}`, { token: di.token, body });
+    const memberOf = async (slug) => (await h.db.get('SELECT m.engine, m.engine_subject, m.engine_label FROM room_ai_members m JOIN rooms r ON r.id = m.room_id WHERE r.slug = ?', [slug]));
+    const routes = require('../server/rooms/vibe-routes').stack.filter((l) => l.route && l.route.path === '/engine');
+    assert.deepStrictEqual(routes.map((l) => Object.keys(l.route.methods)[0]).sort(), ['get', 'put'], 'GET and PUT /api/chat/vibe/engine');
+    assert.deepStrictEqual((await vibeApi('GET', '/engine')).body, { own: false, label: null });
+    assert.strictEqual((await vibeApi('PUT', '/engine', { own: true })).status, 409, 'a key or computer first');
+    assert.strictEqual((await vibeApi('PUT', '/engine', { own: 'yes' })).status, 422);
+    const first = await vibeApi('POST', '', { message: 'hello there' });
+    assert.strictEqual(first.status, 201, first.text);
+    assert.strictEqual((await memberOf(first.body.room.slug)).engine, 'openvibe', 'OpenVibe\'s model by default');
+    assert.strictEqual((await api('PUT', '/me/ai-key', di, { provider: 'node', machine: MACHINE, model: 'llama3.1:8b' })).status, 200);
+    const on = await vibeApi('PUT', '/engine', { own: true });
+    assert.deepStrictEqual(on.body, { own: true, label: 'llama3.1:8b on Di\'s computer' }, on.text);
+    assert.deepStrictEqual(await memberOf(first.body.room.slug), { engine: 'own', engine_subject: h.live.users.get(di.id).subject_id, engine_label: 'llama3.1:8b on Di\'s computer' }, 'the chats they have');
+    await settle(300);
+    const before = runs.length;
+    const next = await vibeApi('POST', '', { message: 'what is a mutex?' });
+    assert.strictEqual((await memberOf(next.body.room.slug)).engine, 'own', 'and new ones');
+    await settle(400);
+    const mine = runs.slice(before).filter((r) => r.credential && r.credential.subject === h.live.users.get(di.id).subject_id);
+    assert.ok(mine.length >= 1, `Vibe answered with their computer (${runs.length - before} runs)`);
+    // The settings form says so and keeps it; unchecked, Vibe goes back to OpenVibe's model.
+    const page = await web('GET', '/settings', di);
+    assert.ok(page.text.includes('name="vibe" value="1" checked') && page.text.includes('· Vibe thinks with it'), 'the box, checked');
+    const saved = await web('POST', '/settings/ai-key', di, { provider: 'node', machine: MACHINE, model: 'qwen2.5:7b' });
+    assert.strictEqual(saved.status, 303);
+    assert.deepStrictEqual((await vibeApi('GET', '/engine')).body, { own: false, label: null }, 'unchecked: OpenVibe\'s model');
+    assert.strictEqual((await memberOf(first.body.room.slug)).engine, 'openvibe');
+    await web('POST', '/settings/ai-key', di, { provider: 'node', machine: MACHINE, model: 'qwen2.5:7b', vibe: '1' });
+    assert.strictEqual((await memberOf(next.body.room.slug)).engine_label, 'qwen2.5:7b on Di\'s computer', 'checked: their computer, the new model');
+    // From openvibe.bot's link the box comes checked.
+    assert.ok((await web('GET', `/settings?own=node&machine=${MACHINE}&model=phi3`, di)).text.includes('name="vibe" value="1" checked'));
+    // The key goes: so does Vibe's use of it.
+    assert.strictEqual((await api('DELETE', '/me/ai-key', di)).status, 200);
+    assert.strictEqual((await memberOf(first.body.room.slug)).engine, 'openvibe');
+    assert.strictEqual(await h.db.get('SELECT 1 AS x FROM vibe_own_engine WHERE user_id = ?', [di.id]), undefined);
+});
+
 t('a server\'s admins give a text channel AI members; others are sent to the server', async () => {
     assert.strictEqual((await api('POST', '/servers', ann, { name: 'Model Guild' })).status, 201);
     assert.strictEqual((await api('POST', '/servers/model-guild/join', bob)).status, 200);
