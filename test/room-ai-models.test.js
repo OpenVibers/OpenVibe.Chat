@@ -35,6 +35,11 @@ const fakeHttp = {
             if (method === 'GET') { if (!store.has(subject)) throw problem(404, 'credential.not_found'); return store.get(subject); }
             if (method === 'DELETE') { if (!store.delete(subject)) throw problem(404, 'credential.not_found'); return null; }
             const prev = store.get(subject);
+            if (json.provider === 'node') {   // a model on the person's own computer: no key (contracts 0.220.0)
+                const row = { owner: 'chat', subject, provider: 'node', machine: json.machine, base_url: null, models: json.models, budget_usd_per_day: null, spent_usd_today: 0 };
+                store.set(subject, row);
+                return row;
+            }
             if (!json.api_key && (!prev || prev.provider !== json.provider || (prev.base_url || null) !== (json.base_url || null))) throw problem(400, 'credential.key_required');
             const row = { owner: 'chat', subject, provider: json.provider, base_url: json.base_url || null, key_hint: json.api_key ? json.api_key.slice(-4) : prev.key_hint, models: json.models, budget_usd_per_day: json.budget_usd_per_day, spent_usd_today: 0.25 };
             store.set(subject, row);
@@ -147,6 +152,32 @@ t('a new model relabels its members; removing the key sends them back to OpenVib
     sage = (await api('GET', '/rooms/model-night/ai-members', ann)).body.ai_members.find((m) => m.handle === 'sage');
     assert.deepStrictEqual([sage.engine, sage.model], ['openvibe', 'OpenVibe']);
     assert.strictEqual((await api('POST', '/rooms/model-night/ai-members', ann, { name: 'Echo', engine: 'own' })).body.code, 'rooms.ai_no_key', 'no key, no own engine');
+});
+
+t('a model on your own computer: the machine and no key; the settings form comes prefilled from openvibe.bot', async () => {
+    const MACHINE = 'dev_01M5YGM39VC2RRGDQPRD6D4SHD';
+    const cy = h.addUser('cy', { subject: ids.newId('user') });
+    await h.ctx.upsertUser(h.live.users.get(cy.id));
+    assert.strictEqual((await api('PUT', '/me/ai-key', cy, { provider: 'node', model: 'llama3.1:8b' })).status, 422, 'it names the computer');
+    assert.strictEqual((await api('PUT', '/me/ai-key', cy, { provider: 'node', machine: 'dev_nope', model: 'llama3.1:8b' })).status, 422);
+    const put = await api('PUT', '/me/ai-key', cy, { provider: 'node', machine: MACHINE, model: 'llama3.1:8b' });
+    assert.strictEqual(put.status, 200, JSON.stringify(put.body));
+    assert.deepStrictEqual([put.body.key.provider, put.body.key.machine, put.body.key.model], ['node', MACHINE, 'llama3.1:8b']);
+    const { label, memberLabel } = require('../server/ai/credentials');
+    assert.strictEqual(label(put.body.key), 'your own computer · llama3.1:8b');
+    assert.strictEqual(memberLabel(put.body.key, 'Cy'), 'llama3.1:8b on Cy\'s computer', 'what a room sees: whose computer, never "your own"');
+    assert.strictEqual(memberLabel({ provider: 'openai', model: 'gpt-4o-mini' }, 'Cy'), 'openai · gpt-4o-mini, Cy\'s key');
+    // From openvibe.bot/machines ("Use these models in OpenVibe.Chat"): the form is filled in, nothing is saved yet.
+    const page = await web('GET', `/settings?own=node&machine=${MACHINE}&model=qwen2.5:7b`, cy);
+    const sect = page.text.slice(page.text.indexOf('id="oc-ai-key"'));
+    assert.ok(sect.includes('<option value="node" selected>A model on my own computer</option>'), 'own computer chosen');
+    assert.ok(sect.includes(`name="machine" maxlength="40"`) && sect.includes(`value="${MACHINE}"`));
+    assert.ok(sect.includes('value="qwen2.5:7b"'), 'the model from the link');
+    assert.ok(sect.includes('Save to let your AI members think with qwen2.5:7b on your own computer.'));
+    assert.ok(sect.includes('your own computer · llama3.1:8b') && sect.includes('nothing spent'), 'what is saved now');
+    const bad = await web('GET', '/settings?own=node&machine=../x&model=<b>', cy);
+    assert.ok(!bad.text.includes('Save to let your AI members'), 'a bad link fills nothing');
+    assert.strictEqual((await api('DELETE', '/me/ai-key', cy)).status, 200);
 });
 
 t('a server\'s admins give a text channel AI members; others are sent to the server', async () => {

@@ -91,7 +91,7 @@ async function engineOf(input, user) {
     let cred;
     try { cred = await credentials.get(subject); } catch (err) { fail(err.status || 502, err.code || 'credentials.unreachable', err.message); }
     if (!cred) fail(409, 'rooms.ai_no_key', 'Add your own AI key in Settings first');
-    return { engine: 'own', engine_subject: subject, engine_label: `${credentials.label(cred)}, ${(user.display_name || user.username || 'a member').slice(0, 40)}'s key` };
+    return { engine: 'own', engine_subject: subject, engine_label: credentials.memberLabel(cred, user.display_name || user.username) };
 }
 
 /** Add one. `can` is rooms.access() for `user`: only a room's managers add, edit or remove AI members. */
@@ -141,7 +141,7 @@ async function dropKey(subject) {
 async function relabelKey(subject, cred, user) {
     if (!subject || !cred) return;
     await db.run("UPDATE room_ai_members SET engine_label = ?, updated_at = ov_now() WHERE engine = 'own' AND engine_subject = ?",
-        [`${credentials.label(cred)}, ${((user && (user.display_name || user.username)) || 'a member').slice(0, 40)}'s key`, String(subject)]);
+        [credentials.memberLabel(cred, user && (user.display_name || user.username)), String(subject)]);
 }
 
 /** The first enabled member a message names (@handle, as a word), or null. */
