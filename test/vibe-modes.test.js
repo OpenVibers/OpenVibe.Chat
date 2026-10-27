@@ -95,6 +95,31 @@ t('Code in an existing chat: Codes on their own computer; Agent too; Chat mode a
     assert.strictEqual(turns.length, 1, 'no instant answers to the tasks');
 });
 
+t('an agent that hands its person a step on its desk: Vibe asks them in the chat, once per hand-off, with the link (Desks plan D4)', async () => {
+    const start = await vibeApi('POST', '', ann, { message: 'hi' });
+    const slug = start.body.room.slug;
+    actorTask = { id: 'tsk_h1', state: 'queued' };
+    const r = await vibeApi('POST', `/${slug}/ask`, ann, { message: 'Book the cheapest flight to Lisbon', mode: 'agent' });
+    assert.strictEqual(r.status, 201, r.text);
+    await new Promise((res) => setTimeout(res, 150));
+    const desk = 'https://openvibe.bot/machines/dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9/screen?desk=desk-0123456789';
+    actorTask = { id: 'tsk_h1', state: 'running', needs_you: { seq: 7, what: 'Sign in to the airline.', url: desk } };
+    await workspace.poll();
+    await workspace.poll();
+    let asks = (await messagesOf(slug)).filter((m) => m.ai_member_id && /needs you/.test(m.message));
+    assert.strictEqual(asks.length, 1, 'once per hand-off, however often the poller looks');
+    assert.strictEqual(asks[0].message, `🙋 Your agent needs you for "Book the cheapest flight to Lisbon": Sign in to the airline.\n\nOpen its desk, take it over, do it, then let go; it goes on by itself: ${desk}`);
+    // A later hand-off in the same task asks again; a link that is not https never goes out.
+    actorTask = { id: 'tsk_h1', state: 'running', needs_you: { seq: 12, what: 'Pay with your card.', url: desk } };
+    await workspace.poll();
+    actorTask = { id: 'tsk_h1', state: 'running', needs_you: { seq: 15, what: 'Look here.', url: 'http://evil.example/x' } };
+    await workspace.poll();
+    asks = (await messagesOf(slug)).filter((m) => m.ai_member_id && /needs you/.test(m.message));
+    assert.deepStrictEqual(asks.map((m) => /Pay with your card/.test(m.message)), [false, true]);
+    actorTask = { id: 'tsk_h1', state: 'cancelled' };
+    await workspace.poll();
+});
+
 t('refusals: an unknown mode, someone else\'s chat, no sign-in', async () => {
     const start = await vibeApi('POST', '', ann, { message: 'mine' });
     const slug = start.body.room.slug;
