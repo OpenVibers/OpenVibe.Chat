@@ -53,4 +53,18 @@ assert.deepStrictEqual(guard.check({ id: 201, message: 'y', user_id: 5, mirrored
 assert.strictEqual(guard.check({ id: 202, message: 'a whole sentence', user_id: 5, mirrored: true }).ok, true);
 assert.strictEqual(guard.check({ id: 203, message: '#'.repeat(300), user_id: 5, mirrored: true }).ok, false, 'a mirrored wall');
 
+// Every inflection of the n-word family is a core slur, in any room and in the global feed (2026-10-25: an '-erin'
+// form passed both). Spelled out at run time from its parts; real words that share the first letters are not.
+{
+    const { containsCoreSlur } = require('../server/chat/moderation-utils');
+    const stem = ['n', 'i', 'g', 'g'].join('');
+    for (const tail of ['er', 'ers', 'a', 'as', 'az', 'ah', 'uh', 'ering', 'erin', 'erings', 'ered', 'erish']) {
+        assert.strictEqual(containsCoreSlur(`who is ${stem}${tail} your eggs`), true, `${stem.slice(0, 1)}…${tail}`);
+        assert.strictEqual(containsCoreSlur(`who is ${stem}${tail}\u2019 your eggs`), true, `${stem.slice(0, 1)}…${tail} with a curly apostrophe`);
+        assert.strictEqual(lineOk(`who is ${stem}${tail} your eggs`, { mirrored: true }), false);
+    }
+    for (const word of ['niggle', 'niggling', 'niggles', 'niggard', 'niggardly', 'snigger', 'sniggering'])
+        assert.strictEqual(containsCoreSlur(`a small ${word} about the stream`), false, word);
+}
+
 console.log('global-standard: all checks passed');

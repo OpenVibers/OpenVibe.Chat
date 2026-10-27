@@ -42,7 +42,10 @@ const CORE_SLUR_CATEGORIES = [
         label: 'N-word and variants',
         patterns: [
             // Base + plural forms: ****a, ****as, ****az, ****er, ****ers, ****az
-            '\\bn+i+g+g+(?:a+[sz]?|e+r+[sz]?)\\b',
+            // ...and every inflection of the -er form (-ers, -ering, -erin, -ered, -erish) and -ah/-uh: a line that used one
+            // passed both a channel's nudge and the global feed (2026-10-25). Real words that share the first letters
+            // (niggle, niggard) are not matched: neither continues with a or er.
+            '\\bn+i+g+g+(?:a+[hsz]?|u+h+|e+r+(?:[sz]|i+n+g*[sz]?|e+d+|i+s+h+)?)\\b',
             // Alternate root family: nick, knick, etc.
             '\\b[kn]*n+h?i+c?k+e+r+s?\\b',
         ],
