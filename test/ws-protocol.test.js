@@ -334,6 +334,45 @@ t('media commands go to Live’s queue with the same replies', async () => {
     await aliceWs.next((x) => x.type === 'system' && x.message === `No robot here (asked as usr_01J9AAAAAAAAAAAAAAAAAAAAAA, user ${alice.id}).`);
 });
 
+t('a !word that is not a channel sound is pressed as the robot button of that name, quietly', async () => {
+    await h.sleep(1100);
+    const before = h.live.effects.length;
+    const hardware = () => h.live.effects.slice(before).filter((e) => e.name === 'hardware');
+    const seen = aliceWs.all.length;
+    aliceWs.sendJson({ type: 'chat', message: '!ir_light' });
+    const deadline = Date.now() + 5000;
+    while (!hardware().length && Date.now() < deadline) await h.sleep(50);
+    assert.deepStrictEqual(hardware().map((e) => [e.body.command, e.body.from_subject, e.body.from_user_id]), [['button:ir_light', 'usr_01J9AAAAAAAAAAAAAAAAAAAAAA', alice.id]]);
+    // Live's "no robot" is not said: most channels have no robot and most words are no button.
+    await h.sleep(300);
+    assert.ok(!aliceWs.all.slice(seen).some((m) => m.type === 'system' && /No robot here/.test(m.message)));
+    // Not a plain word, or a viewer who is not signed in: nothing is asked.
+    await h.sleep(1100);
+    aliceWs.sendJson({ type: 'chat', message: '!Not/A_Button' });
+    const anon = await h.ws({ ip: '198.51.100.71', stream: streamId });
+    anon.sendJson({ type: 'join', streamId });
+    await anon.next((m) => m.type === 'auth');
+    anon.sendJson({ type: 'chat', message: '!cycle_gear' });
+    await h.sleep(600);
+    assert.strictEqual(hardware().length, 1);
+    anon.close();
+});
+
+t('a token in the socket address is not read, and the socket says how to send it', async () => {
+    const ws = await h.ws({ ip: '198.51.100.72', query: `?token=${alice.token}` });
+    const told = await ws.next((m) => m.type === 'system' && m.code === 'token_in_url');
+    assert.match(told.message, /Authorization: Bearer/);
+    assert.ok(!told.message.includes(alice.token), 'the token is never echoed');
+    ws.sendJson({ type: 'join' });
+    assert.strictEqual((await ws.next((m) => m.type === 'auth')).authenticated, false, 'still anonymous');
+    ws.close();
+    const fine = await h.ws({ ip: '198.51.100.73', token: alice.token });
+    fine.sendJson({ type: 'join' });
+    assert.strictEqual((await fine.next((m) => m.type === 'auth')).authenticated, true);
+    assert.ok(await fine.none((m) => m.code === 'token_in_url'), 'a header token gets no notice');
+    fine.close();
+});
+
 t('upgrade guards: foreign origin refused, banned address refused (admins exempt)', async () => {
     assert.strictEqual(await h.wsRefused({ origin: 'https://evil.example' }), true);
     h.live.addBan({ ip_address: '192.0.2.0/24' });
@@ -418,6 +457,33 @@ t('the same line again and again is refused after three in 30 s (punctuation cou
         await h.sleep(1100);
     }
     mws.close();
+});
+
+t('a new Go Live moves sockets left on the channel\'s ended stream onto the new one, and says so', async () => {
+    const gus = h.addUser('gus', { role: 'streamer' });
+    const gusChannel = h.addChannel(gus.id);
+    const slot = { id: 81, slug: 'gus-main', title: 'Main' };
+    const first = h.addStream(gus.id, gusChannel, { managed: slot });
+    const other = h.addStream(gus.id, gusChannel, { managed: { id: 82, slug: 'gus-two', title: 'Second' } });
+    await h.ctx.sync();
+    const join = async (ip, stream) => {
+        const ws = await h.ws({ ip, token: bob.token, stream });
+        ws.sendJson({ type: 'join', streamId: stream, token: bob.token });
+        await ws.next((m) => m.type === 'auth');
+        return ws;
+    };
+    const bot = await join('198.51.100.74', first);
+    const secondSlot = await join('198.51.100.75', other);
+    // The first session ends; the same slot goes live again with a new stream id.
+    h.live.streams.get(first).is_live = 0;
+    const second = h.addStream(gus.id, gusChannel, { managed: slot });
+    await h.ctx.sync();
+    const told = await bot.next((m) => m.type === 'stream_changed');
+    assert.deepStrictEqual([told.stream_id, told.previous_stream_id, told.channel_user_id], [second, first, gus.id]);
+    const client = [...h.chatServer.clients.values()].find((c) => c.ip && c.ip.endsWith('100.74'));
+    assert.strictEqual(client.streamId, second, 'now in the new stream\'s room');
+    assert.ok(await secondSlot.none((m) => m.type === 'stream_changed'), 'a still-live second slot keeps its viewers');
+    bot.close(); secondSlot.close();
 });
 
 t.run(async () => { for (const w of [aliceWs, bobWs, globalWs]) { try { w.close(); } catch { /* */ } } if (h) await h.close(); });

@@ -32,6 +32,13 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   DMs (`dm.js`, `/api/dm/*`), chat history (`history-store.js`, `/api/chat/*`), TTS (`tts-engine.js`,
   `/api/tts/*`), 101soundboards and channel sounds (`/api/sounds*`), moderation utils and the word
   filter, the deploy-notice card. Changes are confined to where they touched Live's data.
+- **For bots on `/ws/chat`** (Maticus, 2026-10-26): a `!word` that is not a channel sound is sent to Live as
+  `button:<word>` for a signed-in viewer, so it presses the channel robot's button of that name, and says nothing when
+  there is none. A token in the socket's address (`?token=`) is never read; the socket gets a `system` frame with
+  `code: "token_in_url"` saying to send an `Authorization: Bearer` header or the join's `token`. When a channel goes
+  live again, sockets still on one of its ended streams (same slot) move to the new stream and get
+  `{ type: "stream_changed", stream_id, previous_stream_id, channel_user_id }`, so a bot stays in the viewer list,
+  TTS and sounds without re-joining (`live-context.onStreamLive`, from the active-streams sync).
 - **The TTS and sound queue** (`audio-queue.js`, table `audio_requests`). TTS, channel `!sounds` and
   101soundboards clips are persisted requests played one at a time per room, across every Chat
   process (a claim holds the room's advisory lock; a partial unique index allows one `playing` row

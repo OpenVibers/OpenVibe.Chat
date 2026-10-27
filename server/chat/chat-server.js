@@ -105,6 +105,7 @@ class ChatServer {
         /** @type {WeakMap<object, Set<string>|null>} frame → the subjects who blocked its author (_blockersOf) */
         this._blockMemo = new WeakMap();
         ctx.onChannelSettings(async (channelId, settings) => await this._channelSettingsSeen(channelId, settings));
+        ctx.onStreamLive(async (stream) => await this._followNewStream(stream));
         this.heartbeatInterval = null;
         // TTS and sound requests queue in Chat's database (./audio-queue.js), one room at a time.
         /** @type {Map<string, number>} `${streamId}:${userKey}` → last soundboard trigger */
@@ -296,6 +297,9 @@ class ChatServer {
         // A bot's bearer; a browser's socket starts anonymous and signs in with its join.
         const token = extractWsToken(req);
         const streamId = parseInt(urlParams.get('stream')) || null;
+        // A token in the address is never read (addresses land in logs and proxies); a bot that put one there used to
+        // sit anonymous with no word why (Maticus, 2026-10-26). It is told how, once the socket is set up.
+        const tokenInUrl = !token && (urlParams.has('token') || urlParams.has('access_token'));
 
         ws.isAlive = true;
         ws.on('pong', () => {
@@ -322,6 +326,9 @@ class ChatServer {
             ws.off('error', onEarlyClose);
             if (closedEarly || ws.readyState !== WebSocket.OPEN) return;
             this._registerConnection(ws, req, { ip, streamId, user, early, tokenIat: user ? session.tokenIat(token) : null });
+            if (tokenInUrl) {
+                this.sendTo(ws, { type: 'system', code: 'token_in_url', message: 'A token in the address is ignored, so this socket is not signed in. Send it as an "Authorization: Bearer" header when connecting, or as "token" in your join message: https://openvibe.live/docs/api-tokens#websocket-chat' });
+            }
         })().catch((err) => {
             console.warn('[Chat] connection setup failed:', err.message);
             try { ws.close(1011, 'setup failed'); } catch {}
@@ -1555,12 +1562,49 @@ class ChatServer {
                 default:
                     // Unknown !command → try a per-channel viewer-uploaded sound clip.
                     // Forward trailing tokens (e.g. "500p", "0.5") as pitch/speed args.
-                    await this.triggerChannelSound(ws, client, stream, cmd.slice(1), parts.slice(1));
+                    // Not a sound: maybe a button on the channel's robot (!ir_light, !cycle_gear …), pressed quietly.
+                    if ((await this.triggerChannelSound(ws, client, stream, cmd.slice(1), parts.slice(1))) === false) {
+                        this._robotButton(stream, cmd.slice(1), client);
+                    }
                     return;
             }
         } catch (err) {
             this.sendTo(ws, { type: 'system', message: err.message || 'Media command failed.' });
         }
+    }
+
+    /**
+     * A channel went live with a new stream: sockets still on one of its ended streams (a bot that joined
+     * ?stream=<id> last time, a popout) move onto the new one and are told (`stream_changed`), so they are in its
+     * viewer list, its TTS and sounds, without checking and re-joining (Maticus, 2026-10-26: "every Go Live starts a
+     * new session id; bots drop off the guest list"). A socket on another stream that is still live (a second slot)
+     * stays, and so does one on a different slot of the channel.
+     */
+    async _followNewStream(stream) {
+        const to = Number(stream && stream.id);
+        const channel = Number(stream && stream.user_id);
+        if (!to || !channel) return;
+        const ended = new Map();   // stream id → may move (ended, and the same slot or no slot)
+        const moved = [];
+        for (const [ws, c] of this.clients) {
+            if (!c.streamId || Number(c.streamId) === to || Number(c.channelUserId) !== channel) continue;
+            if (!ended.has(c.streamId)) {
+                const old = await ctx.getStreamById(c.streamId).catch(() => null);
+                const sameSlot = !old || !old.managed_stream_id || !stream.managed_stream_id || Number(old.managed_stream_id) === Number(stream.managed_stream_id);
+                ended.set(c.streamId, !!old && !old.is_live && sameSlot);
+            }
+            if (ended.get(c.streamId)) moved.push([ws, c, c.streamId]);
+        }
+        if (!moved.length) return;
+        await ctx.warm({ user: null, streamId: to, channelUserId: channel }).catch(() => {});
+        for (const [ws, c, from] of moved) {
+            c.streamId = to;
+            c._modStream = null;
+            this.sendTo(ws, { type: 'stream_changed', stream_id: to, previous_stream_id: from, channel_user_id: channel });
+        }
+        audioQueue.roomJoined(audioQueue.roomKey({ streamId: to, channelUserId: null }));
+        for (const from of new Set(moved.map((m) => m[2]))) this.broadcastUserCount(from);
+        this.broadcastUserCount(to);
     }
 
     /**
@@ -1580,16 +1624,30 @@ class ChatServer {
     }
 
     /**
+     * A `!word` that is not a channel sound, pressed as the button of that name on the channel's OpenVibe.Bot robot
+     * (Live: `button:<word>`; a robot made of buttons, Maticus 2026-10-26: "!ir_light does nothing"). Signed-in viewers
+     * only, a plain word only, and always quiet: most channels have no robot and most words are no button, so a
+     * refusal says nothing (the eight movement words and !say keep their own replies).
+     */
+    _robotButton(stream, word, client) {
+        if (!client.user || !stream?.user_id || !/^[a-z0-9][a-z0-9_.-]{0,39}$/.test(word)) return;
+        this._subjectOfUser(client.user)
+            .then((subject) => ctx.effects.hardwareCommand(stream.user_id, `button:${word}`, client.user.display_name || client.user.username || '', { subject, userId: client.user.id || null }))
+            .catch(() => { /* quiet by design */ });
+    }
+
+    /**
      * Play a per-channel viewer-uploaded sound clip (triggered by !command).
      * Silent no-op when the command is not a registered sound so unknown
-     * commands don't spam the chat.
+     * commands don't spam the chat. Resolves false only when the word is not a sound (the caller may try a robot
+     * button).
      */
     async triggerChannelSound(ws, client, stream, command, args = [], relay = null) {
         try {
-            if (!stream?.user_id || !command) return;
+            if (!stream?.user_id || !command) return false;
             const cmd = String(command).toLowerCase();
             const sound = await db.getChannelSoundByCommand(stream.user_id, cmd);
-            if (!sound) return; // not a sound command — stay silent
+            if (!sound) return false; // not a sound command — stay silent
 
             const chatSettings = await this._getChannelChatSettings(client.streamId);
             if (chatSettings.custom_sounds_enabled === 0) {
