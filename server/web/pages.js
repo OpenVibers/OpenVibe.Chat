@@ -506,7 +506,7 @@ ${await aiKeySection(actor, req.query || {})}`,
         const provider = offered ? 'node' : key ? key.provider : 'openai';
         const machineValue = offered ? offered.machine : (key && key.machine) || '';
         const modelValue = offered && offered.model ? offered.model : (key && key.model) || '';
-        const keyLine = key && key.provider === 'node' ? `on your computer <code>${esc(key.machine || '')}</code> · nothing spent` : key ? `key ending ${esc(key.key_hint || '····')} · ${esc(spent)}` : '';
+        const keyLine = key && key.provider === 'node' ? `${key.machine === 'any' ? 'on whichever of your computers is on, the fastest first' : `on your computer <code>${esc(key.machine || '')}</code>`} · nothing spent` : key ? `key ending ${esc(key.key_hint || '····')} · ${esc(spent)}` : '';
         const vibeOwn = key ? (await require('../rooms/vibe').engineOf(actor.user)).own : false;
         const vibeBox = require('../rooms/vibe').enabled() ? `<label class="oc-check"><input type="checkbox" name="vibe" value="1"${vibeOwn || offered ? ' checked' : ''}> Vibe thinks with it too (in all your chats with Vibe; its answers then have no daily limit)</label>` : '';
         return `<h2 id="oc-ai-key">Your AI key</h2>
@@ -515,7 +515,8 @@ ${offered ? notice('ok', `Save to let your AI members think with ${offered.model
 ${unreachable ? notice('error', 'OpenVibe.AI did not answer, so your key cannot be shown or changed right now.') : `${key ? `<p><strong>${esc(credentials.label(key))}</strong> <span class="oc-muted">· ${keyLine}${vibeOwn ? ' · Vibe thinks with it' : ''}</span></p>` : '<p class="oc-muted">No key yet.</p>'}
 <form class="oc-form oc-ai-form" method="post" action="/settings/ai-key">
 <label>Provider <select name="provider">${opt('openai', 'OpenAI or OpenAI-compatible', provider)}${opt('anthropic', 'Anthropic', provider)}${opt('node', 'A model on my own computer', provider)}</select></label>
-<label class="oc-if-node">Computer <input name="machine" maxlength="40" pattern="dev_[0-9A-Z]{26}" placeholder="dev_… (a model on your own computer only)" value="${esc(machineValue)}" autocomplete="off" spellcheck="false"></label>
+<label class="oc-if-node">Computer <input name="machine" maxlength="40" pattern="dev_[0-9A-Z]{26}" placeholder="dev_… (a model on your own computer only)" value="${esc(machineValue === 'any' ? '' : machineValue)}" autocomplete="off" spellcheck="false"></label>
+<label class="oc-check oc-if-node"><input type="checkbox" name="machine_any" value="1"${machineValue === 'any' ? ' checked' : ''}> Any of my computers that is on with this model (the fastest first, the next when one is busy)</label>
 <label class="oc-if-openai">Endpoint <input name="base_url" type="url" maxlength="300" inputmode="url" placeholder="https://openrouter.ai/api/v1 (leave empty for OpenAI itself)" value="${esc((key && key.base_url) || '')}"></label>
 <label>Model <input name="model" required maxlength="120" placeholder="gpt-4o-mini, or llama3.1:8b on your computer" value="${esc(modelValue)}" autocomplete="off" spellcheck="false"></label>
 <label class="oc-not-node">API key <input name="api_key" type="password" maxlength="400" autocomplete="off" spellcheck="false" placeholder="${key ? 'Leave empty to keep the current key' : 'sk-… (none for your own computer)'}"></label>
@@ -529,7 +530,7 @@ ${key ? `<form class="oc-inline" method="post" action="/settings/ai-key/delete">
         const actor = await needUser(req, res); if (!actor) return;
         const b = req.body || {};
         try {
-            const key = await credentials.put(actor.user.subject_id, { provider: b.provider, base_url: b.provider === 'openai' ? b.base_url : undefined, api_key: b.api_key, model: b.model, budget_usd_per_day: b.budget_usd_per_day, machine: b.machine });
+            const key = await credentials.put(actor.user.subject_id, { provider: b.provider, base_url: b.provider === 'openai' ? b.base_url : undefined, api_key: b.api_key, model: b.model, budget_usd_per_day: b.budget_usd_per_day, machine: b.machine_any === '1' ? 'any' : b.machine });
             await require('../rooms/ai-members').relabelKey(actor.user.subject_id, key, actor.user);
             const vibe = require('../rooms/vibe');
             if (vibe.enabled()) await vibe.setEngine(actor.user, b.vibe === '1');

@@ -56,7 +56,8 @@ async function put(subject, { provider, base_url, api_key, model, budget_usd_per
     if (provider === 'node') {
         // A model on the person's own computer: the machine, no key, no budget (nothing is spent).
         const id = String(machine || '').trim();
-        if (!MACHINE_RE.test(id)) fail(422, 'credentials.machine', 'Name your computer: its id (dev_…) from openvibe.bot/machines.');
+        // `any` (contracts 0.221.0): whichever of their computers is on with the model, the fastest first.
+        if (!MACHINE_RE.test(id) && id !== 'any') fail(422, 'credentials.machine', 'Name your computer (its id, dev_…, from openvibe.bot/machines), or choose any of your computers.');
         try {
             return view(await call('PUT', subject, { provider: 'node', machine: id, models: { chat: m } }));
         } catch (err) {
@@ -92,12 +93,12 @@ async function remove(subject) {
     }
 }
 
-const label = (c) => (c && c.provider === 'node' ? `your own computer · ${c.model || 'its model'}` : c ? `${c.provider}${c.base_url ? ` (${(() => { try { return new URL(c.base_url).hostname; } catch { return 'custom'; } })()})` : ''} · ${c.model || 'default model'}` : null);
+const label = (c) => (c && c.provider === 'node' ? `${c.machine === 'any' ? 'any of your own computers' : 'your own computer'} · ${c.model || 'its model'}` : c ? `${c.provider}${c.base_url ? ` (${(() => { try { return new URL(c.base_url).hostname; } catch { return 'custom'; } })()})` : ''} · ${c.model || 'default model'}` : null);
 
 /** What a room's members see an AI member think with: "<model> on Fran's computer", or "openai · gpt-4o-mini, Fran's key". */
 const memberLabel = (c, name) => {
     const who = String(name || 'a member').slice(0, 40);
-    return c && c.provider === 'node' ? `${c.model || 'a model'} on ${who}'s computer` : `${label(c)}, ${who}'s key`;
+    return c && c.provider === 'node' ? `${c.model || 'a model'} on ${who}'s computer${c.machine === 'any' ? 's' : ''}` : `${label(c)}, ${who}'s key`;
 };
 
 module.exports = { get, put, remove, label, memberLabel, CredentialError, PROVIDERS };
