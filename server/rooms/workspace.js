@@ -248,6 +248,8 @@ async function poll(deps = {}) {
         if (state === 'running' && t.status !== 'running') { await setStatus(room, t.id, { status: 'running' }); changed(room, { id: Number(t.id), status: 'running' }); }
         // The agent handed its person a step on its desk (Desks plan D4): Vibe asks them here, once per hand-off.
         if (state === 'running' && task.needs_you && task.needs_you.url) await askPerson(room, t, task.needs_you, deps).catch(() => {});
+        // The agent works on a desk of its own (Desks plan): in a Vibe chat, Vibe offers to watch it and take it over, once.
+        if (state === 'running' && task.desk && task.desk.url && Number(room.assistant) === 1) await showDesk(room, t, task.desk, deps).catch(() => {});
         if (!DONE.has(state)) continue;
         const r = task.result || {};
         const sources = (Array.isArray(r.sources) ? r.sources : []).map((s) => (typeof s === 'string' ? s : s && s.url)).filter((u) => /^https?:\/\//.test(String(u || ''))).slice(0, 12);
@@ -277,6 +279,26 @@ async function askPerson(room, t, needs, deps = {}) {
     if (!member) return null;
     const what = oneLine(needs.what, 300) || 'one step only you can do';
     const text = `🙋 Your agent needs you for "${t.title}": ${what}\n\nOpen its desk, take it over, do it, then let go; it goes on by itself: ${oneLine(needs.url, LIMITS.url)}`;
+    const roomsMod = deps.rooms || rooms;
+    const posted = await roomsMod.postAsAi(room, member, text);
+    try { require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message: posted }); } catch { /* sockets are optional */ }
+    return posted;
+}
+
+// Tasks whose desk Vibe already offered (actor task), so a poll every few seconds offers it once.
+const shownDesks = new Set();
+
+/** Vibe offers the person the link to watch the agent's desk live and take it over (Desks plan: Watch, Take over). */
+async function showDesk(room, t, desk, deps = {}) {
+    const key = String(t.actor_task);
+    if (shownDesks.has(key) || !/^https:\/\//.test(String(desk.url || ''))) return null;
+    if (shownDesks.size > 2000) shownDesks.clear();
+    shownDesks.add(key);
+    const members = await db.all('SELECT * FROM room_ai_members WHERE room_id = ? AND enabled = 1 ORDER BY (handle = \'vibe\') DESC, id LIMIT 1', [room.id]);
+    const member = members[0];
+    if (!member) return null;
+    const what = desk.kind === 'browser' ? 'a browser of its own' : 'a desk of its own';
+    const text = `🖥️ Your agent is working on "${t.title}" in ${what}. Watch it live, and take it over whenever you like (it waits while you use it): ${oneLine(desk.url, LIMITS.url)}`;
     const roomsMod = deps.rooms || rooms;
     const posted = await roomsMod.postAsAi(room, member, text);
     try { require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message: posted }); } catch { /* sockets are optional */ }

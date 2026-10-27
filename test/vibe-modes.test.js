@@ -17,7 +17,7 @@ const turns = [];
 const actorCalls = [];
 let actorTask = { id: 'tsk_r1', state: 'queued' };
 const vibeApi = (method, path, u, body) => h.http(method, `/api/chat/vibe${path}`, { token: u && u.token, body });
-const messagesOf = async (slug) => ((await h.http('GET', `/api/chat/rooms/${slug}/messages`, { token: ann.token })).body.messages || []);
+const messagesOf = async (slug, as = ann) => ((await h.http('GET', `/api/chat/rooms/${slug}/messages`, { token: as.token })).body.messages || []);
 const realFetch = globalThis.fetch;
 
 t('boot', async () => {
@@ -117,6 +117,26 @@ t('an agent that hands its person a step on its desk: Vibe asks them in the chat
     asks = (await messagesOf(slug)).filter((m) => m.ai_member_id && /needs you/.test(m.message));
     assert.deepStrictEqual(asks.map((m) => /Pay with your card/.test(m.message)), [false, true]);
     actorTask = { id: 'tsk_h1', state: 'cancelled' };
+    await workspace.poll();
+});
+
+t('an agent working on a desk: Vibe offers to watch it and take it over, once per task, with the link', async () => {
+    const start = await vibeApi('POST', '', bob, { message: 'hi' });
+    const slug = start.body.room.slug;
+    actorTask = { id: 'tsk_d1', state: 'queued' };
+    const r = await vibeApi('POST', `/${slug}/ask`, bob, { message: 'Compare three laptops on the store site', mode: 'agent' });
+    assert.strictEqual(r.status, 201, r.text);
+    await new Promise((res) => setTimeout(res, 150));
+    const desk = 'https://openvibe.bot/machines/dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9/screen?desk=desk-9876543210';
+    actorTask = { id: 'tsk_d1', state: 'running' };
+    await workspace.poll();
+    const lines = async () => (await messagesOf(slug, bob)).filter((m) => m.ai_member_id && /Your agent is working on/.test(m.message)).map((m) => m.message);
+    assert.deepStrictEqual(await lines(), [], 'no desk yet: nothing offered');
+    actorTask = { id: 'tsk_d1', state: 'running', desk: { url: desk, kind: 'browser' } };
+    await workspace.poll();
+    await workspace.poll();
+    assert.deepStrictEqual(await lines(), [`🖥️ Your agent is working on "Compare three laptops on the store site" in a browser of its own. Watch it live, and take it over whenever you like (it waits while you use it): ${desk}`], 'once, however often the poller looks');
+    actorTask = { id: 'tsk_d1', state: 'cancelled' };
     await workspace.poll();
 });
 
