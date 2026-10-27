@@ -345,6 +345,18 @@ API: `GET|PUT|DELETE /api/chat/me/ai-key` (own sign-in only, not API tokens); pa
 "Thinks with" choice on each AI member. A server's admins give a text channel AI members at `/r/<channel room>/settings`,
 linked from the channel on the server's settings page.
 
+**A model on their own computer** (AI on your own machines; contracts 0.220.0/0.221.0). The key may instead be provider
+`node`: a `machine` (a `dev_` id from openvibe.bot/machines, or `any`, the fastest of theirs that is on) and a model,
+with no key and nothing spent. OpenVibe.AI reaches it through OpenVibe.Bot and the person's OpenVibe Node, only where they
+turned on "Let my AI use this computer's models".
+- **The form** shows only the fields the chosen provider takes (`chat.css` `:has()`). It comes prefilled from Bot's
+  "Use these models in OpenVibe.Chat" (`/settings?own=node&machine=dev_…|any&model=…`).
+- **A room** sees "llama3.1:8b on Fran's computer(s)" (`credentials.memberLabel`).
+- **Vibe** thinks with it when the person ticks "Vibe thinks with it too" (`vibe_own_engine`, migration 0035;
+  `GET|PUT /api/chat/vibe/engine`): every Vibe chat of theirs and each new one. There is no daily limit then. The page
+  says "Vibe thinks with … (change)", "How Vibe did this" says which model answered, and a computer that does not answer
+  is named, with what to check. Removing the key ends it.
+
 **Servers** (`server/rooms/servers.js`, `server/rooms/server-routes.js`, `server/web/server-pages.js`,
 `migrations/0013_chat_servers.sql`; the owner's Q14: friend groups and couples first, then communities with servers,
 channels and voice). A server is a group of rooms, its channels, with one membership and one set of roles: a text
