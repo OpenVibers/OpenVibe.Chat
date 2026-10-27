@@ -761,6 +761,13 @@ async function syncTable(kind, table, cols, { full = false } = {}) {
     }
     return total;
 }
+// Everyone who wants to know a stream went live here (the chat server moves sockets left on the channel's ended
+// stream onto it). Called once per stream in this process, when Live's active list first has it live (the table
+// sync may have stored it live already, so the stored flag cannot tell).
+const _liveListeners = new Set();
+const _announcedLive = new Set();
+function onStreamLive(fn) { _liveListeners.add(fn); return () => _liveListeners.delete(fn); }
+
 async function syncActiveStreams() {
     const data = await read('/streams/active');
     await upsertRows('ctx_streams', STREAM_COLS, data.rows || []);
@@ -769,6 +776,14 @@ async function syncActiveStreams() {
     const liveNow = new Set((data.rows || []).filter((r) => r.is_live).map((r) => Number(r.id)));
     for (const r of await db.all('SELECT id FROM ctx_streams WHERE is_live = 1')) {
         if (!liveNow.has(Number(r.id))) await db.run('UPDATE ctx_streams SET is_live = 0 WHERE id = ?', [r.id]);
+    }
+    for (const id of _announcedLive) if (!liveNow.has(id)) _announcedLive.delete(id);
+    for (const r of data.rows || []) {
+        if (!r.is_live || _announcedLive.has(Number(r.id))) continue;
+        _announcedLive.add(Number(r.id));
+        for (const fn of _liveListeners) {
+            try { await fn(r); } catch (err) { console.warn('[LiveContext] stream live listener:', err.message); }
+        }
     }
 }
 
@@ -955,7 +970,7 @@ module.exports = {
     emoteSources, setChannelEmoteSources,
     // policy
     getChannelModerationSettings, isChannelModerator, channelLanguage, getChannelAlertSoundsByUser, ensurePolicy, invalidateChannel,
-    reloadPolicy, onChannelSettings, defaultModerationSettings,
+    reloadPolicy, onChannelSettings, onStreamLive, defaultModerationSettings,
     // subscriptions (sub-only chat)
     isSubscriber, subscriberState, ensureSubscriber,
     // bans, follows, approvals, decor
