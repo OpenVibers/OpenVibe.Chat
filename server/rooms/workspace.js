@@ -245,7 +245,9 @@ async function poll(deps = {}) {
             continue;
         }
         const state = task && task.state;
-        if (state === 'running' && t.status !== 'running') { await setStatus(room, t.id, { status: 'running' }); changed(room, { id: Number(t.id), status: 'running' }); continue; }
+        if (state === 'running' && t.status !== 'running') { await setStatus(room, t.id, { status: 'running' }); changed(room, { id: Number(t.id), status: 'running' }); }
+        // The agent handed its person a step on its desk (Desks plan D4): Vibe asks them here, once per hand-off.
+        if (state === 'running' && task.needs_you && task.needs_you.url) await askPerson(room, t, task.needs_you, deps).catch(() => {});
         if (!DONE.has(state)) continue;
         const r = task.result || {};
         const sources = (Array.isArray(r.sources) ? r.sources : []).map((s) => (typeof s === 'string' ? s : s && s.url)).filter((u) => /^https?:\/\//.test(String(u || ''))).slice(0, 12);
@@ -259,6 +261,26 @@ async function poll(deps = {}) {
         });
         await announce(room, await row(room, t.id), deps).catch(() => {});
     }
+}
+
+// Hand-offs already asked about (actor task | its step's seq), so a poll every few seconds asks once.
+const asked = new Set();
+
+/** Vibe asks the person to take the agent's desk for one step (a sign-in, a CAPTCHA), with the link to it. */
+async function askPerson(room, t, needs, deps = {}) {
+    const key = `${t.actor_task}|${Number(needs.seq)}`;
+    if (asked.has(key) || !/^https:\/\//.test(String(needs.url || ''))) return null;
+    if (asked.size > 2000) asked.clear();
+    asked.add(key);
+    const members = await db.all('SELECT * FROM room_ai_members WHERE room_id = ? AND enabled = 1 ORDER BY (handle = \'vibe\') DESC, id LIMIT 1', [room.id]);
+    const member = members[0];
+    if (!member) return null;
+    const what = oneLine(needs.what, 300) || 'one step only you can do';
+    const text = `🙋 Your agent needs you for "${t.title}": ${what}\n\nOpen its desk, take it over, do it, then let go; it goes on by itself: ${oneLine(needs.url, LIMITS.url)}`;
+    const roomsMod = deps.rooms || rooms;
+    const posted = await roomsMod.postAsAi(room, member, text);
+    try { require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message: posted }); } catch { /* sockets are optional */ }
+    return posted;
 }
 
 /** The room hears how a task ended, from its Vibe (or its first AI member), once. */
