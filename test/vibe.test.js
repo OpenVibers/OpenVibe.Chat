@@ -179,6 +179,21 @@ t('answers render as escaped Markdown with http(s) links only', () => {
     assert.ok(md.render('see https://openvibe.live/docs.').includes('<a href="https://openvibe.live/docs" rel="nofollow ugc noopener" target="_blank">https://openvibe.live/docs</a>.'));
     assert.ok(!md.render('[x](https://a.com" onmouseover="alert(1))').includes('onmouseover="'));
     assert.strictEqual(md.render('```\n<i>\n```'), '<pre><code>&lt;i&gt;</code></pre>');
+    // Tables and nested lists (answers are model-written Markdown, which uses both): escaped like everything else.
+    assert.strictEqual(md.render('| Plan | Cost |\n|---|--:|\n| Rice | $2 |\n| <b>x</b> | 1 \\| 2 |'),
+        '<div class="md-table" tabindex="0" role="region" aria-label="Table"><table><thead><tr><th>Plan</th><th class="al-r">Cost</th></tr></thead>'
+        + '<tbody><tr><td>Rice</td><td class="al-r">$2</td></tr><tr><td>&lt;b&gt;x&lt;/b&gt;</td><td class="al-r">1 | 2</td></tr></tbody></table></div>');
+    assert.strictEqual(md.render('Intro\n| a | b |\n| - | - |\n| 1 | 2 |\nafter'), '<p>Intro</p><div class="md-table" tabindex="0" role="region" aria-label="Table"><table><thead><tr><th>a</th><th>b</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table></div><p>after</p>');
+    assert.strictEqual(md.render('a | b\nc | d'), '<p>a | b<br>c | d</p>', 'pipes without a delimiter row are text');
+    assert.strictEqual(md.render('- a\n  - a1\n  - a2\n- b'), '<ul><li>a<ul><li>a1</li><li>a2</li></ul></li><li>b</li></ul>');
+    assert.strictEqual(md.render('1. one\n   - x\n2. two'), '<ol><li>one<ul><li>x</li></ul></li><li>two</li></ol>');
+    assert.strictEqual(md.render('- a\n  continued'), '<ul><li>a continued</li></ul>');
+    const deep = md.render(Array.from({ length: 10 }, (_, k) => `${'  '.repeat(k)}- l${k}`).join('\n'));
+    assert.ok((deep.match(/<ul>/g) || []).length === 4 && deep.includes('l9'), deep);
+    const started = Date.now();
+    md.render(`${'|a'.repeat(20000)}|\n${'|-'.repeat(20000)}|\n${'| x | y |\n'.repeat(20000)}`);
+    md.render(Array.from({ length: 5000 }, (_, k) => `${' '.repeat(k % 24)}- item ${k}`).join('\n'));
+    assert.ok(Date.now() - started < 1500, `pathological Markdown took ${Date.now() - started} ms`);
 });
 
 t.run(async () => { if (aiClient) aiClient._setClient(null); if (h && h.close) await h.close(); });
