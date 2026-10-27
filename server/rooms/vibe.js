@@ -63,6 +63,11 @@ function titleOf(text) {
 
 const newSlug = () => `v-${crypto.randomBytes(8).toString('hex').slice(0, 12)}`;
 
+/** What Vibe thinks with, said to its person: "llama3.1:8b on your computer", "your openai key (gpt-4o-mini)". */
+const youOf = (cred) => (cred.provider === 'node'
+    ? `${cred.model || 'a model'} on your computer${cred.machine === 'any' ? 's' : ''}`
+    : `your ${cred.provider} key (${cred.model || 'its default model'})`);
+
 /** The person's choice of model for Vibe: their own credential when they chose it and it is still stored. */
 async function engineOf(user) {
     if (!user || !user.subject_id || !(await db.get('SELECT 1 AS own FROM vibe_own_engine WHERE user_id = ?', [user.id]))) return { own: false, label: null };
@@ -253,4 +258,4 @@ async function countReply(user) {
         ON CONFLICT (user_id, day) DO UPDATE SET replies = vibe_usage.replies + 1`, [user.id, today()]);
 }
 
-module.exports = { VIBE, MAX_CHATS, TITLE_MAX, SEARCH_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, search, ownChat, rename, remove, retry, lastExchange, repliesToday, countReply, engineOf: async (user) => { const e = await engineOf(user); return { own: e.own, label: e.label }; }, setEngine };
+module.exports = { VIBE, MAX_CHATS, TITLE_MAX, SEARCH_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, search, ownChat, rename, remove, retry, lastExchange, repliesToday, countReply, engineOf: async (user) => { const e = await engineOf(user); return { own: e.own, label: e.label, ...(e.own ? { you: youOf(e.cred) } : {}) }; }, setEngine };

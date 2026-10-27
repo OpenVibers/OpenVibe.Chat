@@ -208,12 +208,17 @@ t('Vibe thinks with your own key or computer when you choose it: every chat of y
     assert.ok(mine.length >= 1, `Vibe answered with their computer (${runs.length - before} runs)`);
     const answer = await h.db.get('SELECT m.how FROM room_messages m JOIN rooms r ON r.id = m.room_id WHERE r.slug = ? AND m.user_id = 0 ORDER BY m.id DESC LIMIT 1', [next.body.room.slug]);
     assert.ok(answer && String(answer.how).includes('Answered with llama3.1:8b on Di\'s computer'), `"How Vibe did this" names it (${answer && answer.how})`);
+    // Vibe's page says so, with a way to change it, and there is no daily limit then.
+    const vibePage = (await web('GET', `/vibe/${next.body.room.slug}`, di)).text;
+    assert.ok(vibePage.includes('Vibe thinks with llama3.1:8b on your computer (<a href="/settings#oc-ai-key">change</a>)'), 'the composer says what Vibe thinks with');
+    assert.ok(vibePage.includes('data-own="1">No daily limit: Vibe thinks with llama3.1:8b on your computer'), 'the rail, instead of the free answers left');
     // The settings form says so and keeps it; unchecked, Vibe goes back to OpenVibe's model.
     const page = await web('GET', '/settings', di);
     assert.ok(page.text.includes('name="vibe" value="1" checked') && page.text.includes('· Vibe thinks with it'), 'the box, checked');
     const saved = await web('POST', '/settings/ai-key', di, { provider: 'node', machine: MACHINE, model: 'qwen2.5:7b' });
     assert.strictEqual(saved.status, 303);
     assert.deepStrictEqual((await vibeApi('GET', '/engine')).body, { own: false, label: null }, 'unchecked: OpenVibe\'s model');
+    assert.ok((await web('GET', '/vibe', di)).text.includes('answers left today'), 'the free answers left again');
     assert.strictEqual((await memberOf(first.body.room.slug)).engine, 'openvibe');
     await web('POST', '/settings/ai-key', di, { provider: 'node', machine: MACHINE, model: 'qwen2.5:7b', vibe: '1' });
     assert.strictEqual((await memberOf(next.body.room.slug)).engine_label, 'qwen2.5:7b on Di\'s computer', 'checked: their computer, the new model');
