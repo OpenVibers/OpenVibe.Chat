@@ -163,7 +163,10 @@ t('a model on your own computer: the machine and no key; the settings form comes
     const put = await api('PUT', '/me/ai-key', cy, { provider: 'node', machine: MACHINE, model: 'llama3.1:8b' });
     assert.strictEqual(put.status, 200, JSON.stringify(put.body));
     assert.deepStrictEqual([put.body.key.provider, put.body.key.machine, put.body.key.model], ['node', MACHINE, 'llama3.1:8b']);
-    assert.strictEqual(require('../server/ai/credentials').label(put.body.key), 'your own computer · llama3.1:8b');
+    const { label, memberLabel } = require('../server/ai/credentials');
+    assert.strictEqual(label(put.body.key), 'your own computer · llama3.1:8b');
+    assert.strictEqual(memberLabel(put.body.key, 'Cy'), 'llama3.1:8b on Cy\'s computer', 'what a room sees: whose computer, never "your own"');
+    assert.strictEqual(memberLabel({ provider: 'openai', model: 'gpt-4o-mini' }, 'Cy'), 'openai · gpt-4o-mini, Cy\'s key');
     // From openvibe.bot/machines ("Use these models in OpenVibe.Chat"): the form is filled in, nothing is saved yet.
     const page = await web('GET', `/settings?own=node&machine=${MACHINE}&model=qwen2.5:7b`, cy);
     const sect = page.text.slice(page.text.indexOf('id="oc-ai-key"'));

@@ -818,9 +818,9 @@ ${composer}${tools}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : '
         if (can.manage && room.kind !== 'system' && aiMembers.enabled()) { try { myKey = await credentials.get(actor.user.subject_id); } catch { myKey = null; } }
         const engineField = (a) => {
             const cur = a ? (a.engine || 'openvibe') : 'openvibe';
-            const ownLabel = a && cur === 'own' ? aiMembers.modelOf(a) : myKey ? `Your own key: ${credentials.label(myKey)}` : 'Your own key (add one in your chat settings first)';
+            const ownLabel = a && cur === 'own' ? aiMembers.modelOf(a) : myKey && myKey.provider === 'node' ? `Your own computer: ${myKey.model || 'its model'}` : myKey ? `Your own key: ${credentials.label(myKey)}` : 'Your own key (add one in your chat settings first)';
             return `<label>Thinks with <select name="engine"><option value="openvibe"${cur === 'openvibe' ? ' selected' : ''}>OpenVibe's model</option><option value="own"${cur === 'own' ? ' selected' : ''}${cur === 'own' || myKey ? '' : ' disabled'}>${esc(ownLabel)}</option></select></label>
-${myKey || cur === 'own' ? '' : '<p class="oc-muted">To give it a different model (yours, from OpenAI, Anthropic or an OpenAI-compatible provider), <a href="/settings#oc-ai-key">add your AI key</a>.</p>'}`;
+${myKey || cur === 'own' ? '' : '<p class="oc-muted">To give it a different model (yours, from OpenAI, Anthropic or an OpenAI-compatible provider, or a model on your own computer), <a href="/settings#oc-ai-key">add your AI key</a>.</p>'}`;
         };
         const aiForm = (a) => `<form class="oc-form oc-ai-form" method="post" action="/r/${esc(room.slug)}/ai-members${a ? `/${Number(a.id)}` : ''}">
 ${a ? '' : '<h3>Add an AI member</h3>'}

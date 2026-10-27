@@ -94,4 +94,10 @@ async function remove(subject) {
 
 const label = (c) => (c && c.provider === 'node' ? `your own computer · ${c.model || 'its model'}` : c ? `${c.provider}${c.base_url ? ` (${(() => { try { return new URL(c.base_url).hostname; } catch { return 'custom'; } })()})` : ''} · ${c.model || 'default model'}` : null);
 
-module.exports = { get, put, remove, label, CredentialError, PROVIDERS };
+/** What a room's members see an AI member think with: "<model> on Fran's computer", or "openai · gpt-4o-mini, Fran's key". */
+const memberLabel = (c, name) => {
+    const who = String(name || 'a member').slice(0, 40);
+    return c && c.provider === 'node' ? `${c.model || 'a model'} on ${who}'s computer` : `${label(c)}, ${who}'s key`;
+};
+
+module.exports = { get, put, remove, label, memberLabel, CredentialError, PROVIDERS };
