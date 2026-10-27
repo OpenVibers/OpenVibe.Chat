@@ -296,7 +296,7 @@
     fetch('/api/chat/vibe?limit=100', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
       if (!d) return;
       var allow = document.getElementById('vb-allow');
-      if (allow && d.allowance) allow.textContent = Math.max(0, d.allowance.per_day - d.allowance.used_today) + ' of ' + d.allowance.per_day + ' answers left today';
+      if (allow && d.allowance && !allow.hasAttribute('data-own')) allow.textContent = Math.max(0, d.allowance.per_day - d.allowance.used_today) + ' of ' + d.allowance.per_day + ' answers left today';
       var list = document.querySelector('.vb-rail-list'); if (!list || !d.chats) return;
       // Rebuilt from data with text nodes (the server's grouping, kept simple here: Today and Earlier).
       var start = new Date(); start.setUTCHours(0, 0, 0, 0);

@@ -93,6 +93,7 @@ function rail({ chats, current, signedIn, allowance, query = '', here = null }) 
             ? groups.map((g) => `<p class="vb-group">${esc(g.label)}</p><ul class="vb-chats">${g.chats.map((c) => `<li><a class="vb-chat" href="/vibe/${esc(c.slug)}"${c.slug === current ? ' aria-current="page"' : ''}>${esc(c.name)}</a></li>`).join('')}</ul>`).join('')
             : '<p class="vb-rail-note">Your chats with Vibe show up here.</p>');
     const left = allowance ? Math.max(0, allowance.per_day - allowance.used_today) : null;
+    const own = allowance && allowance.engine && allowance.engine.own ? allowance.engine : null;   // Vibe on their own model
     return `<aside class="vb-rail" id="vb-rail" aria-label="Your chats with Vibe">
 <div class="vb-rail-top">
 <a class="vb-new" href="/vibe">${ICON.new}<span>New chat</span></a>
@@ -110,7 +111,7 @@ ${signedIn ? `<a href="/vibe/memory" title="What Vibe remembers about you across
 <a href="/rooms">${ICON.rooms}<span>Rooms and servers</span></a>
 <a href="/">${ICON.globe}<span>Global chat</span></a>
 </nav>
-${left != null ? `<p class="vb-allow" id="vb-allow">${left} of ${allowance.per_day} answers left today</p>` : ''}
+${own ? `<p class="vb-allow" id="vb-allow" data-own="1">No daily limit: Vibe thinks with ${esc(own.you)}</p>` : left != null ? `<p class="vb-allow" id="vb-allow">${left} of ${allowance.per_day} answers left today</p>` : ''}
 </aside>`;
 }
 
@@ -140,7 +141,7 @@ const MODES = [
 // The text files the attach button takes (read in the browser, vibe.js readText).
 const TEXT_FILES = 'text/plain,text/markdown,text/csv,application/json,.txt,.md,.markdown,.csv,.tsv,.json,.log,.xml,.yaml,.yml,.toml,.ini,.html,.css,.js,.mjs,.ts,.py,.go,.rs,.java,.c,.h,.cpp,.rb,.php,.sh,.sql';
 
-function composer({ slug, signedIn, enabled, prefill = '' }) {
+function composer({ slug, signedIn, enabled, prefill = '', engine = null }) {
     const action = !signedIn ? `/auth/login` : slug ? `/vibe/${esc(slug)}` : '/vibe';
     // A picture (public/web/vibe.js): it goes to OpenVibe.Pics as the person, and Vibe sees it with the question. A text
     // file (notes, a CSV, code) is read in the browser and goes into the message itself.
@@ -158,11 +159,16 @@ ${attach}
 <button class="vb-send" type="submit" aria-label="Send"${enabled ? '' : ' disabled'}>${ICON.send}</button>
 <fieldset class="vb-modes" aria-label="What Vibe does with it">${MODES.map(([value, label, hint, placeholder], i) => `<label title="${esc(hint)}"><input type="radio" name="mode" value="${value}" data-placeholder="${esc(placeholder)}"${i ? '' : ' checked'}><span>${label}</span></label>`).join('')}</fieldset>
 </form>
-<p class="vb-fine">${enabled ? 'Vibe can get things wrong. Check what matters.' : 'Vibe is resting right now. Try again later.'}</p>`;
+<p class="vb-fine">${!enabled ? 'Vibe is resting right now. Try again later.' : engine && engine.own ? `Vibe thinks with ${esc(engine.you)} (<a href="/settings#oc-ai-key">change</a>). It can get things wrong: check what matters.` : 'Vibe can get things wrong. Check what matters.'}</p>`;
 }
 
 function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit, notice }) {
-    const allowanceOf = async (user) => ({ per_day: require('../config').ai.vibeRepliesPerDay, used_today: await vibe.repliesToday(user) });
+    const allowanceOf = async (user) => {
+        // Which model Vibe thinks with: the person's own key or computer when they chose it (no daily limit then).
+        let engine = null;
+        try { engine = await vibe.engineOf(user); } catch { engine = null; }
+        return { per_day: require('../config').ai.vibeRepliesPerDay, used_today: await vibe.repliesToday(user), engine };
+    };
 
     /**
      * "Ask Vibe" from any OpenVibe site (the shared navbar): ?ask=<the text they selected> and ?from=<the page's https
@@ -220,7 +226,7 @@ ${head}
 ${error ? notice('error', error) : ''}
 ${room ? thread : hello}
 </div>
-<div class="vb-dock">${composer({ slug: room && room.slug, signedIn: !!user, enabled, prefill: room ? '' : prefillOf(req.query || {}) })}</div>
+<div class="vb-dock">${composer({ slug: room && room.slug, signedIn: !!user, enabled, prefill: room ? '' : prefillOf(req.query || {}), engine: allowance && allowance.engine })}</div>
 </section>
 </div>`;
         await page(req, res, status, {
