@@ -398,9 +398,21 @@ async function afterPost(room, message, user, deps = {}) {
             }, opts);
             text = out && typeof out.text === 'string' ? clean(out.text, 2000) : '';
         }
-        if (!text) return await say(own ? 'I could not reach my model just now (its key may be out of today\'s budget, or the provider did not answer). Try again later, or the room\'s owner can switch me to OpenVibe\'s model.' : 'I could not answer just now. Try again in a minute.');
+        // A model on someone's own computer (credential provider node): its label reads "<model> on Fran's computer".
+        const onComputer = own && /'s computer$/.test(String(member.engine_label || ''));
+        if (!text) {
+            if (!own) return await say('I could not answer just now. Try again in a minute.');
+            if (onComputer) return await say(vibe
+                ? 'I could not reach the model on your computer just now. Is it on, with its model server running (Ollama, LM Studio or llama.cpp), and "Let my AI use this computer\'s models" on at openvibe.bot/machines? You can switch me back to OpenVibe\'s model in Settings, under "Your AI key".'
+                : 'I could not reach the model on my manager\'s computer just now. Try again later, or the room\'s owner can switch me to OpenVibe\'s model.');
+            return await say(vibe
+                ? 'I could not reach your model just now (your key may be out of today\'s budget, or the provider did not answer). Try again later, or switch me back to OpenVibe\'s model in Settings, under "Your AI key".'
+                : 'I could not reach my model just now (its key may be out of today\'s budget, or the provider did not answer). Try again later, or the room\'s owner can switch me to OpenVibe\'s model.');
+        }
         if (!own) await countReply(room);
         if (vibe && !own) await require('./vibe').countReply(user);
+        // "How Vibe did this" says which model answered when it was the person's own (their key or their computer).
+        if (vibe && own && steps && member.engine_label) steps.steps.unshift(`Answered with ${String(member.engine_label).slice(0, 160)}`);
         return await say(text, steps && steps.steps.length ? steps : null);
     } catch (err) {
         console.warn(`[Chat AI members] room ${room.id}: ${(err && err.message) || err}`);

@@ -205,6 +205,8 @@ t('Vibe thinks with your own key or computer when you choose it: every chat of y
     await settle(400);
     const mine = runs.slice(before).filter((r) => r.credential && r.credential.subject === h.live.users.get(di.id).subject_id);
     assert.ok(mine.length >= 1, `Vibe answered with their computer (${runs.length - before} runs)`);
+    const answer = await h.db.get('SELECT m.how FROM room_messages m JOIN rooms r ON r.id = m.room_id WHERE r.slug = ? AND m.user_id = 0 ORDER BY m.id DESC LIMIT 1', [next.body.room.slug]);
+    assert.ok(answer && String(answer.how).includes('Answered with llama3.1:8b on Di\'s computer'), `"How Vibe did this" names it (${answer && answer.how})`);
     // The settings form says so and keeps it; unchecked, Vibe goes back to OpenVibe's model.
     const page = await web('GET', '/settings', di);
     assert.ok(page.text.includes('name="vibe" value="1" checked') && page.text.includes('· Vibe thinks with it'), 'the box, checked');
