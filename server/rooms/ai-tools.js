@@ -4,7 +4,8 @@
  * turns of OpenVibe.AI's `chat.member.turn` (server/rooms/ai-members.js). Each is small, read-only and bounded: an AI
  * member still only writes in its room.
  *
- *   search_openvibe   OpenVibe.Search's public results for a query (news, deals, coupons, wiki, listings, videos…)
+ *   search_openvibe   OpenVibe.Search's public results for a query (news, deals, coupons, wiki, listings, videos…), through
+ *                     the Search Fabric's network scope (GET /api/v1/query); /api/v1/search on a Search without it
  *   read_page         a web page's title, text and links, through OpenVibe.Tools' `read` tool (Tools decides what it may
  *                     reach: public http(s) addresses only); Chat never fetches the address itself
  *   web_search        Vibe only (a Vibe chat, or Vibe added to a room): the open web, answered by OpenVibe.Actor's web
@@ -96,12 +97,16 @@ async function searchOpenvibe(args, { fetchImpl = globalThis.fetch } = {}) {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 8000);
     try {
-        const res = await fetchImpl(`${config.ai.searchUrl}/api/v1/search?${new URLSearchParams({ q: query, limit: String(limit) })}`, { headers: { accept: 'application/json', 'user-agent': 'OpenVibe.Chat AI member' }, signal: ctrl.signal, redirect: 'error' });
+        const get = (path) => fetchImpl(`${config.ai.searchUrl}${path}`, { headers: { accept: 'application/json', 'user-agent': 'OpenVibe.Chat AI member' }, signal: ctrl.signal, redirect: 'error' });
+        let res = await get(`/api/v1/query?${new URLSearchParams({ q: query, scopes: 'network', limit: String(limit) })}`);
+        const fabric = res.status !== 404;
+        if (!fabric) res = await get(`/api/v1/search?${new URLSearchParams({ q: query, limit: String(limit) })}`);
         if (!res.ok) return { error: `OpenVibe.Search answered ${res.status}` };
         const body = await res.json();
         const results = (Array.isArray(body.results) ? body.results : []).slice(0, limit).map((r) => ({
             title: String(r.title || '').slice(0, 200), site: r.owner, type: r.type,
-            summary: stripTags(r.snippet_html || r.summary || '').slice(0, 300), url: r.canonical_url, published_at: r.published_at || null,
+            summary: stripTags(fabric ? r.snippet : (r.snippet_html || r.summary || '')).slice(0, 300),
+            url: fabric ? r.url : r.canonical_url, published_at: r.published_at || null,
         }));
         return { query, results, note: results.length ? 'Cite the url when you use a result.' : 'Nothing on OpenVibe matched.' };
     } catch (err) {
