@@ -72,7 +72,7 @@ t('a 1:1 conversation has a Call button; a group or a blocked one has none; sign
     conv = await dm.getOrCreateDirect(alice.id, bob.id);
     const page = await req('GET', `/messages/${conv}`, { headers: cookie(alice) });
     assert.strictEqual(page.status, 200);
-    assert.match(page.text, new RegExp(`<form class="oc-inline oc-dm-call" method="post" action="/messages/${conv}/call"><button type="submit" class="oc-button--quiet">Call Bob</button></form>`, 'i'));
+    assert.match(page.text, new RegExp(`<form class="oc-inline oc-dm-call" method="post" action="/messages/${conv}/call"><button type="submit" class="oc-icon-btn" aria-label="Call Bob"`, 'i'));
     assert.match(page.text, /<script src="\/web\/ring\.js\?v=[^"]+" defer><\/script>/);
     assert.doesNotMatch((await req('GET', '/')).text, /ring\.js/, 'no ring listener for a guest');
     const group = await dm.createConversation(alice.id, [alice.id, bob.id, carol.id], 'Trio');

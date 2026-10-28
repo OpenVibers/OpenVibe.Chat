@@ -370,18 +370,42 @@
   }
 
   // ── The inbox: conversations and unread counts, refreshed while the page is open ──
+  // When a message was, at a glance (server/web/ui.js when()): 14:05 today, Yesterday, a weekday this week, Oct 20, or the date.
+  var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  var WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  function whenText(d) {
+    var now = new Date(), DAY = 86400000;
+    var startToday = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()), t = d.getTime();
+    if (t >= startToday) return d.toISOString().slice(11, 16);
+    if (t >= startToday - DAY) return 'Yesterday';
+    if (t >= startToday - 6 * DAY) return WEEKDAYS[d.getUTCDay()];
+    if (d.getUTCFullYear() === now.getUTCFullYear()) return MONTHS[d.getUTCMonth()] + ' ' + d.getUTCDate();
+    return d.toISOString().slice(0, 10);
+  }
+  // A person's initials in a round mark, its colour from the name (server/web/ui.js initials()).
+  function initialsMark(name) {
+    var words = String(name || '?').replace(/[^\p{L}\p{N} ]/gu, ' ').trim().split(/\s+/).filter(Boolean);
+    var letters = (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2)).toUpperCase();
+    var h = 0;
+    for (var ch of String(name || '')) h = (h * 31 + ch.codePointAt(0)) % 360;
+    var m = el('span', 'oc-av', letters); m.style.setProperty('--av', String(h)); m.setAttribute('aria-hidden', 'true');
+    return m;
+  }
   function convItem(c, me) {
-    var li = el('li', 'oc-conv' + (c.unread_count ? ' oc-unread' : ''));
+    var unread = Number(c.unread_count) || 0;
+    var li = el('li', 'oc-row' + (unread ? ' oc-unread' : ''));
     var a = el('a'); a.href = '/messages/' + encodeURIComponent(c.id);
     var others = (c.participants || []).filter(function (p) { return p.id !== me; });
-    a.appendChild(el('strong', null, c.name || others.map(function (p) { return p.display_name || p.username; }).join(', ') || 'Just you'));
-    if (c.unread_count) { a.appendChild(document.createTextNode(' ')); a.appendChild(el('span', 'oc-badge', c.unread_count + ' new')); }
-    a.appendChild(el('span', 'oc-muted oc-last', c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet'));
-    li.appendChild(a);
+    var title = c.name || others.map(function (p) { return p.display_name || p.username; }).join(', ') || 'Just you';
+    a.appendChild(initialsMark(title));
+    var main = el('span', 'oc-row-main'), top = el('span', 'oc-row-top'), sub = el('span', 'oc-row-sub', c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet');
+    top.appendChild(el('strong', null, title));
     if (c.last_message_at) {
       var d = new Date(String(c.last_message_at).indexOf('T') < 0 ? String(c.last_message_at).replace(' ', 'T') + 'Z' : c.last_message_at);
-      if (!isNaN(d)) { var t = el('time', 'oc-time', d.toISOString().slice(0, 10)); t.dateTime = d.toISOString(); li.appendChild(t); }
+      if (!isNaN(d)) { var t = el('time', null, whenText(d)); t.dateTime = d.toISOString(); top.appendChild(t); }
     }
+    if (unread) { var dot = el('span', 'oc-dot', unread > 9 ? '9+' : String(unread)); dot.setAttribute('aria-label', unread + ' new'); sub.appendChild(dot); }
+    main.appendChild(top); main.appendChild(sub); a.appendChild(main); li.appendChild(a);
     return li;
   }
   function startInbox() {
@@ -397,7 +421,7 @@
           var unread = 0;
           list.textContent = '';
           d.conversations.forEach(function (c) { unread += Number(c.unread_count) || 0; list.appendChild(convItem(c, me)); });
-          if (!d.conversations.length) list.appendChild(el('li', 'oc-muted', 'No conversations yet.'));
+          if (!d.conversations.length) list.appendChild(el('li', 'oc-row-empty oc-muted', 'No conversations yet. Write a username above to start one.'));
           if (status) status.textContent = unread ? unread + ' unread' : 'All caught up';
         }).catch(function () {});
     }

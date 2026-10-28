@@ -41,7 +41,7 @@ t('the inbox: your conversations only, unread counts in the list and the navigat
     await req('POST', `/messages/${conv}`, form(alice, { message: 'are you there?' }));
     let inbox = await req('GET', '/messages', { headers: cookie(bob) });
     assert.strictEqual(inbox.status, 200);
-    assert.match(inbox.text, /<span class="oc-badge">2 new<\/span>/);
+    assert.match(inbox.text, /<span class="oc-dot" aria-label="2 new">2<\/span>/);
     assert.match(inbox.text, /id="oc-inbox-status"[^>]*>2 unread</);
     assert.strictEqual(navLabel(inbox.text, '/messages'), 'Messages (2)');
     assert.ok(inbox.text.includes('are you there?'), 'the last message as a preview');
@@ -82,7 +82,7 @@ t('participants only: a guessed conversation looks like no conversation', async 
 t('block: the conversation closes both ways; the inbox lists who you blocked; unblock opens it again', async () => {
     assert.strictEqual((await req('POST', `/messages/${conv}/block`, form(bob, {}, { origin: 'https://evil.example' }))).status, 403, 'forms from elsewhere are refused');
     let page = await req('GET', `/messages/${conv}`, { headers: cookie(bob) });
-    assert.match(page.text, /Block Alice<\/button>/);
+    assert.match(page.text, /<button type="submit" class="oc-pop-item oc-danger">.*<span>Block Alice<\/span><\/button>/);
     let r = await req('POST', `/messages/${conv}/block`, form(bob, {}));
     assert.strictEqual(r.headers.get('location'), `/messages/${conv}`);
 
