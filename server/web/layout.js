@@ -101,7 +101,8 @@ function contentSecurityPolicy(nonce) {
  * coming in, on every page of a signed-in person while calls are on), app (Vibe's full-window app, server/web/vibe-pages.js:
  * vibe.css + vibe-md.js + vibe.js, and no footer), appScript (the app's own script instead of vibe.js: inbox.js), feedView
  * (a feed's card on the page: feed-view.css + feed-view.js, server/feeds/), scripts (more of
- * public/web's scripts by name, e.g. support.js)
+ * public/web's scripts by name, e.g. support.js), footer ('full', the default, on front pages, directories and docs;
+ * 'compact', one quiet line, on pages people work in: a room, a channel, a conversation, a task, settings)
  */
 function renderPage(o) {
     const { config } = o;
@@ -121,6 +122,7 @@ function renderPage(o) {
     const p = o.prefs || {};
     const cls = [p.compact ? 'oc-compact' : '', p.timestamps ? 'oc-times' : '', p.show_badges === false ? 'oc-nobadges' : ''].filter(Boolean).join(' ');
     const scale = typeof p.font_scale === 'number' ? ` style="--oc-scale:${Math.min(1.4, Math.max(0.8, p.font_scale))}"` : '';
+    const footerVariant = o.footer === 'compact' ? 'compact' : 'full';
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -151,9 +153,9 @@ ${frame.noscriptNav({ name: SITE_NAME, home: '/', links: links(o).map(({ label, 
 <noscript><p class="oc-account">${who}</p></noscript>
 ${o.body || ''}
 </main>
-${o.app ? '' : frame.footer({ service: 'chat', variant: 'full', updates: '/updates' })}
+${o.app ? '' : frame.footer({ service: 'chat', variant: footerVariant, updates: '/updates' })}
 <script>
-window.__OV_PAGE = ${JSON.stringify({ navbar: navConfig(o, config), footer: { service: 'chat', variant: 'full', mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' }, chat: o.page || null }).replace(/</g, '\\u003c')};
+window.__OV_PAGE = ${JSON.stringify({ navbar: navConfig(o, config), footer: { service: 'chat', variant: footerVariant, mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' }, chat: o.page || null }).replace(/</g, '\\u003c')};
 document.addEventListener('DOMContentLoaded', function () {
   try { if (window.OpenVibeNavbar) OpenVibeNavbar.init(window.__OV_PAGE.navbar); } catch (e) { /* the Frame is optional */ }
   try { if (window.OpenVibeFooter) OpenVibeFooter.init(window.__OV_PAGE.footer); } catch (e) { /* */ }

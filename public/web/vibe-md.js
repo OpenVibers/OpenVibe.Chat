@@ -2,7 +2,7 @@
  * subset, every character of the source escaped first, so the only markup in the output is the markup made here.
  *   blocks:  ``` fenced code ```, # / ## / ### headings (drawn as h3/h4), - * • lists and 1. lists (nested by indenting,
  *            4 deep), | pipe | tables | (with :-: alignment; they scroll inside their own box), > quotes, paragraphs
- *   inline:  `code`, **bold**, *italic* / _italic_, [text](https://…), bare https:// links (rel nofollow, new tab)
+ *   inline:  `code`, **bold**, *italic* / _italic_, [text](https://…), <https://…>, bare https:// links (rel nofollow, new tab)
  * Links are http(s) only. One file for both sides: CommonJS on the server, window.VibeMarkdown in the browser. */
 (function (root) {
   'use strict';
@@ -19,6 +19,8 @@
     var links = [];
     // An address ends at white space or at an escaped quote or angle bracket; trailing punctuation stays outside it.
     s = s.replace(/\[([^\]\n]{1,300})\]\((https?:\/\/(?:(?!&(?:quot|#39|lt|gt);)[^\s)])+)\)/g, function (_, t, u) { links.push(link(u, t)); return '\u0001' + (links.length - 1) + '\u0001'; });
+    // <https://…>, Markdown's autolink: escaped to &lt;…&gt; above, the brackets go and the address is the link.
+    s = s.replace(/&lt;(https?:\/\/(?:(?!&(?:quot|#39|lt|gt);)[^\s<])+)&gt;/g, function (_, u) { links.push(link(u, u)); return '\u0001' + (links.length - 1) + '\u0001'; });
     s = s.replace(/(^|[\s(])(https?:\/\/(?:(?!&(?:quot|#39|lt|gt);)[^\s<])+)/g, function (_, pre, u) {
       var tail = /[.,;:!?)]+$/.exec(u);
       var href = tail ? u.slice(0, -tail[0].length) : u;

@@ -47,7 +47,7 @@ function shape(t, room) {
         quick: QUICK.has(t.kind),
         requested_by: { id: Number(t.requested_by), username: t.requester_username || null, name: t.requester_name || t.requester_username || 'someone' },
         runner: t.runner || null, result: t.result || null, result_url: t.result_url || null, sources: Array.isArray(sources) ? sources : [],
-        error: t.error || null, cost_usd: t.cost_usd == null ? null : Number(t.cost_usd),
+        error: t.error || null, cost_usd: t.cost_usd == null ? null : Number(t.cost_usd), how: t.how || null,
         created_at: t.created_at, started_at: t.started_at || null, finished_at: t.finished_at || null,
         url: `/r/${room.slug}/tasks/${Number(t.id)}`,
     };

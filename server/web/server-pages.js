@@ -130,7 +130,7 @@ ${create}`,
         ].filter(Boolean).join(' · ');
         const canInvite = can.manage || (can.moderate && server.visibility === 'public');
         await page(req, res, 200, {
-            actor, wide: true, title: `${isVoice ? '' : '#'}${room.name} · ${server.name}`, path: back, active: 'servers',
+            actor, wide: true, footer: 'compact', title: `${isVoice ? '' : '#'}${room.name} · ${server.name}`, path: back, active: 'servers',
             robots: server.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
             description: server.description || `${server.name}, a server on OpenVibe.Chat with ${server.member_count} member${Number(server.member_count) === 1 ? '' : 's'}.`,
             page: {
