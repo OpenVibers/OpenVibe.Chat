@@ -464,39 +464,43 @@ ${composer}`,
         const sid = actor.user.subject_id;
         const [p, tts, dmSet, pres] = await Promise.all([prefsOf(actor), prefStores.settingsOf(prefStores.tts, sid), prefStores.settingsOf(prefStores.dm, sid), prefStores.settingsOf(prefStores.presence, sid)]);
         const src = tts.sources || {};
-        const volume = (name, label, v) => `<label>${label} <input type="number" name="${name}" min="0" max="100" step="5" value="${Number.isInteger(v) ? v : 80}"></label>`;
+        // A settings row: what it does on the left (with one muted line when it needs saying), the switch on the right.
+        const box = (name, label, on, hint = '') => `<label class="oc-set-row"><span class="oc-set-text">${label}${hint ? `<small>${hint}</small>` : ''}</span><input type="checkbox" class="oc-switch" name="${name}" value="1"${on ? ' checked' : ''}></label>`;
+        const volume = (name, label, v) => { const val = Number.isInteger(v) ? v : 80; return `<label class="oc-set-row oc-set-range"><span class="oc-set-text">${label}</span><input type="range" name="${name}" min="0" max="100" step="5" value="${val}" aria-valuetext="${val} percent"></label>`; };
         const size = p.font_scale == null ? 'default' : p.font_scale < 0.95 ? 'small' : p.font_scale > 1.05 ? 'large' : 'default';
-        const box = (name, label, on) => `<label class="oc-check"><input type="checkbox" name="${name}" value="1"${on ? ' checked' : ''}> ${label}</label>`;
+        const sizes = ['small', 'default', 'large'].map((v) => `<label class="oc-seg-opt"><input type="radio" name="font_size" value="${v}"${v === size ? ' checked' : ''}><span>${v[0].toUpperCase()}${v.slice(1)}</span></label>`).join('');
         const saved = req.query.saved ? notice('ok', 'Saved. These settings follow you to Live chat and every device.') : '';
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         await page(req, res, 200, {
             actor, title: 'Chat settings', path: '/settings', active: 'settings', robots: 'noindex, nofollow', footer: 'compact',
-            body: `<h1>Chat settings</h1>${saved}${error}
-<p class="oc-muted">Saved to your OpenVibe account, so they apply here, in Live chat and on every device you sign in to.</p>
-<form class="oc-form" method="post" action="/settings">
-${box('timestamps', 'Show the time next to each message', p.timestamps === true)}
+            body: `${ui.head({ title: 'Settings', sub: 'Saved to your account: here, in Live chat and on every device' })}${saved}${error}
+<form class="oc-settings" method="post" action="/settings">
+<section class="oc-set" aria-labelledby="oc-set-look"><h2 id="oc-set-look">Messages look</h2>
+${box('timestamps', 'Times next to messages', p.timestamps === true)}
 ${box('compact', 'Compact messages', p.compact === true)}
-${box('show_badges', 'Show staff and moderator badges', p.show_badges !== false)}
+${box('show_badges', 'Staff and moderator badges', p.show_badges !== false)}
 ${box('hide_emotes', 'Hide emotes', p.hide_emotes === true)}
-<label>Text size <select name="font_size">${['small', 'default', 'large'].map((s) => `<option value="${s}"${s === size ? ' selected' : ''}>${s[0].toUpperCase()}${s.slice(1)}</option>`).join('')}</select></label>
-<h2>Messages</h2>
-<label>Who can start a conversation with you <select name="new_conversations"><option value="everyone"${dmSet.new_conversations !== 'nobody' ? ' selected' : ''}>Everyone</option><option value="nobody"${dmSet.new_conversations === 'nobody' ? ' selected' : ''}>Nobody (your existing conversations stay open)</option></select></label>
-${box('group_invites', 'People can add me to group conversations', dmSet.group_invites !== false)}
-${box('previews', 'Show message text in notifications', dmSet.previews !== false)}
-<h2>Presence</h2>
-${box('show_in_user_list', 'Show my name in chat user lists (when off, you are counted but not named)', pres.show_in_user_list !== false)}
-<h2>Text-to-speech and sounds</h2>
-${box('tts_send', 'Read my messages aloud where the streamer has text-to-speech on', tts.send !== false)}
-${box('tts_send_while_live', 'Also while I am broadcasting', tts.send_while_live !== false)}
-${volume('tts_volume', 'Text-to-speech volume', tts.volume)}
-${box('tts_sounds', 'Play chat sounds', tts.sounds !== false)}
-${volume('tts_sound_volume', 'Chat sound volume', tts.sound_volume)}
-<fieldset class="oc-fieldset"><legend>Read messages relayed from</legend>${TTS_SOURCES.map(([k, label]) => box(`tts_src_${k}`, label, src[k] !== false)).join('')}</fieldset>
-<p><button type="submit">Save</button></p>
+<div class="oc-set-row"><span class="oc-set-text" id="oc-size-l">Text size</span><span class="oc-seg" role="radiogroup" aria-labelledby="oc-size-l">${sizes}</span></div>
+</section>
+<section class="oc-set" aria-labelledby="oc-set-dm"><h2 id="oc-set-dm">Direct messages</h2>
+<label class="oc-set-row"><span class="oc-set-text">Who can start one with you</span><select name="new_conversations"><option value="everyone"${dmSet.new_conversations !== 'nobody' ? ' selected' : ''}>Everyone</option><option value="nobody"${dmSet.new_conversations === 'nobody' ? ' selected' : ''}>Nobody</option></select></label>
+${box('group_invites', 'People can add me to groups', dmSet.group_invites !== false)}
+${box('previews', 'Message text in notifications', dmSet.previews !== false)}
+${box('show_in_user_list', 'My name in chat user lists', pres.show_in_user_list !== false, 'Off: you are counted, not named')}
+</section>
+<section class="oc-set" aria-labelledby="oc-set-sound"><h2 id="oc-set-sound">Speech and sounds</h2>
+${box('tts_send', 'Read my messages aloud', tts.send !== false, 'Where the streamer has text-to-speech on')}
+${box('tts_send_while_live', 'Also while I broadcast', tts.send_while_live !== false)}
+${volume('tts_volume', 'Speech volume', tts.volume)}
+${box('tts_sounds', 'Chat sounds', tts.sounds !== false)}
+${volume('tts_sound_volume', 'Sound volume', tts.sound_volume)}
+<div class="oc-set-row oc-set-chips"><span class="oc-set-text">Read messages from</span><span class="oc-chips">${TTS_SOURCES.map(([k, label]) => `<label class="oc-chip"><input type="checkbox" name="tts_src_${k}" value="1"${src[k] !== false ? ' checked' : ''}><span>${label}</span></label>`).join('')}</span></div>
+</section>
+<p class="oc-set-save"><button type="submit">Save settings</button></p>
 </form>
-<h2>Your chat history</h2>
-<p>Download every message you have sent that is still visible, in Live chat and here.</p>
-<p><a class="oc-button" href="/api/chat/me/export" download>Download (JSON)</a> <a class="oc-button" href="/api/chat/me/export?format=csv" download>Download (CSV)</a></p>
+<section class="oc-set" aria-labelledby="oc-set-data"><h2 id="oc-set-data">Your data</h2>
+<div class="oc-set-row"><span class="oc-set-text">Every message you sent that is still visible<small>In Live chat and here</small></span><span class="oc-set-actions"><a class="oc-pill" href="/api/chat/me/export" download>${IC.download}<span>JSON</span></a><a class="oc-pill" href="/api/chat/me/export?format=csv" download>${IC.download}<span>CSV</span></a></span></div>
+</section>
 ${await aiKeySection(actor, req.query || {})}`,
         });
     });
@@ -517,7 +521,8 @@ ${await aiKeySection(actor, req.query || {})}`,
         const keyLine = key && key.provider === 'node' ? `${key.machine === 'any' ? 'on whichever of your computers is on, the fastest first' : `on your computer <code>${esc(key.machine || '')}</code>`} · nothing spent` : key ? `key ending ${esc(key.key_hint || '····')} · ${esc(spent)}` : '';
         const vibeOwn = key ? (await require('../rooms/vibe').engineOf(actor.user)).own : false;
         const vibeBox = require('../rooms/vibe').enabled() ? `<label class="oc-check"><input type="checkbox" name="vibe" value="1"${vibeOwn || offered ? ' checked' : ''}> Vibe thinks with it too (in all your chats with Vibe; its answers then have no daily limit)</label>` : '';
-        return `<h2 id="oc-ai-key">Your AI key</h2>
+        const open = offered || q.saved || q.error ? ' open' : '';
+        return `<details class="oc-card oc-fold oc-aikey" id="oc-ai-key"${open}><summary><span>Your AI key${key ? ` <span class="oc-muted">· ${esc(credentials.label(key))}</span>` : ''}</span>${IC.chevron}</summary>
 <p class="oc-muted">AI members you add to a room, your Vibe among them, can think with your own provider and model instead of OpenVibe's: OpenAI, Anthropic, any OpenAI-compatible endpoint (OpenRouter, Groq, Together, your own server), or <strong>a model on your own computer</strong> (Ollama, LM Studio or llama.cpp through the OpenVibe Node, free, with no port opened: turn on "Let my AI use this computer's models" for it on <a href="https://openvibe.bot/machines">openvibe.bot/machines</a>). A key is kept encrypted in OpenVibe.AI and never shown again; the room's messages go to your provider or your computer when one of those members answers, and a key's replies count against your daily budget, not the room's limit.</p>
 ${offered ? notice('ok', `Save to let your AI members think with ${offered.model || 'a model'} on ${offered.machine === 'any' ? 'whichever of your computers is on' : 'your own computer'}.`) : ''}
 ${unreachable ? notice('error', 'OpenVibe.AI did not answer, so your key cannot be shown or changed right now.') : `${key ? `<p><strong>${esc(credentials.label(key))}</strong> <span class="oc-muted">· ${keyLine}${vibeOwn ? ' · Vibe thinks with it' : ''}</span></p>` : '<p class="oc-muted">No key yet.</p>'}
@@ -532,7 +537,7 @@ ${unreachable ? notice('error', 'OpenVibe.AI did not answer, so your key cannot 
 ${vibeBox}
 <p><button type="submit">${key ? 'Save' : 'Add key'}</button></p>
 </form>
-${key ? `<form class="oc-inline" method="post" action="/settings/ai-key/delete"><button type="submit" class="oc-link">Remove my key</button> <span class="oc-muted">(AI members that use it go back to OpenVibe's model)</span></form>` : ''}`}`;
+${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/ai-key/delete"><button type="submit" class="oc-pill oc-pill-danger">${IC.trash}<span>Remove my key</span></button> <span class="oc-muted">AI members that use it go back to OpenVibe's model</span></form>` : ''}`}</details>`;
     }
     router.post('/settings/ai-key', formLimit, sameSite, async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
@@ -834,10 +839,11 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         const kindRoles = rooms.KIND_ROLES[room.kind] || rooms.KIND_ROLES.community;
         const choices = [...kindRoles.filter((r) => r !== 'owner' && (r !== 'mod' || can.manage)), 'none'];
         const roleOption = (r, current) => `<option value="${r}"${r === current ? ' selected' : ''}>${r === 'none' ? 'remove' : ROLE_LABEL[r] || r}</option>`;
-        const seen = (m) => { const t = hhmm(m.last_seen_at); return t.iso ? ` <span class="oc-muted">· seen <time datetime="${t.iso}">${t.iso.slice(0, 10)}</time></span>` : ''; };
-        const roleForm = (m) => m.role === 'owner' ? '<span class="oc-muted">owner</span>'
-            : (m.role === 'mod' && !can.manage) ? '<span class="oc-muted">moderator</span>'
-                : `<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/members"><input type="hidden" name="username" value="${esc(m.username || '')}"><select name="role" aria-label="Role for ${esc(m.username || '')}">${choices.map((r) => roleOption(r, m.role)).join('')}</select> <button type="submit">Set</button></form>`;
+        const seen = (m) => { const t = ui.when(m.last_seen_at); return t.text ? ` · seen <time datetime="${t.iso}">${esc(t.text)}</time>` : ''; };
+        const roleForm = (m) => m.role === 'owner' ? '<span class="oc-muted oc-role">owner</span>'
+            : (m.role === 'mod' && !can.manage) ? '<span class="oc-muted oc-role">moderator</span>'
+                : `<form class="oc-role-form" method="post" action="/r/${esc(room.slug)}/members"><input type="hidden" name="username" value="${esc(m.username || '')}"><select name="role" aria-label="Role for ${esc(m.username || '')}">${choices.map((r) => roleOption(r, m.role)).join('')}</select><button type="submit" class="oc-icon-btn" aria-label="Set the role of ${esc(m.username || '')}" title="Set">${IC.check}</button></form>`;
+        const memberRow = (m) => `<li class="oc-row oc-row-static">${ui.initials(m.display_name || m.username || '?')}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(m.display_name || m.username || '?')}</strong></span><span class="oc-row-sub">@${esc(m.username || '')}${seen(m)}</span></span>${roleForm(m)}</li>`;
         const addRole = rooms.joinRoleOf(room);
         const attachments = can.manage ? await rooms.attachments(room) : [];
         const ais = can.manage && room.kind !== 'system' ? await aiMembers.list(room) : [];
@@ -849,7 +855,7 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
             return `<label>Thinks with <select name="engine"><option value="openvibe"${cur === 'openvibe' ? ' selected' : ''}>OpenVibe's model</option><option value="own"${cur === 'own' ? ' selected' : ''}${cur === 'own' || myKey ? '' : ' disabled'}>${esc(ownLabel)}</option></select></label>
 ${myKey || cur === 'own' ? '' : '<p class="oc-muted">To give it a different model (yours, from OpenAI, Anthropic or an OpenAI-compatible provider, or a model on your own computer), <a href="/settings#oc-ai-key">add your AI key</a>.</p>'}`;
         };
-        const aiForm = (a) => `<form class="oc-form oc-ai-form" method="post" action="/r/${esc(room.slug)}/ai-members${a ? `/${Number(a.id)}` : ''}">
+        const aiForm = (a) => `<form class="oc-form oc-ai-form oc-grid-form" method="post" action="/r/${esc(room.slug)}/ai-members${a ? `/${Number(a.id)}` : ''}">
 ${a ? '' : '<h3>Add an AI member</h3>'}
 <label>Name <input name="name" required minlength="2" maxlength="24" value="${a ? esc(a.name) : ''}" placeholder="Pantry"></label>
 <label>How it should be <textarea name="persona" rows="2" maxlength="1000" placeholder="A cheerful cook who keeps meals cheap and quick">${a ? esc(a.persona) : ''}</textarea></label>
@@ -857,51 +863,52 @@ ${a ? '' : '<h3>Add an AI member</h3>'}
 ${engineField(a)}
 ${a ? `<label class="oc-check"><input type="checkbox" name="enabled" value="1"${Number(a.enabled) ? ' checked' : ''}> Answers when someone writes @${esc(a.handle)}</label>` : ''}
 <p><button type="submit">${a ? 'Save' : 'Add'}</button></p></form>`;
-        const aiSection = can.manage && room.kind !== 'system' ? `<h2 id="oc-ai">AI members</h2>
+        const aiSection = can.manage && room.kind !== 'system' ? `<details class="oc-card oc-fold" id="oc-ai"${ais.length ? '' : ' open'}><summary><span>AI members${ais.length ? ` <span class="oc-muted">· ${ais.map((a) => esc(a.name)).join(', ')}</span>` : ''}</span>${IC.chevron}</summary>
 ${aiMembers.enabled() ? '' : notice('error', 'AI members are switched off on this server right now.')}
-<p class="oc-muted">An AI member answers when someone writes its name with an @ (for example @${esc(ais[0] ? ais[0].handle : 'pantry')}). It reads the room's recent messages and the notes you give it, through OpenVibe.AI, with OpenVibe's model or with your own key's (several members with different models make a multi-model group chat). It cannot do anything outside the chat. At most ${aiMembers.MAX_PER_ROOM}.</p>
-${ais.map((a) => `<section class="oc-ai-member"><h3><span class="oc-badge oc-ai">AI</span> ${esc(a.name)} <span class="oc-muted">@${esc(a.handle)} · ${esc(aiMembers.modelOf(a))}</span>${a.link_service === 'food' ? ' <span class="oc-badge">knows the household\'s pantry (OpenVibe.Food)</span>' : ''}</h3>${aiForm(a)}<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/ai-members/${Number(a.id)}/delete"><button type="submit" class="oc-link">Remove ${esc(a.name)}</button></form></section>`).join('')}
+<p class="oc-muted oc-small">An AI member answers when someone writes its name with an @ (for example @${esc(ais[0] ? ais[0].handle : 'pantry')}). It reads the room's recent messages and the notes you give it, through OpenVibe.AI, with OpenVibe's model or with your own key's (several members with different models make a multi-model group chat). It cannot do anything outside the chat. At most ${aiMembers.MAX_PER_ROOM}.</p>
+${ais.map((a) => `<section class="oc-ai-member"><h3><span class="oc-badge oc-ai">AI</span> ${esc(a.name)} <span class="oc-muted">@${esc(a.handle)} · ${esc(aiMembers.modelOf(a))}</span>${a.link_service === 'food' ? ' <span class="oc-badge">knows the household\'s pantry (OpenVibe.Food)</span>' : ''}</h3>${aiForm(a)}<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/ai-members/${Number(a.id)}/delete"><button type="submit" class="oc-pill oc-pill-danger">${IC.trash}<span>Remove ${esc(a.name)}</span></button></form></section>`).join('')}
 ${ais.length < aiMembers.MAX_PER_ROOM && !ais.some((a) => a.handle === 'vibe') ? `<form class="oc-form oc-ai-quick" method="post" action="/r/${esc(room.slug)}/ai-members"><input type="hidden" name="name" value="Vibe"><input type="hidden" name="persona" value="${esc(VIBE_IN_ROOMS)}"><p><button type="submit">Add Vibe</button> <span class="oc-muted">OpenVibe's assistant joins the room: anyone here can ask it with @vibe.</span></p></form>` : ''}
-${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}` : '';
+${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}</details>` : '';
         if (room.server_id) {
             return await page(req, res, 200, {
                 actor, title: `#${room.name}: AI members`, path: `/r/${room.slug}/settings`, active: 'servers', robots: 'noindex, nofollow', footer: 'compact',
-                body: `<p><a href="${esc(await channelUrl(room, '/settings'))}">← Server settings</a> · <a href="${esc(await channelUrl(room))}">#${esc(room.name)}</a></p><h1>AI members in #${esc(room.name)}</h1>${saved}${error}
+                body: `${ui.head({ title: `AI members in #${esc(room.name)}`, back: { href: await channelUrl(room, '/settings'), label: 'Server settings' } })}${saved}${error}
 ${aiSection}`,
             });
         }
         const hookList = can.manage && rooms.isWorkspace(room) ? await roomHooks.list(room) : [];
-        const hookSection = can.manage && rooms.isWorkspace(room) ? `<h2 id="oc-hooks">Alerts into this room</h2>
-<p class="oc-muted">Other systems post here through a hook: an OpenVibe.Watch webhook action, an OpenVibe.Events subscription, or anything that signs its POST the same way. Each one arrives as a message from the room's Vibe, and can add a task to the queue for you. At most ${roomHooks.MAX_PER_ROOM}.</p>
+        const hookSection = can.manage && rooms.isWorkspace(room) ? `<details class="oc-card oc-fold" id="oc-hooks"><summary><span>Alerts into this room${hookList.length ? ` <span class="oc-muted">· ${hookList.length}</span>` : ''}</span>${IC.chevron}</summary>
+<p class="oc-muted oc-small">Other systems post here through a hook: an OpenVibe.Watch webhook action, an OpenVibe.Events subscription, or anything that signs its POST the same way. Each one arrives as a message from the room's Vibe, and can add a task to the queue for you. At most ${roomHooks.MAX_PER_ROOM}.</p>
 ${hookList.length ? `<ul class="oc-members">${hookList.map((h) => `<li><strong>${esc(h.label)}</strong> <span class="oc-muted">${h.queue_kind ? `queues ${esc(h.queue_kind)} work` : 'a message only'} · ${h.deliveries} received${h.last_at ? ` · last ${esc(String(h.last_at).slice(0, 16))}` : ''}</span><form class="oc-inline" method="post" action="/r/${esc(room.slug)}/hooks/${encodeURIComponent(h.id)}/delete"><button type="submit" class="oc-link">Delete</button></form></li>`).join('')}</ul>` : ''}
 ${hookList.length < roomHooks.MAX_PER_ROOM ? `<form class="oc-form" method="post" action="/r/${esc(room.slug)}/hooks">
 <label>Name <input name="label" required minlength="2" maxlength="60" placeholder="Site errors"></label>
 <label>Each alert <select name="queue_kind"><option value="">posts a message</option><option value="research">posts and asks Vibe to look into it (research, runs on your allowance)</option><option value="code">posts and queues a code task for a worker</option><option value="other">posts and queues a task for a worker</option></select></label>
-<p><button type="submit">Make a hook</button></p></form>` : ''}` : '';
+<p><button type="submit">Make a hook</button></p></form>` : ''}</details>` : '';
         const communityUrl = config.web.communityUrl;
-        const attachList = can.manage ? `<h2>Attached to</h2>${attachments.length ? `<ul class="oc-members">${attachments.map((a) => `<li><a href="${esc(a.service === 'community' ? `${communityUrl}/s/${encodeURIComponent(a.resource)}` : '#')}">${esc(a.title || a.resource)}</a> <span class="oc-muted">${esc(a.service === 'community' ? 'OpenVibe.Community space' : a.service)}</span><form class="oc-inline" method="post" action="/r/${esc(room.slug)}/attachments/${encodeURIComponent(a.service)}/${encodeURIComponent(a.resource)}/detach"><button type="submit" class="oc-link">Detach</button></form></li>`).join('')}</ul>` : '<p class="oc-muted">Not attached anywhere. A Community space you own can attach this room from the space\'s page.</p>'}` : '';
+        const attachList = can.manage ? `<section class="oc-set"><h2>Attached to</h2>${attachments.length ? `<ul class="oc-members">${attachments.map((a) => `<li><a href="${esc(a.service === 'community' ? `${communityUrl}/s/${encodeURIComponent(a.resource)}` : '#')}">${esc(a.title || a.resource)}</a> <span class="oc-muted">${esc(a.service === 'community' ? 'OpenVibe.Community space' : a.service)}</span><form class="oc-inline" method="post" action="/r/${esc(room.slug)}/attachments/${encodeURIComponent(a.service)}/${encodeURIComponent(a.resource)}/detach"><button type="submit" class="oc-link">Detach</button></form></li>`).join('')}</ul>` : '<p class="oc-muted oc-set-note">Not attached anywhere. A Community space you own can attach this room from the space\'s page.</p>'}</section>` : '';
         await page(req, res, 200, {
-            actor, title: `${room.name}: settings`, path: `/r/${room.slug}/settings`, active: 'rooms', robots: 'noindex, nofollow', footer: 'compact',
-            body: `<p><a href="/r/${esc(room.slug)}">← ${esc(room.name)}</a></p><h1>Room settings</h1>${saved}${error}
-${can.manage && await require('./room-embed-pages').embeddable(room) ? `<h2>Put this room on your site</h2>
-<p>Anyone can read it there; people sign in with OpenVibe to write, and the room's moderation applies. A chat bubble:</p>
-<pre class="ib-snippet" tabindex="0"><code>${esc(`<script src="${config.web.baseUrl}/widget.js" data-room="${room.slug}" async></script>`)}</code></pre>
-<p>Or in a part of your page (an element with id="chat"):</p>
-<pre class="ib-snippet" tabindex="0"><code>${esc(`<script src="${config.web.baseUrl}/widget.js" data-room="${room.slug}" data-target="#chat" data-height="520" async></script>`)}</code></pre>` : ''}
-${can.manage ? `<form class="oc-form" method="post" action="/r/${esc(room.slug)}/settings">
+            actor, title: `${room.name}: settings`, path: `/r/${room.slug}/settings`, active: 'rooms', robots: 'noindex, nofollow', footer: 'compact', script: true, page: { view: 'settings' },
+            body: `${ui.head({ title: 'Room settings', sub: esc(room.name), back: { href: `/r/${room.slug}`, label: 'Back to the room' } })}${saved}${error}
+${can.manage ? `<section class="oc-set"><h2>Room</h2><form class="oc-form oc-grid-form oc-set-form" method="post" action="/r/${esc(room.slug)}/settings">
 <label>Name <input name="name" required minlength="3" maxlength="40" value="${esc(room.name)}"></label>
 <label>Topic <input name="topic" maxlength="200" value="${esc(room.topic || '')}"></label>
 <label>Who can read <select name="visibility"><option value="public"${room.visibility === 'public' ? ' selected' : ''}>Anyone (public)</option><option value="private"${room.visibility === 'private' ? ' selected' : ''}>Members only (private)</option></select></label>
 ${room.kind === 'call' ? `<label>People who join <select name="join_role">${rooms.JOIN_ROLES_CALL.map((r) => `<option value="${r}"${r === addRole ? ' selected' : ''}>${{ speaker: 'can talk (speakers)', participant: 'listen and write (participants)', viewer: 'listen and read (viewers)' }[r]}</option>`).join('')}</select></label>` : ''}
-<label>Slow mode (seconds between messages, 0 = off) <input name="slow_seconds" type="number" min="0" max="600" value="${Number(room.slow_seconds) || 0}"></label>
-${room.slug !== 'staff' && (room.kind || 'community') === 'community' && Number(room.assistant) !== 1 ? `<input type="hidden" name="has_workspace" value="1"><label class="oc-check"><input type="checkbox" name="workspace" value="1"${rooms.isWorkspace(room) ? ' checked' : ''}> Work together here: a work queue beside the conversation (Vibe runs research at once; code and computer tasks go to a member or to the asker's own computer), alerts from other systems, and a shared screen</label>` : ''}
-${rooms.isWorkspace(room) ? `<label>Shared screen <input name="screen_url" type="url" value="${esc(room.screen_url || '')}" placeholder="https://openvibe.bot/screen/…"> <span class="oc-muted">A screen share link from OpenVibe.Bot (a computer's owner makes it on its screen page). Members see the screen beside the conversation, and with a "use" link they can click and type on it. Empty: no screen.</span></label>` : ''}
-<p><button type="submit">Save</button></p></form>` : ''}
+<label>Slow mode: seconds between messages (0 is off) <input name="slow_seconds" type="number" min="0" max="600" value="${Number(room.slow_seconds) || 0}"></label>
+${room.slug !== 'staff' && (room.kind || 'community') === 'community' && Number(room.assistant) !== 1 ? `<input type="hidden" name="has_workspace" value="1"><label class="oc-set-row oc-set-inline"><span class="oc-set-text">Work together here<small>A work queue beside the conversation, alerts from other systems and a shared screen</small></span><input type="checkbox" class="oc-switch" name="workspace" value="1"${rooms.isWorkspace(room) ? ' checked' : ''}></label>` : ''}
+${rooms.isWorkspace(room) ? `<label>Shared screen <input name="screen_url" type="url" value="${esc(room.screen_url || '')}" placeholder="https://openvibe.bot/screen/…"> <span class="oc-muted oc-small">A screen share link from OpenVibe.Bot (a computer's owner makes it on its screen page). Members see the screen beside the conversation; with a "use" link they can click and type on it. Empty: no screen.</span></label>` : ''}
+<p><button type="submit">Save</button></p></form></section>` : ''}
+<section class="oc-set" aria-labelledby="oc-members-h"><h2 id="oc-members-h">Members <span class="oc-count">${members.length}</span></h2>
+<p class="oc-muted oc-set-note">${esc(roleHelp(room.kind))}</p>
+<form class="oc-find oc-find-inset" method="post" action="/r/${esc(room.slug)}/members">${IC.plus}<label for="oc-invite" class="oc-sr">Add someone by their username</label><input id="oc-invite" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="Add by username" autocomplete="off"><select name="role" aria-label="Their role">${choices.filter((r) => r !== 'none' && r !== 'blocked').map((r) => roleOption(r, addRole)).join('')}</select><button type="submit" class="oc-send" aria-label="Add" title="Add">${IC.send}</button></form>
+<ul class="oc-list oc-list-flush">${members.map(memberRow).join('')}</ul>
+</section>
 ${hookSection}
-<h2>Members</h2>
-<p class="oc-muted">${esc(roleHelp(room.kind))}</p>
-<form class="oc-new" method="post" action="/r/${esc(room.slug)}/members"><label for="oc-invite">Add someone</label> <input id="oc-invite" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="their username"> <select name="role" aria-label="Their role">${choices.filter((r) => r !== 'none' && r !== 'blocked').map((r) => roleOption(r, addRole)).join('')}</select> <button type="submit">Add</button></form>
-<ul class="oc-members">${members.map((m) => `<li><strong>${esc(m.display_name || m.username || '?')}</strong> <span class="oc-muted">@${esc(m.username || '')}</span>${seen(m)} ${roleForm(m)}</li>`).join('')}</ul>
+${can.manage && await require('./room-embed-pages').embeddable(room) ? `<details class="oc-card oc-fold" id="oc-embed"><summary><span>Put this room on your site</span>${IC.chevron}</summary>
+<p class="oc-muted oc-small">Anyone can read it there; people sign in with OpenVibe to write, and the room's moderation applies. A chat bubble:</p>
+<div class="oc-snip"><button type="button" class="oc-icon-btn" data-oc-copy="#oc-snip-bubble" aria-label="Copy" title="Copy" hidden>${IC.copy}</button><pre class="ib-snippet" tabindex="0" id="oc-snip-bubble"><code>${esc(`<script src="${config.web.baseUrl}/widget.js" data-room="${room.slug}" async></script>`)}</code></pre></div>
+<p class="oc-muted oc-small">Or in a part of your page (an element with id="chat"):</p>
+<div class="oc-snip"><button type="button" class="oc-icon-btn" data-oc-copy="#oc-snip-inline" aria-label="Copy" title="Copy" hidden>${IC.copy}</button><pre class="ib-snippet" tabindex="0" id="oc-snip-inline"><code>${esc(`<script src="${config.web.baseUrl}/widget.js" data-room="${room.slug}" data-target="#chat" data-height="520" async></script>`)}</code></pre></div></details>` : ''}
 ${aiSection}
 ${attachList}`,
         });

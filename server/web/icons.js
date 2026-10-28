@@ -37,6 +37,7 @@ const ICONS = {
     key: svg('<circle cx="8" cy="15" r="4"/><path d="m10.8 12.2 8.7-8.7M16 7l3 3M14 9l2 2"/>'),
     help: svg('<circle cx="12" cy="12" r="8.5"/><path d="M9.6 9.3a2.5 2.5 0 0 1 4.8.9c0 1.7-2.4 2.2-2.4 3.8M12 17h.01"/>'),
     more: svg('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>'),
+    download: svg('<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>'),
     chevron: svg('<path d="m9 6 6 6-6 6"/>'),
     hand: svg('<path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11M11 10V4.5a1.5 1.5 0 0 1 3 0V11M14 10.5V6a1.5 1.5 0 0 1 3 0v7c0 4-2.5 7-6.5 7-2.6 0-4.2-1.3-5.7-3.6L3 13.6a1.5 1.5 0 0 1 2.4-1.8L8 15"/>'),
 };
