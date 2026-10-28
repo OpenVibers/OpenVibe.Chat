@@ -195,11 +195,6 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-srv-people-list a { display: block; padding: 3px 8px; border-radius: 6px; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oc-srv-people-list a:hover { background: var(--oc-panel-2); }
 /* The directory, an invite, settings */
-.oc-srv-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 10px; }
-.oc-srv-card a { display: flex; align-items: center; gap: 12px; height: 100%; padding: 12px 14px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; color: var(--oc-text); text-decoration: none; }
-.oc-srv-card a:hover, .oc-srv-card a:focus-visible { border-color: var(--oc-accent); }
-.oc-srv-card-text { display: flex; flex-direction: column; min-width: 0; }
-.oc-srv-card-text .oc-muted { font-size: .88em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oc-srv-icon--big { width: 72px; height: 72px; margin: 0 auto 6px; border-radius: 22px; font-size: 1.5rem; }
 .oc-invite-card { max-width: 440px; margin: 32px auto; padding: 28px 24px; text-align: center; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 16px; }
 .oc-invite-card h1 { margin-top: 0; }
@@ -232,8 +227,6 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
   .oc-srv-main > .oc-notice, .oc-srv-main > .oc-ai-here, .oc-srv-main > .oc-call { margin-left: 12px; margin-right: 12px; }
 }
 
-.oc-srv-card-title { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
-.oc-srv-card-title .oc-badge { margin-left: 0; }
 .oc-badge-new { color: var(--oc-text); border-color: var(--oc-red); }
 .oc-badge-official { color: var(--oc-text); border-color: var(--accent-strong, var(--accent, #3b82f6)); }
 .oc-moves { display: inline-flex; gap: 4px; margin-left: auto; }
@@ -272,7 +265,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-lede { margin: 0; max-width: 64ch; font-size: 1.05rem; color: var(--oc-muted); }
 .oc-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 1rem 0 0; }
 .oc-stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 1.2rem 0 0; padding: 0; }
-.oc-stats > div { display: flex; flex-direction: column-reverse; min-width: 0; padding: 8px 14px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); }
+.oc-stats > div { flex: 1 1 100px; display: flex; flex-direction: column-reverse; min-width: 0; padding: 8px 14px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); }
 .oc-stats dt { margin: 0; font-size: .8rem; color: var(--oc-muted); }
 .oc-stats dd { margin: 0; font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; }
 .oc-room > h2 { margin: 1.4rem 0 .2rem; font-size: 1.3rem; }
@@ -564,3 +557,70 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-pop-item.oc-danger { color: var(--oc-red); }
 .oc-row-lock { display: inline-flex; color: var(--oc-muted); flex: none; }
 .oc-row-lock .oc-i { width: .9em; height: .9em; }
+
+/* Settings (GET /settings): grouped cards of rows, each a label on the left and its control on the right (a switch, a
+   slider, a choice), the save button kept in reach, and the rarely needed parts folded. */
+.oc-settings { display: grid; gap: 12px; margin: 0; max-width: none; }
+.oc-set { border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel); overflow: hidden; margin: 0 0 12px; }
+.oc-settings .oc-set { margin: 0; }
+.oc-set > h2 { margin: 0; padding: 12px 14px 6px; font-size: .74rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
+.oc-set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 8px 14px; border-top: 1px solid var(--oc-line); cursor: pointer; }
+.oc-set > h2 + .oc-set-row { border-top: 0; }
+div.oc-set-row { cursor: default; }
+.oc-set-text { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.oc-set-text small { color: var(--oc-muted); font-size: .8rem; }
+.oc-set-row select { flex: none; max-width: 50%; margin: 0; }
+.oc-set-range input[type=range] { flex: 0 1 45%; min-width: 120px; accent-color: var(--accent-strong, var(--oc-accent)); padding: 0; border: 0; background: transparent; }
+.oc-set-actions { display: flex; gap: 6px; flex: none; }
+.oc-switch { appearance: none; -webkit-appearance: none; flex: none; position: relative; width: 44px; height: 26px; margin: 0; padding: 0; border-radius: 999px; border: 0; background: var(--oc-line); cursor: pointer; transition: background .15s; }
+.oc-switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, .35); transition: transform .15s; }
+.oc-switch:checked { background: var(--accent-strong, var(--oc-accent)); }
+.oc-switch:checked::after { transform: translateX(18px); }
+.oc-switch:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+.oc-seg { display: inline-flex; flex: none; padding: 3px; gap: 2px; border-radius: 10px; background: var(--oc-panel-2); }
+.oc-seg-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.oc-seg-opt span { display: block; padding: 5px 11px; border-radius: 8px; font-size: .86rem; font-weight: 600; color: var(--oc-muted); cursor: pointer; }
+.oc-seg-opt input:checked + span { background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, var(--oc-on-accent)); }
+.oc-seg-opt input:focus-visible + span { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
+.oc-set-chips { flex-wrap: wrap; }
+.oc-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.oc-chip input { position: absolute; opacity: 0; pointer-events: none; }
+.oc-chip span { display: inline-block; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--oc-line); font-size: .84rem; font-weight: 600; color: var(--oc-muted); cursor: pointer; }
+.oc-chip input:checked + span { border-color: color-mix(in srgb, var(--oc-accent) 55%, transparent); background: color-mix(in srgb, var(--oc-accent) 14%, transparent); color: var(--oc-text); }
+.oc-chip input:focus-visible + span { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
+.oc-set-save { position: sticky; bottom: 0; z-index: 2; margin: 0; padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(transparent, var(--oc-bg) 35%); }
+.oc-set-save button { width: 100%; min-height: 46px; border-radius: 12px; }
+.oc-aikey .oc-ai-form { max-width: none; }
+@media (min-width: 720px) { .oc-set-save button { width: auto; min-width: 200px; } }
+@media (prefers-reduced-motion: reduce) { .oc-switch, .oc-switch::after { transition: none; } }
+/* Room settings: the room's form, its members (a row each, the role a small select that saves), and folded extras. */
+.oc-set-form { padding: 4px 14px 14px; }
+.oc-set-note { margin: 0; padding: 0 14px 10px; font-size: .86rem; }
+.oc-set .oc-set-inline { padding: 8px 0; border-top: 0; }
+.oc-small { font-size: .86rem; }
+.oc-count { margin-left: 4px; color: var(--oc-text); font-weight: 700; letter-spacing: 0; }
+.oc-find-inset { margin: 0 14px 12px; }
+.oc-find select { flex: none; max-width: 38%; border: 0; background: var(--oc-panel-2); padding: 6px 8px; }
+.oc-list-flush { margin: 0; border: 0; border-radius: 0; border-top: 1px solid var(--oc-line); }
+.oc-row-static { display: flex; align-items: center; gap: 12px; padding: 8px 8px 8px 14px; }
+.oc-role-form { display: flex; align-items: center; gap: 2px; margin: 0; flex: none; }
+.oc-role-form select { padding: 5px 6px; font-size: .86rem; }
+.oc-role { flex: none; padding-right: 8px; font-size: .86rem; }
+.oc-ai-member { padding: 10px 0; border-top: 1px solid var(--oc-line); }
+.oc-ai-member h3 { margin: 0 0 6px; font-size: 1rem; }
+.oc-grid-form label.oc-set-row { display: flex; color: var(--oc-text); font-size: 1rem; }
+.oc-ai-form h3 { margin: 6px 0 2px; font-size: 1rem; }
+
+/* The front page for someone signed in (pages.js appBody): global chat first at the screen's height, Ask Vibe in one
+   line under it, then the stream chats, servers and rooms as compact lists. A server's own mark keeps its colour in
+   a list row. */
+.oc-global { margin-top: 4px; }
+.oc-vibe-mini { margin-top: 16px; }
+.oc-vibe-mini .oc-find { margin: 0; border-color: color-mix(in srgb, var(--oc-accent) 35%, var(--oc-line)); }
+.oc-vibe-mini .oc-find > .oc-i { color: var(--oc-accent); }
+.oc-home-list { margin-top: 18px; }
+.oc-home-list .oc-home-head { align-items: center; margin: 0 0 8px; }
+.oc-home-list h2.oc-list-head { margin: 0; font-family: inherit; font-size: .78rem; letter-spacing: .06em; }
+.oc-home-list .oc-home-head a { font-size: .82rem; }
+.oc-home-list .oc-list { margin: 0; }
+.oc-srv-icon--row { width: 40px; height: 40px; border-radius: 12px; font-size: .85rem; }

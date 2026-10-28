@@ -7,6 +7,8 @@
  *   head({ title, sub, back, actions })   <header class="oc-page-head">: back icon, title and one muted line, icon actions
  *   when(ts, now)                          { iso, text }: 14:05 today, Yesterday, Mon this week, Oct 20 this year, else 2025-10-20
  *   initials(name)                         a round mark with up to two letters, its colour from the name
+ *   hueOf(slug) / serverMark(server)       a server's steady hue, and its rounded-square mark in a list row (the same
+ *                                          colour as in the server rail, wherever the server is listed)
  */
 const { esc } = require('./layout');
 const { ICONS } = require('./icons');
@@ -44,4 +46,8 @@ function initials(name) {
     return `<span class="oc-av" style="--av:${h}" aria-hidden="true">${esc(letters)}</span>`;
 }
 
-module.exports = { head, when, initials };
+const hueOf = (slug) => { let h = 0; for (const c of String(slug)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+const serverLetters = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
+const serverMark = (s) => `<span class="oc-srv-icon oc-srv-icon--row" style="--oc-hue:${hueOf(s.slug)}" aria-hidden="true">${esc(serverLetters(s.name))}</span>`;
+
+module.exports = { head, when, initials, hueOf, serverLetters, serverMark };
