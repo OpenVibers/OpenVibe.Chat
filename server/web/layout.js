@@ -22,14 +22,17 @@ const SITE_NAME = 'OpenVibe.Chat';
 const NETWORK_URL = 'https://openvibe.network';
 const DEFAULT_DESCRIPTION = 'OpenVibe.Chat: the network-wide chat room and your direct messages, one account across every OpenVibe site.';
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public', 'web');
+// The site's own places (the owner, 2026-10-28: "reanalyze all the nav bars… redundant… not front facing of what the
+// important stuff is"): the five people use every visit carry an icon, the rest fold into the navbar's More (Shared
+// 4.22). Search is the menu's orb by the logo and what shipped is the footer's.
 const LINKS = [
-    { key: 'vibe', label: 'Vibe', href: '/vibe' },
-    { key: 'global', label: 'Global chat', href: '/' },
-    { key: 'rooms', label: 'Rooms', href: '/rooms' },
-    { key: 'servers', label: 'Servers', href: '/servers' },
-    { key: 'messages', label: 'Messages', href: '/messages' },
-    { key: 'inbox', label: 'Inbox', href: '/inbox' },
-    { key: 'settings', label: 'Settings', href: '/settings' },
+    { key: 'vibe', label: 'Vibe', href: '/vibe', icon: 'fa-wand-magic-sparkles' },
+    { key: 'global', label: 'Global chat', href: '/', icon: 'fa-earth-americas' },
+    { key: 'rooms', label: 'Rooms', href: '/rooms', icon: 'fa-hashtag' },
+    { key: 'messages', label: 'Messages', href: '/messages', icon: 'fa-comment-dots' },
+    { key: 'inbox', label: 'Inbox', href: '/inbox', icon: 'fa-inbox' },
+    { key: 'servers', label: 'Servers', href: '/servers', more: true },
+    { key: 'settings', label: 'Settings', href: '/settings', more: true },
 ];
 
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -51,14 +54,14 @@ function asset(rel) {
 /** The site's links, with the signed-in person's unread counts (o.counts: { rooms, messages }). */
 function links(o) {
     const counts = o.counts || {};
-    return LINKS.map((l) => ({ key: l.key, href: l.href, label: counts[l.key] > 0 ? `${l.label} (${counts[l.key] > 99 ? '99+' : counts[l.key]})` : l.label }));
+    return LINKS.map((l) => ({ key: l.key, href: l.href, icon: l.icon, more: l.more, label: counts[l.key] > 0 ? `${l.label} (${counts[l.key] > 99 ? '99+' : counts[l.key]})` : l.label }));
 }
 
 function navConfig(o, config) {
     return {
         service: 'chat',
         apiBase: NETWORK_URL,
-        links: links(o).map((l) => ({ label: l.label, href: l.href, active: o.active === l.key })),
+        links: links(o).map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: o.active === l.key })),
         history: { type: 'page', title: o.title || SITE_NAME },
         silentLogin: `${config.web.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
