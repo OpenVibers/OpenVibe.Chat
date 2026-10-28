@@ -84,10 +84,16 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     assert.match(await aiTools.run('rm_rf', '{}'), /no tool called/);
     assert.match(await aiTools.run('roll_dice', '{not json'), /not valid JSON/);
     const seen = [];
-    const fake = async (url) => { seen.push(String(url)); return new Response(JSON.stringify({ results: [{ owner: 'deals', type: 'offer', title: 'Air mattress for $67', snippet_html: 'An <mark>air</mark> mattress', canonical_url: 'https://openvibe.deals/d/x' }] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
+    const fake = async (url) => { seen.push(String(url)); return new Response(JSON.stringify({ results: [{ scope: 'network', kind: 'document', owner: 'deals', type: 'offer', title: 'Air mattress for $67', snippet: 'An air mattress', url: 'https://openvibe.deals/d/x' }] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
     const found = await aiTools._runners.search_openvibe({ query: 'air mattress', limit: 99 }, { fetchImpl: fake });
-    assert.ok(seen[0].startsWith(`${config.ai.searchUrl}/api/v1/search?`) && seen[0].includes('limit=8'));
+    assert.ok(seen[0].startsWith(`${config.ai.searchUrl}/api/v1/query?`) && seen[0].includes('scopes=network') && seen[0].includes('limit=8'), 'the Search Fabric\'s network scope');
     assert.deepStrictEqual([found.results[0].site, found.results[0].summary, found.results[0].url], ['deals', 'An air mattress', 'https://openvibe.deals/d/x']);
+    // A Search without the fabric answers 404 there: the old search answers instead.
+    const seenOld = [];
+    const old = async (url) => { seenOld.push(String(url)); if (String(url).includes('/api/v1/query')) return new Response('{}', { status: 404 }); return new Response(JSON.stringify({ results: [{ owner: 'deals', type: 'offer', title: 'Air mattress for $67', snippet_html: 'An <mark>air</mark> mattress', canonical_url: 'https://openvibe.deals/d/x' }] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
+    const foundOld = await aiTools._runners.search_openvibe({ query: 'air mattress' }, { fetchImpl: old });
+    assert.ok(seenOld[1].startsWith(`${config.ai.searchUrl}/api/v1/search?`));
+    assert.deepStrictEqual([foundOld.results[0].summary, foundOld.results[0].url], ['An air mattress', 'https://openvibe.deals/d/x']);
 });
 
 t('@dealer rolls through a tool: the call runs here, its result goes back, the text answer is posted', async () => {
