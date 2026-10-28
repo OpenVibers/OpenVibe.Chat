@@ -8,7 +8,7 @@
   "port": 4400,
   "domain": "openvibe.chat (Chat's own site: global chat, messages, rooms, settings; the service manifest records it live since 2026-09-24) and openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via an nginx include in openvibe.live's vhost)",
   "contracts": "openvibe-contracts v0.222.0",
-  "sdk": "openvibe-sdk v0.67.0",
+  "sdk": "openvibe-sdk v0.70.0",
   "shared": "openvibe-shared v4.33.0",
   "capabilities": [
     "chat.message.send",
@@ -34,7 +34,8 @@
     "network.modules.read",
     "network.modules.write",
     "tools.tool.run",
-    "tools.job.read"
+    "tools.job.read",
+    "search.query.delegate"
   ],
   "capabilitiesRegistered": true,
   "events": [
@@ -65,7 +66,8 @@
     "network blocks, revocation, account merge, export and deletion from Network events",
     "openvibe-sdk service_outbox events and chat.room.message.* on the realtime plane",
     "N-1 compatibility tests",
-    "per-actor limits (openvibe-sdk/limits)"
+    "per-actor limits (openvibe-sdk/limits)",
+    "Vibe search through the Search Fabric (network and web scopes, cited provider/date/URL; pre-fabric fallbacks)"
   ],
   "updated": "2026-10-28"
 }

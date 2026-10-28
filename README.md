@@ -128,6 +128,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 | The six chat tables (moderators, moderation settings, emotes, tags, AI summaries, timeline) | **Chat** (C-04 done) | Chat's own database; Live reads through `GET /internal/moderation/*` (`chat.moderation.read`), 30 s cached |
 | Emote image bytes | **OpenVibe.Media** (namespace `chat`) | `server/media/client.js` (openvibe-sdk `createObjectsClient`), Chat's service token (`media.object.upload` / `.delete`); the row keeps `media_url` + `media_asset_id` |
 | Chat-AI summaries (global / per-chatter insight + timeline) | **OpenVibe.AI** (namespace `chat.*`) | `server/ai/client.js` (openvibe-sdk `createAiClient`), Chat's service token (`ai.run.create` / `ai.run.read`); workflows `chat.global` / `chat.profile`; extractive fallback when AI does not answer |
+| Vibe's search (OpenVibe and the web) | **OpenVibe.Search** (Search Fabric, `GET /api/v1/query`) | `server/rooms/search-fabric.js` (openvibe-sdk/search 0.70), Chat's service token (Network grants `search.query.delegate` on `openvibe.search`), the person in `X-OV-Subject`; each result keeps its provider, date and URL; Search's `/api/v1/search` and Actor's web task are the fallbacks only when the fabric is down |
 | Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |
 | Events | **OpenVibe.Events** | `service_outbox` (openvibe-sdk outbox) → `POST /api/v1/events` when `EVENTS_URL` and `OV_OAUTH_CLIENT_SECRET` are set (`events.event.publish`); Chat's subscriptions deliver to `POST /internal/events` (`server/events/consumer.js`, `events.subscription.manage`) |
 
@@ -326,7 +327,8 @@ account keeps the AI members it added (they belong to the room) without its subj
 
 **Tools** (`server/rooms/ai-tools.js`; the owner's "modular AI conversation… tool calling"). An AI member's answer
 is a few turns of OpenVibe.AI's `chat.member.turn` (a Chat Completions passthrough with tools, AI#96): the model may
-call `search_openvibe` (OpenVibe.Search's public results, `CHAT_SEARCH_URL`), `current_time`, `roll_dice`,
+call `search_openvibe` (OpenVibe.Search's public results through the Search Fabric's network scope, `CHAT_SEARCH_URL`),
+`web_search` for Vibe (the fabric's web scope; Actor only when the fabric is down), `current_time`, `roll_dice`,
 `pick_one`, and for a member linked to a Food household `household_pantry`; Chat runs them (read-only, bounded, results
 at most 4,000 characters) and sends the results back, at most three rounds with four calls each, then a turn that must
 answer in text. If a turn fails (a provider without tools), the member answers with `chat.member.reply` as before.
@@ -474,10 +476,12 @@ socket, sends on Enter and keeps a draft typed while signed out through the sign
   `public/web/vibe-md.js`, which escapes everything first and links only http(s)), the last 30 messages at 2,000
   characters each, answers up to 8,000 characters (1,500 tokens). Tools: `search_openvibe`, `read_page` (a page's text
   through OpenVibe.Tools' `read` tool, `CHAT_TOOLS_URL`; Tools decides what may be reached), `web_search` (the open
-  web: an OpenVibe.Actor task for the person who asked, `server/rooms/web-search.js`, with Chat's own token and the
-  person in `X-OV-Subject`; Network grants Chat `actor.task.create` and `actor.task.read`; `CHAT_ACTOR_INTERNAL_URL`;
-  it counts against the person's Actor allowance; Vibe added to a room has it too), the time, dice, picks. It says
-  plainly what it cannot do yet (make pictures, use the person's computer, reminders).
+  web through the Search Fabric's web scope: Search's open index, then its paid/free providers, each result with its
+  URL, provider and date; `server/rooms/search-fabric.js`, `server/rooms/web-search.js`; Chat's service token has
+  `search.query.delegate` and names the person in `X-OV-Subject`; `CHAT_SEARCH_URL`; Vibe added to a room has it too),
+  the time, dice, picks. The pre-fabric paths stay only as fallbacks: `/api/v1/search` for the network scope, and an
+  OpenVibe.Actor web task (`CHAT_ACTOR_INTERNAL_URL`; Network grants `actor.task.create`/`actor.task.read`) when the
+  fabric is down. It says plainly what it cannot do yet (make pictures, use the person's computer, reminders).
 - **Pictures** (`pictures.forModel`, `ai-members.js` `picturesFor`): an AI member (Vibe included) sees the
   OpenVibe.Pics pictures a message links, or those of the asker's message just before it (picture first, then the
   question), at most two, fetched from Pics on this host (Host `openvibe.pics`, at most 4 MB each) and sent as image
@@ -960,6 +964,6 @@ Part of the [OpenVibe network](https://openvibe.network). Built in the open by [
 
 <!-- versions:start -->
 - openvibe-contracts: v0.222.0
-- openvibe-sdk: v0.67.0
+- openvibe-sdk: v0.70.0
 - openvibe-shared: v4.33.0
 <!-- versions:end -->
