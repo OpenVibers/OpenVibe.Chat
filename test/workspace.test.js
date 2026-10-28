@@ -169,7 +169,11 @@ t('the room page shows the queue beside the conversation; the task page has the 
     const cookie = `ov_token=${staff.token}`;
     let r = await h.http('GET', '/r/staff', { headers: { cookie } });
     assert.strictEqual(r.status, 200);
-    assert.match(r.text, /<div class="oc-ws"><div class="oc-ws-main"><ol class="oc-feed"/);
+    assert.match(r.text, /<div class="oc-ws"><div class="oc-ws-main"><ol class="oc-feed oc-room-feed"/);
+    // The room's header: its controls are icons with names; an AI member's Markdown is rendered, escaped first.
+    assert.match(r.text, /<a class="oc-icon-btn" href="\/r\/staff\/settings" aria-label="Room settings"/);
+    assert.match(r.text, /<div class="oc-text vb-md"><p>✅ Done: &quot;/);
+    assert.match(r.text, /data-variant="compact"/, 'a room is a page people work in: the one-line footer');
     assert.match(r.text, /<aside class="oc-queue" id="oc-queue"[^>]*data-queue="\/r\/staff\/queue"/);
     assert.match(r.text, /Add a dark favicon to Tools/);
     r = await h.http('GET', '/r/staff/queue', { headers: { cookie } });
@@ -178,7 +182,13 @@ t('the room page shows the queue beside the conversation; the task page has the 
     r = await h.http('GET', `/r/staff/tasks/${id}`, { headers: { cookie } });
     assert.strictEqual(r.status, 200);
     assert.match(r.text, /Three large images block the first paint\./);
-    assert.match(r.text, /run by OpenVibe\.Actor/);
+    assert.match(r.text, /<dt>Done by<\/dt><dd>OpenVibe\.Actor<\/dd>/);
+    assert.match(r.text, /<span class="oc-tp-state oc-tp-succeeded">.*<span>Done<\/span><\/span><span class="oc-tp-kind">.*<span>Research<\/span>/);
+    assert.match(r.text, /<a class="oc-tp-back" href="\/r\/staff">/);
+    assert.match(r.text, /data-variant="compact"/);
+    assert.match(r.text, /<h2 id="oc-ask-h">What was asked<\/h2><div class="vb-md"><p>Look at the last week\.<\/p><\/div>/);
+    assert.match(r.text, /<ol class="oc-tp-sources"><li><a href="https:\/\/example\.com\/a"[^>]*><strong>example\.com<\/strong><span>\/a<\/span>/);
+    assert.doesNotMatch(r.text, /javascript:/, 'only http(s) sources');
     assert.strictEqual((await h.http('GET', `/r/staff/tasks/${id}`, { headers: { cookie: `ov_token=${user.token}` } })).status, 404);
 });
 

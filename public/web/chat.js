@@ -5,6 +5,10 @@
   'use strict';
   var cfg = (window.__OV_PAGE && window.__OV_PAGE.chat) || null;
   if (!cfg) return;
+  // With this file running, a message's delete button waits for a tap on the message on a touch screen (chat.css).
+  if (document.documentElement && document.documentElement.classList) document.documentElement.classList.add('oc-js');
+  // The icons the server draws (server/web/icons.js), for controls made here: constant markup, never user text.
+  var TRASH = '<svg class="oc-i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
   var feed = document.getElementById('oc-feed');
   var form = document.getElementById('oc-compose');
   var input = document.getElementById('oc-input');
@@ -246,11 +250,15 @@
       var b = badge(m.user_role); if (b) li.appendChild(b);
     }
     li.appendChild(document.createTextNode(' '));
-    var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
+    // An AI member writes Markdown: rendered by VibeMarkdown, which escapes every character first (as the server does).
+    var t;
+    if (ai && window.VibeMarkdown) { t = el('div', 'oc-text vb-md'); t.innerHTML = window.VibeMarkdown.render(m.message); }
+    else { t = el('span', 'oc-text'); textWithLinks(t, m.message); }
+    li.appendChild(t);
     if (!ai && cfg.pics) { var pw = pictureThumbs(m.message); if (pw) li.appendChild(pw); }
     if (cfg.moderate || (cfg.me && !ai && m.user_id === cfg.me)) {
       var f = el('form', 'oc-del'); f.method = 'post'; f.action = '/r/' + encodeURIComponent(cfg.room) + '/delete/' + m.id;
-      var x = el('button', null, '×'); x.type = 'submit'; x.title = 'Delete this message'; x.setAttribute('aria-label', 'Delete this message');
+      var x = el('button'); x.type = 'submit'; x.title = 'Delete this message'; x.setAttribute('aria-label', 'Delete this message'); x.innerHTML = TRASH;
       f.appendChild(x); li.appendChild(f);
     }
     return li;
@@ -403,6 +411,29 @@
   // A server's channel list folds away on a phone: the channel's own header says where you are.
   var chans = document.querySelector ? document.querySelector('.oc-srv-channels') : null;
   if (chans && window.matchMedia && window.matchMedia('(max-width: 760px)').matches) chans.open = false;
+  // A tap on a message (not on its links or buttons) shows its delete button on a touch screen; another hides it.
+  if (feed) feed.addEventListener('click', function (e) {
+    if (!e.target.closest || e.target.closest('a, button, input, summary, .oc-spoiler')) return;
+    var li = e.target.closest('.oc-msg');
+    if (!li || !li.querySelector('.oc-del')) return;
+    var on = !li.classList.contains('oc-sel');
+    Array.prototype.forEach.call(feed.querySelectorAll('.oc-sel'), function (x) { x.classList.remove('oc-sel'); });
+    if (on) li.classList.add('oc-sel');
+  });
+  // Copy buttons (a task's result): shown only where the clipboard works.
+  if (navigator.clipboard && document.querySelectorAll) {
+    Array.prototype.forEach.call(document.querySelectorAll('[data-oc-copy]'), function (b) {
+      var target = document.querySelector(b.getAttribute('data-oc-copy'));
+      if (!target) return;
+      b.hidden = false;
+      b.addEventListener('click', function () {
+        navigator.clipboard.writeText(target.innerText || target.textContent || '').then(function () {
+          b.classList.add('is-done'); b.setAttribute('aria-label', 'Copied'); b.title = 'Copied';
+          setTimeout(function () { b.classList.remove('is-done'); b.setAttribute('aria-label', 'Copy the result'); b.title = 'Copy'; }, 1800);
+        }, function () {});
+      });
+    });
+  }
   toBottom();
   if (cfg.view === 'global') startGlobal();
   else if (cfg.view === 'dm') startDm();

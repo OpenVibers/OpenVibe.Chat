@@ -91,6 +91,11 @@ t('the chat is theirs alone and stays out of their rooms', async () => {
     assert.ok(!mine.mine.some((r) => r.slug === slug) && !mine.public.some((r) => r.slug === slug), 'not listed with rooms');
     for (let i = 0; i < 3; i++) assert.strictEqual((await vibeApi('POST', '', ann, { message: `question ${i}` })).status, 201);
     assert.strictEqual((await rooms('POST', '/', ann, { name: 'Ann Room' })).status, 201, 'Vibe chats do not use up the rooms a person may own');
+    // Its room page (links in tasks and messages name /r/<slug>) opens the chat in the Vibe app, for its owner only.
+    const own = await web('GET', `/r/${slug}`, ann);
+    assert.strictEqual(own.status, 302);
+    assert.strictEqual(own.location, `/vibe/${slug}`);
+    assert.strictEqual((await web('GET', `/r/${slug}`, bob)).status, 404, 'nobody else is sent anywhere');
 });
 
 t('the daily allowance is the person\'s across all their chats', async () => {
@@ -179,6 +184,9 @@ t('answers render as escaped Markdown with http(s) links only', () => {
     assert.ok(md.render('see https://openvibe.live/docs.').includes('<a href="https://openvibe.live/docs" rel="nofollow ugc noopener" target="_blank">https://openvibe.live/docs</a>.'));
     assert.ok(!md.render('[x](https://a.com" onmouseover="alert(1))').includes('onmouseover="'));
     assert.strictEqual(md.render('```\n<i>\n```'), '<pre><code>&lt;i&gt;</code></pre>');
+    // <https://…> (Markdown's autolink, which agents write): the address is the link; anything else in brackets stays text.
+    assert.strictEqual(md.render('Go to <https://openvibe.bot/machines>.'), '<p>Go to <a href="https://openvibe.bot/machines" rel="nofollow ugc noopener" target="_blank">https://openvibe.bot/machines</a>.</p>');
+    assert.ok(!md.render('<javascript:alert(1)>').includes('href'));
     // Tables and nested lists (answers are model-written Markdown, which uses both): escaped like everything else.
     assert.strictEqual(md.render('| Plan | Cost |\n|---|--:|\n| Rice | $2 |\n| <b>x</b> | 1 \\| 2 |'),
         '<div class="md-table" tabindex="0" role="region" aria-label="Table"><table><thead><tr><th>Plan</th><th class="al-r">Cost</th></tr></thead>'

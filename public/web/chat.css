@@ -369,8 +369,128 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-task-full p, .oc-task-details { overflow-wrap: anywhere; }
 @keyframes oc-work { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
 @media (prefers-reduced-motion: reduce) { .oc-task-running .oc-task-state { animation: none; } }
-@media (max-width: 900px) { .oc-ws { grid-template-columns: minmax(0, 1fr); } .oc-queue { position: static; max-height: none; order: -1; } }
+/* On a phone the conversation comes first and the queue follows it, without its how-to (the composer's @vibe says it). */
+@media (max-width: 900px) { .oc-ws { grid-template-columns: minmax(0, 1fr); } .oc-queue { position: static; max-height: none; } }
+@media (max-width: 560px) { .oc-queue-how { display: none; } }
 /* A workspace room's shared screen (rooms.screen_url, a screen share page from OpenVibe.Bot), above the conversation. */
 .oc-screen { margin: 10px 0 14px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); overflow: hidden; }
 .oc-screen summary { cursor: pointer; padding: 8px 12px; font-weight: 600; }
 .oc-screen iframe { display: block; width: 100%; aspect-ratio: 16 / 10; min-height: 260px; max-height: 78vh; border: 0; background: #000; }
+
+/* Markdown (public/web/vibe-md.js): Vibe's answers, an AI member's messages in a room, a task's result */
+.vb-md { line-height: 1.65; overflow-wrap: anywhere; }
+.vb-md > :first-child { margin-top: 0; }
+.vb-md > :last-child { margin-bottom: 0; }
+.vb-md p { margin: 0 0 .8em; }
+.vb-md h3, .vb-md h4 { margin: 1.2em 0 .45em; line-height: 1.3; }
+.vb-md h3 { font-size: 1.12rem; }
+.vb-md h4 { font-size: 1rem; }
+.vb-md ul, .vb-md ol { margin: 0 0 .9em; padding-left: 1.4em; }
+.vb-md li { margin: .25em 0; }
+.vb-md li::marker { color: var(--oc-muted); }
+.vb-md a { color: var(--oc-accent); text-underline-offset: 2px; }
+.vb-md strong { font-weight: 700; }
+.vb-md code { font: .88em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--oc-panel-2); padding: .12em .38em; border-radius: 6px; }
+.vb-md pre { margin: 0 0 1em; padding: 14px 16px; border-radius: 14px; background: color-mix(in srgb, var(--oc-panel) 80%, #000); border: 1px solid var(--oc-line); overflow-x: auto; }
+.vb-md pre code { background: none; padding: 0; font-size: .86rem; white-space: pre; }
+.vb-md blockquote { margin: 0 0 .9em; padding: 2px 0 2px 14px; border-left: 3px solid var(--oc-line); color: var(--oc-muted); }
+.vb-md li > ul, .vb-md li > ol { margin: .2em 0 .3em; }
+.md-table { overflow-x: auto; margin: 0 0 1em; border: 1px solid var(--oc-line); border-radius: 12px; }
+.md-table:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+.md-table table { border-collapse: collapse; width: 100%; font-size: .94em; line-height: 1.45; }
+.md-table th, .md-table td { padding: 8px 12px; border-bottom: 1px solid var(--oc-line); text-align: left; vertical-align: top; min-width: 6em; }
+.md-table thead th { background: var(--oc-panel-2); font-weight: 650; }
+.md-table tbody tr:last-child td { border-bottom: 0; }
+.md-table .al-c { text-align: center; }
+.md-table .al-r { text-align: right; }
+
+
+/* Line icons (server/web/icons.js), icon buttons and pills: one look for every control that is an icon or an icon
+   and a word. */
+.oc-i { width: 1.15em; height: 1.15em; flex: none; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vertical-align: -.2em; }
+.oc-icon-btn { display: inline-grid; place-items: center; width: 40px; height: 40px; padding: 0; border-radius: 12px; border: 1px solid transparent; background: transparent; color: var(--oc-muted); cursor: pointer; text-decoration: none; }
+.oc-icon-btn:hover { color: var(--oc-text); background: var(--oc-panel-2); border-color: var(--oc-line); }
+.oc-icon-btn[hidden] { display: none; }
+.oc-icon-btn.is-done { color: var(--oc-ok); }
+.oc-pill { display: inline-flex; align-items: center; gap: 7px; min-height: 40px; padding: 8px 14px; border-radius: 999px; border: 1px solid var(--oc-line); background: var(--oc-panel); color: var(--oc-text); font: inherit; font-size: .92rem; font-weight: 600; text-decoration: none; cursor: pointer; }
+.oc-pill:hover { border-color: var(--oc-accent); }
+.oc-pill-strong { background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, var(--oc-on-accent)); border-color: transparent; }
+.oc-pill-danger { color: var(--oc-red); }
+.oc-pill-danger:hover { border-color: var(--oc-red); }
+
+/* A task's page (server/web/workspace-pages.js): status and kind, the title, the facts in a grid, then cards. */
+.oc-tp { max-width: 760px; margin: 0 auto; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.oc-tp-back { display: inline-flex; align-items: center; gap: 6px; width: max-content; max-width: 100%; color: var(--oc-muted); text-decoration: none; font-size: .92rem; padding: 4px 8px 4px 2px; border-radius: 8px; }
+.oc-tp-back:hover { color: var(--oc-text); }
+.oc-tp-back span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-tp h1 { margin: 2px 0 0; font-size: clamp(1.35rem, 4.5vw, 1.75rem); letter-spacing: -.01em; }
+.oc-tp-head { display: grid; gap: 8px; }
+.oc-tp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; }
+.oc-tp-state, .oc-tp-kind { display: inline-flex; align-items: center; gap: 6px; padding: 3px 11px 3px 9px; border-radius: 999px; font-size: .82rem; font-weight: 700; border: 1px solid var(--oc-line); color: var(--oc-muted); }
+.oc-tp-succeeded { color: var(--oc-ok); border-color: color-mix(in srgb, var(--oc-ok) 45%, transparent); background: color-mix(in srgb, var(--oc-ok) 10%, transparent); }
+.oc-tp-failed { color: var(--oc-red); border-color: color-mix(in srgb, var(--oc-red) 45%, transparent); background: color-mix(in srgb, var(--oc-red) 10%, transparent); }
+.oc-tp-running { color: var(--oc-accent); border-color: color-mix(in srgb, var(--oc-accent) 45%, transparent); }
+.oc-tp-running .oc-i { animation: oc-spin 1s linear infinite; }
+@keyframes oc-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .oc-tp-running .oc-i { animation: none; } }
+.oc-tp-says { margin: 0; }
+.oc-tp-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 6px 0 0; }
+.oc-tp-facts div { padding: 8px 12px; border-radius: 12px; background: var(--oc-panel); border: 1px solid var(--oc-line); min-width: 0; }
+.oc-tp-facts dt { font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--oc-muted); }
+.oc-tp-facts dd { margin: 2px 0 0; font-size: .95rem; overflow-wrap: anywhere; }
+.oc-tp-card { padding: 16px 18px; border-radius: 16px; background: var(--oc-panel); border: 1px solid var(--oc-line); min-width: 0; }
+.oc-tp-card h2 { margin: 0 0 10px; font-size: 1rem; display: flex; gap: 8px; align-items: baseline; }
+.oc-tp-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: -6px -8px 4px 0; }
+.oc-tp-card-head h2 { margin: 0; }
+.oc-tp-result { border-color: color-mix(in srgb, var(--oc-accent) 30%, var(--oc-line)); }
+.oc-tp-check { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--oc-line); color: var(--oc-muted); font-size: .88rem; }
+.oc-tp-check .oc-i { color: var(--oc-ok); margin-top: 2px; }
+.oc-tp-sources { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; }
+.oc-tp-sources a { display: flex; flex-direction: column; padding: 8px 12px; border-radius: 10px; background: var(--oc-panel-2); text-decoration: none; color: var(--oc-text); min-width: 0; }
+.oc-tp-sources a:hover { outline: 1px solid var(--oc-accent); }
+.oc-tp-sources span { color: var(--oc-muted); font-size: .84rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.oc-tp-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.oc-tp-cancel { margin: 0; }
+.oc-tp-form { max-width: none; }
+@media (max-width: 560px) {
+  .oc-tp-card { padding: 14px; border-radius: 14px; }
+  .oc-tp-facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* A room (server/web/pages.js /r/:slug): a compact header with icon buttons, the messages filling the screen, the
+   composer docked under them with the picture button beside it. */
+.oc-room-head { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; }
+.oc-room-head > .oc-icon-btn { margin-left: -8px; }
+.oc-room-id { flex: 1; min-width: 0; }
+.oc-room-id h1 { margin: 0; font-size: clamp(1.1rem, 4vw, 1.4rem); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-room-lock { display: inline-flex; margin-left: 6px; color: var(--oc-muted); vertical-align: -1px; }
+.oc-room-lock .oc-i { width: .85em; height: .85em; }
+.oc-room-sub { margin: 0; font-size: .86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-room-tools { display: flex; gap: 2px; margin-right: -8px; }
+.oc-ai-here { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 8px; padding: 6px 10px; border-radius: 10px; background: color-mix(in srgb, #a78bfa 8%, transparent); color: var(--oc-muted); font-size: .88rem; }
+.oc-ai-here .oc-i { color: #c4b5fd; margin-top: 2px; }
+.oc-ai-here strong { color: #ddd6fe; }
+.oc-msg-ai .vb-md { display: block; margin-top: 2px; }
+.oc-msg-ai .vb-md p { margin: 0 0 .5em; }
+.oc-del button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; vertical-align: middle; }
+.oc-del .oc-i { width: 16px; height: 16px; }
+@media (hover: none) {
+  .oc-js .oc-del button { visibility: hidden; }
+  .oc-js .oc-msg.oc-sel .oc-del button { visibility: visible; }
+  .oc-msg.oc-sel { background: var(--oc-panel-2); }
+}
+.oc-dock { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.oc-dock > .oc-compose { flex: 1 1 0; min-width: 0; }
+.oc-dock > .oc-pic-compose { margin: 0; order: 0; }
+.oc-dock > .oc-pic-compose > summary { list-style: none; width: 44px; height: 44px; }
+.oc-dock > .oc-pic-compose > summary::-webkit-details-marker { display: none; }
+.oc-dock > .oc-pic-compose[open] { order: 2; flex: 1 1 100%; }
+.oc-dock > .oc-pic-compose[open] > summary { color: var(--oc-accent); }
+.oc-compose textarea { min-height: 44px; max-height: 40vh; border-radius: 22px; padding: 10px 16px; resize: none; field-sizing: content; }
+.oc-send { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 50%; flex: none; }
+.oc-send .oc-i { width: 20px; height: 20px; stroke-width: 2.4; }
+/* The conversation takes the screen's height (header, notes and composer around it), not a fixed box. */
+.oc-room-feed { max-height: none; height: max(320px, calc(100svh - 300px)); }
+@media (max-width: 560px) {
+  .oc-room-feed { height: max(300px, calc(100svh - 250px)); }
+}

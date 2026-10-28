@@ -205,7 +205,7 @@ ${pictures.enabled() ? '<label class="ib-pic-btn" title="Send a picture"><input 
         const hooks = owner ? await webhooks.list(inbox) : [];
         const acts = owner ? await actions.list(inbox) : [];
         await page(req, res, 200, {
-            actor, title: `${inbox.name}: settings`, path: `/inbox/${inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow',
+            actor, title: `${inbox.name}: settings`, path: `/inbox/${inbox.id}/settings`, active: 'inbox', robots: 'noindex, nofollow', footer: 'compact',
             body: `<p><a href="/inbox/${esc(inbox.id)}">&larr; ${esc(inbox.name)}</a></p><h1>${esc(inbox.name)}</h1>
 ${req.query.made ? notice('ok', 'Your inbox is ready. Paste the snippet into your site, before </body>.') : ''}${req.query.saved ? notice('ok', 'Saved.') : ''}${req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : ''}
 <h2>Add it to your site</h2>
@@ -299,7 +299,7 @@ ${saved.length ? `<ul class="oc-members">${saved.map((r) => `<li><b>/${esc(r.sho
         const line = (m) => (m.author === 'system' ? `<li class="oc-muted sp-sys" data-id="${m.id}">${esc(m.body)}</li>`
             : `<li class="sp-msg${m.author === 'visitor' ? ' sp-me' : ''}" data-id="${m.id}"><b>${esc(who(m))}</b> <span class="sp-text">${m.author === 'ai' ? md.render(m.body) : esc(m.author === 'agent' || m.account ? pictures.withoutLinks(m.body) : m.body).replace(/\n/g, '<br>')}</span>${m.author === 'agent' || m.account ? pictures.pageHtml(m.body) : ''}</li>`);
         await page(req, res, 200, {
-            actor, title: `${inbox.name}: support`, path: `/support/${conv.id}`, active: 'messages', robots: 'noindex, nofollow',
+            actor, title: `${inbox.name}: support`, path: `/support/${conv.id}`, active: 'messages', robots: 'noindex, nofollow', footer: 'compact',
             page: { view: 'support', inbox: inbox.id, conversation: conv.id, latest: msgs.length ? msgs[msgs.length - 1].id : 0 },
             scripts: ['vibe-md.js', 'support.js'],
             body: `<p><a href="/messages">&larr; Messages</a></p>

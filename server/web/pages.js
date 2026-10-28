@@ -306,7 +306,7 @@ ${parts.more}`,
         const support = await require('../inbox/inbox').mySupport(me, { limit: 20 }).catch(() => []);
         const supportList = support.length ? `<h2>Support</h2><ul class="oc-convs">${support.map((c) => { const t = hhmm(c.last_message_at); return `<li class="oc-conv"><a href="/support/${esc(c.id)}"><strong>${esc(c.inbox.name)} <span class="oc-badge">${esc({ bot: 'Vibe', waiting: 'Waiting', open: 'Open', resolved: 'Resolved' }[c.status] || c.status)}</span></strong><span class="oc-muted oc-last">${esc(c.preview || '')}</span></a>${t.text ? `<time class="oc-time" datetime="${t.iso}">${t.iso.slice(0, 10)}</time>` : ''}</li>`; }).join('')}</ul>` : '';
         await page(req, res, 200, {
-            actor, title: 'Messages', path: '/messages', active: 'messages', robots: 'noindex, nofollow', script: true,
+            actor, title: 'Messages', path: '/messages', active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'compact',
             page: { view: 'inbox', unread, me: me.id },
             body: `<h1>Messages</h1>${error}${done}
 <p class="oc-muted" id="oc-inbox-status" aria-live="polite">${unread ? `${unread} unread` : 'All caught up'}</p>
@@ -363,7 +363,7 @@ ${blockedList}`,
         const callForm = other && !closed && require('../config').calls.enabled
             ? `<form class="oc-inline oc-dm-call" method="post" action="/messages/${id}/call"><button type="submit" class="oc-button--quiet">Call ${otherName}</button></form>` : '';
         await page(req, res, 200, {
-            actor, title, path: `/messages/${id}`, active: 'messages', robots: 'noindex, nofollow', script: true,
+            actor, title, path: `/messages/${id}`, active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'compact',
             page: { view: 'dm', conversation: id, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me.id },
             body: `<p><a href="/messages">← Messages</a></p><div class="oc-dm-head"><h1>${esc(title)}</h1>${callForm}</div>${error}
 <ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => dmMessage(m, me)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
@@ -462,7 +462,7 @@ ${composer}${tools}`,
         const saved = req.query.saved ? notice('ok', 'Saved. These settings follow you to Live chat and every device.') : '';
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         await page(req, res, 200, {
-            actor, title: 'Chat settings', path: '/settings', active: 'settings', robots: 'noindex, nofollow',
+            actor, title: 'Chat settings', path: '/settings', active: 'settings', robots: 'noindex, nofollow', footer: 'compact',
             body: `<h1>Chat settings</h1>${saved}${error}
 <p class="oc-muted">Saved to your OpenVibe account, so they apply here, in Live chat and on every device you sign in to.</p>
 <form class="oc-form" method="post" action="/settings">
@@ -577,10 +577,12 @@ ${key ? `<form class="oc-inline" method="post" action="/settings/ai-key/delete">
     const roomHooks = require('../rooms/hooks');
     const pictures = require('../rooms/pictures');
     const aiMembers = require('../rooms/ai-members');
+    const md = require('../../public/web/vibe-md.js');
+    const { ICONS } = require('./icons');
     // A picture sent from the room's form (server/rooms/pictures.js): one image, kept in memory only until Pics has it.
     const pictureForm = require('multer')({ storage: require('multer').memoryStorage(), limits: { fileSize: (require('../config').pics.maxBytes || 20 * 1024 * 1024), files: 1, fields: 4 } }).single('picture');
     /** The "Add a picture" form under a room's or channel's composer (rooms where the person may post). */
-    const pictureComposer = (room, back) => (pictures.enabled() ? `<details class="oc-pic-compose"><summary>Add a picture</summary>
+    const pictureComposer = (room, back) => (pictures.enabled() ? `<details class="oc-pic-compose"><summary class="oc-icon-btn" aria-label="Add a picture" title="Add a picture">${ICONS.image}</summary>
 <form class="oc-form oc-pic-form" method="post" action="/r/${esc(room.slug)}/picture" enctype="multipart/form-data" data-room="${esc(room.slug)}">
 <input type="hidden" name="back" value="${esc(back)}">
 <label>Picture <input type="file" name="picture" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" required></label>
@@ -601,11 +603,13 @@ ${key ? `<form class="oc-inline" method="post" action="/settings/ai-key/delete">
     const roomMessage = (m, can, slug, me) => {
         const t = hhmm(m.created_at);
         const ai = m.ai_member_id != null;
-        const del = (can.moderate || (me && !ai && m.user_id === me.id)) ? `<form class="oc-del" method="post" action="/r/${esc(slug)}/delete/${Number(m.id)}"><button type="submit" title="Delete this message" aria-label="Delete this message">×</button></form>` : '';
+        const del = (can.moderate || (me && !ai && m.user_id === me.id)) ? `<form class="oc-del" method="post" action="/r/${esc(slug)}/delete/${Number(m.id)}"><button type="submit" title="Delete this message" aria-label="Delete this message">${ICONS.trash}</button></form>` : '';
         const who = ai
             ? `<span class="oc-name oc-ai-name">${esc(m.display_name || 'AI')}</span> <span class="oc-badge oc-ai" title="An AI member of this room">AI</span>`
             : `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)}`;
-        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} <span class="oc-text">${linkify(m.message)}</span>${ai ? '' : pictures.pageHtml(m.message)}${del}</li>`;
+        // An AI member writes Markdown (lists, bold, links): vibe-md.js escapes every character first, then marks it up.
+        const text = ai ? `<div class="oc-text vb-md">${md.render(m.message)}</div>` : `<span class="oc-text">${linkify(m.message)}</span>`;
+        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${ai ? '' : pictures.pageHtml(m.message)}${del}</li>`;
     };
     const applyRoomChange = async (room) => await roomRoutes.applyRoomChange(room);
 
@@ -706,19 +710,21 @@ ${people}
         const x = await loadRoom(req, res); if (!x) return;
         const { actor, me, room, can } = x;
         if (room.server_id) return res.redirect(302, await channelUrl(room));
+        // A person's own Vibe chat opens in the Vibe app (its links in task pages and messages name /r/<slug>).
+        if (me && Number(room.assistant) === 1 && await require('../rooms/vibe').ownChat(room.slug, me)) return res.redirect(302, `/vibe/${encodeURIComponent(room.slug)}`);
         const msgs = await rooms.history(room, { limit: 60 });
         if (me && can.role) await rooms.markRead(room, me);
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const joinLabel = room.kind === 'system' ? 'Follow these announcements' : 'Join this room';
         let composer;
         if (!me) composer = `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${encodeURIComponent(`/r/${room.slug}`)}">Sign in with OpenVibe</a> to join the conversation.</p>`;
-        else if (can.post) composer = `<form class="oc-compose" method="post" action="/r/${esc(room.slug)}" id="oc-compose"><label for="oc-input" class="oc-sr">Message to ${esc(room.name)}</label><textarea id="oc-input" name="message" maxlength="2000" rows="2" required placeholder="${room.kind === 'system' ? 'Post an announcement' : `Message ${esc(room.name)}`}"></textarea><button type="submit">Send</button></form>${room.kind === 'system' ? '' : pictureComposer(room, `/r/${room.slug}`)}`;
+        else if (can.post) composer = `<div class="oc-dock">${room.kind === 'system' ? '' : pictureComposer(room, `/r/${room.slug}`)}<form class="oc-compose" method="post" action="/r/${esc(room.slug)}" id="oc-compose"><label for="oc-input" class="oc-sr">Message to ${esc(room.name)}</label><textarea id="oc-input" name="message" maxlength="2000" rows="1" required placeholder="${room.kind === 'system' ? 'Post an announcement' : 'Write a message'}"></textarea><button type="submit" class="oc-send" aria-label="Send" title="Send">${ICONS.send}</button></form></div>`;
         else if (!can.role) composer = `<form method="post" action="/r/${esc(room.slug)}/join"><button type="submit">${joinLabel}</button></form>`;
         else if (room.kind === 'system') composer = `<p class="oc-muted">Announcements from OpenVibe staff. You will see new ones counted in Rooms.</p>`;
         else if (can.role === 'viewer') composer = `<p class="oc-muted">You can read this room but not write in it (viewer).</p>`;
         else composer = notice('error', 'You cannot post here right now.');
-        const tools = me && can.role && can.role !== 'owner' ? `<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/leave"><button type="submit" class="oc-link">Leave room</button></form>` : '';
-        const manage = can.moderate ? ` · <a href="/r/${esc(room.slug)}/settings">${can.manage ? 'Room settings' : 'Members'}</a>` : '';
+        const leave = me && can.role && can.role !== 'owner' ? `<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/leave"><button type="submit" class="oc-icon-btn" aria-label="Leave this room" title="Leave this room">${ICONS.leave}</button></form>` : '';
+        const manage = can.moderate ? `<a class="oc-icon-btn" href="/r/${esc(room.slug)}/settings" aria-label="${can.manage ? 'Room settings' : 'Members'}" title="${can.manage ? 'Room settings' : 'Members'}">${can.manage ? ICONS.gear : ICONS.members}</a>` : '';
         const YOU_ARE = { owner: 'the owner', mod: 'a moderator', speaker: 'a speaker', participant: 'a participant', member: 'a member', viewer: 'a viewer' };
         const yourRole = me && YOU_ARE[can.role] ? ` · you are ${YOU_ARE[can.role]}` : '';
         const isCall = room.kind === 'call';
@@ -727,21 +733,26 @@ ${people}
         // A feed the owner shows here (server/feeds/): its card above the messages.
         const feed = await require('../feeds/feeds').forRoom(room.id);
         const work = rooms.isWorkspace(room) ? await require('../rooms/workspace').list(room, me, { limit: 40 }) : null;
-        const aiHere = ais.length ? `<p class="oc-ai-here">${ais.map((a) => `<span class="oc-badge oc-ai">AI</span> <strong>${esc(a.name)}</strong> <span class="oc-muted oc-ai-model">(${esc(aiMembers.modelOf(a))})</span>`).join(' · ')} <span class="oc-muted">· write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask${ais.length > 1 ? ' one of them' : ''} something</span></p>` : '';
+        const aiHere = ais.length ? `<p class="oc-ai-here">${ICONS.spark}<span>${ais.map((a) => `<strong title="${esc(aiMembers.modelOf(a))}">${esc(a.name)}</strong>`).join(', ')} ${ais.length > 1 ? 'are' : 'is'} here: write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask</span></p>` : '';
+        const memberCount = (await rooms.publicRoom(room)).members;
         await page(req, res, 200, {
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady, feedView: !!feed,
+            footer: 'compact', scripts: ais.length ? ['vibe-md.js'] : [], wide: !!work,
             description: room.topic || `${room.name}, a ${isCall ? 'call' : room.kind === 'system' ? 'announcements' : 'chat'} room on OpenVibe.`,
             page: { view: 'room', room: room.slug, kind: room.kind, pics: pictures.enabled() ? pictures.publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: can.join, talk: can.talk } } : {}) },
-            body: `<p><a href="/rooms">← Rooms</a></p>
-<h1>${esc(room.name)}${kindBadge(room)}${room.visibility === 'private' ? ' <span class="oc-badge">private</span>' : ''}</h1>
-<p class="oc-muted">${room.topic ? `${esc(room.topic)} · ` : ''}${(await rooms.publicRoom(room)).members} members${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole}${manage} <span class="oc-live" id="oc-live" hidden>● live</span></p>
+            body: `<header class="oc-room-head">
+<a class="oc-icon-btn" href="/rooms" aria-label="All rooms" title="All rooms">${ICONS.back}</a>
+<div class="oc-room-id"><h1>${esc(room.name)}${room.visibility === 'private' ? `<span class="oc-room-lock" title="Private: only people invited read and post">${ICONS.lock}<span class="oc-sr">private</span></span>` : ''}${kindBadge(room)}</h1>
+<p class="oc-muted oc-room-sub">${room.topic ? `${esc(room.topic)} · ` : ''}${memberCount} ${memberCount === 1 ? 'member' : 'members'}${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole} <span class="oc-live" id="oc-live" hidden>● live</span></p></div>
+<div class="oc-room-tools">${manage}${leave}</div>
+</header>
 ${aiHere}${error}
 ${isCall ? callPanel(room, can, me) : ''}
 ${feed ? `<div class="fv oc-room-fv" data-feed="${esc(feed.id)}"></div>` : ''}
 ${work && room.screen_url && can.role ? `<details class="oc-screen" open><summary>Shared screen</summary><iframe src="${esc(room.screen_url)}" title="The room's shared screen" loading="lazy" referrerpolicy="no-referrer" allow="clipboard-write; fullscreen"></iframe></details>` : ''}
-${work ? '<div class="oc-ws"><div class="oc-ws-main">' : ''}<ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
-${composer}${tools}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
+${work ? '<div class="oc-ws"><div class="oc-ws-main">' : ''}<ol class="oc-feed oc-room-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
+${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         });
     });
 
@@ -844,7 +855,7 @@ ${ais.length < aiMembers.MAX_PER_ROOM && !ais.some((a) => a.handle === 'vibe') ?
 ${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}` : '';
         if (room.server_id) {
             return await page(req, res, 200, {
-                actor, title: `#${room.name}: AI members`, path: `/r/${room.slug}/settings`, active: 'servers', robots: 'noindex, nofollow',
+                actor, title: `#${room.name}: AI members`, path: `/r/${room.slug}/settings`, active: 'servers', robots: 'noindex, nofollow', footer: 'compact',
                 body: `<p><a href="${esc(await channelUrl(room, '/settings'))}">← Server settings</a> · <a href="${esc(await channelUrl(room))}">#${esc(room.name)}</a></p><h1>AI members in #${esc(room.name)}</h1>${saved}${error}
 ${aiSection}`,
             });
@@ -860,7 +871,7 @@ ${hookList.length < roomHooks.MAX_PER_ROOM ? `<form class="oc-form" method="post
         const communityUrl = config.web.communityUrl;
         const attachList = can.manage ? `<h2>Attached to</h2>${attachments.length ? `<ul class="oc-members">${attachments.map((a) => `<li><a href="${esc(a.service === 'community' ? `${communityUrl}/s/${encodeURIComponent(a.resource)}` : '#')}">${esc(a.title || a.resource)}</a> <span class="oc-muted">${esc(a.service === 'community' ? 'OpenVibe.Community space' : a.service)}</span><form class="oc-inline" method="post" action="/r/${esc(room.slug)}/attachments/${encodeURIComponent(a.service)}/${encodeURIComponent(a.resource)}/detach"><button type="submit" class="oc-link">Detach</button></form></li>`).join('')}</ul>` : '<p class="oc-muted">Not attached anywhere. A Community space you own can attach this room from the space\'s page.</p>'}` : '';
         await page(req, res, 200, {
-            actor, title: `${room.name}: settings`, path: `/r/${room.slug}/settings`, active: 'rooms', robots: 'noindex, nofollow',
+            actor, title: `${room.name}: settings`, path: `/r/${room.slug}/settings`, active: 'rooms', robots: 'noindex, nofollow', footer: 'compact',
             body: `<p><a href="/r/${esc(room.slug)}">← ${esc(room.name)}</a></p><h1>Room settings</h1>${saved}${error}
 ${can.manage && await require('./room-embed-pages').embeddable(room) ? `<h2>Put this room on your site</h2>
 <p>Anyone can read it there; people sign in with OpenVibe to write, and the room's moderation applies. A chat bubble:</p>
