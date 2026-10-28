@@ -260,7 +260,8 @@ ${parts.places}`;
         await page(req, res, 200, {
             actor, fullTitle: 'OpenVibe.Chat: global chat, servers, rooms and calls', path: '/', active: 'global', robots: 'index, follow', script: true,
             description: 'Chat with everyone on OpenVibe, start a server with text and voice channels, message friends and call them. Free and open source.',
-            jsonLd: [...homeJsonLd(config), ...(signedIn ? [] : [sharedSeo.jsonLd.faq(home.FAQ)])],
+            // The same JSON-LD for every reader (discovery.test.js): the questions are the site's, shown to visitors.
+            jsonLd: [...homeJsonLd(config), sharedSeo.jsonLd.faq(home.FAQ)],
             page: { view: 'global', latest: latest_id, signedIn, me: signedIn ? actor.user.username : null },
             footer: signedIn ? 'compact' : 'full',
             body: signedIn ? appBody() : `<header class="oc-hero"><p class="oc-eyebrow">OpenVibe.Chat</p>
