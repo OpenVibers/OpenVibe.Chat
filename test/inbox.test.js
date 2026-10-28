@@ -412,7 +412,7 @@ t('a visitor signed in to OpenVibe: their conversation is theirs, in their Messa
     assert.strictEqual((await h.db.get('SELECT visitor_user_id FROM inbox_conversations WHERE id = ?', [spoof.body.conversation.id])).visitor_user_id, null, 'an account in the body counts for nothing');
     const get = (path, u) => fetch(`${h.base}${path}`, { headers: { cookie: `ov_token=${u.token}` }, redirect: 'manual' }).then(async (r) => ({ status: r.status, text: await r.text() }));
     const messages = await get('/messages', carol);
-    assert.ok(messages.text.includes('<h2>Support</h2>') && messages.text.includes(`href="/support/${cid}"`) && messages.text.includes('Acme'));
+    assert.ok(messages.text.includes('<h2 class="oc-list-head">Support</h2>') && messages.text.includes(`href="/support/${cid}"`) && messages.text.includes('Acme'));
     const sp = await get(`/support/${cid}`, carol);
     assert.ok(sp.status === 200 && sp.text.includes('Before signing in') && sp.text.includes('support.js'));
     assert.strictEqual((await get(`/support/${cid}`, bob)).status, 404, 'only theirs');

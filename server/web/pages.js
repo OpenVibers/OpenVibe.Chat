@@ -287,6 +287,14 @@ ${parts.more}`,
 
     // ── Direct messages ──
     const dmApi = require('../chat/dm-routes');
+    const ui = require('./ui');
+    const { ICONS: IC } = require('./icons');
+    /** One conversation in a list: initials, name and time on one line, the last message under it, unread marked. */
+    const convRow = ({ href, title, preview, at, unread = 0, badge = '' }) => {
+        const t = ui.when(at);
+        return `<li class="oc-row${unread ? ' oc-unread' : ''}"><a href="${esc(href)}">${ui.initials(title)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(title)}</strong>${badge}${t.text ? `<time datetime="${t.iso}">${esc(t.text)}</time>` : ''}</span>`
+            + `<span class="oc-row-sub">${esc(preview)}${unread ? `<span class="oc-dot" aria-label="${unread} new">${unread > 9 ? '9+' : unread}</span>` : ''}</span></span></a></li>`;
+    };
     router.get('/messages', async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         const me = actor.user;
@@ -294,8 +302,7 @@ ${parts.more}`,
         const rows = (await Promise.all(convs.map(async (c) => {
             const others = (await dm.getParticipants(c.id)).filter((p) => p.id !== me.id);
             const title = c.name || others.map((p) => p.display_name || p.username).join(', ') || 'Just you';
-            const t = hhmm(c.last_message_at);
-            return `<li class="oc-conv${c.unread_count ? ' oc-unread' : ''}"><a href="/messages/${c.id}"><strong>${esc(title)}</strong>${c.unread_count ? ` <span class="oc-badge">${c.unread_count} new</span>` : ''}<span class="oc-muted oc-last">${c.last_message ? esc(String(c.last_message).slice(0, 120)) : 'No messages yet'}</span></a>${t.text ? `<time class="oc-time" datetime="${t.iso}">${t.iso.slice(0, 10)}</time>` : ''}</li>`;
+            return convRow({ href: `/messages/${c.id}`, title, preview: c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet', at: c.last_message_at, unread: Number(c.unread_count) || 0 });
         })));
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const done = req.query.unblocked ? notice('ok', 'Unblocked. They can message you again, and you them.') : '';
@@ -304,14 +311,14 @@ ${parts.more}`,
         const unread = convs.reduce((n, c) => n + (Number(c.unread_count) || 0), 0);
         // Support conversations with sites' chats, where they signed in to OpenVibe (server/inbox/: theirs to follow up).
         const support = await require('../inbox/inbox').mySupport(me, { limit: 20 }).catch(() => []);
-        const supportList = support.length ? `<h2>Support</h2><ul class="oc-convs">${support.map((c) => { const t = hhmm(c.last_message_at); return `<li class="oc-conv"><a href="/support/${esc(c.id)}"><strong>${esc(c.inbox.name)} <span class="oc-badge">${esc({ bot: 'Vibe', waiting: 'Waiting', open: 'Open', resolved: 'Resolved' }[c.status] || c.status)}</span></strong><span class="oc-muted oc-last">${esc(c.preview || '')}</span></a>${t.text ? `<time class="oc-time" datetime="${t.iso}">${t.iso.slice(0, 10)}</time>` : ''}</li>`; }).join('')}</ul>` : '';
+        const STATUS = { bot: 'Vibe', waiting: 'Waiting', open: 'Open', resolved: 'Resolved' };
+        const supportList = support.length ? `<h2 class="oc-list-head">Support</h2><ul class="oc-list">${support.map((c) => convRow({ href: `/support/${c.id}`, title: c.inbox.name, preview: c.preview || '', at: c.last_message_at, badge: ` <span class="oc-badge">${esc(STATUS[c.status] || c.status)}</span>` })).join('')}</ul>` : '';
         await page(req, res, 200, {
             actor, title: 'Messages', path: '/messages', active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'compact',
             page: { view: 'inbox', unread, me: me.id },
-            body: `<h1>Messages</h1>${error}${done}
-<p class="oc-muted" id="oc-inbox-status" aria-live="polite">${unread ? `${unread} unread` : 'All caught up'}</p>
-<form class="oc-new" method="post" action="/messages/new"><label for="oc-to">Message someone</label> <input id="oc-to" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="their username" autocomplete="off"> <button type="submit">Start</button></form>
-<ul class="oc-convs" id="oc-convs">${rows.join('\n') || '<li class="oc-muted">No conversations yet.</li>'}</ul>
+            body: `${ui.head({ title: 'Messages', sub: `<span id="oc-inbox-status" aria-live="polite">${unread ? `${unread} unread` : 'All caught up'}</span>` })}${error}${done}
+<form class="oc-find" method="post" action="/messages/new" role="search">${IC.pencil}<label for="oc-to" class="oc-sr">New message: their username</label><input id="oc-to" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="New message: their username" autocomplete="off" enterkeyhint="go"><button type="submit" class="oc-send" aria-label="Start the conversation" title="Start">${IC.send}</button></form>
+<ul class="oc-list" id="oc-convs">${rows.join('\n') || '<li class="oc-row-empty oc-muted">No conversations yet. Write a username above to start one.</li>'}</ul>
 ${supportList}
 ${blockedList}`,
         });
@@ -355,19 +362,20 @@ ${blockedList}`,
         const iBlocked = other ? await dm.hasBlocked(me.id, other.id) : false;
         const closed = other ? await dm.isBlockedEither(me.id, other.id) : false;
         const otherName = other ? esc(other.display_name || other.username) : '';
-        let composer = `<form class="oc-compose" method="post" action="/messages/${id}" id="oc-compose"><label for="oc-input" class="oc-sr">Reply</label><textarea id="oc-input" name="message" maxlength="2000" rows="2" required placeholder="Write a message"></textarea><button type="submit">Send</button></form>`;
+        let composer = `<div class="oc-dock"><form class="oc-compose" method="post" action="/messages/${id}" id="oc-compose"><label for="oc-input" class="oc-sr">Reply</label><textarea id="oc-input" name="message" maxlength="2000" rows="1" required placeholder="Write a message"></textarea><button type="submit" class="oc-send" aria-label="Send" title="Send">${IC.send}</button></form></div>`;
         if (iBlocked) composer = `${notice('error', `You blocked ${other.display_name || other.username}. Neither of you can message the other.`)}<form class="oc-inline" method="post" action="/messages/unblock/${Number(other.id)}"><input type="hidden" name="back" value="/messages/${id}"><button type="submit">Unblock ${otherName}</button></form>`;
         else if (closed) composer = notice('error', 'You cannot message this person.');
-        const tools = other && !iBlocked ? `<form class="oc-inline oc-tools" method="post" action="/messages/${id}/block"><button type="submit" class="oc-link">Block ${otherName}</button></form>` : '';
+        // Blocking is in the conversation's "more" menu: one tap on an icon in the header should never block someone.
+        const tools = other && !iBlocked ? `<details class="oc-more"><summary class="oc-icon-btn" aria-label="More" title="More">${IC.more}</summary><div class="oc-pop"><form method="post" action="/messages/${id}/block"><button type="submit" class="oc-pop-item oc-danger">${IC.ban}<span>Block ${otherName}</span></button></form></div></details>` : '';
         // A 1:1 conversation nobody blocked can become a call (POST /messages/:id/call rings the other person).
         const callForm = other && !closed && require('../config').calls.enabled
-            ? `<form class="oc-inline oc-dm-call" method="post" action="/messages/${id}/call"><button type="submit" class="oc-button--quiet">Call ${otherName}</button></form>` : '';
+            ? `<form class="oc-inline oc-dm-call" method="post" action="/messages/${id}/call"><button type="submit" class="oc-icon-btn" aria-label="Call ${otherName}" title="Call ${otherName}">${IC.phone}</button></form>` : '';
         await page(req, res, 200, {
             actor, title, path: `/messages/${id}`, active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'compact',
             page: { view: 'dm', conversation: id, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me.id },
-            body: `<p><a href="/messages">← Messages</a></p><div class="oc-dm-head"><h1>${esc(title)}</h1>${callForm}</div>${error}
-<ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => dmMessage(m, me)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
-${composer}${tools}`,
+            body: `${ui.head({ title: esc(title), sub: other ? `@${esc(other.username || '')}` : `${others.length + 1} people`, back: { href: '/messages', label: 'All messages' }, actions: [callForm, tools].filter(Boolean) })}${error}
+<ol class="oc-feed oc-room-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => dmMessage(m, me)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
+${composer}`,
         });
     });
 
@@ -599,7 +607,9 @@ ${key ? `<form class="oc-inline" method="post" action="/settings/ai-key/delete">
     const KIND_LABEL = { community: '', call: 'call', system: 'announcements' };
     const ROLE_LABEL = { owner: 'owner', mod: 'moderator', speaker: 'speaker', participant: 'participant', member: 'member', viewer: 'viewer', blocked: 'blocked' };
     const kindBadge = (r) => (KIND_LABEL[r.kind] ? ` <span class="oc-badge oc-kind-${esc(r.kind)}">${KIND_LABEL[r.kind]}</span>` : '');
-    const roomCard = (r) => `<li class="oc-conv${r.unread ? ' oc-unread' : ''}"><a href="/r/${esc(r.slug)}"><strong>${esc(r.name)}</strong>${kindBadge(r)}${r.visibility === 'private' ? ' <span class="oc-badge">private</span>' : ''}${r.unread ? ` <span class="oc-badge">${r.unread} new</span>` : ''}<span class="oc-muted oc-last">${esc(r.topic || `${r.members} member${r.members === 1 ? '' : 's'}`)}</span></a></li>`;
+    // One room in a list: its initials, name with its kind and a lock when private, the topic or the members under it.
+    const roomCard = (r) => `<li class="oc-row${r.unread ? ' oc-unread' : ''}"><a href="/r/${esc(r.slug)}">${ui.initials(r.name)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(r.name)}</strong>${kindBadge(r)}${r.visibility === 'private' ? `<span class="oc-row-lock" title="Private">${IC.lock}<span class="oc-sr">private</span></span>` : ''}</span>`
+        + `<span class="oc-row-sub">${esc(r.topic || `${r.members} member${r.members === 1 ? '' : 's'}`)}${r.unread ? `<span class="oc-dot" aria-label="${r.unread} new">${r.unread > 9 ? '9+' : r.unread}</span>` : ''}</span></span></a></li>`;
     const roomMessage = (m, can, slug, me) => {
         const t = hhmm(m.created_at);
         const ai = m.ai_member_id != null;
@@ -637,11 +647,11 @@ ${staff ? '<label class="oc-check"><input type="radio" name="kind" value="system
 <p><button type="submit">Create room</button></p>
 </form>` : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${wantWork ? '%2Frooms%3Fnew%3Dworkspace' : '%2Frooms'}">Sign in with OpenVibe</a> to start or join a room.</p>`;
         await page(req, res, 200, {
-            actor, title: 'Rooms', path: '/rooms', active: 'rooms', robots: 'index, follow',
+            actor, title: 'Rooms', path: '/rooms', active: 'rooms', robots: 'index, follow', footer: 'compact',
             description: 'Chat and call rooms on OpenVibe: start one about anything, invite people, or join a public room.',
-            body: `<h1>Rooms</h1>${error}
-${mine.length ? `<h2>Your rooms</h2><ul class="oc-convs">${mine.map(roomCard).join('')}</ul>` : ''}
-<h2>Public rooms</h2>${pub.length ? `<ul class="oc-convs">${pub.map(roomCard).join('')}</ul>` : `<div class="oc-rooms-empty">
+            body: `${ui.head({ title: 'Rooms', sub: 'Group chats, calls and workspaces with Vibe', actions: me ? [`<a class="oc-icon-btn" href="#oc-new-room" aria-label="Start a room" title="Start a room">${IC.plus}</a>`] : [] })}${error}
+${mine.length ? `<h2 class="oc-list-head">Your rooms</h2><ul class="oc-list">${mine.map(roomCard).join('')}</ul>` : ''}
+<h2 class="oc-list-head">Public rooms</h2>${pub.length ? `<ul class="oc-list">${pub.map(roomCard).join('')}</ul>` : `<div class="oc-rooms-empty">
 <p><strong>No public room is open right now: start the first one below.</strong> A room can be about anything, private to the people you invite, a voice call, or a group chat with AI members who know the context.</p>
 <p>Meanwhile the conversation is here:</p>
 <ul class="oc-goto"><li><a href="/">Global chat</a>: everyone on OpenVibe, readable without an account</li>

@@ -14,6 +14,8 @@ const feeds = require('../feeds/feeds');
 const ctx = require('../live-context');
 const db = require('../db/database');
 const { esc, asset } = require('./layout');
+const ui = require('./ui');
+const { ICONS } = require('./icons');
 
 const THEMES = {
     light: '--oc-bg:#ffffff;--oc-panel:#ffffff;--oc-line:#e3e7ef;--oc-text:#101828;--oc-muted:#5b6577;--oc-accent:#2563eb;--oc-ok:#16a34a;color-scheme:light',
@@ -38,10 +40,15 @@ function embedHtml(feed, theme) {
 }
 
 const hookFor = (base, id) => ({ type: 'http', url: `${base}/api/chat/feeds/${id}/hooks/claude-code`, headers: { Authorization: 'Bearer $OPENVIBE_FEED_KEY' }, allowedEnvVars: ['OPENVIBE_FEED_KEY'], timeout: 5 });
-/** The block for .claude/settings.json: the events a viewer may see, sent as they happen; never blocks Claude Code. */
+/**
+ * The block for .claude/settings.json: the events a viewer may see, sent as they happen; never blocks Claude Code. One
+ * line per event (the same hook each time), so it reads at a glance and pastes as valid JSON.
+ */
 function claudeCodeSnippet(base, id) {
-    const h = [hookFor(base, id)];
-    return JSON.stringify({ hooks: { SessionStart: [{ hooks: h }], UserPromptSubmit: [{ hooks: h }], PostToolUse: [{ matcher: '*', hooks: h }], Stop: [{ hooks: h }], SessionEnd: [{ hooks: h }] } }, null, 2);
+    const h = JSON.stringify([hookFor(base, id)]);
+    const events = [['SessionStart', `[{ "hooks": ${h} }]`], ['UserPromptSubmit', `[{ "hooks": ${h} }]`], ['PostToolUse', `[{ "matcher": "*", "hooks": ${h} }]`],
+        ['Stop', `[{ "hooks": ${h} }]`], ['SessionEnd', `[{ "hooks": ${h} }]`]];
+    return `{\n  "hooks": {\n${events.map(([e, v]) => `    "${e}": ${v}`).join(',\n')}\n  }\n}`;
 }
 const curlSnippet = (base, id) => `curl -X POST ${base}/api/chat/feeds/${id}/events \\
   -H "Authorization: Bearer $OPENVIBE_FEED_KEY" -H "Content-Type: application/json" \\
@@ -80,21 +87,21 @@ function mountFeedPages(router, { page, needUser, sameSite, formLimit, notice, c
     router.get('/feeds', async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         const mine = await feeds.mine(actor.user);
+        const where = (f) => [f.room_id ? 'in a room' : '', f.managed_stream_id ? 'on Live' : ''].filter(Boolean).join(' · ');
         const list = mine.length
-            ? `<ul class="ib-list">${mine.map((f) => `<li><a href="/feeds/${esc(f.id)}"><span class="ib-dot fd-dot${f.settings.enabled && !f.settings.paused ? ' fd-on' : ''}"></span><b>${esc(f.title)}</b>
-<span class="oc-muted">${f.last_event_at ? `last step ${esc(f.last_event_at.slice(0, 16).replace('T', ' '))}` : 'nothing published yet'}${f.room_id ? ' · in a room' : ''}${f.managed_stream_id ? ' · on Live' : ''}</span></a></li>`).join('')}</ul>`
-            : '<p class="oc-muted">No feeds yet.</p>';
+            ? `<ul class="oc-list">${mine.map((f) => { const t = ui.when(f.last_event_at); const on = f.settings.enabled && !f.settings.paused; return `<li class="oc-row"><a href="/feeds/${esc(f.id)}"><span class="oc-av oc-av-feed${on ? ' is-on' : ''}" aria-hidden="true">${ICONS.code}</span><span class="oc-row-main"><span class="oc-row-top"><strong>${esc(f.title)}</strong>${t.text ? `<time datetime="${t.iso}">${esc(t.text)}</time>` : ''}</span><span class="oc-row-sub">${on ? '' : f.settings.paused ? 'Paused · ' : 'Hidden · '}${f.last_event_at ? 'last step published' : 'nothing published yet'}${where(f) ? ` · ${where(f)}` : ''}</span></span></a></li>`; }).join('')}</ul>`
+            : '';
         await page(req, res, 200, {
-            actor, title: 'Feeds', path: '/feeds', active: 'rooms', robots: 'noindex, nofollow',
-            body: `<h1>Feeds</h1>
-<p class="oc-muted">Show what you are building, live. Claude Code, Copilot or any tool sends each step (a prompt, a command, a file edited, the answer) and your viewers follow along in a card: in your room, on your Live channel while you stream, or embedded on your own site. You decide what they see; secrets and home folders are wiped before anything is shown.</p>
+            actor, title: 'Feeds', path: '/feeds', active: 'rooms', robots: 'noindex, nofollow', footer: 'compact',
+            body: `${ui.head({ title: 'Feeds', sub: 'Your coding session, live: in a room, on your Live channel, or on your site' })}
 ${req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : ''}
 ${list}
-<h2>Make a feed</h2>
-<form class="oc-form" method="post" action="/feeds">
+<details class="oc-card oc-make"${mine.length ? '' : ' open'}><summary>${ICONS.plus}<span>New feed</span></summary>
+<p class="oc-muted oc-make-how">Claude Code, Copilot or any tool sends each step (a prompt, a command, a file edited, the answer), and your viewers follow along in a card. You decide what they see; secrets and home folders are wiped before anything is shown.</p>
+<form class="oc-form oc-grid-form" method="post" action="/feeds">
 <label>Title <input name="title" required minlength="2" maxlength="80" value="Vibe coding"></label>
 ${placeFields(await places(actor.user))}
-<p><button type="submit">Make the feed</button></p></form>`,
+<p><button type="submit">Make the feed</button></p></form></details>`,
         });
     });
 
@@ -103,7 +110,7 @@ ${placeFields(await places(actor.user))}
         const b = req.body || {};
         try {
             const { feed, key } = await feeds.create(actor.user, { title: b.title, room: b.room || null, slot: b.slot || null });
-            await page(req, res, 201, { actor, title: `${feed.title}: key`, path: `/feeds/${feed.id}`, active: 'rooms', robots: 'noindex, nofollow', body: `<p><a href="/feeds">&larr; Feeds</a></p><h1>${esc(feed.title)}</h1>${keyPanel(feed, key)}` });
+            await page(req, res, 201, { actor, title: `${feed.title}: key`, path: `/feeds/${feed.id}`, active: 'rooms', robots: 'noindex, nofollow', footer: 'compact', body: `${ui.head({ title: esc(feed.title), sub: 'Its key, shown this once', back: { href: `/feeds/${feed.id}`, label: 'The feed' } })}${keyPanel(feed, key)}` });
         } catch (err) { res.redirect(303, `/feeds?error=${encodeURIComponent(err.message || 'That did not work')}`); }
     });
 
@@ -119,33 +126,46 @@ ${placeFields(await places(actor.user))}
         const { actor, feed } = a;
         const s = feed.settings;
         const check = (name, label) => `<label class="oc-check"><input type="checkbox" name="${name}" value="1"${s[name] ? ' checked' : ''}> ${label}</label>`;
+        const t = ui.when(feed.last_event_at);
+        const on = s.enabled && !s.paused;
+        const where = [feed.room_id ? 'in a room' : '', feed.managed_stream_id ? 'on Live while you stream' : ''].filter(Boolean).join(' · ');
+        // How to connect: one tool at a time, folded; the first one open while nothing has been published.
+        const snip = (id, text) => `<div class="oc-snip"><button type="button" class="oc-icon-btn" data-oc-copy="#${id}" aria-label="Copy" title="Copy" hidden>${ICONS.copy}</button><pre class="ib-snippet" tabindex="0" id="${id}"><code>${esc(text)}</code></pre></div>`;
+        const connect = (id, label, inner, open) => `<details class="oc-card oc-fold" id="${id}"${open ? ' open' : ''}><summary><span>${label}</span>${ICONS.chevron}</summary>${inner}</details>`;
         await page(req, res, 200, {
-            actor, title: `${feed.title}: feed`, path: `/feeds/${feed.id}`, active: 'rooms', robots: 'noindex, nofollow', feedView: true,
-            body: `<p><a href="/feeds">&larr; Feeds</a></p><h1>${esc(feed.title)}</h1>
+            actor, title: `${feed.title}: feed`, path: `/feeds/${feed.id}`, active: 'rooms', robots: 'noindex, nofollow', feedView: true, footer: 'compact', script: true, page: { view: 'feed' },
+            body: `${ui.head({
+                title: esc(feed.title),
+                sub: `${on ? 'Visible' : s.paused ? 'Paused' : 'Hidden'}${t.text ? ` · last step ${esc(t.text)}` : ' · nothing published yet'}${where ? ` · ${where}` : ''}`,
+                back: { href: '/feeds', label: 'All feeds' },
+                actions: [`<a class="oc-icon-btn" href="#oc-feed-settings" aria-label="Where it shows and what viewers see" title="Settings">${ICONS.gear}</a>`],
+            })}
 ${req.query.saved ? notice('ok', 'Saved.') : ''}${req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : ''}
 <div class="fv fd-preview" data-feed="${esc(feed.id)}"></div>
-<h2>Publish from Claude Code</h2>
-<p>Add this to <code>.claude/settings.json</code> in a project (or <code>~/.claude/settings.json</code> for every project), and set <code>OPENVIBE_FEED_KEY</code> in the shell you start Claude Code from. Each prompt, tool used and answer becomes a step; nothing is read from your files or transcript.</p>
-<pre class="ib-snippet" tabindex="0"><code>${esc(claudeCodeSnippet(base, feed.id))}</code></pre>
-<h2>Publish from anything else</h2>
-<p>Send events to the API with the key; <code>eventType</code> is one of ${feeds.TYPES.map((t) => `<code>${t}</code>`).join(', ')} (up to 50 at once as <code>{ "events": [...] }</code>). The OpenVibe Copilot companion speaks the same events.</p>
-<pre class="ib-snippet" tabindex="0"><code>${esc(curlSnippet(base, feed.id))}</code></pre>
-<p class="oc-muted">Key ending in <code>${esc(feed.key_hint || '????')}</code>.</p>
-<form method="post" action="/feeds/${esc(feed.id)}/key" class="oc-inline"><button type="submit">Make a new key</button></form> <span class="oc-muted">(the old one stops working)</span>
-<h2>Show it on your site</h2>
-<pre class="ib-snippet" tabindex="0"><code>${esc(iframeSnippet(base, feed.id))}</code></pre>
-<h2>Where it shows and what viewers see</h2>
-<form class="oc-form" method="post" action="/feeds/${esc(feed.id)}/settings">
+<h2 class="oc-list-head">Connect</h2>
+${connect('oc-connect-claude', 'Claude Code', `<p>Add this to <code>.claude/settings.json</code> in a project (or <code>~/.claude/settings.json</code> for every project), and set <code>OPENVIBE_FEED_KEY</code> in the shell you start Claude Code from. Each prompt, tool used and answer becomes a step; nothing is read from your files or transcript.</p>
+${snip('oc-snip-claude', claudeCodeSnippet(base, feed.id))}`, !feed.last_event_at)}
+${connect('oc-connect-api', 'Any other tool (the API)', `<p>Send events with the key; <code>eventType</code> is one of ${feeds.TYPES.map((x) => `<code>${x}</code>`).join(', ')} (up to 50 at once as <code>{ "events": [...] }</code>). The OpenVibe Copilot companion speaks the same events.</p>
+${snip('oc-snip-api', curlSnippet(base, feed.id))}`, false)}
+${connect('oc-connect-embed', 'Show it on your site', snip('oc-snip-embed', iframeSnippet(base, feed.id)), false)}
+<div class="oc-keyrow"><span class="oc-muted">${ICONS.key} Key ending in <code>${esc(feed.key_hint || '????')}</code></span><form method="post" action="/feeds/${esc(feed.id)}/key" class="oc-inline"><button type="submit" class="oc-pill">${ICONS.retry}<span>New key</span></button></form></div>
+<details class="oc-card oc-fold" id="oc-feed-settings"${req.query.saved || req.query.error ? ' open' : ''}><summary><span>Where it shows and what viewers see</span>${ICONS.chevron}</summary>
+<form class="oc-form oc-grid-form" method="post" action="/feeds/${esc(feed.id)}/settings">
 <label>Title <input name="title" required minlength="2" maxlength="80" value="${esc(feed.title)}"></label>
 ${placeFields(await places(actor.user), feed)}
+<fieldset class="oc-fieldset"><legend>Showing</legend>
 ${check('enabled', 'Viewers see this feed')}
 ${check('paused', 'Paused (steps are kept, nobody sees them until you unpause)')}
+</fieldset>
+<fieldset class="oc-fieldset"><legend>What viewers see</legend>
 ${check('show_prompts', 'Prompts')}${check('show_responses', 'Answers')}${check('show_tool_calls', 'Tools used')}${check('show_tool_arguments', 'What the tools were given (commands, searches)')}
 ${check('show_file_events', 'Files changed')}${check('redact_file_paths', 'File names only, not their folders')}${check('show_thinking', 'Thinking, when the tool sends it')}
+</fieldset>
 <label>Detail <select name="viewer_depth">${[['headline', 'Headlines'], ['standard', 'Standard'], ['deep', 'More text']].map(([v, l]) => `<option value="${v}"${s.viewer_depth === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
 <label>Delay before viewers see a step <select name="delay_ms">${[[0, 'None'], [10000, '10 seconds'], [30000, '30 seconds'], [60000, '1 minute'], [120000, '2 minutes']].map(([v, l]) => `<option value="${v}"${s.delay_ms === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
 <p><button type="submit">Save</button></p></form>
-<form method="post" action="/feeds/${esc(feed.id)}/delete" class="oc-inline"><button type="submit" class="oc-link oc-danger">Delete this feed and its history</button></form>`,
+<form method="post" action="/feeds/${esc(feed.id)}/delete" class="oc-inline oc-danger-row"><button type="submit" class="oc-pill oc-pill-danger">${ICONS.trash}<span>Delete this feed and its history</span></button></form>
+</details>`,
         });
     });
 
@@ -163,7 +183,7 @@ ${check('show_file_events', 'Files changed')}${check('redact_file_paths', 'File 
     router.post('/feeds/:id/key', formLimit, sameSite, async (req, res) => {
         const a = await ownFeed(req, res); if (!a) return;
         const key = await feeds.rotateKey(a.feed);
-        await page(req, res, 200, { actor: a.actor, title: `${a.feed.title}: key`, path: `/feeds/${a.feed.id}`, active: 'rooms', robots: 'noindex, nofollow', body: `<p><a href="/feeds">&larr; Feeds</a></p><h1>${esc(a.feed.title)}</h1>${keyPanel(a.feed, key)}` });
+        await page(req, res, 200, { actor: a.actor, title: `${a.feed.title}: key`, path: `/feeds/${a.feed.id}`, active: 'rooms', robots: 'noindex, nofollow', footer: 'compact', body: `${ui.head({ title: esc(a.feed.title), sub: 'Its new key, shown this once', back: { href: `/feeds/${a.feed.id}`, label: 'The feed' } })}${keyPanel(a.feed, key)}` });
     });
     router.post('/feeds/:id/delete', formLimit, sameSite, async (req, res) => {
         const a = await ownFeed(req, res); if (!a) return;

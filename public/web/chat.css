@@ -494,3 +494,73 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 @media (max-width: 560px) {
   .oc-room-feed { height: max(300px, calc(100svh - 250px)); }
 }
+
+/* Working pages (server/web/ui.js): one compact header (back, title, one muted line, icon actions), lists that read like
+   a phone's (a mark, the name and time on one line, the last thing under it), a search-style row for "start one",
+   and cards that fold away what is only needed once (setup, settings). */
+.oc-page-head { display: flex; align-items: center; gap: 6px; margin: 0 0 12px; min-height: 44px; }
+.oc-page-head > .oc-back { margin-left: -8px; }
+.oc-page-id { flex: 1; min-width: 0; }
+.oc-page-id h1 { margin: 0; font-size: clamp(1.15rem, 4vw, 1.45rem); line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-page-sub { margin: 2px 0 0; color: var(--oc-muted); font-size: .86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-page-tools { display: flex; gap: 2px; margin-right: -8px; }
+.oc-page-tools form { margin: 0; }
+.oc-list { list-style: none; margin: 0 0 14px; padding: 0; border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel); overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr); }
+.oc-list-head { margin: 18px 0 8px; font-size: .78rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
+.oc-row + .oc-row { border-top: 1px solid var(--oc-line); }
+.oc-row > a { display: flex; align-items: center; gap: 12px; padding: 10px 14px; color: var(--oc-text); text-decoration: none; min-width: 0; }
+.oc-row > a:hover { background: var(--oc-panel-2); }
+.oc-row-main { flex: 1; min-width: 0; display: grid; gap: 1px; }
+.oc-row-top { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.oc-row-top strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 650; }
+.oc-row-top time { flex: none; color: var(--oc-muted); font-size: .78rem; font-variant-numeric: tabular-nums; }
+.oc-row-top .oc-badge { flex: none; margin-left: 0; }
+.oc-row-sub { display: block; min-width: 0; color: var(--oc-muted); font-size: .9rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-row-sub .oc-dot { float: right; margin-left: 8px; }
+.oc-unread .oc-row-top strong { font-weight: 800; }
+.oc-unread .oc-row-sub { color: var(--oc-text); }
+.oc-dot { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, var(--oc-on-accent)); font-size: .72rem; font-weight: 800; }
+.oc-row-empty { padding: 16px 14px; }
+.oc-av { flex: none; display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; font-size: .85rem; font-weight: 800; letter-spacing: .02em; color: #fff; background: hsl(var(--av, 210) 45% 38%); }
+.oc-av-feed { background: var(--oc-panel-2); color: var(--oc-muted); border: 1px solid var(--oc-line); }
+.oc-av-feed.is-on { color: var(--oc-ok); border-color: color-mix(in srgb, var(--oc-ok) 45%, transparent); }
+.oc-find { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 4px 4px 4px 14px; border: 1px solid var(--oc-line); border-radius: 999px; background: var(--oc-panel); }
+.oc-find:focus-within { border-color: var(--oc-accent); }
+.oc-find > .oc-i { color: var(--oc-muted); }
+.oc-find input { flex: 1; min-width: 0; border: 0; background: transparent; padding: 8px 0; outline: none; }
+.oc-find .oc-send { width: 38px; height: 38px; }
+.oc-card { margin: 0 0 10px; padding: 0; border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel); }
+.oc-card > summary { display: flex; align-items: center; gap: 10px; padding: 12px 14px; cursor: pointer; list-style: none; font-weight: 650; }
+.oc-card > summary::-webkit-details-marker { display: none; }
+.oc-card > summary > span { flex: 1; }
+.oc-fold > summary > .oc-i { color: var(--oc-muted); transition: transform .15s; }
+.oc-fold[open] > summary > .oc-i { transform: rotate(90deg); }
+.oc-card[open] > summary { border-bottom: 1px solid var(--oc-line); }
+.oc-card > :not(summary) { margin-left: 14px; margin-right: 14px; }
+.oc-card > :not(summary):last-child { margin-bottom: 14px; }
+.oc-card > p:first-of-type, .oc-card > form:first-of-type, .oc-card > pre:first-of-type { margin-top: 12px; }
+.oc-make > summary { color: var(--oc-accent); }
+.oc-make-how { font-size: .9rem; }
+.oc-grid-form { max-width: none; }
+.oc-grid-form label { display: grid; gap: 4px; font-size: .9rem; color: var(--oc-muted); }
+.oc-grid-form label.oc-check { display: flex; color: var(--oc-text); }
+.oc-grid-form input:not([type=checkbox]):not([type=radio]), .oc-grid-form select { width: 100%; margin-left: 0; max-width: none; color: var(--oc-text); }
+.oc-keyrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 12px; }
+.oc-keyrow .oc-i { vertical-align: -.2em; }
+.oc-danger-row { display: block; margin: 0 14px 14px; }
+@media (prefers-reduced-motion: reduce) { .oc-fold > summary > .oc-i { transition: none; } }
+/* A code block people copy (a feed's setup): its copy button in the corner, and never taller than a screenful. */
+.oc-snip { position: relative; }
+.oc-snip > .oc-icon-btn { position: absolute; top: 6px; right: 6px; z-index: 1; width: 34px; height: 34px; background: var(--oc-panel); border-color: var(--oc-line); }
+.oc-snip > pre { max-height: 50vh; overflow: auto; padding-right: 48px; }
+/* A header's "more" menu (a conversation's Block): a small panel under its button. */
+.oc-more { position: relative; }
+.oc-more > summary { list-style: none; }
+.oc-more > summary::-webkit-details-marker { display: none; }
+.oc-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; padding: 6px; border-radius: 12px; border: 1px solid var(--oc-line); background: var(--oc-panel); box-shadow: 0 12px 28px rgba(0, 0, 0, .35); }
+.oc-pop form { margin: 0; }
+.oc-pop-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 8px; background: transparent; color: var(--oc-text); font-weight: 600; text-align: left; }
+.oc-pop-item:hover { background: var(--oc-panel-2); }
+.oc-pop-item.oc-danger { color: var(--oc-red); }
+.oc-row-lock { display: inline-flex; color: var(--oc-muted); flex: none; }
+.oc-row-lock .oc-i { width: .9em; height: .9em; }
