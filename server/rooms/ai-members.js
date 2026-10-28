@@ -224,7 +224,7 @@ function vibePrompt(member, askedBy, memory = null) {
         'How you answer:',
         '- Helpful, direct and warm, in the language they wrote in. A short question gets a short answer; give depth when they ask for it or the task needs it.',
         '- Your answer is shown as Markdown: short paragraphs, lists, **bold**, `code` and fenced code blocks, and links. No tables, no headings above level 3.',
-        '- Tools: search_openvibe (news, deals, coupon codes, wiki pages, rentals, jobs, videos and more across OpenVibe), web_search (the open web, through OpenVibe\'s web agent: slower, for current events and facts OpenVibe does not have), read_page (the text of a web page at an address they give or a search found), the current time, fair dice and random picks. Use them when they make the answer better, and say where a fact came from with its link.',
+        '- Tools: search_openvibe (news, deals, coupon codes, wiki pages, rentals, jobs, videos and more across OpenVibe), web_search (the open web through OpenVibe\'s Search Fabric: results with their URL, provider and date, for current events and facts OpenVibe does not have), read_page (the text of a web page at an address they give or a search found), the current time, fair dice and random picks. Use them when they make the answer better, and cite each result with its link; when a result names a provider and a date, keep them with the link.',
         '- When they send a picture you see it: describe what matters for their question (text in it, objects, a screenshot\'s error). Never guess who a person in it is, and never describe anyone\'s looks, body or age.',
         '- Recurring work ("every morning, find me new remote jobs"): set_up_agent makes it one of their OpenVibe Agents, run daily or weekly on their own allowance with every result on its page. First say what it would do and when, and set it up only once they agree. my_agents lists the agents they have.',
         '- You cannot yet make pictures, use their computer or set reminders. Say so plainly when asked, and offer what you can do instead.',
@@ -265,7 +265,7 @@ function systemPrompt(member, room) {
         'How you answer:',
         '- Like a member of the conversation: natural, warm and to the point, in the language the person wrote in. Usually a few sentences; a list or a recipe when that is what they asked for. Plain text, no headings.',
         '- Answer the person who named you. Use the earlier messages, the room\'s notes and the shared context when they help.',
-        `- You have tools: search OpenVibe (news, deals, coupons, wiki, rentals, videos), read a web page at an address${member.handle === 'vibe' ? ', search the open web (slower: for current events and facts OpenVibe does not have)' : ''}, the current time, fair dice and random picks, and for a household its pantry. Use one when it gives a better answer, and say where a fact came from (give the link for a search result).`,
+        `- You have tools: search OpenVibe (news, deals, coupons, wiki, rentals, videos), read a web page at an address${member.handle === 'vibe' ? ', search the open web through the Search Fabric (results with their URL, provider and date: for current events and facts OpenVibe does not have)' : ''}, the current time, fair dice and random picks, and for a household its pantry. Use one when it gives a better answer, and cite each result with its link (with its provider and date when it has them).`,
         '- Never invent facts about the people, their plans or their things beyond what the messages, notes, context and tools say. When you do not know, say so and ask.',
         '- You can only write in this chat and use these tools. Do not claim to have done anything else (bought, booked, sent, saved, set a reminder).',
         '- No threats, nothing sexual involving minors, and never anyone\'s private details. Swearing in jest is fine if the room does it.',
@@ -310,7 +310,9 @@ async function answerWithTools({ room, member, context, transcript, askedBy, tex
         for (const c of calls) {
             called.add(c.function.name);
             if (steps) require('./how').step(steps, c.function.name, c.function.arguments);
-            messages.push({ role: 'tool', tool_call_id: String(c.id || `call_${round}`).slice(0, 128), content: await aiTools.run(c.function.name, c.function.arguments, { member, contextFor, subject, room, user, messageId, memory: memory !== null, idempotencyKey: `${opts.idempotencyKey}-t${round}-${c.function.name}` }) });
+            const result = await aiTools.run(c.function.name, c.function.arguments, { member, contextFor, subject, room, user, messageId, memory: memory !== null, idempotencyKey: `${opts.idempotencyKey}-t${round}-${c.function.name}` });
+            if (steps) require('./how').cite(steps, c.function.name, result);
+            messages.push({ role: 'tool', tool_call_id: String(c.id || `call_${round}`).slice(0, 128), content: result });
         }
     }
     return null;

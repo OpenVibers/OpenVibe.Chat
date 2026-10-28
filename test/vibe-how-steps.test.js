@@ -31,6 +31,7 @@ t('boot', async () => {
     // answer would only make the wait for Vibe's message run out.
     const stub = require('http').createServer((req, res) => {
         res.writeHead(200, { 'content-type': 'application/json' });
+        if (req.url.startsWith('/api/v1/query')) return res.end(JSON.stringify({ results: [{ scope: 'network', kind: 'document', owner: 'deals', type: 'offer', title: 'Keychron K2 for $59', snippet: 'A mechanical keyboard', url: 'https://openvibe.deals/d/k2', published_at: '2026-10-20T00:00:00Z' }] }));
         res.end(JSON.stringify(req.url.startsWith('/api/v1/') ? { results: [] } : { title: 'Keyboards', text: 'Keychron K2 $59', links: [] }));
     });
     await new Promise((r) => stub.listen(0, '127.0.0.1', r));
@@ -43,14 +44,18 @@ t('boot', async () => {
     aiClient._setClient({ runs: { create: async (workflow) => ({ run: { status: 'succeeded', output: workflow === 'chat.member.turn' ? (script.shift() || (() => say('Sure.')))() : { text: 'plain' } } }) } });
 });
 
-t('the tools Vibe used are kept with its answer, in plain words, with the pages it read', async () => {
+t('the tools Vibe used are kept with its answer, in plain words, with the pages it read and the searches it cited', async () => {
     script = [() => callTools(toolCall('c1', 'search_openvibe', { query: 'mechanical keyboard deals' }), toolCall('c2', 'read_page', { url: 'https://www.example.com/kb' })), () => say('The **Keychron K2** is $59 today.')];
     const r = await vibeApi('POST', '', { message: 'Find me a mechanical keyboard deal' });
     assert.strictEqual(r.status, 201, r.text);
     const m = await lastAi(r.body.room.slug);
-    assert.deepStrictEqual(JSON.parse(m.how), { steps: ['Searched OpenVibe for “mechanical keyboard deals”', 'Read example.com'], sources: ['https://www.example.com/kb'] });
+    const howKept = JSON.parse(m.how);
+    assert.deepStrictEqual(howKept.steps, ['Searched OpenVibe for “mechanical keyboard deals”', 'Read example.com']);
+    assert.deepStrictEqual(howKept.sources, ['https://openvibe.deals/d/k2', 'https://www.example.com/kb']);
+    assert.deepStrictEqual({ provider: howKept.citations[0].provider, published_at: howKept.citations[0].published_at, url: howKept.citations[0].url },
+        { provider: null, published_at: '2026-10-20T00:00:00Z', url: 'https://openvibe.deals/d/k2' }, 'the search result keeps its date and URL as a citation');
     const page = await fetch(`${h.base}/vibe/${r.body.room.slug}`, { headers: { cookie: `ov_token=${ann.token}` } }).then((x) => x.text());
-    assert.ok(page.includes('<details class="vb-how"><summary>How Vibe did this</summary><ul><li>Searched OpenVibe for “mechanical keyboard deals”</li><li>Read example.com</li><li>Sources: <a href="https://www.example.com/kb" rel="nofollow ugc noopener" target="_blank">example.com</a></li></ul></details>'), 'folded under the answer');
+    assert.ok(page.includes('<details class="vb-how"><summary>How Vibe did this</summary><ul><li>Searched OpenVibe for “mechanical keyboard deals”</li><li>Read example.com</li><li>Sources: <a href="https://openvibe.deals/d/k2" rel="nofollow ugc noopener" target="_blank">openvibe.deals</a>, <a href="https://www.example.com/kb" rel="nofollow ugc noopener" target="_blank">example.com</a></li></ul></details>'), 'folded under the answer');
     const how = await vibeApi('GET', `/${r.body.room.slug}/how`);
     assert.deepStrictEqual(how.body.how[String(m.id)].lines, ['Searched OpenVibe for “mechanical keyboard deals”', 'Read example.com']);
 });
@@ -80,7 +85,11 @@ t('steps read plainly, at most twelve, the same one twice in a row once', async 
     how.step(acc, 'set_up_agent', { name: 'Remote jobs' });
     how.step(acc, 'no_such_tool', '{}');
     how.step(acc, 'read_page', 'not json');
+    how.cite(acc, 'web_search', JSON.stringify({ citations: [{ n: 1, title: 'Match report', url: 'https://example.com/match', provider: 'deepseek', published_at: '2026-10-27T00:00:00Z', retrieved_at: '2026-10-28T12:00:00Z' }] }));
+    how.cite(acc, 'current_time', JSON.stringify({ citations: [{ url: 'https://ignored.test/x' }] }));
     assert.deepStrictEqual(acc.steps, ['Searched the web for “who won the match”', 'Set up an agent: “Remote jobs”', 'Read a page']);
+    assert.deepStrictEqual(acc.sources, ['https://example.com/match']);
+    assert.deepStrictEqual([acc.citations[0].provider, acc.citations[0].published_at, acc.citations[0].retrieved_at], ['deepseek', '2026-10-27T00:00:00Z', '2026-10-28T12:00:00Z']);
     for (let i = 0; i < 30; i++) how.step(acc, 'search_openvibe', JSON.stringify({ query: `q${i}` }));
     assert.strictEqual(acc.steps.length, 12);
     assert.strictEqual(how.ofMessage('{"steps":[]}'), null);

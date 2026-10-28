@@ -78,7 +78,8 @@ module.exports = {
     inbox: { aiRepliesPerDay: Math.max(1, int(process.env.CHAT_INBOX_AI_REPLIES_PER_DAY, 500)), notify: process.env.CHAT_INBOX_NOTIFY !== '0', identityKey: process.env.CHAT_INBOX_IDENTITY_KEY || '',
         postsPerMinute: Math.max(1, int(process.env.CHAT_INBOX_POSTS_PER_MINUTE, 20)),   // a visitor's address, widget writes
         translationsPerDay: Math.max(0, int(process.env.CHAT_INBOX_TRANSLATIONS_PER_DAY, 300)) },   // new translations an inbox a UTC day
-    // OpenVibe.Actor, for Vibe's web search (server/rooms/web-search.js): tasks for the person, with Chat's own token.
+    // OpenVibe.Actor, the fallback for Vibe's web search when the Search Fabric is down (server/rooms/web-search.js):
+    // tasks for the person, with Chat's own token.
     actor: { internalUrl: strip(process.env.CHAT_ACTOR_INTERNAL_URL || 'http://127.0.0.1:4950') },
 
     // openvibe.chat, the site (server/web/): global chat, messages and settings, served by Chat itself.
@@ -204,7 +205,8 @@ module.exports = {
         members: process.env.CHAT_AI_MEMBERS !== '0',
         memberRepliesPerDay: Math.max(1, int(process.env.CHAT_AI_MEMBER_REPLIES_PER_DAY, 100)),
         // Tools an AI member may use (server/rooms/ai-tools.js) through OpenVibe.AI's chat.member.turn: on unless
-        // CHAT_AI_MEMBER_TOOLS=0. Network search goes to OpenVibe.Search's public API.
+        // CHAT_AI_MEMBER_TOOLS=0. Search goes to OpenVibe.Search's Search Fabric (network and web scopes); Chat's
+        // service token holds search.query.delegate for the web scope and names the person in X-OV-Subject.
         memberTools: process.env.CHAT_AI_MEMBER_TOOLS !== '0',
         searchUrl: strip(process.env.CHAT_SEARCH_URL || 'https://search.openvibe.network'),
         // read_page goes to OpenVibe.Tools' public run API (its `read` tool).

@@ -8,8 +8,8 @@
  *   POST   /picture    the body is a picture (Content-Type image/*), an optional question in X-Caption (URI-encoded) →
  *                      201 { room, message, picture }: a new chat that starts with it (it goes to OpenVibe.Pics as the
  *                      person, like a room's picture), and Vibe answers seeing it
- *   GET    /:slug/how  { how: { <message id>: { lines, sources, actor_url } } }: "How Vibe did this" for the agent tasks
- *                      answered in the chat (server/rooms/how.js)
+ *   GET    /:slug/how  { how: { <message id>: { lines, sources, citations?, actor_url } } }: "How Vibe did this" for the
+ *                      agent tasks answered in the chat, with the search results' URLs/providers/dates (server/rooms/how.js)
  *   PATCH  /:slug      { name } → { room }
  *   DELETE /:slug      204: the chat and its messages are deleted
  *   POST   /:slug/retry  202 { removed }: Vibe's last answer goes and it answers the person's last message anew (409

@@ -5,11 +5,12 @@
  * member still only writes in its room.
  *
  *   search_openvibe   OpenVibe.Search's public results for a query (news, deals, coupons, wiki, listings, videos…), through
- *                     the Search Fabric's network scope (GET /api/v1/query); /api/v1/search on a Search without it
+ *                     the Search Fabric's network scope (GET /api/v1/query); /api/v1/search only on a Search without it
  *   read_page         a web page's title, text and links, through OpenVibe.Tools' `read` tool (Tools decides what it may
  *                     reach: public http(s) addresses only); Chat never fetches the address itself
- *   web_search        Vibe only (a Vibe chat, or Vibe added to a room): the open web, answered by OpenVibe.Actor's web
- *                     agent as a task for the person who asked (server/rooms/web-search.js), with its sources
+ *   web_search        Vibe only (a Vibe chat, or Vibe added to a room): the open web through the Search Fabric's web
+ *                     scope, with each result's provider, date and URL; OpenVibe.Actor's web agent only when the fabric
+ *                     is down (server/rooms/web-search.js)
  *   current_time      the date and time now, in a time zone
  *   roll_dice         N dice of S sides
  *   pick_one          one of the options given, at random
@@ -28,6 +29,7 @@
  */
 const crypto = require('crypto');
 const config = require('../config');
+const fabricSearch = require('./search-fabric');
 
 const RESULT_MAX = 4000;
 
@@ -47,7 +49,7 @@ const BASE = [
     fn('pick_one', 'Pick one of the given options at random, fairly (where to eat, who goes first).', { options: { type: 'array', minItems: 2, maxItems: 30, items: { type: 'string' } } }, ['options']),
 ];
 const PANTRY = fn('household_pantry', 'What is in this household\'s pantry and its meal plan, from OpenVibe.Food, right now.');
-const WEB = fn('web_search', 'Search the open web and get a short answer with its sources (OpenVibe\'s web agent; takes up to a minute). Use it for current events, prices, schedules and facts that OpenVibe search does not have.',
+const WEB = fn('web_search', 'Search the open web (the Search Fabric: OpenVibe\'s open index, then its web providers) and get results with each one\'s title, URL, provider and date. Cite the URL, provider and date you use. Use it for current events, prices, schedules and facts that OpenVibe search does not have.',
     { query: { type: 'string', description: 'The question or search, in plain words' } }, ['query']);
 
 const QUEUE = fn('queue_task', 'Put a piece of work on this room\'s work queue, for the person who asked you. research (a short report with sources), web (a current answer from the web) and answer run at once and their result comes back into the room in a minute or two; code (a change to an OpenVibe repository, done by a coding agent and handed in as a pull request for review), computer (something done on a computer) and other wait for a worker to take them. Queue only what someone asked to have done, one task per job.',
@@ -87,31 +89,35 @@ const definitions = (member, room = null, { memory = false } = {}) => [
 ];
 
 const clip = (o) => { const s = typeof o === 'string' ? o : JSON.stringify(o); return s.length > RESULT_MAX ? `${s.slice(0, RESULT_MAX - 1)}…` : s; };
-const stripTags = (h) => String(h || '').replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 const int = (v, min, max, dflt) => { const n = Math.floor(Number(v)); return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : dflt; };
 
-async function searchOpenvibe(args, { fetchImpl = globalThis.fetch } = {}) {
+async function searchOpenvibe(args, { fetchImpl = null, searchClient = null } = {}) {
     const query = String(args.query || '').trim().slice(0, 200);
     if (!query) return { error: 'query is required' };
     const limit = int(args.limit, 1, 8, 5);
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 8000);
+    const signal = AbortSignal.timeout(8000);
     try {
-        const get = (path) => fetchImpl(`${config.ai.searchUrl}${path}`, { headers: { accept: 'application/json', 'user-agent': 'OpenVibe.Chat AI member' }, signal: ctrl.signal, redirect: 'error' });
-        let res = await get(`/api/v1/query?${new URLSearchParams({ q: query, scopes: 'network', limit: String(limit) })}`);
-        const fabric = res.status !== 404;
-        if (!fabric) res = await get(`/api/v1/search?${new URLSearchParams({ q: query, limit: String(limit) })}`);
-        if (!res.ok) return { error: `OpenVibe.Search answered ${res.status}` };
-        const body = await res.json();
-        const results = (Array.isArray(body.results) ? body.results : []).slice(0, limit).map((r) => ({
-            title: String(r.title || '').slice(0, 200), site: r.owner, type: r.type,
-            summary: stripTags(fabric ? r.snippet : (r.snippet_html || r.summary || '')).slice(0, 300),
-            url: fabric ? r.url : r.canonical_url, published_at: r.published_at || null,
-        }));
-        return { query, results, note: results.length ? 'Cite the url when you use a result.' : 'Nothing on OpenVibe matched.' };
+        const body = await fabricSearch.query({ q: query, scopes: ['network'], limit, signal }, { client: searchClient, fetchImpl });
+        const results = (Array.isArray(body.results) ? body.results : []).slice(0, limit).map((r) => fabricSearch.resultOf(r));
+        return { query, citations: fabricSearch.citationsOf(results), results, note: results.length ? 'Cite each result with its url, provider and date.' : 'Nothing on OpenVibe matched.' };
     } catch (err) {
-        return { error: err && err.name === 'AbortError' ? 'OpenVibe.Search did not answer in time' : 'OpenVibe.Search is unreachable' };
-    } finally { clearTimeout(timer); }
+        if (!fabricSearch.isDown(err)) {
+            const status = err && err.status;
+            return { error: status ? `OpenVibe.Search answered ${status}` : 'OpenVibe.Search did not answer' };
+        }
+        // A Search without the fabric (or one that is down): its pre-fabric query API answers instead.
+        try {
+            const res = await (fetchImpl || globalThis.fetch)(`${config.ai.searchUrl}/api/v1/search?${new URLSearchParams({ q: query, limit: String(limit) })}`, {
+                headers: { accept: 'application/json', 'user-agent': 'OpenVibe.Chat AI member' }, signal: AbortSignal.timeout(8000), redirect: 'error',
+            });
+            if (!res.ok) return { error: `OpenVibe.Search answered ${res.status}` };
+            const old = await res.json();
+            const results = (Array.isArray(old.results) ? old.results : []).slice(0, limit).map((r) => fabricSearch.resultOf(r, { fallback: true }));
+            return { query, citations: fabricSearch.citationsOf(results), results, fallback: true, note: results.length ? 'Cite each result with its url and date.' : 'Nothing on OpenVibe matched.' };
+        } catch {
+            return { error: 'OpenVibe.Search is unreachable' };
+        }
+    }
 }
 
 async function readPage(args, { fetchImpl = globalThis.fetch } = {}) {
