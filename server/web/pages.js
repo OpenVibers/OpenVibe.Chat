@@ -733,7 +733,7 @@ ${people}
         // A feed the owner shows here (server/feeds/): its card above the messages.
         const feed = await require('../feeds/feeds').forRoom(room.id);
         const work = rooms.isWorkspace(room) ? await require('../rooms/workspace').list(room, me, { limit: 40 }) : null;
-        const aiHere = ais.length ? `<p class="oc-ai-here">${ICONS.spark}<span>${ais.map((a) => `<strong title="${esc(aiMembers.modelOf(a))}">${esc(a.name)}</strong>`).join(', ')} ${ais.length > 1 ? 'are' : 'is'} here: write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask</span></p>` : '';
+        const aiHere = ais.length ? `<p class="oc-ai-here">${ICONS.spark}<span>${ais.map((a) => `<strong>${esc(a.name)}</strong> <span class="oc-muted oc-ai-model">(${esc(aiMembers.modelOf(a))})</span>`).join(', ')} ${ais.length > 1 ? 'are' : 'is'} here: write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask</span></p>` : '';
         const memberCount = (await rooms.publicRoom(room)).members;
         await page(req, res, 200, {
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady, feedView: !!feed,
