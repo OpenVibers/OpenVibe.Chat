@@ -27,7 +27,16 @@ async function lastAi(slug) {
 }
 
 t('boot', async () => {
-    h = await boot({ env: { CHAT_WEB_URL: 'https://openvibe.chat' } });
+    // Search and Tools answer here, not on the real network: the steps are what this file checks, and a slow outside
+    // answer would only make the wait for Vibe's message run out.
+    const stub = require('http').createServer((req, res) => {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify(req.url.startsWith('/api/v1/') ? { results: [] } : { title: 'Keyboards', text: 'Keychron K2 $59', links: [] }));
+    });
+    await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+    stub.unref();
+    const local = `http://127.0.0.1:${stub.address().port}`;
+    h = await boot({ env: { CHAT_WEB_URL: 'https://openvibe.chat', CHAT_SEARCH_URL: local, CHAT_TOOLS_URL: local } });
     aiClient = require('../server/ai/client');
     ann = h.addUser('ann', { subject: ids.newId('user') });
     await h.ctx.upsertUser(h.live.users.get(ann.id));
