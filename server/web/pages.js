@@ -236,24 +236,36 @@ function createWebRoutes({ config }) {
             }
         } catch { /* the names stay plain */ }
         const composer = actor.kind === 'user'
-            ? (actor.user.is_banned ? notice('error', 'Your account is banned from chat.') : `<form class="oc-compose" method="post" action="/send" id="oc-compose">
-<label for="oc-input" class="oc-sr">Message to everyone</label>
-<textarea id="oc-input" name="message" maxlength="500" rows="2" required placeholder="Say something to everyone on OpenVibe"></textarea>
-<button type="submit">Send</button>
-</form>`)
+            ? (actor.user.is_banned ? notice('error', 'Your account is banned from chat.') : `<div class="oc-dock"><form class="oc-compose" method="post" action="/send" id="oc-compose"><label for="oc-input" class="oc-sr">Message to everyone</label><textarea id="oc-input" name="message" maxlength="500" rows="1" required placeholder="Message everyone on OpenVibe"></textarea><button type="submit" class="oc-send" aria-label="Send" title="Send">${IC.send}</button></form></div>`)
             : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=%2F">Sign in with OpenVibe</a> to chat. Anyone can read along.</p>`;
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
-        // Around the room: the real activity (server/web/home.js, read once a minute), how it works and questions.
-        const parts = home.sections(await home.activity());
         const signedIn = actor.kind === 'user';
+        // Around the room: the real activity (server/web/home.js, read once a minute). Someone signed in gets the app: the
+        // room first at the screen's height, Ask Vibe in one line, compact lists, and no introduction or questions (those,
+        // the hero and the full footer, are for people who are new here, and for search).
+        const activity = await home.activity();
+        const parts = home.sections(activity, { app: signedIn });
+        const feedList = `<ol class="oc-feed${signedIn ? ' oc-room-feed' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${shown.map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>`;
+        const appBody = () => `<section class="oc-room oc-global" aria-labelledby="oc-h">
+<header class="oc-room-head"><div class="oc-room-id"><h1 id="oc-h">Global chat</h1>
+<p class="oc-muted oc-room-sub">Everyone on OpenVibe${home.peopleLine(activity)} <span class="oc-live" id="oc-live" hidden>● live</span></p></div>
+<div class="oc-room-tools"><a class="oc-icon-btn" href="/vibe" aria-label="Chat with Vibe" title="Chat with Vibe">${IC.spark}</a><a class="oc-icon-btn" href="/settings" aria-label="Chat settings" title="Chat settings">${IC.gear}</a></div></header>
+${error}
+${feedList}
+${composer}
+</section>
+${parts.vibe}
+${parts.streams}
+${parts.places}`;
         await page(req, res, 200, {
             actor, fullTitle: 'OpenVibe.Chat: global chat, servers, rooms and calls', path: '/', active: 'global', robots: 'index, follow', script: true,
             description: 'Chat with everyone on OpenVibe, start a server with text and voice channels, message friends and call them. Free and open source.',
-            jsonLd: [...homeJsonLd(config), sharedSeo.jsonLd.faq(home.FAQ)],
+            jsonLd: [...homeJsonLd(config), ...(signedIn ? [] : [sharedSeo.jsonLd.faq(home.FAQ)])],
             page: { view: 'global', latest: latest_id, signedIn, me: signedIn ? actor.user.username : null },
-            body: `<header class="oc-hero"><p class="oc-eyebrow">OpenVibe.Chat</p>
+            footer: signedIn ? 'compact' : 'full',
+            body: signedIn ? appBody() : `<header class="oc-hero"><p class="oc-eyebrow">OpenVibe.Chat</p>
 <h1>Chat with everyone on OpenVibe, or start your own server</h1>
-<p class="oc-lede">Vibe, OpenVibe's own assistant, global chat for the whole network, the chat of every stream on OpenVibe.Live, servers with text and voice channels, rooms, private messages, calls of up to eight people, and AI members that join in. One free account, everywhere.</p>
+<p class="oc-lede">Vibe, OpenVibe's assistant. One chat for the whole network and every stream on OpenVibe.Live. Servers with text and voice channels, rooms, private messages and calls of up to eight, with AI members that join in. One free account, everywhere.</p>
 <p class="oc-hero-actions"><a class="oc-button" href="/vibe">Chat with Vibe</a> <a class="oc-button oc-button--quiet" href="${signedIn ? '/servers#oc-new-server' : '/auth/login?next=%2Fservers'}">Start a server</a> <a class="oc-button oc-button--quiet" href="/rooms">Rooms</a> <a class="oc-button oc-button--quiet" href="${signedIn ? '/messages' : '/auth/login?next=%2Fmessages'}">Messages</a></p>
 ${parts.stats}</header>
 ${parts.vibe}
@@ -261,7 +273,7 @@ ${parts.vibe}
 <h2 id="oc-h">Global chat</h2>
 <p class="oc-muted">One room for everyone on OpenVibe: streamers, viewers and players, from every site. <span class="oc-live" id="oc-live" hidden>● live</span></p>
 ${error}
-<ol class="oc-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${shown.map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>
+${feedList}
 ${composer}
 </section>
 ${parts.streams}
@@ -632,12 +644,15 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
         const actor = await viewerOf(req);
         const me = actor.kind === 'user' ? actor.user : null;
         const { public: pub, mine } = await rooms.list(me);
+        // Your rooms are listed once, in their own list.
+        const yours = new Set(mine.map((r) => r.slug));
+        const others = pub.filter((r) => !yours.has(r.slug));
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const staff = !!me && permissions.can(me, 'staff.moderation.chat');
         // ?new=workspace (other OpenVibe sites link "Work on it together" here) picks the workspace kind and fills the name.
         const wantWork = req.query.new === 'workspace';
         const preName = wantWork && typeof req.query.name === 'string' ? req.query.name.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 40) : '';
-        const create = me ? `<form class="oc-form oc-create" id="oc-new-room" method="post" action="/rooms/new">
+        const create = me ? `<form class="oc-form oc-grid-form oc-create" id="oc-new-room" method="post" action="/rooms/new">
 <h2>Start a room</h2>
 <label>Name <input name="name" required minlength="3" maxlength="40" placeholder="Night Owls" value="${esc(preName)}"${wantWork ? ' autofocus' : ''}></label>
 <label>Topic <input name="topic" maxlength="200" placeholder="What it is about (optional)"></label>
@@ -656,7 +671,7 @@ ${staff ? '<label class="oc-check"><input type="radio" name="kind" value="system
             description: 'Chat and call rooms on OpenVibe: start one about anything, invite people, or join a public room.',
             body: `${ui.head({ title: 'Rooms', sub: 'Group chats, calls and workspaces with Vibe', actions: me ? [`<a class="oc-icon-btn" href="#oc-new-room" aria-label="Start a room" title="Start a room">${IC.plus}</a>`] : [] })}${error}
 ${mine.length ? `<h2 class="oc-list-head">Your rooms</h2><ul class="oc-list">${mine.map(roomCard).join('')}</ul>` : ''}
-<h2 class="oc-list-head">Public rooms</h2>${pub.length ? `<ul class="oc-list">${pub.map(roomCard).join('')}</ul>` : `<div class="oc-rooms-empty">
+<h2 class="oc-list-head">${mine.length ? 'More public rooms' : 'Public rooms'}</h2>${others.length ? `<ul class="oc-list">${others.map(roomCard).join('')}</ul>` : mine.length ? '<p class="oc-rooms-empty oc-muted">No other public room yet.</p>' : `<div class="oc-rooms-empty">
 <p><strong>No public room is open right now: start the first one below.</strong> A room can be about anything, private to the people you invite, a voice call, or a group chat with AI members who know the context.</p>
 <p>Meanwhile the conversation is here:</p>
 <ul class="oc-goto"><li><a href="/">Global chat</a>: everyone on OpenVibe, readable without an account</li>

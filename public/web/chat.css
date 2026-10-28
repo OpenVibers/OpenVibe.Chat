@@ -195,11 +195,6 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-srv-people-list a { display: block; padding: 3px 8px; border-radius: 6px; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oc-srv-people-list a:hover { background: var(--oc-panel-2); }
 /* The directory, an invite, settings */
-.oc-srv-cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 10px; }
-.oc-srv-card a { display: flex; align-items: center; gap: 12px; height: 100%; padding: 12px 14px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; color: var(--oc-text); text-decoration: none; }
-.oc-srv-card a:hover, .oc-srv-card a:focus-visible { border-color: var(--oc-accent); }
-.oc-srv-card-text { display: flex; flex-direction: column; min-width: 0; }
-.oc-srv-card-text .oc-muted { font-size: .88em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oc-srv-icon--big { width: 72px; height: 72px; margin: 0 auto 6px; border-radius: 22px; font-size: 1.5rem; }
 .oc-invite-card { max-width: 440px; margin: 32px auto; padding: 28px 24px; text-align: center; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 16px; }
 .oc-invite-card h1 { margin-top: 0; }
@@ -232,8 +227,6 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
   .oc-srv-main > .oc-notice, .oc-srv-main > .oc-ai-here, .oc-srv-main > .oc-call { margin-left: 12px; margin-right: 12px; }
 }
 
-.oc-srv-card-title { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 6px; }
-.oc-srv-card-title .oc-badge { margin-left: 0; }
 .oc-badge-new { color: var(--oc-text); border-color: var(--oc-red); }
 .oc-badge-official { color: var(--oc-text); border-color: var(--accent-strong, var(--accent, #3b82f6)); }
 .oc-moves { display: inline-flex; gap: 4px; margin-left: auto; }
@@ -272,7 +265,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-lede { margin: 0; max-width: 64ch; font-size: 1.05rem; color: var(--oc-muted); }
 .oc-hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin: 1rem 0 0; }
 .oc-stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 1.2rem 0 0; padding: 0; }
-.oc-stats > div { display: flex; flex-direction: column-reverse; min-width: 0; padding: 8px 14px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); }
+.oc-stats > div { flex: 1 1 100px; display: flex; flex-direction: column-reverse; min-width: 0; padding: 8px 14px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); }
 .oc-stats dt { margin: 0; font-size: .8rem; color: var(--oc-muted); }
 .oc-stats dd { margin: 0; font-size: 1.3rem; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.2; }
 .oc-room > h2 { margin: 1.4rem 0 .2rem; font-size: 1.3rem; }
@@ -617,3 +610,17 @@ div.oc-set-row { cursor: default; }
 .oc-ai-member h3 { margin: 0 0 6px; font-size: 1rem; }
 .oc-grid-form label.oc-set-row { display: flex; color: var(--oc-text); font-size: 1rem; }
 .oc-ai-form h3 { margin: 6px 0 2px; font-size: 1rem; }
+
+/* The front page for someone signed in (pages.js appBody): global chat first at the screen's height, Ask Vibe in one
+   line under it, then the stream chats, servers and rooms as compact lists. A server's own mark keeps its colour in
+   a list row. */
+.oc-global { margin-top: 4px; }
+.oc-vibe-mini { margin-top: 16px; }
+.oc-vibe-mini .oc-find { margin: 0; border-color: color-mix(in srgb, var(--oc-accent) 35%, var(--oc-line)); }
+.oc-vibe-mini .oc-find > .oc-i { color: var(--oc-accent); }
+.oc-home-list { margin-top: 18px; }
+.oc-home-list .oc-home-head { align-items: center; margin: 0 0 8px; }
+.oc-home-list h2.oc-list-head { margin: 0; font-family: inherit; font-size: .78rem; letter-spacing: .06em; }
+.oc-home-list .oc-home-head a { font-size: .82rem; }
+.oc-home-list .oc-list { margin: 0; }
+.oc-srv-icon--row { width: 40px; height: 40px; border-radius: 12px; font-size: .85rem; }

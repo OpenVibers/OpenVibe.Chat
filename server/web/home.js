@@ -9,10 +9,14 @@
  * channel of a banned account. A person is counted once per week, by account or by anonymous id.
  *
  *   activity() → { weekMessages, weekPeople, totalMessages, streams: [...], rooms: [...], servers: [...] }
- *   sections({ activity, signedIn, live }) → the HTML pieces the page places around global chat
+ *   sections(activity, { app }) → the HTML pieces the page places around global chat; app (someone signed in): the
+ *                                    lists as compact rows and Ask Vibe as one line, no introduction
+ *   peopleLine(activity)            → "4 people this week" for the room's header, or ''
  */
 const db = require('../db/database');
 const { esc } = require('./layout');
+const ui = require('./ui');
+const { ICONS } = require('./icons');
 
 const TTL_MS = 60_000;
 const WEEK_MS = 7 * 24 * 3600 * 1000;
@@ -103,7 +107,7 @@ const FAQ = [
 function stats(a) {
     const items = [
         a.weekMessages ? [n(a.weekMessages), 'messages this week'] : null,
-        a.weekPeople ? [n(a.weekPeople), a.weekPeople === 1 ? 'person chatting this week' : 'people chatting this week'] : null,
+        a.weekPeople ? [n(a.weekPeople), 'chatting this week'] : null,
         a.totalMessages ? [n(a.totalMessages), 'messages in all'] : null,
         a.servers.length ? [n(a.servers.length), a.servers.length === 1 ? 'public server' : 'public servers'] : null,
         a.streams.some((s) => s.live) ? [n(a.streams.filter((s) => s.live).length), 'streams live now'] : null,
@@ -112,8 +116,16 @@ function stats(a) {
     return `<dl class="oc-stats">${items.map(([v, l]) => `<div><dt>${esc(l)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
 }
 
-function streamsSection(a) {
+/** One place in a compact list: its mark, the name with a badge, one muted line. */
+const row = (href, name, mark, badge, sub) => `<li class="oc-row"><a href="${href}">${mark}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(name)}</strong>${badge}</span><span class="oc-row-sub">${sub}</span></span></a></li>`;
+const listSection = (id, title, more, rows) => `<section class="oc-home-sec oc-home-list" aria-labelledby="${id}"><div class="oc-home-head"><h2 id="${id}" class="oc-list-head">${title}</h2>${more}</div><ul class="oc-list">${rows.join('')}</ul></section>`;
+
+function streamsSection(a, app) {
     if (!a.streams.length) return '';
+    if (app) {
+        return listSection('oc-h-streams', 'Stream chats', `<a href="${LIVE}/">Who is live</a>`, a.streams.map((s) => row(`${LIVE}/@${esc(s.username)}`, s.display_name, ui.initials(s.display_name), s.live ? '<span class="oc-badge oc-badge-live">Live</span>' : '',
+            s.live && s.title ? esc(s.title) : `${s.messages ? `${plural(s.messages, 'message', 'messages')} this week` : ''}${s.last ? `${s.messages ? ' · ' : ''}last ${esc(ago(s.last))}` : ''}`)));
+    }
     const item = (s) => `<li><a class="oc-stream" href="${LIVE}/@${esc(s.username)}"><span class="oc-stream-name"><strong>${esc(s.display_name)}</strong>${s.live ? ' <span class="oc-badge oc-badge-live">Live now</span>' : ''}</span>
 <span class="oc-muted">${s.live && s.title ? `${esc(s.title)}${s.messages ? ' · ' : ''}` : ''}${s.messages ? `${plural(s.messages, 'message', 'messages')} from ${plural(s.people, 'person', 'people')} this week` : ''}${s.last && !s.live ? ` · last ${esc(ago(s.last))}` : ''}</span></a></li>`;
     return `<section class="oc-home-sec" aria-labelledby="oc-h-streams"><div class="oc-home-head"><h2 id="oc-h-streams">Stream chats on OpenVibe.Live</h2><a href="${LIVE}/">Who is live</a></div>
@@ -121,7 +133,13 @@ function streamsSection(a) {
 <ul class="oc-streams" role="list">${a.streams.map(item).join('')}</ul></section>`;
 }
 
-function placesSection(a) {
+function placesSection(a, app) {
+    if (app) {
+        return [
+            a.servers.length ? listSection('oc-h-servers', 'Public servers', '<a href="/servers">All</a>', a.servers.map((s) => row(`/s/${esc(s.slug)}`, s.name, ui.serverMark(s), s.official ? '<span class="oc-badge oc-badge-official">official</span>' : '', esc(s.description || plural(s.members, 'member', 'members'))))) : '',
+            a.rooms.length ? listSection('oc-h-rooms', 'Public rooms', '<a href="/rooms">All</a>', a.rooms.map((r) => row(`/r/${esc(r.slug)}`, r.name, ui.initials(r.name), '', `${esc(r.topic || plural(r.members, 'member', 'members'))}${r.last_message_at ? ` · last ${esc(ago(r.last_message_at))}` : ''}`))) : '',
+        ].join('\n');
+    }
     const servers = a.servers.map((s) => `<li><a class="oc-stream" href="/s/${esc(s.slug)}"><span class="oc-stream-name"><strong>${esc(s.name)}</strong>${s.official ? ' <span class="oc-badge oc-badge-official">official</span>' : ''}</span><span class="oc-muted">${esc(s.description || plural(s.members, 'member', 'members'))}</span></a></li>`);
     const rooms = a.rooms.map((r) => `<li><a class="oc-stream" href="/r/${esc(r.slug)}"><span class="oc-stream-name"><strong>${esc(r.name)}</strong></span><span class="oc-muted">${esc(r.topic || plural(r.members, 'member', 'members'))}${r.last_message_at ? ` · last ${esc(ago(r.last_message_at))}` : ''}</span></a></li>`);
     return [
@@ -131,7 +149,11 @@ function placesSection(a) {
 }
 
 /** Ask Vibe from the front page: the question opens a new Vibe chat with it in the box (never sent for you). */
-function vibeSection() {
+function vibeSection(app) {
+    if (app) {
+        return `<section class="oc-home-sec oc-vibe-mini" aria-labelledby="oc-h-vibe"><h2 id="oc-h-vibe" class="oc-sr">Ask Vibe</h2>
+<form class="oc-find oc-vibe-ask" action="/vibe" method="get" role="search">${ICONS.spark}<label for="oc-vibe-q" class="oc-sr">Ask Vibe</label><input id="oc-vibe-q" name="ask" type="text" maxlength="1200" placeholder="Ask Vibe anything" autocomplete="off" enterkeyhint="go" required><button type="submit" class="oc-send" aria-label="Ask Vibe" title="Ask Vibe">${ICONS.send}</button></form></section>`;
+    }
     return `<section class="oc-home-sec oc-vibe-card" aria-labelledby="oc-h-vibe"><h2 id="oc-h-vibe">Ask Vibe, OpenVibe's assistant</h2>
 <p class="oc-muted">Free with your account. It searches the web and all of OpenVibe, reads the pages and pictures you share, remembers what you ask it to, and sets up work that runs every day for you. Your chats with it are private.</p>
 <form class="oc-vibe-ask" action="/vibe" method="get" role="search"><label for="oc-vibe-q" class="oc-sr">Ask Vibe</label><input id="oc-vibe-q" name="ask" type="text" maxlength="1200" placeholder="Ask Vibe anything" autocomplete="off" enterkeyhint="go" required><button type="submit" class="oc-button">Ask</button></form></section>`;
@@ -161,8 +183,11 @@ function moreSection() {
 }
 
 /** Everything around global chat: the numbers, Ask Vibe, then stream chats, servers and rooms, how it works, questions, more. */
-function sections(a) {
-    return { stats: stats(a), vibe: vibeSection(), streams: streamsSection(a), places: placesSection(a), steps: stepsSection(), faq: faqSection(), more: moreSection() };
+function sections(a, { app = false } = {}) {
+    return { stats: app ? '' : stats(a), vibe: vibeSection(app), streams: streamsSection(a, app), places: placesSection(a, app), steps: app ? '' : stepsSection(), faq: app ? '' : faqSection(), more: app ? '' : moreSection() };
 }
 
-module.exports = { activity, sections, FAQ, _reset: () => { cached = null; } };
+/** The room's header line for someone signed in: how many people wrote this week. */
+const peopleLine = (a) => (a.weekPeople ? ` · ${plural(a.weekPeople, 'person', 'people')} this week` : '');
+
+module.exports = { activity, sections, peopleLine, FAQ, _reset: () => { cached = null; } };

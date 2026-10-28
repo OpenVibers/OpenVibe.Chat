@@ -14,6 +14,8 @@
  * room (a channel is a room), and call.js the voice channel's call.
  */
 const { esc } = require('./layout');
+const ui = require('./ui');
+const { ICONS: IC } = require('./icons');
 const rooms = require('../rooms/rooms');
 const servers = require('../rooms/servers');
 const ctx = require('../live-context');
@@ -25,9 +27,9 @@ const YOU_ARE = { owner: 'the owner', admin: 'an admin', mod: 'a moderator', mem
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zM20 20l-4.8-4.8"/></svg>';
 const VOICE_ICON = '<svg class="oc-ico" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 9v6h4l5 4V5L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>';
 
-const initials = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
-/** A steady hue per server, so its icon is recognisable in the rail. */
-const hueOf = (slug) => { let h = 0; for (const c of String(slug)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+const initials = ui.serverLetters;
+/** A steady hue per server, so its icon is recognisable in the rail (and in every list: ui.serverMark). */
+const hueOf = ui.hueOf;
 
 function mountServerPages(router, h) {
     const { page, needUser, viewerOf, sameSite, formLimit, notice, roomMessage, callPanel, applyRoomChange, pictureComposer, config } = h;
@@ -43,27 +45,32 @@ function mountServerPages(router, h) {
     const errorOf = (req) => (req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '');
 
     const icon = (s, active) => `<a class="oc-srv-icon${active ? ' is-active' : ''}" href="/s/${esc(s.slug)}" title="${esc(s.name)}" style="--oc-hue:${hueOf(s.slug)}"${active ? ' aria-current="page"' : ''}><span aria-hidden="true">${esc(initials(s.name))}</span><span class="oc-sr">${esc(s.name)}</span>${s.unread ? `<span class="oc-srv-dot" aria-label="${s.unread} unread">${s.unread > 99 ? '99+' : s.unread}</span>` : ''}</a>`;
-    const serverCard = (s) => `<li class="oc-srv-card"><a href="/s/${esc(s.slug)}"><span class="oc-srv-icon oc-srv-icon--card" style="--oc-hue:${hueOf(s.slug)}" aria-hidden="true">${esc(initials(s.name))}</span><span class="oc-srv-card-text"><span class="oc-srv-card-title"><strong>${esc(s.name)}</strong>${s.official ? '<span class="oc-badge oc-badge-official">official</span>' : ''}${s.visibility === 'private' ? '<span class="oc-badge">private</span>' : ''}${s.unread ? `<span class="oc-badge oc-badge-new">${s.unread} new</span>` : ''}</span><span class="oc-muted">${esc(s.description || `${s.members} member${s.members === 1 ? '' : 's'}`)}</span></span></a></li>`;
+    // One server in the directory: its mark, the name with its badges, the description or members under it.
+    const serverRow = (s) => `<li class="oc-row${s.unread ? ' oc-unread' : ''}"><a href="/s/${esc(s.slug)}">${ui.serverMark(s)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(s.name)}</strong>${s.official ? '<span class="oc-badge oc-badge-official">official</span>' : ''}${s.visibility === 'private' ? `<span class="oc-row-lock" title="Private">${IC.lock}<span class="oc-sr">private</span></span>` : ''}</span>`
+        + `<span class="oc-row-sub">${esc(s.description || `${s.members} member${s.members === 1 ? '' : 's'}`)}${s.unread ? `<span class="oc-dot" aria-label="${s.unread} new">${s.unread > 9 ? '9+' : s.unread}</span>` : ''}</span></span></a></li>`;
 
     // ── The directory ──
     router.get('/servers', async (req, res) => {
         const actor = await viewerOf(req);
         const me = userOf(actor);
         const { public: pub, mine } = await servers.list(me);
-        const create = me ? `<form class="oc-form oc-create" id="oc-new-server" method="post" action="/servers/new">
+        // Your servers are listed once, in their own list.
+        const yours = new Set(mine.map((s) => s.slug));
+        const others = pub.filter((s) => !yours.has(s.slug));
+        const create = me ? `<form class="oc-form oc-grid-form oc-create" id="oc-new-server" method="post" action="/servers/new">
 <h2>Start a server</h2>
-<p class="oc-muted">A server is a place for a group: text channels to write in and voice channels to talk in, one membership and one set of roles for all of them. It starts with #general and a voice Lounge.</p>
+<p class="oc-muted oc-small">Text channels to write in and voice channels to talk in, with one membership and one set of roles for all of them. It starts with #general and a voice Lounge.</p>
 <label>Name <input name="name" required minlength="2" maxlength="40" placeholder="Saturday Raiders"></label>
 <label>Description <input name="description" maxlength="300" placeholder="What it is for (optional)"></label>
 <label class="oc-check"><input type="checkbox" name="private" value="1"> Private: only people with an invite can find, read or join it</label>
 <p><button type="submit">Create server</button></p>
 </form>` : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=%2Fservers">Sign in with OpenVibe</a> to start or join a server.</p>`;
         await page(req, res, 200, {
-            actor, title: 'Servers', path: '/servers', active: 'servers', robots: 'index, follow',
+            actor, title: 'Servers', path: '/servers', active: 'servers', robots: 'index, follow', footer: 'compact',
             description: 'Servers on OpenVibe.Chat: a place for a group, with text and voice channels, roles and invites.',
-            body: `<h1>Servers</h1>${errorOf(req)}
-${mine.length ? `<h2>Your servers</h2><ul class="oc-srv-cards">${mine.map(serverCard).join('')}</ul>` : ''}
-<h2>Public servers</h2><ul class="oc-srv-cards">${pub.map(serverCard).join('') || '<li class="oc-muted">No public servers yet. Start the first one.</li>'}</ul>
+            body: `${ui.head({ title: 'Servers', sub: 'Groups with text and voice channels, roles and invites', actions: me ? [`<a class="oc-icon-btn" href="#oc-new-server" aria-label="Start a server" title="Start a server">${IC.plus}</a>`] : [] })}${errorOf(req)}
+${mine.length ? `<h2 class="oc-list-head">Your servers</h2><ul class="oc-list">${mine.map(serverRow).join('')}</ul>` : ''}
+<h2 class="oc-list-head">${mine.length ? 'More public servers' : 'Public servers'}</h2>${others.length ? `<ul class="oc-list">${others.map(serverRow).join('')}</ul>` : `<p class="oc-rooms-empty oc-muted">${mine.length ? 'No other public server yet.' : 'No public server yet. Start one: it can be public, or private to the people you invite.'}</p>`}
 ${create}`,
         });
     });
