@@ -264,7 +264,7 @@ ${parts.places}`;
             jsonLd: [...homeJsonLd(config), sharedSeo.jsonLd.faq(home.FAQ)],
             page: { view: 'global', latest: latest_id, signedIn, me: signedIn ? actor.user.username : null },
             footer: signedIn ? 'compact' : 'full',
-            body: signedIn ? appBody() : `<header class="oc-hero"><p class="oc-eyebrow">OpenVibe.Chat</p>
+            body: signedIn ? appBody() : `<header class="oc-hero">
 <h1>Chat with everyone on OpenVibe, or start your own server</h1>
 <p class="oc-lede">Vibe, OpenVibe's assistant. One chat for the whole network and every stream on OpenVibe.Live. Servers with text and voice channels, rooms, private messages and calls of up to eight, with AI members that join in. One free account, everywhere.</p>
 <p class="oc-hero-actions"><a class="oc-button" href="/vibe">Chat with Vibe</a> <a class="oc-button oc-button--quiet" href="${signedIn ? '/servers#oc-new-server' : '/auth/login?next=%2Fservers'}">Start a server</a> <a class="oc-button oc-button--quiet" href="/rooms">Rooms</a> <a class="oc-button oc-button--quiet" href="${signedIn ? '/messages' : '/auth/login?next=%2Fmessages'}">Messages</a></p>
