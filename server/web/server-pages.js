@@ -136,8 +136,12 @@ ${create}`,
             can.member && can.role !== 'owner' ? `<form class="oc-inline" method="post" action="/s/${esc(server.slug)}/leave"><button type="submit" class="oc-link">Leave server</button></form>` : '',
         ].filter(Boolean).join(' · ');
         const canInvite = can.manage || (can.moderate && server.visibility === 'public');
+        // The canonical URL is the one served and listed in the sitemap: /s/<server> without a channel in the
+        // request, and the channel's own URL when the request named it. `back` stays the channel URL the composer
+        // and the sign-in link post to (POST /s/:slug/:channel).
+        const canonicalPath = req.params.channel ? back : `/s/${server.slug}`;
         await page(req, res, 200, {
-            actor, wide: true, footer: 'compact', title: `${isVoice ? '' : '#'}${room.name} · ${server.name}`, path: back, active: 'servers',
+            actor, wide: true, footer: 'compact', title: `${isVoice ? '' : '#'}${room.name} · ${server.name}`, path: canonicalPath, active: 'servers',
             robots: server.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
             description: server.description || `${server.name}, a server on OpenVibe.Chat with ${server.member_count} member${Number(server.member_count) === 1 ? '' : 's'}.`,
             page: {

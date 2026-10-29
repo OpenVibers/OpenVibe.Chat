@@ -231,7 +231,11 @@ t('the official server: only chat staff take /s/openvibe; it is marked official 
     assert.ok(list.slice(1).every((x) => x.official === false), 'no other server is official');
     assert.strictEqual((await api('POST', '/', staff, { name: 'Explore', slug: 'explore' })).status, 422, 'the other reserved words stay reserved, even for staff');
     assert.match((await page('/servers', null)).text, /<strong>OpenVibe<\/strong><span class="oc-badge oc-badge-official">official<\/span>/);
-    assert.match((await page('/s/openvibe', null)).text, /oc-srv-name">OpenVibe<\/h1><span class="oc-badge oc-badge-official">official<\/span>/);
+    const official = (await page('/s/openvibe', null)).text;
+    assert.match(official, /oc-srv-name">OpenVibe<\/h1><span class="oc-badge oc-badge-official">official<\/span>/);
+    const canonical = (/<link rel="canonical" href="([^"]*)"/.exec(official) || [])[1] || '';
+    assert.match(canonical, /\/s\/openvibe$/, 'canonical is the URL served and listed in the sitemap, not the default channel');
+    assert.ok(!canonical.includes('/s/openvibe/general'), 'no canonical to the channel the server happens to default to');
 });
 
 t.run(async () => { if (h && h.close) await h.close(); });
