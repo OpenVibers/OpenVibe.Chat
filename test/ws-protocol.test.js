@@ -334,6 +334,27 @@ t('media commands go to Live’s queue with the same replies', async () => {
     await aliceWs.next((x) => x.type === 'system' && x.message === `No robot here (asked as usr_01J9AAAAAAAAAAAAAAAAAAAAAA, user ${alice.id}).`);
 });
 
+t('Bench votes reach Live once with signed-in viewer and stream ids', async () => {
+    await h.sleep(1100);
+    // Bob is still timed out by the moderation test. Use a viewer with no moderation history.
+    const viewer = h.addUser('benchvoter');
+    await h.ctx.sync();
+    const viewerWs = await h.ws({ ip: '198.51.100.75', token: viewer.token, stream: streamId });
+    try {
+        viewerWs.sendJson({ type: 'join', streamId, token: viewer.token });
+        await viewerWs.next((m) => m.type === 'auth');
+        const before = h.live.effects.length;
+        aliceWs.sendJson({ type: 'chat', message: '!1' });
+        await aliceWs.next((x) => x.type === 'system' && x.message === 'Your Bench vote is counted.');
+        viewerWs.sendJson({ type: 'chat', message: '!tie' });
+        await viewerWs.next((x) => x.type === 'system' && x.message === 'Your Bench vote is counted.');
+        assert.deepStrictEqual(h.live.effects.slice(before).filter((e) => e.name === 'bench-vote').map((e) => e.body), [
+            { stream_id: streamId, viewer_user_id: alice.id, choice: 'left' },
+            { stream_id: streamId, viewer_user_id: viewer.id, choice: 'tie' },
+        ]);
+    } finally { viewerWs.close(); }
+});
+
 t('a !word that is not a channel sound is pressed as the robot button of that name, quietly', async () => {
     await h.sleep(1100);
     const before = h.live.effects.length;

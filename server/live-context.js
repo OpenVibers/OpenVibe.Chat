@@ -4,7 +4,7 @@
  * Every piece of data Chat does not own (accounts and roles, streams and live state, channels,
  * channel moderation policy, bans and IP rules, follows, cosmetics and tags, site settings,
  * anon numbers) and every side effect chat triggers in Live (coins, AI viewers, arena, media
- * queue, hardware, pastes, translation, PowerChat, notifications, viewer counts, IP log) goes
+ * queue, hardware, Bench votes, pastes, translation, PowerChat, notifications, viewer counts, IP log) goes
  * through this module. Nothing else in Chat talks to Live.
  *
  * Transport: Live's internal endpoints, service token from OpenVibe.Network for audience
@@ -944,6 +944,7 @@ const effects = {
     hardwareCommand: async (streamerUserId, command, fromUser, { subject = null, userId = null } = {}) => await effect('hardware', {
         streamer_user_id: streamerUserId, command, from_user: fromUser, ...(subject ? { from_subject: subject } : {}), ...(userId ? { from_user_id: userId } : {}),
     }),
+    benchVote: (streamId, userId, choice) => effect('bench-vote', { stream_id: streamId, viewer_user_id: userId, choice }),
     createPaste: (body) => effect('paste', body).then((r) => r.paste),
     translate: (text, channelUserId) => effect('translate', { text, channel_user_id: channelUserId }).then((r) => r.translation || null),
     notifyDm: (body) => fire('notify/dm', body),

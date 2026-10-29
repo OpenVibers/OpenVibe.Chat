@@ -1355,6 +1355,17 @@ class ChatServer {
             return;
         }
 
+        if (cmd === '!1' || cmd === '!2' || cmd === '!tie') {
+            if (!client.user?.id) { this.sendTo(ws, { type: 'system', message: 'Sign in to vote in Bench.' }); return; }
+            if (!client.streamId) { this.sendTo(ws, { type: 'system', message: 'Join a live stream to vote in Bench.' }); return; }
+            const choice = cmd === '!1' ? 'left' : cmd === '!2' ? 'right' : 'tie';
+            try {
+                const result = await ctx.effects.benchVote(client.streamId, client.user.id, choice);
+                this.sendTo(ws, { type: 'system', message: result.message || 'Bench could not count that vote.' });
+            } catch (err) { this.sendTo(ws, { type: 'system', message: 'Bench could not count that vote.' }); }
+            return;
+        }
+
         if (cmd === '!gotti') {
             const username = client.user ? client.user.display_name : client.anonId;
             const coreUsername = client.user ? client.user.username : null;
