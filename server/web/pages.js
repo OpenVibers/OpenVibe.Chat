@@ -152,10 +152,11 @@ function apiBridge(apiRouter, apiPath, { body, ok, fail }) {
 function createWebRoutes({ config }) {
     const router = express.Router();
     // Markdown twin requests and the agent manifest go to openvibe-shared/agent-layer, mounted after this router:
-    // .md paths, ?format=markdown, an explicit text/markdown preference, and /.well-known/.
+    // .md paths, ?format=markdown, an explicit text/markdown preference, and the manifest's own path (the rest of
+    // /.well-known/ is this router's — security.txt above all).
     router.use((req, res, next) => {
         const p = String(req.path || '');
-        if (p.endsWith('.md') || p.startsWith('/.well-known/') || (req.query && req.query.format === 'markdown')
+        if (p === '/.well-known/agent.json' || p.endsWith('.md') || (req.query && req.query.format === 'markdown')
             || req.accepts(['html', 'text/markdown']) === 'text/markdown') return next('router');
         return next();
     });
