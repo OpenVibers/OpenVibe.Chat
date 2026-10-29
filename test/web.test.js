@@ -80,8 +80,26 @@ t('the composer posts without JavaScript, through the API\'s checks; other origi
     assert.match(r.headers.get('location'), /^\/auth\/login\?next=/, 'signed out: sign in first');
 });
 
+t('SEO-7: a gated page answers on this origin with noindex, a public page keeps its own canonical', async () => {
+    const gated = await req('GET', '/inbox');
+    assert.strictEqual(gated.status, 401);
+    assert.match(gated.text, /<meta name="robots" content="noindex, nofollow">/);
+    assert.match(gated.text, /href="\/auth\/login\?next=%2Finbox"/, 'one click from signing in');
+    // The rule: a gated page never names another origin as its canonical. It used to be a redirect whose
+    // destination carried openvibe.network/login as the canonical, so a crawler read that as this page's.
+    const canon = (/<link rel="canonical" href="([^"]+)"/.exec(gated.text) || [])[1];
+    assert.ok(!canon || new URL(canon).origin !== 'https://openvibe.network', `canonical ${canon}`);
+    const pub = await req('GET', '/');
+    assert.strictEqual(pub.status, 200);
+    assert.match(pub.text, /<meta name="robots" content="index, follow">/);
+    const pubCanon = (/<link rel="canonical" href="([^"]+)"/.exec(pub.text) || [])[1];
+    assert.ok(pubCanon && pubCanon.endsWith('/') && !pubCanon.includes('openvibe.network'), `public canonical ${pubCanon}`);
+});
+
 t('messages: start a conversation by username, reply without JavaScript, participants only', async () => {
-    assert.match((await req('GET', '/messages')).headers.get('location'), /^\/auth\/login\?next=%2Fmessages/);
+    const gate = await req('GET', '/messages');
+    assert.strictEqual(gate.status, 401, 'signed out: a gate page here, noindex (SEO-7)');
+    assert.match(gate.text, /href="\/auth\/login\?next=%2Fmessages"/);
     let r = await req('POST', '/messages/new', form(alice, { username: 'bob' }));
     assert.strictEqual(r.status, 303);
     const m = /^\/messages\/(\d+)$/.exec(r.headers.get('location'));

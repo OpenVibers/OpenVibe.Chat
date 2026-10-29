@@ -36,6 +36,19 @@ const FIX = path.join(__dirname, 'fixtures', 'n-1');
 const client = JSON.parse(fs.readFileSync(path.join(FIX, 'client.json'), 'utf8'));
 const worker = JSON.parse(fs.readFileSync(path.join(FIX, 'worker.json'), 'utf8'));
 
+// Calls whose answer this release changes on purpose, and why (SEO-7). The fixture is N-1's own answer
+// recorded from production, so it is not edited: a deliberate change is declared here instead, and a
+// declaration that no longer names a recorded call fails the run rather than sitting there unread.
+const INTENTIONAL = [
+    { auth: 'anon', method: 'GET', path: '/messages', status: 401, location: null, why: 'SEO-7: a gated page answers on this origin, noindex, instead of a redirect to Network sign-in' },
+    { auth: 'anon', method: 'GET', path: '/settings', status: 401, location: null, why: 'SEO-7: a gated page answers on this origin, noindex, instead of a redirect to Network sign-in' },
+];
+for (const change of INTENTIONAL) {
+    const rec = client.calls.find((c) => c.auth === change.auth && c.method === change.method && c.path === change.path);
+    if (!rec) throw new Error(`intentional change names a call N-1 does not make: ${change.auth} ${change.method} ${change.path}`);
+    Object.assign(rec, { status: change.status, location: change.location, intentional: change.why });
+}
+
 if (worker.engine !== 'postgresql') throw new Error('N-1 fixture must use PostgreSQL');
 const { createDb } = require('openvibe-sdk/db');
 const quiet = { log() {}, info() {}, warn() {}, error: (...a) => console.error(...a) };

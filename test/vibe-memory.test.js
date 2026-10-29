@@ -157,7 +157,10 @@ t('the API: list, add, delete, clear; someone else\'s note is not there; signed 
 
 t('the page: the notes with Delete, add, switch, forget everything; signed out asks to sign in', async () => {
     const out = await web('GET', '/vibe/memory', null);
-    assert.deepStrictEqual([out.status, out.location], [303, '/auth/login?next=%2Fvibe%2Fmemory']);
+    // A gated page is served here with noindex, not redirected to Network sign-in (SEO-7).
+    assert.strictEqual(out.status, 401);
+    assert.match(out.text, /<meta name="robots" content="noindex/);
+    assert.match(out.text, /href="\/auth\/login\?next=%2Fvibe%2Fmemory"/);
     const page = await web('GET', '/vibe/memory', ann);
     assert.strictEqual(page.status, 200);
     assert.match(page.text, /<h1>What Vibe remembers about you<\/h1>/);
