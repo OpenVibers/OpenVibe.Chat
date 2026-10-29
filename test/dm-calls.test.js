@@ -115,7 +115,7 @@ t('Call rings the other person (a direct row) and opens the call page with the r
     assert.strictEqual((await req('GET', '/call/user-1-nothing', { headers: cookie(alice) })).status, 404);
     assert.strictEqual((await req('GET', '/call/public', { headers: cookie(alice) })).status, 404, 'the public lobby is not a 1:1 call page');
     const anon = await req('GET', `/call/${encodeURIComponent(channelId)}`);
-    assert.strictEqual(anon.status, 303, 'sign in first');
+    assert.strictEqual(anon.status, 401, 'sign in first (served here with noindex, not bounced to Network sign-in)');
 });
 
 t('ring.js: a ring shows Answer and Decline; answering tells the caller and opens the call page', async () => {

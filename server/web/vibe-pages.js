@@ -289,8 +289,7 @@ ${notes.length ? `<h2 class="vb-group">${notes.length} of ${memory.MAX_NOTES} no
     }
 
     router.get('/vibe/memory', async (req, res) => {
-        const actor = await viewerOf(req);
-        if (actor.kind !== 'user') return res.redirect(303, `/auth/login?next=${encodeURIComponent('/vibe/memory')}`);
+        const actor = await needUser(req, res); if (!actor) return;
         await renderMemory(req, res, actor);
     });
 
@@ -321,8 +320,7 @@ ${notes.length ? `<h2 class="vb-group">${notes.length} of ${memory.MAX_NOTES} no
     });
 
     router.get('/vibe/:slug', async (req, res) => {
-        const actor = await viewerOf(req);
-        if (actor.kind !== 'user') return res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+        const actor = await needUser(req, res); if (!actor) return;
         const room = await vibe.ownChat(req.params.slug, actor.user);
         if (!room) return render(req, res, { status: 404, error: 'That chat is not here: it may have been deleted. Start a new one below.' });
         await render(req, res, { room });

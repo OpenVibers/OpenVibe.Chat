@@ -195,7 +195,23 @@ function createWebRoutes({ config }) {
     const needUser = async (req, res) => {
         const actor = await viewerOf(req);
         if (actor.kind === 'user') return actor;
-        res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+        // A gated page answers here, noindex, instead of redirecting to Network sign-in: a crawler that
+        // followed the redirect read openvibe.network's canonical as this page's (audit SEO-7). The page
+        // links to sign-in, one click from where the redirect went. A form still gets a redirect: a
+        // person submitting one has a session that ended, and sign-in brings them back to the page.
+        if (req.method !== 'GET') {
+            res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+            return null;
+        }
+        // The visible link goes back to the path only. A query string on a private page holds words that must
+        // never come back in an anonymous response — the security suite reads every 401 body for the private
+        // room's words, and echoing ?q= here put them there (SEO-7 review, 2026-10-29).
+        await page(req, res, 401, {
+            actor, title: 'Sign in to continue', path: req.path, active: null, footer: 'compact', robots: 'noindex, nofollow',
+            body: `<h1>Sign in to continue</h1>
+<p class="oc-muted">This page is for OpenVibe accounts. Sign in and you come straight back here.</p>
+<p><a class="oc-btn" href="/auth/login?next=${encodeURIComponent(req.path)}">Sign in with OpenVibe</a></p>`,
+        });
         return null;
     };
 
