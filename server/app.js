@@ -281,7 +281,15 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     });
 
     // openvibe.chat, the site: pages, sign-in, the Frame's /shared/ files (server/web/).
-    app.use(require('./web/pages').createWebRoutes({ config }));
+    const webRoutes = require('./web/pages').createWebRoutes({ config });
+    app.use(webRoutes);
+    // The agent layer (openvibe-shared/agent-layer): /.well-known/agent.json, and the Markdown twins of the public
+    // pages, rendered by the routes above in-process. It sits after them, so a browser gets the page's own head and
+    // cache and only a twin request reaches it; before the JSON 404, so an unknown .md is a 404.
+    require('openvibe-shared/agent-layer').mount(app, {
+        descriptor: require('./agent-descriptor'),
+        render: require('./web/agent-pages').createAgentPages({ router: webRoutes }).renderPublicPage,
+    });
 
     app.use((req, res) => res.status(404).json({ error: 'Not found' }));
     app.use((err, req, res, _next) => {

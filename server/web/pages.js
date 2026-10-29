@@ -151,6 +151,15 @@ function apiBridge(apiRouter, apiPath, { body, ok, fail }) {
 
 function createWebRoutes({ config }) {
     const router = express.Router();
+    // Markdown twin requests and the agent manifest go to openvibe-shared/agent-layer, mounted after this router:
+    // .md paths, ?format=markdown, an explicit text/markdown preference, and the manifest's own path (the rest of
+    // /.well-known/ is this router's — security.txt above all).
+    router.use((req, res, next) => {
+        const p = String(req.path || '');
+        if (p === '/.well-known/agent.json' || p.endsWith('.md') || (req.query && req.query.format === 'markdown')
+            || req.accepts(['html', 'text/markdown']) === 'text/markdown') return next('router');
+        return next();
+    });
     const site = config.web.baseUrl;
     const siteOrigin = (() => { try { return new URL(site).origin; } catch { return null; } })();
     const webConfig = { ...config, baseUrl: site };
@@ -189,6 +198,10 @@ function createWebRoutes({ config }) {
     const page = async (req, res, status, o) => {
         const actor = o.actor || await viewerOf(req);
         const nonce = require('crypto').randomBytes(16).toString('base64');
+        if (/^index/.test(o.robots || '')) {
+            const twin = require('openvibe-shared/agent-layer').linkHeaderTags(`${config.web.baseUrl}${o.path || '/'}`, `${config.web.baseUrl}/llms.txt`);
+            res.set('Link', twin.header);
+        }
         res.status(status).set('Cache-Control', o.cache || cache.htmlHeaders({ private: true })).set('Content-Security-Policy', contentSecurityPolicy(nonce)).type('html')
             .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: await countsOf(actor), nonce, ringScript: actor.kind === 'user' && !!(config.calls && config.calls.enabled), ...o }));
     };
@@ -1075,7 +1088,9 @@ ${notice('ok', 'Copy the secret now: it is not shown again. Anyone with the addr
     // JSON). The API, /internal/, /ws/ and any client not asking for HTML keep the JSON 404 that
     // server/app.js answers after this router.
     router.use(async (req, res, next) => {
-        if ((req.method !== 'GET' && req.method !== 'HEAD') || /^\/(api|internal|ws)(\/|$)/.test(req.path) || !/\btext\/html\b/.test(req.get('accept') || '')) return next();
+        if ((req.method !== 'GET' && req.method !== 'HEAD') || /^\/(api|internal|ws)(\/|$)/.test(req.path)
+            || String(req.path || '').startsWith('/.well-known/')
+            || !/\btext\/html\b/.test(req.get('accept') || '')) return next();
         try {
             await page(req, res, 404, {
                 title: 'Page not found', path: req.path, robots: 'noindex',
