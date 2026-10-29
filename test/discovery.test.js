@@ -45,6 +45,19 @@ t('/llms.txt describes the site, its public pages and its machine-readable endpo
     for (const re of PRIVATE) assert.ok(!re.test(r.text), `no private path in llms.txt (${re})`);
 });
 
+t('/llms-full.txt carries every public page and what it is, at least 500 characters', async () => {
+    const r = await req('/llms-full.txt');
+    assert.strictEqual(r.status, 200);
+    assert.match(r.type, /^text\/plain/);
+    assert.match(r.cache, /public/, 'cached like llms.txt');
+    assert.match(r.text, /^# OpenVibe\.Chat/, 'llmstxt.org: the name first');
+    assert.ok(r.text.length >= 500, `real content, not a stub (${r.text.length} characters)`);
+    const sitemap = await req('/sitemap.xml');
+    for (const m of sitemap.text.matchAll(/<loc>([^<]+)<\/loc>/g)) assert.ok(r.text.includes(m[1]), `llms-full.txt names ${m[1]}`);
+    for (const p of ['/terms', '/privacy', '/dmca']) assert.ok(r.text.includes(`${SITE}${p}`), `llms-full.txt names ${p}`);
+    for (const re of PRIVATE) assert.ok(!re.test(r.text), `no private path in llms-full.txt (${re})`);
+});
+
 t('/robots.txt keeps every Disallow and welcomes the search and AI crawlers', async () => {
     const r = await req('/robots.txt');
     assert.strictEqual(r.status, 200);
