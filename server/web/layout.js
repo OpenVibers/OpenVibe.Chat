@@ -112,12 +112,15 @@ function renderPage(o) {
     if (!o.robots) throw new TypeError('renderPage needs explicit robots');
     // fullTitle: a page that names the site itself (the front page) takes no suffix.
     const title = o.fullTitle || (o.title ? `${o.title} · ${SITE_NAME}` : SITE_NAME);
-    const head = sharedSeo.headTags({
+    let head = sharedSeo.headTags({
         title, description: o.description || DEFAULT_DESCRIPTION, canonical: `${config.web.baseUrl}${o.path || '/'}`,
         robots: o.robots, siteName: SITE_NAME, type: 'website', jsonLd: o.jsonLd,
         // Indexable pages share the site's card (openvibe-shared/social); private ones advertise nothing.
         image: /^index/.test(o.robots) ? social.url('chat') : undefined, imageAlt: /^index/.test(o.robots) ? SITE_NAME : undefined,
     });
+    // A public page names its Markdown twin and the site's llms.txt (openvibe-shared/agent-layer); gated and
+    // private pages have no twin and advertise none.
+    if (/^index/.test(o.robots)) head += '\n' + sharedSeo.linkHeaderTags(`${config.web.baseUrl}${o.path || '/'}`, `${config.web.baseUrl}/llms.txt`).head;
     const actor = o.actor || { kind: 'anonymous' };
     const who = actor.kind === 'user'
         ? `<span>Signed in as ${esc(actor.user.display_name || actor.user.username)}</span> · <a href="/auth/logout?next=${encodeURIComponent(o.path || '/')}">Sign out</a>`

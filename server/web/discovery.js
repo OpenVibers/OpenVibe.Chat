@@ -91,7 +91,7 @@ function createDiscoveryRoutes({ config }) {
             allow: ['/', '/vibe', '/updates', '/developers', '/rooms', '/r/', '/servers', '/s/'],
             // A person's own Vibe chats and memory (/vibe/…) are theirs: never crawled. /vibe itself is the app's front.
             disallow: ['/r/*/settings', '/s/*/settings', '/join/', '/messages', '/settings', '/auth/', '/api/', '/vibe/'],
-        }));
+        }) + `# Agent manifest: ${abs('/.well-known/agent.json')}\n`);
     });
 
     router.get('/llms.txt', (req, res) => {
