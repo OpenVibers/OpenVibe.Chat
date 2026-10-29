@@ -1,20 +1,24 @@
 'use strict';
 /**
- * The open web for Vibe (server/rooms/vibe.js, and Vibe added to a room): a question goes to OpenVibe.Actor as a task
- * for the person who asked, and Actor's web agent answers it with its sources. Chat's own service token (audience
- * openvibe.actor; Network grants Chat actor.task.create and actor.task.read) names the person in X-OV-Subject, so the
- * task is theirs (their free allowance and task list) and Actor records Chat as `via`; Chat reads only that task back.
+ * The open web for Vibe (server/rooms/vibe.js, and Vibe added to a room), through the Search Fabric first:
+ * the web scope asks Search's open index, then its paid/free providers (DeepSeek, Wikipedia) and returns every
+ * result with its URL, provider and dates. Chat's own service token (audience openvibe.search) holds
+ * `search.query.delegate` and names the person in X-OV-Subject, so the paid steps are theirs.
  *
- *   search({ subject, query, idempotencyKey }) → { answer, sources } | { error }
+ *   search({ subject, query, idempotencyKey }) → { answer, results, citations, sources, … } | { error }
  *
- * Polls the task for at most WAIT_MS. Without Chat's OAuth secret or the asker's subject it answers an error the model
- * can say plainly.
+ * The old path — an OpenVibe.Actor task for the person who asked (Chat's token, audience openvibe.actor;
+ * Network grants actor.task.create and actor.task.read) — answers only when the fabric is down (unreachable,
+ * 404 on a Search without it, or a 5xx). Actor's web agent still gives a short answer with its sources.
  */
 const config = require('../config');
+const fabricSearch = require('./search-fabric');
 
 const WAIT_MS = 50_000;
 const POLL_MS = 1500;
 const DONE = new Set(['succeeded', 'failed', 'cancelled']);
+const WEB_LIMIT = 6;
+const SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 let tokens = null;
 
 function tokenClient() {
@@ -30,11 +34,30 @@ function tokenClient() {
     return tokens;
 }
 
-async function search({ subject, query, idempotencyKey }, { fetchImpl = globalThis.fetch, waitMs = WAIT_MS, pollMs = POLL_MS } = {}) {
-    const q = String(query || '').replace(/\s+/g, ' ').trim().slice(0, 300);
-    if (!q) return { error: 'query is required' };
-    if (!config.oauth.clientSecret) return { error: 'web search is not available on this server' };
-    if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(subject || ''))) return { error: 'web search needs the person to be signed in' };
+/** A fabric web answer, cited: each result keeps its provider, publication date and retrieval time. */
+function fromFabric(body, query) {
+    const results = (Array.isArray(body && body.results) ? body.results : [])
+        .filter((r) => r && /^https?:\/\//i.test(String(r.url || r.canonical_url || '')))
+        .slice(0, WEB_LIMIT)
+        .map((r) => fabricSearch.resultOf(r));
+    const citations = fabricSearch.citationsOf(results);
+    const answer = body && body.answer ? (typeof body.answer === 'string' ? body.answer : body.answer.text || null) : null;
+    const foundBy = ((body && body.route && body.route.explain) || [])
+        .filter((e) => e && e.scope === 'web' && e.ok && Number(e.count) > 0).map((e) => e.step);
+    return {
+        query,
+        answer,
+        citations,
+        sources: results.map((r) => r.url),
+        results,
+        ...(foundBy.length ? { found_by: foundBy.join(', ') } : {}),
+        ...(body && body.route && Number.isFinite(Number(body.route.cost_usd)) ? { cost_usd: Number(body.route.cost_usd) } : {}),
+        note: results.length ? 'Cite each result with its url, provider and date.' : 'Nothing found on the web for that; try other words.',
+    };
+}
+
+/** The actor fallback: one task for the person, polled until it answers or the wait is over. */
+async function actorSearch({ subject, q, idempotencyKey }, { fetchImpl = globalThis.fetch, waitMs = WAIT_MS, pollMs = POLL_MS } = {}) {
     let token;
     try { token = await tokenClient().getToken(); } catch { return { error: 'web search is not available right now' }; }
     const headers = { Authorization: `Bearer ${token}`, 'X-OV-Subject': subject, Accept: 'application/json' };
@@ -66,6 +89,28 @@ async function search({ subject, query, idempotencyKey }, { fetchImpl = globalTh
     return { answer: String(r.answer || '').slice(0, 3000), sources: (Array.isArray(r.sources) ? r.sources : []).slice(0, 8).map((s) => (typeof s === 'string' ? s : s && s.url)).filter(Boolean) };
 }
 
+async function search({ subject, query, idempotencyKey }, opts = {}) {
+    const q = String(query || '').replace(/\s+/g, ' ').trim().slice(0, 300);
+    if (!q) return { error: 'query is required' };
+    if (!config.oauth.clientSecret) return { error: 'web search is not available on this server' };
+    if (!SUBJECT.test(String(subject || ''))) return { error: 'web search needs the person to be signed in' };
+    const { fetchImpl = null, waitMs = WAIT_MS, pollMs = POLL_MS, fabricClient = null, searchClient = null, fabricFetch = null } = opts;
+    const actorFetch = fetchImpl || globalThis.fetch;
+    // A test (or a caller with its own transport) may pass fetchImpl alone: use it for the fabric too, anonymously.
+    const injectedFetch = fabricClient || searchClient ? null : (fabricFetch || fetchImpl);
+    try {
+        const body = await fabricSearch.query({ q, scopes: ['web'], subject, limit: WEB_LIMIT }, { client: fabricClient || searchClient, fetchImpl: injectedFetch });
+        return fromFabric(body, q);
+    } catch (err) {
+        if (!fabricSearch.isDown(err)) {
+            const status = err && err.status;
+            return { error: status ? `OpenVibe.Search answered ${status}` : 'OpenVibe.Search did not answer' };
+        }
+        // The fabric is down: the old Actor task still answers, as it did before the fabric.
+        return await actorSearch({ subject, q, idempotencyKey }, { fetchImpl: actorFetch, waitMs, pollMs });
+    }
+}
+
 function _setTokens(t) { tokens = t; }
 
-module.exports = { search, WAIT_MS, _setTokens };
+module.exports = { search, actorSearch, fromFabric, WAIT_MS, WEB_LIMIT, _setTokens };

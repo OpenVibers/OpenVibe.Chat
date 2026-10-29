@@ -53,25 +53,35 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     }));
     assert.deepStrictEqual(asked[0], { url: 'https://openvibe.tools/api/v1/tools/read/run', body: { input: { url: 'https://example.com/a', max_chars: 6000 } } });
     assert.deepStrictEqual([page.title, page.text, page.links[0].url], ['Example', 'Hello', 'https://example.com/b']);
-    // web_search is Vibe's (a Vibe chat, or Vibe added to a room): Actor answers it as a task for the person who asked.
+    // web_search is Vibe's (a Vibe chat, or Vibe added to a room); it asks the Search Fabric's web scope.
     assert.ok(aiTools.definitions({ handle: 'vibe' }).some((d) => d.function.name === 'web_search'), 'Vibe searches the web');
     assert.ok(!aiTools.definitions({ handle: 'pantry' }).some((d) => d.function.name === 'web_search'), 'another AI member does not');
     assert.ok(/no tool called web_search/.test(await aiTools.run('web_search', '{"query":"x"}', { member: { handle: 'pantry' } })));
-    require('../server/rooms/web-search')._setTokens({ getToken: async () => 'chat-actor-token' });
     const subject = ids.newId('user');
+    const fabricCalls = [];
+    const fabricClient = { fabric: async (text, o) => { fabricCalls.push({ text, o }); return { results: [{ scope: 'web', kind: 'page', title: 'Mariners 5-3', snippet: 'A recap', url: 'https://example.com/score', site: 'example.com', provider: 'deepseek', published_at: '2026-10-27T00:00:00Z', retrieved_at: '2026-10-28T12:00:00Z' }], citations: [{ n: 1, url: 'https://example.com/score', title: 'Mariners 5-3', provider: 'deepseek', retrieved_at: '2026-10-28T12:00:00Z' }], route: { explain: [{ scope: 'web', step: 'deepseek', ok: true, count: 1, cost_usd: 0.00075 }], cost_usd: 0.00075 } }; } };
+    const web = JSON.parse(await aiTools.run('web_search', '{"query":"who won the Mariners game"}', { member: { handle: 'vibe' }, subject, idempotencyKey: 'chat-ai-1-2-t0-web_search', webSearchOpts: { fabricClient } }));
+    assert.deepStrictEqual(fabricCalls.map((c) => [c.text, c.o.scopes, c.o.actingSubject]), [['who won the Mariners game', ['web'], subject]], 'the fabric web scope as the person who asked');
+    assert.deepStrictEqual([web.results[0].provider, web.results[0].published_at, web.results[0].retrieved_at, web.results[0].url], ['deepseek', '2026-10-27T00:00:00Z', '2026-10-28T12:00:00Z', 'https://example.com/score']);
+    assert.deepStrictEqual([web.citations[0].provider, web.citations[0].published_at, web.citations[0].url], ['deepseek', '2026-10-27T00:00:00Z', 'https://example.com/score']);
+    assert.strictEqual(web.answer, null);
+    assert.strictEqual(web.found_by, 'deepseek');
+    // The fabric is down (404 here): the old Actor task still answers, as before the fabric.
+    require('../server/rooms/web-search')._setTokens({ getToken: async () => 'chat-actor-token' });
     const sent = [];
     const actorFetch = async (url, o = {}) => {
         sent.push({ url, method: o.method || 'GET', subject: o.headers['X-OV-Subject'], auth: o.headers.Authorization, body: o.body ? JSON.parse(o.body) : null });
         if ((o.method || 'GET') === 'POST') return { ok: true, status: 201, json: async () => ({ id: 'tsk_1', state: 'queued' }) };
         return { ok: true, status: 200, json: async () => ({ id: 'tsk_1', state: 'succeeded', result: { answer: 'The Mariners won 5-3.', sources: ['https://example.com/score'] } }) };
     };
-    const web = JSON.parse(await aiTools.run('web_search', '{"query":"who won the Mariners game"}', { member: { handle: 'vibe' }, subject, idempotencyKey: 'chat-ai-1-2-t0-web_search', webSearchOpts: { fetchImpl: actorFetch, pollMs: 1 } }));
-    assert.deepStrictEqual(web, { answer: 'The Mariners won 5-3.', sources: ['https://example.com/score'] });
+    const down = { fabric: async () => { throw Object.assign(new Error('no fabric'), { status: 404 }); } };
+    const oldWeb = JSON.parse(await aiTools.run('web_search', '{"query":"who won the Mariners game"}', { member: { handle: 'vibe' }, subject, idempotencyKey: 'chat-ai-1-2-t0-web_search', webSearchOpts: { fabricClient: down, fetchImpl: actorFetch, pollMs: 1 } }));
+    assert.deepStrictEqual(oldWeb, { answer: 'The Mariners won 5-3.', sources: ['https://example.com/score'] });
     assert.deepStrictEqual([sent[0].url, sent[0].method, sent[0].subject, sent[0].auth], ['http://127.0.0.1:4950/api/v1/tasks', 'POST', subject, 'Bearer chat-actor-token'], 'a task for the person, with Chat\'s own token');
     assert.ok(sent[0].body.task.includes('who won the Mariners game') && sent[0].body.idempotency_key === 'chat-ai-1-2-t0-web_search');
     assert.deepStrictEqual([sent[1].url, sent[1].subject], ['http://127.0.0.1:4950/api/v1/tasks/tsk_1', subject], 'it reads back only that task, as the person');
     assert.ok(/signed in/.test(JSON.parse(await aiTools.run('web_search', '{"query":"x"}', { member: { handle: 'vibe' }, subject: null })).error), 'no person, no search');
-    const failed = JSON.parse(await aiTools.run('web_search', '{"query":"x"}', { member: { handle: 'vibe' }, subject, webSearchOpts: { pollMs: 1, fetchImpl: async (u, o = {}) => ({ ok: true, status: 200, json: async () => ((o.method || 'GET') === 'POST' ? { id: 'tsk_2', state: 'queued' } : { id: 'tsk_2', state: 'failed', error: { code: 'actor.allowance.exhausted', detail: 'The free tier runs 20 tasks a day' } }) }) } }));
+    const failed = JSON.parse(await aiTools.run('web_search', '{"query":"x"}', { member: { handle: 'vibe' }, subject, webSearchOpts: { fabricClient: down, pollMs: 1, fetchImpl: async (u, o = {}) => ({ ok: true, status: 200, json: async () => ((o.method || 'GET') === 'POST' ? { id: 'tsk_2', state: 'queued' } : { id: 'tsk_2', state: 'failed', error: { code: 'actor.allowance.exhausted', detail: 'The free tier runs 20 tasks a day' } }) }) } }));
     assert.ok(/20 tasks a day/.test(failed.error), 'Actor\'s refusal reaches the model to say');
     assert.ok(aiTools.definitions({ link_service: 'food', link_resource: 'plan1' }).some((d) => d.function.name === 'household_pantry'));
     const dice = JSON.parse(await aiTools.run('roll_dice', '{"count":50,"sides":6}'));
@@ -84,16 +94,46 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     assert.match(await aiTools.run('rm_rf', '{}'), /no tool called/);
     assert.match(await aiTools.run('roll_dice', '{not json'), /not valid JSON/);
     const seen = [];
-    const fake = async (url) => { seen.push(String(url)); return new Response(JSON.stringify({ results: [{ scope: 'network', kind: 'document', owner: 'deals', type: 'offer', title: 'Air mattress for $67', snippet: 'An air mattress', url: 'https://openvibe.deals/d/x' }] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
+    const fake = async (url) => { seen.push(String(url)); return new Response(JSON.stringify({ results: [{ scope: 'network', kind: 'document', owner: 'deals', type: 'offer', title: 'Air mattress for $67', snippet: 'An air mattress', url: 'https://openvibe.deals/d/x', published_at: '2026-10-27T00:00:00Z' }] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
     const found = await aiTools._runners.search_openvibe({ query: 'air mattress', limit: 99 }, { fetchImpl: fake });
     assert.ok(seen[0].startsWith(`${config.ai.searchUrl}/api/v1/query?`) && seen[0].includes('scopes=network') && seen[0].includes('limit=8'), 'the Search Fabric\'s network scope');
-    assert.deepStrictEqual([found.results[0].site, found.results[0].summary, found.results[0].url], ['deals', 'An air mattress', 'https://openvibe.deals/d/x']);
+    assert.deepStrictEqual([found.results[0].site, found.results[0].summary, found.results[0].url, found.results[0].published_at], ['deals', 'An air mattress', 'https://openvibe.deals/d/x', '2026-10-27T00:00:00Z']);
+    assert.deepStrictEqual([found.citations[0].url, found.citations[0].published_at], ['https://openvibe.deals/d/x', '2026-10-27T00:00:00Z'], 'the result keeps its date as a citation');
     // A Search without the fabric answers 404 there: the old search answers instead.
     const seenOld = [];
-    const old = async (url) => { seenOld.push(String(url)); if (String(url).includes('/api/v1/query')) return new Response('{}', { status: 404 }); return new Response(JSON.stringify({ results: [{ owner: 'deals', type: 'offer', title: 'Air mattress for $67', snippet_html: 'An <mark>air</mark> mattress', canonical_url: 'https://openvibe.deals/d/x' }] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
+    const old = async (url) => { seenOld.push(String(url)); if (String(url).includes('/api/v1/query')) return new Response('{}', { status: 404 }); return new Response(JSON.stringify({ results: [{ owner: 'deals', type: 'offer', title: 'Air mattress for $67', snippet_html: 'An <mark>air</mark> mattress', canonical_url: 'https://openvibe.deals/d/x', published_at: '2026-10-26T00:00:00Z' }] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
     const foundOld = await aiTools._runners.search_openvibe({ query: 'air mattress' }, { fetchImpl: old });
     assert.ok(seenOld[1].startsWith(`${config.ai.searchUrl}/api/v1/search?`));
-    assert.deepStrictEqual([foundOld.results[0].summary, foundOld.results[0].url], ['An air mattress', 'https://openvibe.deals/d/x']);
+    assert.deepStrictEqual([foundOld.results[0].summary, foundOld.results[0].url, foundOld.results[0].published_at], ['An air mattress', 'https://openvibe.deals/d/x', '2026-10-26T00:00:00Z']);
+    assert.deepStrictEqual([foundOld.citations[0].url, foundOld.citations[0].published_at, foundOld.fallback], ['https://openvibe.deals/d/x', '2026-10-26T00:00:00Z', true]);
+});
+
+t('the fabric gets Chat\'s service token and the person as X-OV-Subject, and its provider and dates survive', async () => {
+    const http = require('http');
+    const seen = [];
+    const stub = http.createServer((req, res) => {
+        const u = new URL(req.url, 'http://stub');
+        seen.push({ path: u.pathname, query: Object.fromEntries(u.searchParams), auth: req.headers.authorization, subject: req.headers['x-ov-subject'] });
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ results: [{ scope: 'web', kind: 'page', title: 'A real result', snippet: 'With a provider and dates', url: 'https://example.com/real', site: 'example.com', provider: 'wikipedia', published_at: '2026-10-27T00:00:00Z', retrieved_at: '2026-10-28T12:00:00Z' }], citations: [], route: { explain: [{ scope: 'web', step: 'wikipedia', ok: true, count: 1 }], cost_usd: 0 } }));
+    });
+    await new Promise((r) => stub.listen(0, '127.0.0.1', r));
+    const fabric = require('../server/rooms/search-fabric');
+    const saved = config.ai.searchUrl;
+    config.ai.searchUrl = `http://127.0.0.1:${stub.address().port}`;
+    fabric._reset();
+    try {
+        const web = await require('../server/rooms/web-search').search({ subject: ids.newId('user'), query: 'real fabric' });
+        assert.strictEqual(seen.length, 1, 'one fabric query, no Actor task');
+        assert.ok(seen[0].path === '/api/v1/query' && seen[0].query.scopes === 'web' && seen[0].query.limit === '6');
+        assert.match(String(seen[0].auth), /^Bearer /);
+        assert.match(String(seen[0].subject), /^usr_/);
+        assert.deepStrictEqual([web.results[0].provider, web.results[0].published_at, web.results[0].url], ['wikipedia', '2026-10-27T00:00:00Z', 'https://example.com/real']);
+    } finally {
+        config.ai.searchUrl = saved;
+        fabric._reset();
+        await new Promise((r) => stub.close(r));
+    }
 });
 
 t('@dealer rolls through a tool: the call runs here, its result goes back, the text answer is posted', async () => {

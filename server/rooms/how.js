@@ -7,8 +7,9 @@
  *
  *   forRoom(room) → Map(message id → info) for the room's announced tasks and Vibe's answers that kept their steps
  *   of(task, names) → info { lines: [text], sources: [url], actor_url } or null: plain text, escaped where it is shown
- *   ofMessage(how)  → the same info from a chat answer's room_messages.how { steps, sources }, or null
+ *   ofMessage(how)  → the same info from a chat answer's room_messages.how { steps, sources, citations }, or null
  *   step(acc, tool, args) adds what a tool call did, in plain words, to { steps, sources } (ai-members.js)
+ *   cite(acc, tool, result) keeps a search result's URL, provider and dates as a citation (ai-members.js)
  *   html(info)      → the <details class="vb-how"> markup, escaped
  */
 const config = require('../config');
@@ -59,6 +60,7 @@ function of(t, agentNames = new Map()) {
 
 // A chat answer's steps (ai-members.js answerWithTools): each tool call in plain words, at most MAX_STEPS.
 const MAX_STEPS = 12;
+const MAX_CITES = 6;
 const quoted = (v, max = 80) => { const s = String(v || '').replace(/\s+/g, ' ').trim(); return s ? `“${s.length > max ? `${s.slice(0, max - 1)}…` : s}”` : ''; };
 const STEP = {
     search_openvibe: (a) => `Searched OpenVibe for ${quoted(a.query)}`,
@@ -85,7 +87,38 @@ function step(acc, tool, raw = null) {
 function ofMessage(raw) {
     const how = typeof raw === 'string' ? json(raw, null) : raw;
     if (!how || !Array.isArray(how.steps) || !how.steps.length) return null;
-    return { lines: how.steps.map((l) => String(l).slice(0, 200)).slice(0, MAX_STEPS), sources: (Array.isArray(how.sources) ? how.sources : []).filter((u) => /^https?:\/\//.test(String(u || ''))).slice(0, 6), actor_url: null };
+    const citations = (Array.isArray(how.citations) ? how.citations : []).filter((c) => c && /^https?:\/\//.test(String(c.url || ''))).slice(0, MAX_CITES)
+        .map((c) => ({ url: String(c.url).slice(0, 500), title: c.title ? String(c.title).slice(0, 200) : null, provider: c.provider ? String(c.provider).slice(0, 40) : null, published_at: c.published_at ? String(c.published_at).slice(0, 40) : null, retrieved_at: c.retrieved_at ? String(c.retrieved_at).slice(0, 40) : null }));
+    return { lines: how.steps.map((l) => String(l).slice(0, 200)).slice(0, MAX_STEPS), sources: (Array.isArray(how.sources) ? how.sources : []).filter((u) => /^https?:\/\//.test(String(u || ''))).slice(0, 6), ...(citations.length ? { citations } : {}), actor_url: null };
+}
+
+/**
+ * Keep the citations a search tool returned with its answer: each result's URL, provider and dates. The
+ * model already sees them in the tool result; this puts the same links under "How Vibe did this".
+ */
+function cite(acc, tool, raw) {
+    if (!acc || (tool !== 'search_openvibe' && tool !== 'web_search')) return;
+    let result = null;
+    try { result = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return; }
+    if (!result || typeof result !== 'object') return;
+    const list = Array.isArray(result.citations) && result.citations.length ? result.citations
+        : Array.isArray(result.results) ? result.results
+            : Array.isArray(result.sources) ? result.sources.map((url) => ({ url })) : [];
+    if (!Array.isArray(acc.sources)) acc.sources = [];
+    if (!Array.isArray(acc.citations)) acc.citations = [];
+    for (const item of list) {
+        if (!item || acc.sources.length >= MAX_CITES) break;
+        const url = String((typeof item === 'string' ? item : item.url) || '').slice(0, 500);
+        if (!/^https?:\/\//.test(url) || acc.sources.includes(url)) continue;
+        acc.sources.push(url);
+        acc.citations.push({
+            url,
+            title: item.title ? String(item.title).slice(0, 200) : null,
+            provider: item.provider ? String(item.provider).slice(0, 40) : null,
+            published_at: item.published_at ? String(item.published_at).slice(0, 40) : null,
+            retrieved_at: item.retrieved_at ? String(item.retrieved_at).slice(0, 40) : null,
+        });
+    }
 }
 
 async function forRoom(room) {
@@ -111,4 +144,4 @@ function html(info) {
         + `${info.actor_url ? `<li><a href="${esc(info.actor_url)}">Every step on OpenVibe Agents</a></li>` : ''}</ul></details>`;
 }
 
-module.exports = { names, of, ofMessage, step, forRoom, html, _reset: () => { cached = { at: 0, names: new Map() }; } };
+module.exports = { names, of, ofMessage, step, cite, forRoom, html, _reset: () => { cached = { at: 0, names: new Map() }; } };
