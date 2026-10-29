@@ -82,6 +82,25 @@ t('/sitemap.xml is the public pages with a real lastmod, never today', async () 
     assert.ok(room.includes('<lastmod>2026-02-03</lastmod>'), 'the room lastmod is its last_message_at');
 });
 
+t('/.well-known/security.txt is RFC 9116, canonical to this site, valid for a year', async () => {
+    const r = await req('/.well-known/security.txt');
+    assert.strictEqual(r.status, 200);
+    assert.strictEqual(r.type, 'text/plain; charset=utf-8');
+    assert.strictEqual(r.cache, 'public, max-age=86400');
+    const fields = new Map();
+    for (const line of r.text.split('\n')) if (line.trim()) {
+        const m = line.match(/^([A-Za-z-]+): (.+)$/);
+        assert.ok(m, `every security.txt line is "Name: value" (got "${line}")`);
+        fields.set(m[1], m[2]);
+    }
+    for (const key of ['Contact', 'Expires', 'Preferred-Languages', 'Canonical', 'Policy']) assert.ok(fields.has(key), `security.txt names ${key}`);
+    assert.strictEqual(fields.get('Contact'), 'mailto:security@openvibe.network');
+    assert.ok(Date.parse(fields.get('Expires')) > Date.now(), 'Expires is in the future');
+    const canonical = new URL(fields.get('Canonical'));
+    assert.strictEqual(canonical.host, new URL(SITE).host, 'Canonical is this site\'s own host');
+    assert.strictEqual(canonical.pathname, '/.well-known/security.txt');
+});
+
 t('the home page carries JSON-LD: WebSite plus the site\'s primary type', async () => {
     const r = await req('/');
     assert.strictEqual(r.status, 200);
