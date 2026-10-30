@@ -116,13 +116,13 @@ async function createRoom(user, title) {
     return await db.get('SELECT * FROM rooms WHERE id = ?', [id]);
 }
 
-async function start(user, text) {
+async function start(user, text, { timezone = null } = {}) {
     const body = String(text || '').replace(/\r\n/g, '\n').trim();
     if (user && enabled() && !body) fail(422, 'rooms.empty', 'Write something first');
     const room = await createRoom(user, body);
     const id = room.id;
     try {
-        const message = await rooms.post(room, user, body);
+        const message = await rooms.post(room, user, body, { timezone });
         return { room: await rooms.publicRoom(room, { role: 'owner' }), message };
     } catch (err) {
         await db.tx(() => erase(id));   // a first message the room refuses (spam, too long) leaves no empty chat behind

@@ -60,13 +60,16 @@ function clientWith(fetchImpl) {
     return createSearchClient(createClient({ fetch: fetchImpl, timeoutMs: TIMEOUT_MS, retries: 0 }), { baseUrl: config.ai.searchUrl });
 }
 
-/** One fabric query. `subject` (usr_/gst_) asks as that person; scopes are the fabric's names. */
-async function query({ q, scopes = ['network'], subject = null, limit = 8, depth = null, freshness = null, signal = null } = {}, { client: injected = null, fetchImpl = null } = {}) {
+/** One fabric query. `subject` (usr_/gst_) asks as that person; scopes are the fabric's names; owner/type narrow a retry. */
+async function query({ q, scopes = ['network'], subject = null, limit = 8, depth = null, freshness = null, owner = null, type = null, site = null, signal = null } = {}, { client: injected = null, fetchImpl = null } = {}) {
     const body = {
         scopes,
         limit,
         ...(depth ? { depth } : {}),
         ...(freshness ? { freshness } : {}),
+        ...(owner ? { owner } : {}),
+        ...(type ? { type } : {}),
+        ...(site ? { site } : {}),
         ...(subject ? { actingSubject: subject } : {}),
         ...(signal ? { signal } : {}),
     };
