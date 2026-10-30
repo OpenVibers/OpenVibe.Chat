@@ -36,7 +36,7 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: .3em 0 .2em; }
 .oc-notice { padding: 8px 12px; border-left: 4px solid var(--oc-accent); background: var(--oc-panel); border-radius: 0 8px 8px 0; }
 .oc-notice.oc-error { border-color: var(--oc-red); }
 .oc-notice.oc-ok { border-color: var(--oc-ok); }
-.oc-feed { list-style: none; margin: 12px 0; padding: 8px 4px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; max-height: min(64vh, 720px); overflow-y: auto; overscroll-behavior: contain; }
+.oc-feed { list-style: none; margin: 12px 0; padding: 8px 4px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; max-height: min(60vh, 720px); max-height: min(60svh, 720px); overflow-y: auto; overscroll-behavior-y: auto; } /* at its end a finger drag carries on into the page (Shared docs/kit.md "Scrolling on touch screens") */
 .oc-msg { padding: 5px 10px; border-radius: 8px; line-height: 1.45; }
 .oc-msg:hover { background: var(--oc-panel-2); }
 .oc-compact .oc-msg { padding: 1px 10px; }

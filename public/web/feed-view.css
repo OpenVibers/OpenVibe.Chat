@@ -15,7 +15,7 @@
 .fv-chev { color: var(--fv-muted); transition: transform .15s; }
 .fv-folded .fv-chev { transform: rotate(-90deg); }
 .fv-folded .fv-body { display: none; }
-.fv-body { border-top: 1px solid var(--fv-line); max-height: 260px; overflow-y: auto; padding: 8px 12px 10px; overscroll-behavior: contain; }
+.fv-body { border-top: 1px solid var(--fv-line); max-height: 260px; overflow-y: auto; padding: 8px 12px 10px; overscroll-behavior-y: auto; }
 .fv-turns, .fv-steps { list-style: none; margin: 0; padding: 0; }
 .fv-turn { padding: 4px 0; }
 .fv-turn + .fv-turn { border-top: 1px dashed color-mix(in srgb, var(--fv-line) 70%, transparent); }
