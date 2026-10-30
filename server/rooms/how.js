@@ -85,7 +85,16 @@ function step(acc, tool, raw = null) {
     if (!args || typeof args !== 'object') args = {};
     const line = STEP[tool](args);
     if (acc.steps[acc.steps.length - 1] !== line) acc.steps.push(line);   // the same step twice in a row reads once
-    if (tool === 'read_page' && /^https?:\/\//.test(String(args.url || '')) && acc.sources.length < 6 && !acc.sources.includes(args.url)) acc.sources.push(String(args.url).slice(0, 500));
+    if (tool === 'read_page' && /^https?:\/\//.test(String(args.url || ''))) {
+        const url = String(args.url).slice(0, 500);
+        if (!Array.isArray(acc.sources)) acc.sources = [];
+        if (acc.sources.length < 6 && !acc.sources.includes(url)) acc.sources.push(url);
+        if (!Array.isArray(acc.citations)) acc.citations = [];
+        // A page read has no publication date of its own: the chip shows the date Vibe read it (11-01).
+        if (!acc.citations.some((c) => c && c.url === url) && acc.citations.length < MAX_CITES) {
+            acc.citations.push({ url, site: hostOf(url), title: null, provider: null, published_at: null, retrieved_at: new Date().toISOString() });
+        }
+    }
 }
 function ofMessage(raw) {
     const how = typeof raw === 'string' ? json(raw, null) : raw;

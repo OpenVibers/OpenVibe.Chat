@@ -57,7 +57,7 @@ t('the tools Vibe used are kept with its answer, in plain words, with the pages 
     const page = await fetch(`${h.base}/vibe/${r.body.room.slug}`, { headers: { cookie: `ov_token=${ann.token}` } }).then((x) => x.text());
     assert.ok(page.includes('<ul class="vb-sources" aria-label="Sources">'), 'source chips under the answer');
     assert.match(page, /<a class="vb-source" href="https:\/\/openvibe\.deals\/d\/k2"[^>]*>[\s\S]*?openvibe\.deals[\s\S]*?Oct 20, 2026/);
-    assert.ok(page.includes('href="https://www.example.com/kb"'), 'the page it read is a source too');
+    assert.match(page, /<a class="vb-source" href="https:\/\/www\.example\.com\/kb"[^>]*><span class="vb-source-site">example\.com<\/span><span class="vb-source-date">[^<]+<\/span><\/a>/, 'the page it read is a source too, dated when it was read');
     assert.ok(page.includes('<details class="vb-how"><summary>How Vibe did this</summary>'), 'folded under the answer');
     assert.match(page, /<li class="vb-how-sources"><span>Sources:<\/span> [\s\S]*?openvibe\.deals[\s\S]*?Oct 20, 2026[\s\S]*?example\.com/);
     assert.strictEqual((page.match(/openvibe\.deals\/d\/k2/g) || []).length, 2, 'the chip and How list the same source');
