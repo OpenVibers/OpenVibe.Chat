@@ -624,3 +624,10 @@ div.oc-set-row { cursor: default; }
 .oc-home-list .oc-home-head a { font-size: .82rem; }
 .oc-home-list .oc-list { margin: 0; }
 .oc-srv-icon--row { width: 40px; height: 40px; border-radius: 12px; font-size: .85rem; }
+
+/* Touch targets on phones (fleet audit 2026-10-29): the touch-only hit area for this group. Nothing moves with a mouse. */
+@media (pointer: coarse) {
+  /* A section head's "more" link: a vertical-only hit area, the width stays as it is. */
+  .oc-home-head a { position: relative; }
+  .oc-home-head a::after { content: ''; position: absolute; left: 0; right: 0; top: -11px; bottom: -11px; }
+}
