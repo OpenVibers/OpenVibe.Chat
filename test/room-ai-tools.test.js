@@ -153,25 +153,60 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     const retryFake = async (url) => {
         retrySeen.push(new URL(String(url)));
         const q = retrySeen[retrySeen.length - 1].searchParams.get('q');
-        const results = q === 'video editing' ? [job] : [];
+        const results = q === 'video editor' ? [job] : [];
         return new Response(JSON.stringify({ results }), { status: 200, headers: { 'content-type': 'application/json' } });
     };
     const retried = await aiTools._runners.search_openvibe({ query: 'Find remote video editing jobs posted recently', freshness: 'week' }, { fetchImpl: retryFake });
     assert.strictEqual(retrySeen.length, 2, 'one retry, not a loop');
     assert.strictEqual(retrySeen[0].searchParams.get('q'), 'Find remote video editing jobs posted recently');
-    assert.deepStrictEqual([retrySeen[1].searchParams.get('q'), retrySeen[1].searchParams.get('owner'), retrySeen[1].searchParams.get('freshness')], ['video editing', 'work', 'week']);
-    assert.deepStrictEqual([retried.query, retried.original_query, retried.results.length], ['video editing', 'Find remote video editing jobs posted recently', 1]);
-    assert.match(retried.note, /retry with "video editing" found 1/);
+    assert.deepStrictEqual([retrySeen[1].searchParams.get('q'), retrySeen[1].searchParams.get('owner'), retrySeen[1].searchParams.get('freshness')], ['video editor', 'work', 'week']);
+    assert.deepStrictEqual([retried.query, retried.original_query, retried.results.length], ['video editor', 'Find remote video editing jobs posted recently', 1]);
+    assert.match(retried.note, /retry with "video editor" found 1/);
     // A bare query with no time words: a window the model guessed is dropped for the retry, so the Work job is found.
     const bareSeen = [];
-    const bare = await aiTools._runners.search_openvibe({ query: 'remote video editing jobs', owner: 'work', freshness: 'day' }, { fetchImpl: async (url) => { bareSeen.push(new URL(String(url))); const q = bareSeen[bareSeen.length - 1].searchParams.get('q'); return new Response(JSON.stringify({ results: q === 'video editing' ? [job] : [] }), { status: 200, headers: { 'content-type': 'application/json' } }); } });
+    const bare = await aiTools._runners.search_openvibe({ query: 'remote video editing jobs', owner: 'work', freshness: 'day' }, { fetchImpl: async (url) => { bareSeen.push(new URL(String(url))); const q = bareSeen[bareSeen.length - 1].searchParams.get('q'); return new Response(JSON.stringify({ results: q === 'video editor' ? [job] : [] }), { status: 200, headers: { 'content-type': 'application/json' } }); } });
     assert.deepStrictEqual([bareSeen[0].searchParams.get('freshness'), bareSeen[1].searchParams.get('freshness')], ['day', null], 'no time word: the retry looks outside the guessed window');
+    assert.strictEqual(bareSeen[1].searchParams.get('q'), 'video editor', 'the key nouns are the job title, not the sentence');
     assert.deepStrictEqual([bare.freshness_dropped, bare.results.length], ['day', 1]);
     assert.match(bare.note, /in the last day/);
     // ...and when both find nothing, the note still gives the hint.
     const bothEmpty = await aiTools._runners.search_openvibe({ query: 'remote video editing jobs', freshness: 'day' }, { fetchImpl: async () => new Response(JSON.stringify({ results: [] }), { status: 200, headers: { 'content-type': 'application/json' } }) });
-    assert.match(bothEmpty.note, /"remote video editing jobs" and a retry with "video editing" both found nothing/);
+    assert.match(bothEmpty.note, /"remote video editing jobs" and a retry with "video editor" both found nothing/);
     assert.match(bothEmpty.note, /2–3 key nouns/);
+});
+
+t('each result says whether it matches the person\'s constraints, and weak results ask for the web too', async () => {
+    const deal = (id, title, snippet, category) => ({ scope: 'network', kind: 'document', owner: 'deals', type: 'offer', id, title, snippet, ...(category ? { facets: { category } } : {}), url: `https://openvibe.deals/d/${id}`, published_at: '2026-10-28T00:00:00Z' });
+    const deals = [
+        deal('k2', 'Keychron K2 Mechanical Keyboard for $59', 'A compact mechanical keyboard.', 'Keyboards'),
+        deal('bb', 'Bit Blaster XL', 'Keyboard + Gamepad Support. An arcade shoot \'em up.'),
+    ];
+    const asked = [];
+    const fake = async (url) => { asked.push(new URL(String(url))); return new Response(JSON.stringify({ results: deals }), { status: 200, headers: { 'content-type': 'application/json' } }); };
+    const found = await aiTools._runners.search_openvibe({ query: 'mechanical keyboard', owner: 'deals' }, { fetchImpl: fake, requestText: 'Find me a good deal on a mechanical keyboard under $60' });
+    assert.strictEqual(asked[0].searchParams.get('q'), 'mechanical keyboard', 'the rewritten key nouns, with the owner as a filter');
+    assert.strictEqual(found.results[0].owner, 'deals', 'the owner survives, so the judgement knows the product');
+    assert.deepStrictEqual([found.results[0].matches_constraints, found.results[0].constraint_notes], ['yes', 'price: yes ($59 is within $60); category: yes (mechanical keyboard)']);
+    assert.deepStrictEqual([found.results[1].matches_constraints, found.results[1].constraint_notes], ['no', 'price: not stated (limit $60); category: no (mechanical keyboard)'], 'a game whose description says keyboard is not a keyboard deal');
+    assert.strictEqual(found.weak, true);
+    assert.match(found.note, /Weak OpenVibe results \(only 2 results; 1 of 2 miss a stated constraint\)/);
+    assert.match(found.note, /also call web_search for the same request/);
+    assert.match(found.note, /came from OpenVibe and which came from the web/);
+    assert.match(found.note, /matches_constraints is "yes", "no" or "unknown"/);
+    // Work: remote and a city are judged from what the listing states, and three good results are not weak.
+    const job = (id, snippet) => ({ scope: 'network', kind: 'document', owner: 'work', type: 'job', id, title: `Video Editor ${id}`, snippet, url: `https://openvibe.work/jobs/${id}`, published_at: '2026-10-28T00:00:00Z' });
+    const jobs = [job('a', 'Berlin · remote · Full Time Video Editor'), job('b', 'Berlin · remote · Full Time Video Editor'), job('c', 'Berlin · Full Time Video Editor')];
+    const workFake = async () => new Response(JSON.stringify({ results: jobs }), { status: 200, headers: { 'content-type': 'application/json' } });
+    const work = await aiTools._runners.search_openvibe({ query: 'video editor', owner: 'work' }, { fetchImpl: workFake, requestText: 'Find remote video editing jobs in Berlin' });
+    assert.deepStrictEqual(work.results.map((r) => r.matches_constraints), ['yes', 'yes', 'no']);
+    assert.match(work.results[0].constraint_notes, /remote: yes/);
+    assert.match(work.results[2].constraint_notes, /remote: no/);
+    assert.strictEqual(work.results[2].constraint_notes.includes('city: yes (Berlin)'), true, 'a city matches the listing\'s location');
+    assert.strictEqual(work.weak, true, 'one of three misses remote');
+    // No stated constraint, no judgement; three results are enough.
+    const plain = await aiTools._runners.search_openvibe({ query: 'video editor' }, { fetchImpl: workFake });
+    assert.ok(plain.results.every((r) => !r.matches_constraints && !r.constraint_notes));
+    assert.ok(!plain.weak);
 });
 
 t('the fabric gets Chat\'s service token and the person as X-OV-Subject, and its provider and dates survive', async () => {
@@ -232,8 +267,9 @@ t('sources: redirects and aggregators resolve to the page, and the chips name it
     assert.match(chips, /href="https:\/\/openvibe\.live\/docs\/go-live-in-your-browser"/);
     assert.match(chips, /openvibe\.live/, 'a page read is a source too, without a date');
     assert.match(chips, /link\.apnews\.com/, 'no target: the redirector itself is named');
-    assert.match(how.html(info), /class="vb-how-sources"/);
-    assert.match(how.html(info), /Oct 27, 2026/);
+    assert.match(how.chips(info, 7), /^<ul class="vb-sources" aria-label="Sources" id="vb-sources-7">/, 'the chips carry the id How links to');
+    assert.match(how.html(info, 7), /class="vb-how-sources"><a href="#vb-sources-7">Sources \(\d+\) under this answer<\/a>/);
+    assert.ok(!/class="vb-source"/.test(how.html(info, 7)), 'How links to the chips, never a second copy');
 });
 
 t('@dealer rolls through a tool: the call runs here, its result goes back, the text answer is posted', async () => {

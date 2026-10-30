@@ -141,18 +141,30 @@ function sourceOf(r) {
     return { url, site: host(url), ...(displayUrl && displayUrl !== url ? { display_url: displayUrl } : {}) };
 }
 
-/** One result as Vibe sees it: the fabric's citation fields survive (provider and dates are not dropped). */
+/**
+ * One result as Vibe sees it: the fabric's citation fields survive (provider and dates are not dropped), and so do
+ * the fields Vibe judges a stated constraint by when a source has them (Work's `remote`, a Deals category, a price).
+ */
 function resultOf(r, { fallback = false } = {}) {
     const src = sourceOf(r);
     const url = src.url;
     const snippet = r && (r.snippet || r.summary || (fallback ? r.snippet_html : ''));
+    const facets = (r && r.facets) || {};
+    const remote = r && r.remote !== undefined ? r.remote : facets.remote;
+    const category = (r && r.category) || facets.category || null;
+    const price = r && r.price !== undefined ? r.price : (facets.price !== undefined ? facets.price : null);
     return {
         title: text(r && r.title, 200) || url,
         site: src.site || (r && r.site) || (r && r.owner) || null,
+        owner: (r && r.owner) || null,
         type: (r && (r.type || r.kind)) || null,
+        id: (r && r.id) || null,
         summary: text(snippet, 300),
         url,
         ...(src.display_url ? { display_url: src.display_url } : {}),
+        ...(remote !== undefined && remote !== null ? { remote: remote === true || remote === 'true' } : {}),
+        ...(category ? { category: String(category).slice(0, 80) } : {}),
+        ...(price !== undefined && price !== null && Number.isFinite(Number(price)) ? { price: Number(price) } : {}),
         provider: (r && r.provider) || null,
         published_at: date(r && r.published_at),
         retrieved_at: date(r && r.retrieved_at),

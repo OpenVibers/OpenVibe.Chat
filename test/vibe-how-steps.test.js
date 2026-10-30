@@ -55,13 +55,13 @@ t('the tools Vibe used are kept with its answer, in plain words, with the pages 
     assert.deepStrictEqual({ provider: howKept.citations[0].provider, published_at: howKept.citations[0].published_at, url: howKept.citations[0].url },
         { provider: null, published_at: '2026-10-20T00:00:00Z', url: 'https://openvibe.deals/d/k2' }, 'the search result keeps its date and URL as a citation');
     const page = await fetch(`${h.base}/vibe/${r.body.room.slug}`, { headers: { cookie: `ov_token=${ann.token}` } }).then((x) => x.text());
-    assert.ok(page.includes('<ul class="vb-sources" aria-label="Sources">'), 'source chips under the answer');
+    assert.ok(page.includes(`<ul class="vb-sources" aria-label="Sources" id="vb-sources-${m.id}">`), 'source chips under the answer, with the id How links to');
     assert.match(page, /<a class="vb-source" href="https:\/\/openvibe\.deals\/d\/k2"[^>]*>[\s\S]*?openvibe\.deals[\s\S]*?Oct 20, 2026/);
     assert.match(page, /<a class="vb-source" href="https:\/\/www\.example\.com\/kb"[^>]*><span class="vb-source-site">example\.com<\/span><span class="vb-source-date">[^<]+<\/span><\/a>/, 'the page it read is a source too, dated when it was read');
     assert.ok(page.includes('<details class="vb-how"><summary>How Vibe did this</summary>'), 'folded under the answer');
-    assert.match(page, /<li class="vb-how-sources"><span>Sources:<\/span> [\s\S]*?openvibe\.deals[\s\S]*?Oct 20, 2026[\s\S]*?example\.com/);
-    assert.strictEqual((page.match(/openvibe\.deals\/d\/k2/g) || []).length, 2, 'the chip and How list the same source');
-    assert.strictEqual((page.match(/www\.example\.com\/kb/g) || []).length, 2);
+    assert.ok(page.includes(`<li class="vb-how-sources"><a href="#vb-sources-${m.id}">Sources (2) under this answer</a></li>`), 'How links to the chips');
+    assert.strictEqual((page.match(/openvibe\.deals\/d\/k2/g) || []).length, 1, 'the source is written once, as a chip');
+    assert.strictEqual((page.match(/www\.example\.com\/kb/g) || []).length, 1);
     const how = await vibeApi('GET', `/${r.body.room.slug}/how`);
     assert.deepStrictEqual(how.body.how[String(m.id)].lines, ['Searched OpenVibe for “mechanical keyboard deals”', 'Read example.com']);
 });

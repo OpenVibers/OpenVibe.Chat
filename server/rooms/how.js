@@ -11,8 +11,8 @@
  *   step(acc, tool, args) adds what a tool call did, in plain words, to { steps, sources } (ai-members.js)
  *   cite(acc, tool, result) keeps a search result's URL, site, provider and dates as a citation (ai-members.js)
  *   linksOf(info)   → the sources resolved and deduped: { url, site, date }, citations first then plain sources
- *   chips(info)     → the source chips under the answer, each the site, the date and the page it opens
- *   html(info)      → the <details class="vb-how"> markup, escaped, with the same sources
+ *   chips(info, id) → the answer's only source chips, each the site, the date and the page it opens
+ *   html(info, id)  → the <details class="vb-how"> markup, escaped; it links to those chips instead of repeating them
  */
 const config = require('../config');
 const db = require('../db/database');
@@ -184,18 +184,21 @@ function linksOf(info) {
 }
 const anchor = (l) => `<a class="vb-source" href="${esc(l.url)}" rel="nofollow ugc noopener" target="_blank"><span class="vb-source-site">${esc(l.site || hostOf(l.url))}</span>${l.date ? `<span class="vb-source-date">${esc(l.date)}</span>` : ''}</a>`;
 
-/** The source chips under an answer: the site name, the date, and the page they open. */
-function chips(info) {
+const sourcesId = (id) => `vb-sources-${String(id || 'answer').replace(/[^a-zA-Z0-9_-]/g, '')}`;
+
+/** The answer's source chips, shown once: the site name, the date, and the page they open. */
+function chips(info, id = null) {
     const links = linksOf(info);
     if (!links.length) return '';
-    return `<ul class="vb-sources" aria-label="Sources">${links.map((l) => `<li>${anchor(l)}</li>`).join('')}</ul>`;
+    return `<ul class="vb-sources" aria-label="Sources"${id ? ` id="${esc(sourcesId(id))}"` : ''}>${links.map((l) => `<li>${anchor(l)}</li>`).join('')}</ul>`;
 }
 
-function html(info) {
+/** The steps in plain words. The sources are the chips under the answer: this links to them, never a second copy. */
+function html(info, id = null) {
     if (!info) return '';
     const links = linksOf(info);
     return `<details class="vb-how"><summary>How Vibe did this</summary><ul>${info.lines.map((l) => `<li>${esc(l)}</li>`).join('')}`
-        + `${links.length ? `<li class="vb-how-sources"><span>Sources:</span> ${links.map(anchor).join(' ')}</li>` : ''}`
+        + `${links.length ? `<li class="vb-how-sources"><a href="#${esc(sourcesId(id))}">Sources (${links.length}) under this answer</a></li>` : ''}`
         + `${info.actor_url ? `<li><a href="${esc(info.actor_url)}">Every step on OpenVibe Agents</a></li>` : ''}</ul></details>`;
 }
 
