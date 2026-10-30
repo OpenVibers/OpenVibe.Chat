@@ -84,6 +84,14 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     assert.deepStrictEqual(noWeb.results, []);
     assert.match(noWeb.note, /Nothing found on the web/);
     assert.match(noWeb.note, /2–3 key nouns/);
+    // A long web result is clipped for the model but kept whole for the answer's source chips (11-01).
+    const long = Array.from({ length: 6 }, (_, i) => ({ scope: 'web', kind: 'page', title: `${'Long title '.repeat(20)} ${i}`, snippet: `${'A sentence of the story. '.repeat(20)} ${i}`, url: `https://example.com/story/${i}`, site: 'example.com', provider: 'deepseek', published_at: '2026-10-27T00:00:00Z' }));
+    const big = await aiTools.runWithResult('web_search', '{"query":"a long result"}', { member: { handle: 'vibe' }, subject, webSearchOpts: { fabricClient: { fabric: async () => ({ results: long }) } } });
+    assert.ok(big.text.length <= aiTools.RESULT_MAX, 'the model still gets a bounded result');
+    assert.strictEqual(big.result.citations.length, 6, 'the whole result keeps every citation');
+    const bigAcc = { steps: [], sources: [] };
+    require('../server/rooms/how').cite(bigAcc, 'web_search', big.result);
+    assert.strictEqual(bigAcc.citations.length, 6, 'the chips keep every citation even when the model result was clipped');
     // The fabric is down (404 here): the old Actor task still answers, as before the fabric.
     require('../server/rooms/web-search')._setTokens({ getToken: async () => 'chat-actor-token' });
     const sent = [];
