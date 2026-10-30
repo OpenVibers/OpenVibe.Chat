@@ -12,6 +12,7 @@
  */
 const assert = require('assert');
 const { ids, validate } = require('openvibe-contracts');
+const { uncovered } = require('openvibe-sdk/account-data');
 const { boot, suite } = require('./helpers');
 const t = suite('account-data');
 let h, dana, otto, old;
@@ -30,6 +31,19 @@ t('boot', async () => {
 t('export, then erase and confirm', async () => {
     const accountData = require('../server/chat/account-data');
     const d = require('../server/db/database').getDb();
+    {
+        const missing = await uncovered(d, {
+            taskKeyed: ['calls', 'channel_moderators', 'channel_sounds', 'chat_messages', 'chat_server_invites', 'chat_server_members',
+                'ctx_channels', 'ctx_managed_streams', 'ctx_streams', 'dm_conversations', 'dm_participants', 'emotes', 'inbox_actions',
+                'inbox_members', 'inbox_saved_replies', 'inbox_webhooks', 'pending_ip_messages', 'room_hooks', 'room_members', 'room_messages',
+                'user_tags', 'vibe_asks', 'vibe_deliveries', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_usage'],
+            exempt: {
+                account_data_events: 'the ledger of requests itself: which export and deletion Chat applied',
+                hidden_relay_users: 'a moderation record of a relay account hidden from a channel, kept for accountability',
+            },
+        });
+        assert.deepStrictEqual(missing, [], `a table with a person column is neither covered nor exempted: ${missing.join(', ')}`);
+    }
     await d.prepare("INSERT INTO chat_messages (user_id, username, message, channel_user_id, subject_id) VALUES (?, 'dana', 'hi otto', ?, ?), (?, 'otto', 'hi dana', ?, ?), (?, 'dana_old', 'old me', ?, ?)")
         .run(dana.id, otto.id, dana.subject_id, otto.id, dana.id, otto.subject_id, old.id, otto.id, old.subject_id);
     const pair = (await h.http('POST', '/api/dm/conversations', { token: dana.token, body: { user_ids: [otto.id] } })).body.conversation.id;
