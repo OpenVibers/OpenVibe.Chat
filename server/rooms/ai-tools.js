@@ -265,17 +265,32 @@ async function myAgents(_args, ctx) {
 
 const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus, remember, forget, set_up_agent: setUpAgent, my_agents: myAgents };
 
-/** Runs one tool call. `raw` is the model's JSON argument string. Unknown tools and bad JSON come back as errors. */
-async function run(name, raw, ctx = {}) {
+/**
+ * Runs one tool call and returns both what the model reads (the JSON clipped to RESULT_MAX) and the whole result, so
+ * the answer's sources are kept even when a long web result is clipped for the model (11-01).
+ */
+async function runWithResult(name, raw, ctx = {}) {
     const runner = RUNNERS[name];
     if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food')) || (name === 'web_search' && !isVibe(ctx.member))
         || ((name === 'queue_task' || name === 'queue_status') && !isWorkspace(ctx.room))
         || ((name === 'remember' || name === 'forget') && !(hasMemory(ctx.member, ctx.room, ctx.memory) && ctx.user))
-        || ((name === 'set_up_agent' || name === 'my_agents') && !(ownChat(ctx.member, ctx.room) && ctx.user))) return clip({ error: `no tool called ${String(name).slice(0, 64)}` });
+        || ((name === 'set_up_agent' || name === 'my_agents') && !(ownChat(ctx.member, ctx.room) && ctx.user))) {
+        const error = { error: `no tool called ${String(name).slice(0, 64)}` };
+        return { text: clip(error), result: error };
+    }
     let args = {};
-    if (raw) { try { args = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return clip({ error: 'the arguments were not valid JSON' }); } }
+    if (raw) {
+        try { args = typeof raw === 'string' ? JSON.parse(raw) : raw; }
+        catch { const error = { error: 'the arguments were not valid JSON' }; return { text: clip(error), result: error }; }
+    }
     if (!args || typeof args !== 'object' || Array.isArray(args)) args = {};
-    try { return clip(await runner(args, ctx)); } catch { return clip({ error: 'the tool failed' }); }
+    try { const result = await runner(args, ctx); return { text: clip(result), result }; }
+    catch { const error = { error: 'the tool failed' }; return { text: clip(error), result: error }; }
 }
 
-module.exports = { definitions, run, RESULT_MAX, _runners: RUNNERS };
+/** Runs one tool call. `raw` is the model's JSON argument string. Unknown tools and bad JSON come back as errors. */
+async function run(name, raw, ctx = {}) {
+    return (await runWithResult(name, raw, ctx)).text;
+}
+
+module.exports = { definitions, run, runWithResult, RESULT_MAX, _runners: RUNNERS };
