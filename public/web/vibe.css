@@ -266,6 +266,8 @@ body.oc-app-body { overflow: hidden; }
   .vb-thread { gap: 18px; }
   .vb-turn { gap: 10px; }
   .vb-bubble { max-width: 88%; }
+  /* The link from "How Vibe did this" to the answer's chips is a tap target on a phone. */
+  .vb-how-sources a { display: inline-flex; align-items: center; min-height: 44px; }
 }
 @media (max-width: 520px) {
   .vb-suggest { grid-template-columns: minmax(0, 1fr); }

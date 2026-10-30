@@ -205,12 +205,18 @@
     if (c.date) a.appendChild(el('span', 'vb-source-date', c.date));
     return a;
   }
+  // The id "How Vibe did this" links to: the answer's one set of chips, never a second copy.
+  function sourcesId(li) {
+    var id = li && li.dataset ? li.dataset.id : null;
+    return id ? 'vb-sources-' + String(id).replace(/[^a-zA-Z0-9_-]/g, '') : null;
+  }
   function renderSources(li, info) {
     var body = li.querySelector('.vb-body');
     if (!info || !body || body.querySelector('.vb-sources')) return;
     var links = sourceChips(info);
     if (!links.length) return;
     var ul = el('ul', 'vb-sources'); ul.setAttribute('aria-label', 'Sources');
+    var sid = sourcesId(li); if (sid) ul.id = sid;
     links.forEach(function (c) { var row = el('li'); row.appendChild(chipLink(c)); ul.appendChild(row); });
     var md = body.querySelector('.vb-md');
     if (md && md.nextSibling) body.insertBefore(ul, md.nextSibling);
@@ -231,8 +237,9 @@
       var links = sourceChips(info);
       if (links.length) {
         var src = el('li', 'vb-how-sources');
-        src.appendChild(el('span', null, 'Sources: '));
-        links.forEach(function (c, i) { if (i) src.appendChild(document.createTextNode(' ')); src.appendChild(chipLink(c)); });
+        var link = el('a', null, 'Sources (' + links.length + ') under this answer');
+        var sid = sourcesId(li); if (sid) link.href = '#' + sid;
+        src.appendChild(link);
         ul.appendChild(src);
       }
       if (info.actor_url && /^https:\/\/openvibe\.actor\//.test(info.actor_url)) { var li2 = el('li'); var a2 = el('a', null, 'Every step on OpenVibe Agents'); a2.href = info.actor_url; li2.appendChild(a2); ul.appendChild(li2); }

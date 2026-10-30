@@ -66,9 +66,9 @@ t('Research in a new chat: a task on Actor as the person, Vibe says it is on it,
     const page = await fetch(`${h.base}/vibe/${slug}`, { headers: { cookie: `ov_token=${ann.token}` } }).then((x) => x.text());
     assert.ok(page.includes('<details class="vb-how"><summary>How Vibe did this</summary><ul><li>Researched by OpenVibe runtime (deepseek-v4-flash)</li>'
         + '<li>Checked by a second model (qwen): The sources back the answer.</li><li>Took under a minute · cost $0.0042 of your daily allowance</li>'), 'the fold under the answer');
-    assert.match(page, /<li class="vb-how-sources"><span>Sources:<\/span> <a class="vb-source" href="https:\/\/browser-use\.com\/cloud-browsers"[^>]*><span class="vb-source-site">browser-use\.com<\/span><\/a><\/li>/);
+    assert.match(page, new RegExp(`<li class="vb-how-sources"><a href="#vb-sources-${done.id}">Sources \\(1\\) under this answer</a></li>`), 'How links to the chips');
     assert.ok(page.includes('<li><a href="https://openvibe.actor/tasks/tsk_r1">Every step on OpenVibe Agents</a></li>'), 'every step on Actor');
-    assert.match(page, /<ul class="vb-sources" aria-label="Sources">[\s\S]*?browser-use\.com[\s\S]*?<\/ul>/, 'the same source as a chip under the answer');
+    assert.match(page, new RegExp(`<ul class="vb-sources" aria-label="Sources" id="vb-sources-${done.id}">[\\s\\S]*?browser-use\\.com[\\s\\S]*?<\\/ul>`), 'the source as a chip under the answer, once');
     const how = await vibeApi('GET', `/${slug}/how`, ann);
     assert.strictEqual(how.status, 200);
     assert.strictEqual(how.body.how[String(done.id)].actor_url, 'https://openvibe.actor/tasks/tsk_r1', 'the same, for an answer that arrives while the page is open');
