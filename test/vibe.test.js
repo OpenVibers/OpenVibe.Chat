@@ -77,6 +77,10 @@ t('a first message starts a private chat named after it, and Vibe answers it una
     const tokyo = aiMembers.vibePrompt({ name: 'Vibe' }, 'Ann', null, { now: at, timezone: 'Asia/Tokyo' });
     assert.match(tokyo, /for Ann it is Friday, October 30, 2026 .* in Asia\/Tokyo/);
     assert.match(tokyo, /web_search with freshness "day"/, 'news goes to the web, not an invented News feed');
+    // OpenVibe first (11-01): the prompt names every product owner and says when the web is allowed.
+    assert.match(tokyo, /OpenVibe first/);
+    for (const owner of ['work', 'deals', 'food', 'rent', 'help', 'quest', 'live', 'tools']) assert.ok(tokyo.includes(`"${owner}"`), `owner ${owner}`);
+    assert.match(tokyo, /web_search only when that returns nothing useful, or when they ask for the wider web/);
 });
 
 t('a follow-up is answered with the conversation so far', async () => {

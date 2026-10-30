@@ -177,29 +177,68 @@
       renderHow(li, d && d.how && d.how[String(id)]);
     }).catch(function () {});
   }
-  // A chat answer that arrives with its steps (message.how: { steps, sources }, server/rooms/how.js).
+  // A chat answer that arrives with its steps and sources (message.how: { steps, sources, citations }, server/rooms/how.js).
+  function sourceSite(u) {
+    try { return new URL(String(u)).hostname.replace(/^www\./, ''); } catch (e) { return String(u || ''); }
+  }
+  function sourceDate(ts) {
+    var t = Date.parse(String(ts || ''));
+    if (!isFinite(t)) return null;
+    try { return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }); } catch (e) { return null; }
+  }
+  // The same sources the server folds into the answer: resolved URLs, the site they open, and the result's date.
+  function sourceChips(info) {
+    var out = [], seen = {};
+    function add(url, c) {
+      url = String(url || '');
+      if (!/^https?:\/\//.test(url) || seen[url] || out.length >= 6) return;
+      seen[url] = 1;
+      out.push({ url: url, site: sourceSite(url), date: sourceDate(c && (c.published_at || c.retrieved_at)) });
+    }
+    (info.citations || []).forEach(function (c) { add(c.url, c); });
+    (info.sources || []).forEach(function (u) { add(u, null); });
+    return out;
+  }
+  function chipLink(c) {
+    var a = el('a', 'vb-source'); a.href = c.url; a.rel = 'nofollow ugc noopener'; a.target = '_blank';
+    a.appendChild(el('span', 'vb-source-site', c.site));
+    if (c.date) a.appendChild(el('span', 'vb-source-date', c.date));
+    return a;
+  }
+  function renderSources(li, info) {
+    var body = li.querySelector('.vb-body');
+    if (!info || !body || body.querySelector('.vb-sources')) return;
+    var links = sourceChips(info);
+    if (!links.length) return;
+    var ul = el('ul', 'vb-sources'); ul.setAttribute('aria-label', 'Sources');
+    links.forEach(function (c) { var row = el('li'); row.appendChild(chipLink(c)); ul.appendChild(row); });
+    var md = body.querySelector('.vb-md');
+    if (md && md.nextSibling) body.insertBefore(ul, md.nextSibling);
+    else if (md) body.appendChild(ul);
+    else body.insertBefore(ul, body.firstChild);
+  }
   function stepsOf(raw) {
     var h = null; try { h = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { h = null; }
-    return h && h.steps && h.steps.length ? { lines: h.steps, sources: h.sources || [] } : null;
+    return h && h.steps && h.steps.length ? { lines: h.steps, sources: h.sources || [], citations: h.citations || [] } : null;
   }
   function renderHow(li, info) {
       var body = li.querySelector('.vb-body');
       if (!info || !body || body.querySelector('.vb-how')) return;
+      renderSources(li, info);
       var det = el('details', 'vb-how'); det.appendChild(el('summary', null, 'How Vibe did this'));
       var ul = el('ul');
       (info.lines || []).forEach(function (l) { ul.appendChild(el('li', null, l)); });
-      if (info.sources && info.sources.length) {
-        var src = el('li', null, 'Sources: ');
-        info.sources.forEach(function (u, i) {
-          if (!/^https?:\/\//.test(u)) return;
-          if (i) src.appendChild(document.createTextNode(', '));
-          var a = el('a', null, u.replace(/^https?:\/\/(www\.)?/, '').split('/')[0]); a.href = u; a.rel = 'nofollow ugc noopener'; a.target = '_blank';
-          src.appendChild(a);
-        });
+      var links = sourceChips(info);
+      if (links.length) {
+        var src = el('li', 'vb-how-sources');
+        src.appendChild(el('span', null, 'Sources: '));
+        links.forEach(function (c, i) { if (i) src.appendChild(document.createTextNode(' ')); src.appendChild(chipLink(c)); });
         ul.appendChild(src);
       }
       if (info.actor_url && /^https:\/\/openvibe\.actor\//.test(info.actor_url)) { var li2 = el('li'); var a2 = el('a', null, 'Every step on OpenVibe Agents'); a2.href = info.actor_url; li2.appendChild(a2); ul.appendChild(li2); }
-      det.appendChild(ul); body.appendChild(det);
+      det.appendChild(ul);
+      var acts = body.querySelector('.vb-acts');
+      if (acts) body.insertBefore(det, acts); else body.appendChild(det);
   }
   function clearWait() { var w = document.getElementById('vb-wait'); if (w) w.remove(); if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } }
   // Stop: what Vibe wrote so far stays as its answer (POST /api/chat/vibe/:slug/stop); shown once the chat exists (a new

@@ -51,6 +51,12 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
         assert.deepStrictEqual(schemaOf(name).properties.freshness.enum, ['day', 'week', 'month', 'year'], `freshness on ${name}`);
         assert.match(schemaOf(name).properties.freshness.description, /today|news/, `the model is told when to use it on ${name}`);
     }
+    // OpenVibe first (11-01): the search tool names the product owners, in the schema and in the description.
+    const openvibe = aiTools.definitions({ handle: 'vibe' }).find((d) => d.function.name === 'search_openvibe');
+    assert.deepStrictEqual(openvibe.function.parameters.properties.owner.enum, ['work', 'deals', 'food', 'rent', 'help', 'quest', 'live', 'tools']);
+    assert.match(openvibe.function.parameters.properties.owner.description, /work.*jobs/);
+    assert.match(openvibe.function.description, /OpenVibe first/);
+    assert.match(openvibe.function.description, /only when this finds nothing useful/);
     // read_page asks OpenVibe.Tools' read tool (Tools decides what may be reached) and passes on only the page's parts.
     assert.ok(/full http\(s\) address/.test(JSON.parse(await aiTools.run('read_page', '{"url":"ftp://example.com"}')).error));
     const asked = [];
@@ -109,7 +115,7 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     const fake = async (url) => { seen.push(String(url)); return new Response(JSON.stringify({ results: [{ scope: 'network', kind: 'document', owner: 'deals', type: 'offer', title: 'Air mattress for $67', snippet: 'An air mattress', url: 'https://openvibe.deals/d/x', published_at: '2026-10-27T00:00:00Z' }] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
     const found = await aiTools._runners.search_openvibe({ query: 'air mattress', limit: 99, freshness: 'week' }, { fetchImpl: fake });
     assert.ok(seen[0].startsWith(`${config.ai.searchUrl}/api/v1/query?`) && seen[0].includes('scopes=network') && seen[0].includes('limit=8') && seen[0].includes('freshness=week'), 'the Search Fabric\'s network scope, in the week window');
-    assert.deepStrictEqual([found.results[0].site, found.results[0].summary, found.results[0].url, found.results[0].published_at], ['deals', 'An air mattress', 'https://openvibe.deals/d/x', '2026-10-27T00:00:00Z']);
+    assert.deepStrictEqual([found.results[0].site, found.results[0].summary, found.results[0].url, found.results[0].published_at], ['openvibe.deals', 'An air mattress', 'https://openvibe.deals/d/x', '2026-10-27T00:00:00Z']);
     assert.deepStrictEqual([found.citations[0].url, found.citations[0].published_at], ['https://openvibe.deals/d/x', '2026-10-27T00:00:00Z'], 'the result keeps its date as a citation');
     // A Search without the fabric answers 404 there: the old search answers instead.
     const seenOld = [];
@@ -118,6 +124,14 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     assert.ok(seenOld[1].startsWith(`${config.ai.searchUrl}/api/v1/search?`));
     assert.deepStrictEqual([foundOld.results[0].summary, foundOld.results[0].url, foundOld.results[0].published_at], ['An air mattress', 'https://openvibe.deals/d/x', '2026-10-26T00:00:00Z']);
     assert.deepStrictEqual([foundOld.citations[0].url, foundOld.citations[0].published_at, foundOld.fallback], ['https://openvibe.deals/d/x', '2026-10-26T00:00:00Z', true]);
+    // OpenVibe first: an owner the model names reaches the Fabric on the first query; one that is not a product is ignored.
+    const ownerSeen = [];
+    const emptyJson = async (url) => { ownerSeen.push(new URL(String(url))); return new Response(JSON.stringify({ results: [] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
+    await aiTools._runners.search_openvibe({ query: 'video editor', owner: 'work', freshness: 'week' }, { fetchImpl: emptyJson });
+    assert.deepStrictEqual([ownerSeen[0].searchParams.get('owner'), ownerSeen[0].searchParams.get('freshness')], ['work', 'week']);
+    const one = async (url) => { ownerSeen.push(new URL(String(url))); return new Response(JSON.stringify({ results: [{ title: 'A tool', url: 'https://openvibe.tools/x' }] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
+    await aiTools._runners.search_openvibe({ query: 'image cropper', owner: 'news' }, { fetchImpl: one });
+    assert.strictEqual(ownerSeen[1].searchParams.get('owner'), null, 'not a product owner: search all of OpenVibe');
     // Nothing matched: the note tells the model to say so and go to the web, never to list strangers (10-30).
     const none = await aiTools._runners.search_openvibe({ query: 'mechanical keyboard' }, { fetchImpl: async () => new Response(JSON.stringify({ results: [] }), { status: 200, headers: { 'content-type': 'application/json' } }) });
     assert.deepStrictEqual(none.results, []);
@@ -173,6 +187,38 @@ t('the fabric gets Chat\'s service token and the person as X-OV-Subject, and its
         fabric._reset();
         await new Promise((r) => stub.close(r));
     }
+});
+
+t('sources: redirects and aggregators resolve to the page, and the chips name it with the date', async () => {
+    const fabric = require('../server/rooms/search-fabric');
+    const how = require('../server/rooms/how');
+    const results = [
+        { title: 'A story', url: 'https://www.google.com/url?q=https%3A%2F%2Fexample.com%2Fstory%3Fid%3D1', published_at: '2026-10-27T00:00:00Z' },
+        { title: 'AP story', url: 'https://link.apnews.com/view/abc', display_url: 'https://apnews.com/article/xyz', published_at: '2026-10-26T00:00:00Z' },
+        { title: 'Google story', url: 'https://news.google.com/rss/articles/abc', published_at: '2026-10-25T00:00:00Z' },
+        { title: 'NYPL aggregator', url: 'https://nypl.org/aggregator/sources/2?page=1', published_at: '2026-10-24T00:00:00Z' },
+        { title: 'No target', url: 'https://link.apnews.com/view/def', published_at: '2026-10-23T00:00:00Z' },
+    ].map((r) => fabric.resultOf(r));
+    assert.deepStrictEqual([results[0].url, results[0].site], ['https://example.com/story?id=1', 'example.com'], 'a known redirector\'s ?url= target');
+    assert.deepStrictEqual([results[1].url, results[1].site, results[1].display_url], ['https://apnews.com/article/xyz', 'apnews.com', 'https://link.apnews.com/view/abc'], 'display_url is the target');
+    assert.deepStrictEqual([results[2].url, results[2].site], ['https://news.google.com/rss/articles/abc', 'news.google.com'], 'no target: the aggregator is named honestly');
+    assert.deepStrictEqual([results[3].url, results[3].site], ['https://nypl.org/aggregator/sources/2?page=1', 'nypl.org']);
+    const citations = fabric.citationsOf(results);
+    assert.deepStrictEqual([citations[0].url, citations[0].site], ['https://example.com/story?id=1', 'example.com']);
+    const acc = { steps: [], sources: [] };
+    how.cite(acc, 'web_search', JSON.stringify({ citations }));
+    assert.deepStrictEqual([acc.citations[0].url, acc.citations[0].site], ['https://example.com/story?id=1', 'example.com']);
+    const info = how.ofMessage(JSON.stringify({ steps: ['Searched the web for “tech news”'], citations: acc.citations, sources: ['https://openvibe.live/docs/go-live-in-your-browser'] }));
+    const chips = how.chips(info);
+    assert.match(chips, /^<ul class="vb-sources" aria-label="Sources">/);
+    assert.match(chips, /href="https:\/\/example\.com\/story\?id=1"/);
+    assert.match(chips, /example\.com/);
+    assert.match(chips, /Oct 27, 2026/);
+    assert.match(chips, /href="https:\/\/openvibe\.live\/docs\/go-live-in-your-browser"/);
+    assert.match(chips, /openvibe\.live/, 'a page read is a source too, without a date');
+    assert.match(chips, /link\.apnews\.com/, 'no target: the redirector itself is named');
+    assert.match(how.html(info), /class="vb-how-sources"/);
+    assert.match(how.html(info), /Oct 27, 2026/);
 });
 
 t('@dealer rolls through a tool: the call runs here, its result goes back, the text answer is posted', async () => {

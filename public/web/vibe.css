@@ -44,6 +44,22 @@ body.oc-app-body { overflow: hidden; }
 .vb-how summary:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; border-radius: 4px; }
 .vb-how ul { margin: 6px 0 0; padding: 8px 12px; list-style: none; border-left: 2px solid var(--oc-line); display: grid; gap: 4px; overflow-wrap: anywhere; }
 .vb-how a { color: var(--oc-accent); }
+
+/* Source chips under an answer (server/rooms/how.js): the site, the date, the page they open. They wrap; nothing
+   scrolls sideways at 390 px. */
+.vb-sources { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; max-width: 100%; min-width: 0; }
+.vb-sources li { min-width: 0; max-width: 100%; }
+.vb-source {
+  display: inline-flex; align-items: baseline; gap: 6px; max-width: 100%; min-width: 0; padding: 3px 9px;
+  border: 1px solid var(--oc-line); border-radius: 999px; color: var(--oc-muted); text-decoration: none;
+  font-size: .78rem; line-height: 1.35;
+}
+.vb-source:hover { color: var(--oc-text); border-color: color-mix(in srgb, var(--oc-accent) 40%, var(--oc-line)); }
+.vb-source:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+.vb-source-site { min-width: 0; max-width: 15em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vb-source-date { color: var(--oc-muted); white-space: nowrap; }
+.vb-how .vb-source { margin: 2px 2px 2px 0; color: var(--oc-muted); }
+.vb-how .vb-source:hover { color: var(--oc-text); }
 .vb-search { position: relative; margin: 0 2px 6px; }
 .vb-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--oc-muted); pointer-events: none; }
 .vb-search input {

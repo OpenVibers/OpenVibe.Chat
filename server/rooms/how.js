@@ -9,11 +9,14 @@
  *   of(task, names) → info { lines: [text], sources: [url], actor_url } or null: plain text, escaped where it is shown
  *   ofMessage(how)  → the same info from a chat answer's room_messages.how { steps, sources, citations }, or null
  *   step(acc, tool, args) adds what a tool call did, in plain words, to { steps, sources } (ai-members.js)
- *   cite(acc, tool, result) keeps a search result's URL, provider and dates as a citation (ai-members.js)
- *   html(info)      → the <details class="vb-how"> markup, escaped
+ *   cite(acc, tool, result) keeps a search result's URL, site, provider and dates as a citation (ai-members.js)
+ *   linksOf(info)   → the sources resolved and deduped: { url, site, date }, citations first then plain sources
+ *   chips(info)     → the source chips under the answer, each the site, the date and the page it opens
+ *   html(info)      → the <details class="vb-how"> markup, escaped, with the same sources
  */
 const config = require('../config');
 const db = require('../db/database');
+const { sourceOf } = require('./search-fabric');
 
 const NAMES_TTL_MS = 3_600_000;
 let cached = { at: 0, names: new Map() };
@@ -88,7 +91,10 @@ function ofMessage(raw) {
     const how = typeof raw === 'string' ? json(raw, null) : raw;
     if (!how || !Array.isArray(how.steps) || !how.steps.length) return null;
     const citations = (Array.isArray(how.citations) ? how.citations : []).filter((c) => c && /^https?:\/\//.test(String(c.url || ''))).slice(0, MAX_CITES)
-        .map((c) => ({ url: String(c.url).slice(0, 500), title: c.title ? String(c.title).slice(0, 200) : null, provider: c.provider ? String(c.provider).slice(0, 40) : null, published_at: c.published_at ? String(c.published_at).slice(0, 40) : null, retrieved_at: c.retrieved_at ? String(c.retrieved_at).slice(0, 40) : null }));
+        .map((c) => {
+            const src = sourceOf(c);
+            return { url: String(src.url).slice(0, 500), site: src.site ? String(src.site).slice(0, 253) : hostOf(src.url), title: c.title ? String(c.title).slice(0, 200) : null, provider: c.provider ? String(c.provider).slice(0, 40) : null, ...(src.display_url ? { display_url: String(src.display_url).slice(0, 500) } : {}), published_at: c.published_at ? String(c.published_at).slice(0, 40) : null, retrieved_at: c.retrieved_at ? String(c.retrieved_at).slice(0, 40) : null };
+        });
     return { lines: how.steps.map((l) => String(l).slice(0, 200)).slice(0, MAX_STEPS), sources: (Array.isArray(how.sources) ? how.sources : []).filter((u) => /^https?:\/\//.test(String(u || ''))).slice(0, 6), ...(citations.length ? { citations } : {}), actor_url: null };
 }
 
@@ -108,13 +114,16 @@ function cite(acc, tool, raw) {
     if (!Array.isArray(acc.citations)) acc.citations = [];
     for (const item of list) {
         if (!item || acc.sources.length >= MAX_CITES) break;
-        const url = String((typeof item === 'string' ? item : item.url) || '').slice(0, 500);
+        const src = sourceOf(typeof item === 'string' ? { url: item } : item);
+        const url = String(src.url || '').slice(0, 500);
         if (!/^https?:\/\//.test(url) || acc.sources.includes(url)) continue;
         acc.sources.push(url);
         acc.citations.push({
             url,
+            site: src.site ? String(src.site).slice(0, 253) : hostOf(url),
             title: item.title ? String(item.title).slice(0, 200) : null,
             provider: item.provider ? String(item.provider).slice(0, 40) : null,
+            ...(src.display_url ? { display_url: src.display_url } : {}),
             published_at: item.published_at ? String(item.published_at).slice(0, 40) : null,
             retrieved_at: item.retrieved_at ? String(item.retrieved_at).slice(0, 40) : null,
         });
@@ -135,13 +144,50 @@ async function forRoom(room) {
 }
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u; } };
+const hostOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return String(u); } };
+const shortDate = (ts) => {
+    const at = Date.parse(String(ts || ''));
+    return Number.isFinite(at) ? new Date(at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }) : null;
+};
+
+/**
+ * The answer's sources, resolved and deduped: its citations first, then plain sources (a page it read, an agent task's
+ * links). Each is { url, site, date } and names the host it will open, never a guess (11-01).
+ */
+function linksOf(info) {
+    if (!info) return [];
+    const out = []; const seen = new Set();
+    const add = (c) => {
+        if (!c || out.length >= MAX_CITES) return;
+        const item = typeof c === 'string' ? { url: c } : c;
+        const src = sourceOf(item);
+        if (!/^https?:\/\//.test(src.url) || seen.has(src.url)) return;
+        seen.add(src.url);
+        out.push({
+            url: src.url, site: src.site || hostOf(src.url), title: item.title ? String(item.title).slice(0, 200) : null,
+            provider: item.provider ? String(item.provider).slice(0, 40) : null, date: shortDate(item.published_at || item.retrieved_at),
+            ...(src.display_url ? { display_url: src.display_url } : {}),
+        });
+    };
+    (Array.isArray(info.citations) ? info.citations : []).forEach(add);
+    (Array.isArray(info.sources) ? info.sources : []).forEach(add);
+    return out;
+}
+const anchor = (l) => `<a class="vb-source" href="${esc(l.url)}" rel="nofollow ugc noopener" target="_blank"><span class="vb-source-site">${esc(l.site || hostOf(l.url))}</span>${l.date ? `<span class="vb-source-date">${esc(l.date)}</span>` : ''}</a>`;
+
+/** The source chips under an answer: the site name, the date, and the page they open. */
+function chips(info) {
+    const links = linksOf(info);
+    if (!links.length) return '';
+    return `<ul class="vb-sources" aria-label="Sources">${links.map((l) => `<li>${anchor(l)}</li>`).join('')}</ul>`;
+}
 
 function html(info) {
     if (!info) return '';
+    const links = linksOf(info);
     return `<details class="vb-how"><summary>How Vibe did this</summary><ul>${info.lines.map((l) => `<li>${esc(l)}</li>`).join('')}`
-        + `${info.sources.length ? `<li>Sources: ${info.sources.map((u) => `<a href="${esc(u)}" rel="nofollow ugc noopener" target="_blank">${esc(hostOf(u))}</a>`).join(', ')}</li>` : ''}`
+        + `${links.length ? `<li class="vb-how-sources"><span>Sources:</span> ${links.map(anchor).join(' ')}</li>` : ''}`
         + `${info.actor_url ? `<li><a href="${esc(info.actor_url)}">Every step on OpenVibe Agents</a></li>` : ''}</ul></details>`;
 }
 
-module.exports = { names, of, ofMessage, step, cite, forRoom, html, _reset: () => { cached = { at: 0, names: new Map() }; } };
+module.exports = { names, of, ofMessage, step, cite, forRoom, linksOf, chips, html, _reset: () => { cached = { at: 0, names: new Map() }; } };
