@@ -99,7 +99,7 @@ async function searchOpenvibe(args, { fetchImpl = null, searchClient = null } = 
     try {
         const body = await fabricSearch.query({ q: query, scopes: ['network'], limit, signal }, { client: searchClient, fetchImpl });
         const results = (Array.isArray(body.results) ? body.results : []).slice(0, limit).map((r) => fabricSearch.resultOf(r));
-        return { query, citations: fabricSearch.citationsOf(results), results, note: results.length ? 'Cite each result with its url, provider and date.' : 'Nothing on OpenVibe matched.' };
+        return { query, citations: fabricSearch.citationsOf(results), results, note: results.length ? 'Cite each result with its url, provider and date.' : NOTHING };
     } catch (err) {
         if (!fabricSearch.isDown(err)) {
             const status = err && err.status;
@@ -113,7 +113,7 @@ async function searchOpenvibe(args, { fetchImpl = null, searchClient = null } = 
             if (!res.ok) return { error: `OpenVibe.Search answered ${res.status}` };
             const old = await res.json();
             const results = (Array.isArray(old.results) ? old.results : []).slice(0, limit).map((r) => fabricSearch.resultOf(r, { fallback: true }));
-            return { query, citations: fabricSearch.citationsOf(results), results, fallback: true, note: results.length ? 'Cite each result with its url and date.' : 'Nothing on OpenVibe matched.' };
+            return { query, citations: fabricSearch.citationsOf(results), results, fallback: true, note: results.length ? 'Cite each result with its url and date.' : NOTHING };
         } catch {
             return { error: 'OpenVibe.Search is unreachable' };
         }
@@ -141,6 +141,11 @@ async function readPage(args, { fetchImpl = globalThis.fetch } = {}) {
         return { error: err && err.name === 'AbortError' ? 'the page did not load in time' : 'OpenVibe.Tools is unreachable' };
     } finally { clearTimeout(timer); }
 }
+
+// 10-30: Vibe answered "Find me a good deal on a mechanical keyboard" with five audio tools Search had returned (its
+// nearest vectors, unrelated). Search now answers nothing for an unrelated query; this tells the model what to do then.
+const NOTHING = 'Nothing on OpenVibe matched this. Say so in one plain sentence, never list unrelated results as if they were answers, '
+    + 'and then use web_search for the same request (add "deal" or "price" for a shopping request) and answer from that.';
 
 function currentTime(args, { now = Date.now() } = {}) {
     let tz = String(args.timezone || 'UTC').trim() || 'UTC';
