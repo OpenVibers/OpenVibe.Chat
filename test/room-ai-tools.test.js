@@ -148,13 +148,12 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     assert.match(none.note, /2–3 key nouns/, 'the one hint: a shorter query');
     assert.match(none.note, /video editor/, 'the job-title example the starter chip needs');
     // "remote video editing jobs" finds nothing: one automatic retry with the nouns, narrowed to Work, before the model spends a round.
+    const job = { scope: 'network', kind: 'document', owner: 'work', type: 'job', title: 'Intern Video Editing & Support at Bettermile', snippet: 'Video editing, remote-friendly', url: 'https://openvibe.work/jobs/job_1', published_at: '2026-10-26T00:00:00Z' };
     const retrySeen = [];
     const retryFake = async (url) => {
         retrySeen.push(new URL(String(url)));
         const q = retrySeen[retrySeen.length - 1].searchParams.get('q');
-        const results = q === 'video editing'
-            ? [{ scope: 'network', kind: 'document', owner: 'work', type: 'job', title: 'Intern Video Editing & Support at Bettermile', snippet: 'Video editing, remote-friendly', url: 'https://openvibe.work/jobs/job_1', published_at: '2026-10-26T00:00:00Z' }]
-            : [];
+        const results = q === 'video editing' ? [job] : [];
         return new Response(JSON.stringify({ results }), { status: 200, headers: { 'content-type': 'application/json' } });
     };
     const retried = await aiTools._runners.search_openvibe({ query: 'Find remote video editing jobs posted recently', freshness: 'week' }, { fetchImpl: retryFake });
@@ -163,7 +162,13 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     assert.deepStrictEqual([retrySeen[1].searchParams.get('q'), retrySeen[1].searchParams.get('owner'), retrySeen[1].searchParams.get('freshness')], ['video editing', 'work', 'week']);
     assert.deepStrictEqual([retried.query, retried.original_query, retried.results.length], ['video editing', 'Find remote video editing jobs posted recently', 1]);
     assert.match(retried.note, /retry with "video editing" found 1/);
-    // ...and when the retry finds nothing either, the note says both queries and still gives the hint.
+    // A bare query with no time words: a window the model guessed is dropped for the retry, so the Work job is found.
+    const bareSeen = [];
+    const bare = await aiTools._runners.search_openvibe({ query: 'remote video editing jobs', owner: 'work', freshness: 'day' }, { fetchImpl: async (url) => { bareSeen.push(new URL(String(url))); const q = bareSeen[bareSeen.length - 1].searchParams.get('q'); return new Response(JSON.stringify({ results: q === 'video editing' ? [job] : [] }), { status: 200, headers: { 'content-type': 'application/json' } }); } });
+    assert.deepStrictEqual([bareSeen[0].searchParams.get('freshness'), bareSeen[1].searchParams.get('freshness')], ['day', null], 'no time word: the retry looks outside the guessed window');
+    assert.deepStrictEqual([bare.freshness_dropped, bare.results.length], ['day', 1]);
+    assert.match(bare.note, /in the last day/);
+    // ...and when both find nothing, the note still gives the hint.
     const bothEmpty = await aiTools._runners.search_openvibe({ query: 'remote video editing jobs', freshness: 'day' }, { fetchImpl: async () => new Response(JSON.stringify({ results: [] }), { status: 200, headers: { 'content-type': 'application/json' } }) });
     assert.match(bothEmpty.note, /"remote video editing jobs" and a retry with "video editing" both found nothing/);
     assert.match(bothEmpty.note, /2–3 key nouns/);

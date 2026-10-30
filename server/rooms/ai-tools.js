@@ -119,6 +119,9 @@ const OWNERS = [
     [/\b(news|headlines?)\b/i, 'news'],
 ];
 const ownerOf = (q) => (OWNERS.find(([re]) => re.test(String(q || ''))) || [])[1] || null;
+// A query that names its own time ("posted recently", "today") keeps the freshness window on the retry; one that does
+// not (the bare "remote video editing jobs") lets the retry look outside the window the model guessed (11-01).
+const TEMPORAL = /\b(today|tonight|now|latest|recent|recently|new|posted|this\s+(week|month|year)|week|month|year|day)\b/i;
 /** The 2–3 key nouns of a request, or null when it is already that short ("video editor", "mechanical keyboard"). */
 function shortenQuery(q) {
     const words = String(q || '').toLowerCase().replace(/[^\p{L}\p{N}\s'-]+/gu, ' ').split(/\s+/).filter(Boolean);
@@ -153,10 +156,12 @@ async function searchOpenvibe(args, { fetchImpl = null, searchClient = null } = 
         const short = shortenQuery(query);
         if (short) {
             const owner = wanted || ownerOf(query);
-            const retryBody = await fabricSearch.query({ q: short, scopes: ['network'], limit, ...window, ...(owner ? { owner } : {}), signal: AbortSignal.timeout(8000) }, opts);
+            const retryWindow = TEMPORAL.test(query) ? window : {};
+            const dropped = freshness && !retryWindow.freshness ? freshness : null;
+            const retryBody = await fabricSearch.query({ q: short, scopes: ['network'], limit, ...retryWindow, ...(owner ? { owner } : {}), signal: AbortSignal.timeout(8000) }, opts);
             const retried = (Array.isArray(retryBody.results) ? retryBody.results : []).slice(0, limit).map((r) => fabricSearch.resultOf(r));
-            if (retried.length) return { query: short, original_query: query, retried_with: short, ...window, ...(owner ? { owner } : {}), citations: fabricSearch.citationsOf(retried), results: retried, note: `Nothing matched "${query}". A retry with "${short}" found ${retried.length}; answer from that, or say plainly if it is not what they asked for.` };
-            return { query, original_query: query, retried_with: short, ...window, ...(owner ? { owner } : {}), citations: [], results: [], note: nothingNote(query, short) };
+            if (retried.length) return { query: short, original_query: query, retried_with: short, ...retryWindow, ...(dropped ? { freshness_dropped: dropped } : {}), ...(owner ? { owner } : {}), citations: fabricSearch.citationsOf(retried), results: retried, note: `Nothing matched "${query}"${dropped ? ` in the last ${dropped}` : ''}. A retry with "${short}"${dropped ? ' without that window' : ''} found ${retried.length}; answer from that, or say plainly if it is not what they asked for.` };
+            return { query, original_query: query, retried_with: short, ...retryWindow, ...(dropped ? { freshness_dropped: dropped } : {}), ...(owner ? { owner } : {}), citations: [], results: [], note: nothingNote(query, short) };
         }
         return { query, ...window, ...product, citations: [], results: [], note: nothingNote(query) };
     } catch (err) {
