@@ -106,6 +106,11 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     assert.ok(seenOld[1].startsWith(`${config.ai.searchUrl}/api/v1/search?`));
     assert.deepStrictEqual([foundOld.results[0].summary, foundOld.results[0].url, foundOld.results[0].published_at], ['An air mattress', 'https://openvibe.deals/d/x', '2026-10-26T00:00:00Z']);
     assert.deepStrictEqual([foundOld.citations[0].url, foundOld.citations[0].published_at, foundOld.fallback], ['https://openvibe.deals/d/x', '2026-10-26T00:00:00Z', true]);
+    // Nothing matched: the note tells the model to say so and go to the web, never to list strangers (10-30).
+    const none = await aiTools._runners.search_openvibe({ query: 'mechanical keyboard' }, { fetchImpl: async () => new Response(JSON.stringify({ results: [] }), { status: 200, headers: { 'content-type': 'application/json' } }) });
+    assert.deepStrictEqual(none.results, []);
+    assert.match(none.note, /never list unrelated results/);
+    assert.match(none.note, /web_search/);
 });
 
 t('the fabric gets Chat\'s service token and the person as X-OV-Subject, and its provider and dates survive', async () => {
