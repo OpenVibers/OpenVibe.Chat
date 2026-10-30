@@ -195,14 +195,15 @@ t('sources: redirects and aggregators resolve to the page, and the chips name it
     const results = [
         { title: 'A story', url: 'https://www.google.com/url?q=https%3A%2F%2Fexample.com%2Fstory%3Fid%3D1', published_at: '2026-10-27T00:00:00Z' },
         { title: 'AP story', url: 'https://link.apnews.com/view/abc', display_url: 'https://apnews.com/article/xyz', published_at: '2026-10-26T00:00:00Z' },
-        { title: 'Google story', url: 'https://news.google.com/rss/articles/abc', published_at: '2026-10-25T00:00:00Z' },
-        { title: 'NYPL aggregator', url: 'https://nypl.org/aggregator/sources/2?page=1', published_at: '2026-10-24T00:00:00Z' },
+        { title: 'NYPL aggregator with a target', url: 'https://nypl.org/aggregator/sources/2?page=1', display_url: 'https://apnews.com/article/abc', published_at: '2026-10-25T00:00:00Z' },
+        { title: 'Google story', url: 'https://news.google.com/rss/articles/abc', published_at: '2026-10-24T00:00:00Z' },
         { title: 'No target', url: 'https://link.apnews.com/view/def', published_at: '2026-10-23T00:00:00Z' },
     ].map((r) => fabric.resultOf(r));
     assert.deepStrictEqual([results[0].url, results[0].site], ['https://example.com/story?id=1', 'example.com'], 'a known redirector\'s ?url= target');
     assert.deepStrictEqual([results[1].url, results[1].site, results[1].display_url], ['https://apnews.com/article/xyz', 'apnews.com', 'https://link.apnews.com/view/abc'], 'display_url is the target');
-    assert.deepStrictEqual([results[2].url, results[2].site], ['https://news.google.com/rss/articles/abc', 'news.google.com'], 'no target: the aggregator is named honestly');
-    assert.deepStrictEqual([results[3].url, results[3].site], ['https://nypl.org/aggregator/sources/2?page=1', 'nypl.org']);
+    assert.deepStrictEqual([results[2].url, results[2].site, results[2].display_url], ['https://apnews.com/article/abc', 'apnews.com', 'https://nypl.org/aggregator/sources/2?page=1'], 'an aggregator with a target resolves');
+    assert.deepStrictEqual([results[3].url, results[3].site], ['https://news.google.com/rss/articles/abc', 'news.google.com'], 'no target: the aggregator is named honestly');
+    assert.deepStrictEqual([results[4].url, results[4].site], ['https://link.apnews.com/view/def', 'link.apnews.com']);
     const citations = fabric.citationsOf(results);
     assert.deepStrictEqual([citations[0].url, citations[0].site], ['https://example.com/story?id=1', 'example.com']);
     const acc = { steps: [], sources: [] };
@@ -214,6 +215,7 @@ t('sources: redirects and aggregators resolve to the page, and the chips name it
     assert.match(chips, /href="https:\/\/example\.com\/story\?id=1"/);
     assert.match(chips, /example\.com/);
     assert.match(chips, /Oct 27, 2026/);
+    assert.match(chips, /href="https:\/\/apnews\.com\/article\/abc"/, 'the aggregator opens its target, not itself');
     assert.match(chips, /href="https:\/\/openvibe\.live\/docs\/go-live-in-your-browser"/);
     assert.match(chips, /openvibe\.live/, 'a page read is a source too, without a date');
     assert.match(chips, /link\.apnews\.com/, 'no target: the redirector itself is named');

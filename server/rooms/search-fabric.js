@@ -106,12 +106,19 @@ const REDIRECT_PATHS = [
 ];
 const REDIRECT_PREFIX = /^(link|links|go|out|redirect|track|click|url)\./i;
 const REDIRECT_KEYS = ['url', 'u', 'target', 'to', 'dest', 'destination', 'redirect', 'redirect_url', 'q', 'uddg'];
+const AGGREGATOR_PATH = /\/(aggregator|redirect|redirector|out|away|link|click|go|track)(\/|$)/i;
 const httpUrl = (v) => (/^https?:\/\//i.test(String(v == null ? '' : v)) ? String(v).slice(0, 2048) : null);
 function parsed(u) { try { return new URL(String(u)); } catch { return null; } }
 function isRedirector(u) {
     const p = parsed(u); if (!p) return false;
     if (REDIRECT_PREFIX.test(p.hostname) || REDIRECT_HOSTS.some((re) => re.test(p.hostname))) return true;
     return REDIRECT_PATHS.some(([hostRe, pathRe]) => hostRe.test(p.hostname) && pathRe.test(p.pathname));
+}
+/** A redirector, or a page whose path says it wraps links (an aggregator): a target in display_url wins over it. */
+function isAggregator(u) {
+    if (isRedirector(u)) return true;
+    const p = parsed(u);
+    return !!(p && AGGREGATOR_PATH.test(p.pathname));
 }
 /** The target inside a known redirector's query string, or null. */
 function targetOf(u) {
@@ -128,7 +135,7 @@ function sourceOf(r) {
     let displayUrl = null;
     const inner = raw ? targetOf(raw) : null;
     if (inner) { url = inner; displayUrl = raw; }
-    else if (raw && isRedirector(raw) && display && !isRedirector(display)) { url = display; displayUrl = raw; }
+    else if (raw && isAggregator(raw) && display && !isAggregator(display)) { url = display; displayUrl = raw; }
     else if (display && isRedirector(display) && raw && !isRedirector(raw)) { url = raw; displayUrl = display; }
     else if (!raw && display) url = display;
     return { url, site: host(url), ...(displayUrl && displayUrl !== url ? { display_url: displayUrl } : {}) };
