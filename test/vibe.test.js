@@ -53,7 +53,7 @@ t('boot', async () => {
 });
 
 t('a first message starts a private chat named after it, and Vibe answers it unasked with its own instructions', async () => {
-    const r = await vibeApi('POST', '', ann, { message: 'Plan a cheap dinner for four people tonight, nothing spicy please' });
+    const r = await vibeApi('POST', '', ann, { message: 'Plan a cheap dinner for four people tonight, nothing spicy please', timezone: 'America/New_York' });
     assert.strictEqual(r.status, 201, r.text);
     slug = r.body.room.slug;
     assert.ok(/^v-[0-9a-f]{12}$/.test(slug), slug);
@@ -64,8 +64,19 @@ t('a first message starts a private chat named after it, and Vibe answers it una
     assert.deepStrictEqual([a.display_name, a.message], ['Vibe', '**Answer 1**\n\n- rice\n- lentils']);
     const turn = calls.find((c) => c.workflow === 'chat.member.turn');
     assert.ok(turn.input.messages[0].content.startsWith('You are Vibe, OpenVibe\'s assistant, in a private chat with Ann'), turn.input.messages[0].content.slice(0, 120));
+    // Today's date, and the person's own zone when their browser sent it (10-30): "today" and "recently" mean something.
+    assert.match(turn.input.messages[0].content, /Today is \w+day, \w+ \d{1,2}, \d{4} \(UTC\); for Ann it is .* in America\/New_York\./);
     assert.strictEqual(turn.input.max_tokens, 1500);
     assert.ok(turn.input.tools.some((x) => x.function.name === 'read_page'), 'Vibe can read a page');
+    // The date line is deterministic and a zone that is not an IANA name is ignored, not put in the prompt.
+    const aiMembers = require('../server/rooms/ai-members');
+    const at = Date.UTC(2026, 9, 30, 12, 0);
+    const utc = aiMembers.vibePrompt({ name: 'Vibe' }, 'Ann', null, { now: at, timezone: 'Not/AZone' });
+    assert.match(utc, /^You are Vibe[^\n]*\nToday is Friday, October 30, 2026 \(UTC\)\./);
+    assert.ok(!utc.includes('Not/AZone'));
+    const tokyo = aiMembers.vibePrompt({ name: 'Vibe' }, 'Ann', null, { now: at, timezone: 'Asia/Tokyo' });
+    assert.match(tokyo, /for Ann it is Friday, October 30, 2026 .* in Asia\/Tokyo/);
+    assert.match(tokyo, /web_search with freshness "day"/, 'news goes to the web, not an invented News feed');
 });
 
 t('a follow-up is answered with the conversation so far', async () => {

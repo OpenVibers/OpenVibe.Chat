@@ -45,6 +45,12 @@ t('boot', async () => {
 t('the tool list and the runners: bounded, fair, refusing what is not theirs', async () => {
     const names = aiTools.definitions({}).map((d) => d.function.name);
     assert.deepStrictEqual(names, ['search_openvibe', 'read_page', 'current_time', 'roll_dice', 'pick_one'], 'no pantry for an unlinked member');
+    // Both search tools take the Search Fabric's freshness window (10-30): "today" and "recently" reach Search.
+    const schemaOf = (name) => aiTools.definitions({ handle: 'vibe' }).find((d) => d.function.name === name).function.parameters;
+    for (const name of ['search_openvibe', 'web_search']) {
+        assert.deepStrictEqual(schemaOf(name).properties.freshness.enum, ['day', 'week', 'month', 'year'], `freshness on ${name}`);
+        assert.match(schemaOf(name).properties.freshness.description, /today|news/, `the model is told when to use it on ${name}`);
+    }
     // read_page asks OpenVibe.Tools' read tool (Tools decides what may be reached) and passes on only the page's parts.
     assert.ok(/full http\(s\) address/.test(JSON.parse(await aiTools.run('read_page', '{"url":"ftp://example.com"}')).error));
     const asked = [];
@@ -60,12 +66,18 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     const subject = ids.newId('user');
     const fabricCalls = [];
     const fabricClient = { fabric: async (text, o) => { fabricCalls.push({ text, o }); return { results: [{ scope: 'web', kind: 'page', title: 'Mariners 5-3', snippet: 'A recap', url: 'https://example.com/score', site: 'example.com', provider: 'deepseek', published_at: '2026-10-27T00:00:00Z', retrieved_at: '2026-10-28T12:00:00Z' }], citations: [{ n: 1, url: 'https://example.com/score', title: 'Mariners 5-3', provider: 'deepseek', retrieved_at: '2026-10-28T12:00:00Z' }], route: { explain: [{ scope: 'web', step: 'deepseek', ok: true, count: 1, cost_usd: 0.00075 }], cost_usd: 0.00075 } }; } };
-    const web = JSON.parse(await aiTools.run('web_search', '{"query":"who won the Mariners game"}', { member: { handle: 'vibe' }, subject, idempotencyKey: 'chat-ai-1-2-t0-web_search', webSearchOpts: { fabricClient } }));
-    assert.deepStrictEqual(fabricCalls.map((c) => [c.text, c.o.scopes, c.o.actingSubject]), [['who won the Mariners game', ['web'], subject]], 'the fabric web scope as the person who asked');
+    const web = JSON.parse(await aiTools.run('web_search', '{"query":"who won the Mariners game","freshness":"day"}', { member: { handle: 'vibe' }, subject, idempotencyKey: 'chat-ai-1-2-t0-web_search', webSearchOpts: { fabricClient } }));
+    assert.deepStrictEqual(fabricCalls.map((c) => [c.text, c.o.scopes, c.o.actingSubject, c.o.freshness]), [['who won the Mariners game', ['web'], subject, 'day']], 'the fabric web scope as the person who asked, in the day window');
+    assert.strictEqual(web.freshness, 'day');
     assert.deepStrictEqual([web.results[0].provider, web.results[0].published_at, web.results[0].retrieved_at, web.results[0].url], ['deepseek', '2026-10-27T00:00:00Z', '2026-10-28T12:00:00Z', 'https://example.com/score']);
     assert.deepStrictEqual([web.citations[0].provider, web.citations[0].published_at, web.citations[0].url], ['deepseek', '2026-10-27T00:00:00Z', 'https://example.com/score']);
     assert.strictEqual(web.answer, null);
     assert.strictEqual(web.found_by, 'deepseek');
+    // Nothing on the web: the result says so and gives the one retry hint (10-30).
+    const noWeb = JSON.parse(await aiTools.run('web_search', '{"query":"a thing nobody wrote"}', { member: { handle: 'vibe' }, subject, webSearchOpts: { fabricClient: { fabric: async () => ({ results: [] }) } } }));
+    assert.deepStrictEqual(noWeb.results, []);
+    assert.match(noWeb.note, /Nothing found on the web/);
+    assert.match(noWeb.note, /2–3 key nouns/);
     // The fabric is down (404 here): the old Actor task still answers, as before the fabric.
     require('../server/rooms/web-search')._setTokens({ getToken: async () => 'chat-actor-token' });
     const sent = [];
@@ -95,8 +107,8 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     assert.match(await aiTools.run('roll_dice', '{not json'), /not valid JSON/);
     const seen = [];
     const fake = async (url) => { seen.push(String(url)); return new Response(JSON.stringify({ results: [{ scope: 'network', kind: 'document', owner: 'deals', type: 'offer', title: 'Air mattress for $67', snippet: 'An air mattress', url: 'https://openvibe.deals/d/x', published_at: '2026-10-27T00:00:00Z' }] }), { status: 200, headers: { 'content-type': 'application/json' } }); };
-    const found = await aiTools._runners.search_openvibe({ query: 'air mattress', limit: 99 }, { fetchImpl: fake });
-    assert.ok(seen[0].startsWith(`${config.ai.searchUrl}/api/v1/query?`) && seen[0].includes('scopes=network') && seen[0].includes('limit=8'), 'the Search Fabric\'s network scope');
+    const found = await aiTools._runners.search_openvibe({ query: 'air mattress', limit: 99, freshness: 'week' }, { fetchImpl: fake });
+    assert.ok(seen[0].startsWith(`${config.ai.searchUrl}/api/v1/query?`) && seen[0].includes('scopes=network') && seen[0].includes('limit=8') && seen[0].includes('freshness=week'), 'the Search Fabric\'s network scope, in the week window');
     assert.deepStrictEqual([found.results[0].site, found.results[0].summary, found.results[0].url, found.results[0].published_at], ['deals', 'An air mattress', 'https://openvibe.deals/d/x', '2026-10-27T00:00:00Z']);
     assert.deepStrictEqual([found.citations[0].url, found.citations[0].published_at], ['https://openvibe.deals/d/x', '2026-10-27T00:00:00Z'], 'the result keeps its date as a citation');
     // A Search without the fabric answers 404 there: the old search answers instead.
@@ -111,6 +123,28 @@ t('the tool list and the runners: bounded, fair, refusing what is not theirs', a
     assert.deepStrictEqual(none.results, []);
     assert.match(none.note, /never list unrelated results/);
     assert.match(none.note, /web_search/);
+    assert.match(none.note, /2–3 key nouns/, 'the one hint: a shorter query');
+    assert.match(none.note, /video editor/, 'the job-title example the starter chip needs');
+    // "remote video editing jobs" finds nothing: one automatic retry with the nouns, narrowed to Work, before the model spends a round.
+    const retrySeen = [];
+    const retryFake = async (url) => {
+        retrySeen.push(new URL(String(url)));
+        const q = retrySeen[retrySeen.length - 1].searchParams.get('q');
+        const results = q === 'video editing'
+            ? [{ scope: 'network', kind: 'document', owner: 'work', type: 'job', title: 'Intern Video Editing & Support at Bettermile', snippet: 'Video editing, remote-friendly', url: 'https://openvibe.work/jobs/job_1', published_at: '2026-10-26T00:00:00Z' }]
+            : [];
+        return new Response(JSON.stringify({ results }), { status: 200, headers: { 'content-type': 'application/json' } });
+    };
+    const retried = await aiTools._runners.search_openvibe({ query: 'Find remote video editing jobs posted recently', freshness: 'week' }, { fetchImpl: retryFake });
+    assert.strictEqual(retrySeen.length, 2, 'one retry, not a loop');
+    assert.strictEqual(retrySeen[0].searchParams.get('q'), 'Find remote video editing jobs posted recently');
+    assert.deepStrictEqual([retrySeen[1].searchParams.get('q'), retrySeen[1].searchParams.get('owner'), retrySeen[1].searchParams.get('freshness')], ['video editing', 'work', 'week']);
+    assert.deepStrictEqual([retried.query, retried.original_query, retried.results.length], ['video editing', 'Find remote video editing jobs posted recently', 1]);
+    assert.match(retried.note, /retry with "video editing" found 1/);
+    // ...and when the retry finds nothing either, the note says both queries and still gives the hint.
+    const bothEmpty = await aiTools._runners.search_openvibe({ query: 'remote video editing jobs', freshness: 'day' }, { fetchImpl: async () => new Response(JSON.stringify({ results: [] }), { status: 200, headers: { 'content-type': 'application/json' } }) });
+    assert.match(bothEmpty.note, /"remote video editing jobs" and a retry with "video editing" both found nothing/);
+    assert.match(bothEmpty.note, /2–3 key nouns/);
 });
 
 t('the fabric gets Chat\'s service token and the person as X-OV-Subject, and its provider and dates survive', async () => {

@@ -214,17 +214,34 @@ async function picturesFor(message, history, user) {
 /** Vibe's instructions in a person's own chat with it (server/rooms/vibe.js). */
 /**
  * Vibe in a person's own chat. `memory` is null when their memory is off (or this is not their own chat), else their
- * notes as "[id] text" lines (server/rooms/vibe-memory.js), '' when there are none yet.
+ * notes as "[id] text" lines (server/rooms/vibe-memory.js), '' when there are none yet. `timezone`, when their browser
+ * sent it with the message, is an IANA name (America/New_York): the prompt then states their local date and time too.
  */
-function vibePrompt(member, askedBy, memory = null) {
+function timezoneOf(v) {
+    const tz = String(v == null ? '' : v).trim().slice(0, 64);
+    if (!tz) return null;
+    try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } catch { return null; }
+}
+function dateLine(now, timezone, askedBy) {
+    const d = new Date(now);
+    const utc = d.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' });
+    if (!timezone) return `Today is ${utc} (UTC).`;
+    const local = d.toLocaleString('en-US', { timeZone: timezone, weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+    return `Today is ${utc} (UTC); for ${askedBy} it is ${local} in ${timezone}.`;
+}
+
+function vibePrompt(member, askedBy, memory = null, { now = Date.now(), timezone = null } = {}) {
     return [
         `You are ${member.name}, OpenVibe's assistant, in a private chat with ${askedBy} on OpenVibe.Chat. Only they read it.`,
+        dateLine(now, timezoneOf(timezone), askedBy),
         member.persona ? `How they want you to be: ${member.persona}` : '',
         '',
         'How you answer:',
         '- Helpful, direct and warm, in the language they wrote in. A short question gets a short answer; give depth when they ask for it or the task needs it.',
         '- Your answer is shown as Markdown: short paragraphs, lists, **bold**, `code` and fenced code blocks, and links. No tables, no headings above level 3.',
         '- Tools: search_openvibe (news, deals, coupon codes, wiki pages, rentals, jobs, videos and more across OpenVibe), web_search (the open web through OpenVibe\'s Search Fabric: results with their URL, provider and date, for current events and facts OpenVibe does not have), read_page (the text of a web page at an address they give or a search found), the current time, fair dice and random picks. Use them when they make the answer better, and cite each result with its link; when a result names a provider and a date, keep them with the link.',
+        '- Searching: use two or three key words, not the whole request ("remote video editing jobs" finds nothing; "video editor" finds the jobs). Pass freshness to search_openvibe or web_search when the ask is about today, this week or the latest: "day" for today, "week" for recently, "month" or "year" for slower topics. If a search returns nothing, retry once with the key nouns before you answer.',
+        '- News and deals: OpenVibe.News has no stories yet, so for news go to web_search with freshness "day" (or "week" for a roundup) and say which web source and date each story came from; never present a recorded stream or video as today\'s news. OpenVibe search may have no offer for a shopping question: use web_search with "deal" or "price" and freshness "week" rather than citing a post that only mentions the words.',
         '- When they send a picture you see it: describe what matters for their question (text in it, objects, a screenshot\'s error). Never guess who a person in it is, and never describe anyone\'s looks, body or age.',
         '- Recurring work ("every morning, find me new remote jobs"): set_up_agent makes it one of their OpenVibe Agents, run daily or weekly on their own allowance with every result on its page. First say what it would do and when, and set it up only once they agree. my_agents lists the agents they have.',
         '- You cannot yet make pictures, use their computer or set reminders. Say so plainly when asked, and offer what you can do instead.',
@@ -286,12 +303,13 @@ function userPrompt({ member, context, transcript, askedBy, text }) {
  * The answer through chat.member.turn with tools: up to MAX_TOOL_ROUNDS rounds of tool calls run here, then a turn
  * with tool_choice none. → the reply text, or null when a turn failed (the caller falls back to chat.member.reply).
  */
-async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], user = null, messageId = null, memory = null, called = new Set(), onText = null, steps = null, signal = null }) {
+async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], user = null, messageId = null, memory = null, timezone = null, called = new Set(), onText = null, steps = null, signal = null }) {
     const tools = aiTools.definitions(member, room, { memory: memory !== null });
     const vibe = Number(room.assistant) === 1;
+    const tz = timezoneOf(timezone);
     const prompt = userPrompt({ member, context, transcript, askedBy, text });
     const messages = [
-        { role: 'system', content: vibe ? vibePrompt(member, askedBy, memory) : systemPrompt(member, room) },
+        { role: 'system', content: vibe ? vibePrompt(member, askedBy, memory, { timezone: tz }) : systemPrompt(member, room) },
         // Pictures the person sent (picturesFor): the model sees them with the text.
         { role: 'user', content: images.length ? [{ type: 'text', text: `${prompt}\n\n(${images.length === 1 ? 'The picture they sent is' : 'The pictures they sent are'} attached.)` }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] : prompt },
     ];
@@ -310,7 +328,7 @@ async function answerWithTools({ room, member, context, transcript, askedBy, tex
         for (const c of calls) {
             called.add(c.function.name);
             if (steps) require('./how').step(steps, c.function.name, c.function.arguments);
-            const result = await aiTools.run(c.function.name, c.function.arguments, { member, contextFor, subject, room, user, messageId, memory: memory !== null, idempotencyKey: `${opts.idempotencyKey}-t${round}-${c.function.name}` });
+            const result = await aiTools.run(c.function.name, c.function.arguments, { member, contextFor, subject, room, user, messageId, memory: memory !== null, timezone: tz, idempotencyKey: `${opts.idempotencyKey}-t${round}-${c.function.name}` });
             if (steps) require('./how').cite(steps, c.function.name, result);
             messages.push({ role: 'tool', tool_call_id: String(c.id || `call_${round}`).slice(0, 128), content: result });
         }
@@ -380,7 +398,7 @@ async function afterPost(room, message, user, deps = {}) {
         if (controller) stoppers.set(room.id, controller);
         if (config.ai.memberTools) {
             const images = await picturesFor(message, history, user).catch(() => []);
-            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, vibe ? 12000 : 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, called, onText, steps, signal: controller && controller.signal }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
+            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, vibe ? 12000 : 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, timezone: deps.timezone, called, onText, steps, signal: controller && controller.signal }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
         }
         if (controller && controller.signal.aborted) {
             const sofar = clean(pending || '', 7900);

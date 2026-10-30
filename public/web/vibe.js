@@ -24,6 +24,8 @@
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function token() { var m = /(?:^|;\s*)ov_token=([^;]+)/.exec(document.cookie || ''); return m ? decodeURIComponent(m[1]) : undefined; }
   function store(fn) { try { return fn(window.localStorage); } catch (e) { return null; } }
+  // The browser's IANA zone (America/New_York) with each message: Vibe's prompt then states the person's local date.
+  function timezone() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (e) { return null; } }
   function nearBottom() { return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 160; }
   function toBottom() { scroll.scrollTop = scroll.scrollHeight; }
   function markSvg() {
@@ -383,7 +385,7 @@
       init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': sendingPicture.file.type, 'X-Caption': encodeURIComponent(text) }, body: sendingPicture.file };
     } else {
       url = room ? '/api/chat/rooms/' + encodeURIComponent(room) + '/messages' : '/api/chat/vibe';
-      init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) };
+      init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, timezone: timezone() }) };
     }
     fetch(url, init)
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: null }; }); })

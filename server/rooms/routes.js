@@ -144,7 +144,7 @@ router.get('/:slug/messages', optionalAuth, async (req, res) => {
 router.post('/:slug/messages', requireAuth, postLimit, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     try {
-        const message = await rooms.post(room, req.user, req.body && req.body.message);
+        const message = await rooms.post(room, req.user, req.body && req.body.message, { timezone: req.body && req.body.timezone });
         chatServer().broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
         res.status(201).json({ message });
     } catch (err) { send(res, err); }

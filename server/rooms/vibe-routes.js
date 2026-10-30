@@ -59,7 +59,7 @@ const modeOf = (b) => (b && b.mode && b.mode !== 'chat' ? String(b.mode) : null)
 router.post('/', requireAuth, personOnly, startLimit, async (req, res) => {
     try {
         const b = req.body || {};
-        const out = modeOf(b) ? await vibe.startWork(req.user, b.message, modeOf(b)) : await vibe.start(req.user, b.message);
+        const out = modeOf(b) ? await vibe.startWork(req.user, b.message, modeOf(b)) : await vibe.start(req.user, b.message, { timezone: b.timezone });
         res.status(201).json(out);
     } catch (err) { send(res, err); }
 });
