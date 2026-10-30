@@ -105,7 +105,9 @@ function contentSecurityPolicy(nonce) {
  * vibe.css + vibe-md.js + vibe.js, and no footer), appScript (the app's own script instead of vibe.js: inbox.js), feedView
  * (a feed's card on the page: feed-view.css + feed-view.js, server/feeds/), scripts (more of
  * public/web's scripts by name, e.g. support.js), footer ('full', the default, on front pages, directories and docs;
- * 'compact', one quiet line, on pages people work in: a room, a channel, a conversation, a task, settings)
+ * 'compact', one quiet line, on pages people work in: a room, a channel, a conversation, a task, settings),
+ * inlineStyles (CSS the page needs and the site's stylesheet cannot hold: the rule that shows the picked block of a
+ * pick block is written for the page, because there is one per block)
  */
 function renderPage(o) {
     const { config } = o;
@@ -140,6 +142,7 @@ ${INSTALL_LINKS}
 <link rel="stylesheet" href="${asset('chat.css')}">
 <link rel="stylesheet" href="${ovServe.url('items.css')}">
 ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` : ''}
+${(o.inlineStyles || []).map((css) => `<style>${css}</style>`).join('\n')}
 ${o.app ? `<link rel="stylesheet" href="${asset('vibe.css')}">` : ''}
 ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
 ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join('\n')}
