@@ -125,7 +125,10 @@ function acts(slug) {
 
 function turn(m, me, hows = new Map(), retrySlug = null) {
     const ai = !!m.ai_member_id;
-    if (ai) return `<li class="vb-turn vb-ai" data-id="${Number(m.id) || 0}">${MARK}<div class="vb-body"><p class="oc-sr">Vibe said:</p><div class="vb-md">${md.render(m.message)}</div>${how.html(hows.get(Number(m.id)))}${acts(retrySlug)}</div></li>`;
+    if (ai) {
+        const info = hows.get(Number(m.id));
+        return `<li class="vb-turn vb-ai" data-id="${Number(m.id) || 0}">${MARK}<div class="vb-body"><p class="oc-sr">Vibe said:</p><div class="vb-md">${md.render(m.message)}</div>${how.chips(info)}${how.html(info)}${acts(retrySlug)}</div></li>`;
+    }
     const mine = me && Number(m.user_id) === Number(me.id);
     return `<li class="vb-turn vb-me" data-id="${Number(m.id) || 0}"><div class="vb-bubble"><p class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</p>${esc(m.message).replace(/\n/g, '<br>')}${pictures.pageHtml(m.message)}</div></li>`;
 }
