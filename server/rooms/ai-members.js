@@ -329,9 +329,9 @@ async function answerWithTools({ room, member, context, transcript, askedBy, tex
         for (const c of calls) {
             called.add(c.function.name);
             if (steps) require('./how').step(steps, c.function.name, c.function.arguments);
-            const result = await aiTools.run(c.function.name, c.function.arguments, { member, contextFor, subject, room, user, messageId, memory: memory !== null, timezone: tz, idempotencyKey: `${opts.idempotencyKey}-t${round}-${c.function.name}` });
-            if (steps) require('./how').cite(steps, c.function.name, result);
-            messages.push({ role: 'tool', tool_call_id: String(c.id || `call_${round}`).slice(0, 128), content: result });
+            const tool = await aiTools.runWithResult(c.function.name, c.function.arguments, { member, contextFor, subject, room, user, messageId, memory: memory !== null, timezone: tz, idempotencyKey: `${opts.idempotencyKey}-t${round}-${c.function.name}` });
+            if (steps) require('./how').cite(steps, c.function.name, tool.result);
+            messages.push({ role: 'tool', tool_call_id: String(c.id || `call_${round}`).slice(0, 128), content: tool.text });
         }
     }
     return null;
