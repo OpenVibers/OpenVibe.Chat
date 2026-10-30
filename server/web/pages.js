@@ -40,6 +40,7 @@ const { renderPage, contentSecurityPolicy, assetVersion, esc, SITE_NAME } = requ
 const { createSessionRoutes } = require('./session');
 const { createDiscoveryRoutes, homeJsonLd } = require('./discovery');
 const home = require('./home');
+const { pickBlock, pickRules, foldBlock } = require('./short');
 const sharedSeo = require('openvibe-shared/seo');
 const session = require('../auth/network-session');
 const historyStore = require('../chat/history-store');
@@ -274,6 +275,20 @@ function createWebRoutes({ config }) {
         // the hero and the full footer, are for people who are new here, and for search).
         const activity = await home.activity();
         const parts = home.sections(activity, { app: signedIn });
+        // On a phone the front page is one or two screens (the owner's short-pages rule, 2026-10-30): the sections
+        // after the room become one pick block (a row of chips, one at a time) and the parts a reader rarely needs
+        // become folds. Every section stays in the page for crawlers; a wider screen shows them all, with no chips.
+        // The panes keep the order the sections had, so a wide screen reads as it did; the first one is what a phone
+        // shows first.
+        const panes = [
+            { id: 'pane-streams', label: 'Stream chats', html: parts.streams },
+            { id: 'pane-servers', label: 'Servers', html: parts.servers },
+            { id: 'pane-rooms', label: 'Rooms', html: parts.rooms },
+            { id: 'pane-what', label: 'What Chat does', html: whatChatDoes(signedIn) },
+            { id: 'pane-how', label: 'How it works', html: parts.steps },
+        ].filter((pane) => pane.html);
+        const explore = pickBlock({ key: 'explore', label: 'Explore OpenVibe.Chat', head: 'Explore OpenVibe.Chat', panes });
+        const inlineStyles = [`@supports selector(:has(*)){@media (max-width:640px){${pickRules('explore', panes.map((pane) => pane.id))}}}`];
         const feedList = `<ol class="oc-feed${signedIn ? ' oc-room-feed' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${shown.map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>`;
         const appBody = () => `<section class="oc-room oc-global" aria-labelledby="oc-h">
 <header class="oc-room-head"><div class="oc-room-id"><h1 id="oc-h">Global chat</h1>
@@ -285,7 +300,8 @@ ${composer}
 </section>
 ${parts.vibe}
 ${parts.streams}
-${parts.places}`;
+${parts.servers}
+${parts.rooms}`;
         await page(req, res, 200, {
             actor, fullTitle: 'OpenVibe.Chat: global chat, servers, rooms and calls', path: '/', active: 'global', robots: 'index, follow', script: true,
             description: 'Chat with everyone on OpenVibe, start a server with text and voice channels, message friends and call them. Free and open source.',
@@ -306,13 +322,11 @@ ${error}
 ${feedList}
 ${composer}
 </section>
-${parts.streams}
-${parts.places}
-${whatChatDoes(signedIn)}
-${parts.steps}
-${parts.faq}
-${parts.more}`,
+${explore}
+${foldBlock({ id: 'faq', head: '<h2 id="oc-h-faq">Questions</h2>', html: parts.faq })}
+${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html: parts.more })}`,
             showcase: true,
+            inlineStyles,
         });
     });
 

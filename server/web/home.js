@@ -133,19 +133,23 @@ function streamsSection(a, app) {
 <ul class="oc-streams" role="list">${a.streams.map(item).join('')}</ul></section>`;
 }
 
-function placesSection(a, app) {
+/** The public servers and the public rooms, one part each: on a phone each is a chip of its own. */
+function serversSection(a, app) {
+    if (!a.servers.length) return '';
     if (app) {
-        return [
-            a.servers.length ? listSection('oc-h-servers', 'Public servers', '<a href="/servers">All</a>', a.servers.map((s) => row(`/s/${esc(s.slug)}`, s.name, ui.serverMark(s), s.official ? '<span class="oc-badge oc-badge-official">official</span>' : '', esc(s.description || plural(s.members, 'member', 'members'))))) : '',
-            a.rooms.length ? listSection('oc-h-rooms', 'Public rooms', '<a href="/rooms">All</a>', a.rooms.map((r) => row(`/r/${esc(r.slug)}`, r.name, ui.initials(r.name), '', `${esc(r.topic || plural(r.members, 'member', 'members'))}${r.last_message_at ? ` · last ${esc(ago(r.last_message_at))}` : ''}`))) : '',
-        ].join('\n');
+        return listSection('oc-h-servers', 'Public servers', '<a href="/servers">All</a>', a.servers.map((s) => row(`/s/${esc(s.slug)}`, s.name, ui.serverMark(s), s.official ? '<span class="oc-badge oc-badge-official">official</span>' : '', esc(s.description || plural(s.members, 'member', 'members')))));
     }
     const servers = a.servers.map((s) => `<li><a class="oc-stream" href="/s/${esc(s.slug)}"><span class="oc-stream-name"><strong>${esc(s.name)}</strong>${s.official ? ' <span class="oc-badge oc-badge-official">official</span>' : ''}</span><span class="oc-muted">${esc(s.description || plural(s.members, 'member', 'members'))}</span></a></li>`);
+    return `<section class="oc-home-sec" aria-labelledby="oc-h-servers"><div class="oc-home-head"><h2 id="oc-h-servers">Public servers</h2><a href="/servers">All servers</a></div><ul class="oc-streams" role="list">${servers.join('')}</ul></section>`;
+}
+
+function roomsSection(a, app) {
+    if (!a.rooms.length) return '';
+    if (app) {
+        return listSection('oc-h-rooms', 'Public rooms', '<a href="/rooms">All</a>', a.rooms.map((r) => row(`/r/${esc(r.slug)}`, r.name, ui.initials(r.name), '', `${esc(r.topic || plural(r.members, 'member', 'members'))}${r.last_message_at ? ` · last ${esc(ago(r.last_message_at))}` : ''}`)));
+    }
     const rooms = a.rooms.map((r) => `<li><a class="oc-stream" href="/r/${esc(r.slug)}"><span class="oc-stream-name"><strong>${esc(r.name)}</strong></span><span class="oc-muted">${esc(r.topic || plural(r.members, 'member', 'members'))}${r.last_message_at ? ` · last ${esc(ago(r.last_message_at))}` : ''}</span></a></li>`);
-    return [
-        servers.length ? `<section class="oc-home-sec" aria-labelledby="oc-h-servers"><div class="oc-home-head"><h2 id="oc-h-servers">Public servers</h2><a href="/servers">All servers</a></div><ul class="oc-streams" role="list">${servers.join('')}</ul></section>` : '',
-        rooms.length ? `<section class="oc-home-sec" aria-labelledby="oc-h-rooms"><div class="oc-home-head"><h2 id="oc-h-rooms">Public rooms</h2><a href="/rooms">All rooms</a></div><ul class="oc-streams" role="list">${rooms.join('')}</ul></section>` : '',
-    ].join('\n');
+    return `<section class="oc-home-sec" aria-labelledby="oc-h-rooms"><div class="oc-home-head"><h2 id="oc-h-rooms">Public rooms</h2><a href="/rooms">All rooms</a></div><ul class="oc-streams" role="list">${rooms.join('')}</ul></section>`;
 }
 
 /** Ask Vibe from the front page: the question opens a new Vibe chat with it in the box (never sent for you). */
@@ -168,8 +172,9 @@ function stepsSection() {
     return `<section class="oc-home-sec" aria-labelledby="oc-h-how"><h2 id="oc-h-how">How it works</h2><ol class="oc-steps">${steps.map(([t, d]) => `<li><h3>${esc(t)}</h3><p>${esc(d)}</p></li>`).join('')}</ol></section>`;
 }
 
+/** The questions: the heading sits in the fold that holds them, so the fold's summary names the part. */
 function faqSection() {
-    return `<section class="oc-home-sec" aria-labelledby="oc-h-faq"><h2 id="oc-h-faq">Questions</h2><div class="oc-faq">${FAQ.map((f) => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join('')}</div></section>`;
+    return `<section class="oc-home-sec" aria-labelledby="oc-h-faq"><div class="oc-faq">${FAQ.map((f) => `<details><summary>${esc(f.q)}</summary><p>${esc(f.a)}</p></details>`).join('')}</div></section>`;
 }
 
 function moreSection() {
@@ -179,12 +184,16 @@ function moreSection() {
         ['https://openvibe.pics', 'OpenVibe.Pics', 'Where the pictures you send in chat live.'],
         ['https://openvibe.games', 'OpenVibe.Games', 'Games to play with the people you chat with.'],
     ];
-    return `<section class="oc-home-sec" aria-labelledby="oc-h-more"><h2 id="oc-h-more">More on OpenVibe</h2><ul class="oc-more" role="list">${more.map(([href, name, text]) => `<li><a href="${href}/"><strong>${esc(name)}</strong><span>${esc(text)}</span></a></li>`).join('')}</ul></section>`;
+    return `<section class="oc-home-sec" aria-labelledby="oc-h-more"><ul class="oc-more" role="list">${more.map(([href, name, text]) => `<li><a href="${href}/"><strong>${esc(name)}</strong><span>${esc(text)}</span></a></li>`).join('')}</ul></section>`;
 }
 
 /** Everything around global chat: the numbers, Ask Vibe, then stream chats, servers and rooms, how it works, questions, more. */
 function sections(a, { app = false } = {}) {
-    return { stats: app ? '' : stats(a), vibe: vibeSection(app), streams: streamsSection(a, app), places: placesSection(a, app), steps: app ? '' : stepsSection(), faq: app ? '' : faqSection(), more: app ? '' : moreSection() };
+    return {
+        stats: app ? '' : stats(a), vibe: vibeSection(app), streams: streamsSection(a, app),
+        servers: serversSection(a, app), rooms: roomsSection(a, app),
+        steps: app ? '' : stepsSection(), faq: app ? '' : faqSection(), more: app ? '' : moreSection(),
+    };
 }
 
 /** The room's header line for someone signed in: how many people wrote this week. */
