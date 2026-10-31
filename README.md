@@ -32,6 +32,11 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   DMs (`dm.js`, `/api/dm/*`), chat history (`history-store.js`, `/api/chat/*`), TTS (`tts-engine.js`,
   `/api/tts/*`), 101soundboards and channel sounds (`/api/sounds*`), moderation utils and the word
   filter, the deploy-notice card. Changes are confined to where they touched Live's data.
+- **A channel room can be joined by its name** (2026-10-31): `join` takes `channel: '<username>'` next
+  to `channelUserId`, so a client that only knows the channel's name (the overlay page on
+  `openvibe.live`) sits in that channel's room — live or not — without a stream id. The name is
+  resolved to the channel's owner and cached for a minute. Naming a channel grants nothing: the
+  socket stays anonymous, exactly an anonymous viewer in that room.
 - **For bots on `/ws/chat`** (Maticus, 2026-10-26): a `!word` that is not a channel sound is sent to Live as
   `button:<word>` for a signed-in viewer, so it presses the channel robot's button of that name, and says nothing when
   there is none. A token in the socket's address (`?token=`) is never read; the socket gets a `system` frame with
