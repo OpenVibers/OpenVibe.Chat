@@ -28,7 +28,11 @@ const ctx = require('../live-context');
 const revocations = require('./revocations');
 
 const ROLE_RANK = { user: 0, streamer: 1, global_mod: 2, admin: 3 };
-const stats = { local: 0, live: 0, rejected: 0 };
+const DOCK_CLIENT_ID = 'companion';
+const DOCK_SCOPE = 'chat.read';
+const dockIssuer = () => `${String(config.networkUrl || '').replace(/\/+$/, '')}/dock`;
+const scopesOf = (claims) => String((claims && claims.scope) || '').split(/\s+/).filter(Boolean);
+const stats = { local: 0, dock: 0, live: 0, rejected: 0 };
 const _reasons = new Map(); // sha256(token) → 'invalid' for tokens refused here (bounded)
 const tokenKey = (t) => crypto.createHash('sha256').update(String(t)).digest('hex');
 
@@ -78,8 +82,12 @@ function refuse(token) {
     return null;
 }
 
-/** Resolve a browser/bot token to a chat user (a fresh object) or null. */
-async function authenticate(token) {
+/**
+ * Resolve a browser/bot token to a chat user (a fresh object) or null. `allowDock` opens the private
+ * Dock issuer (the browser extension) and requires `chat.read`; the caller decides whether the request
+ * path is a read (auth/auth.js). A Dock token never falls through to Live.
+ */
+async function authenticate(token, { allowDock = false } = {}) {
     if (!token) return null;
     const viaLive = async () => {
         stats.live++;
@@ -91,6 +99,21 @@ async function authenticate(token) {
     };
     if (String(token).startsWith('hbt_')) return await viaLive();
     const r = await verify(token);
+    // The extension's Dock token: private issuer, companion client, chat.read scope, and only on paths
+    // the request guard marks as reads. It is never sent to Live and never becomes a normal session.
+    if (!r.ok && r.reason === 'issuer' && allowDock && dockIssuerOf(token) === dockIssuer()) {
+        const d = await verify(token, undefined, { issuer: dockIssuer() });
+        if (!d.ok || d.claims.client_id !== DOCK_CLIENT_ID || !scopesOf(d.claims).includes(DOCK_SCOPE)) return refuse(token);
+        if (await revocations.isRevoked(d.claims)) return refuse(token);
+        const dockUser = await userFor(d.claims);
+        if (!dockUser) return refuse(token);
+        dockUser.auth_source = 'dock';
+        stats.dock++;
+        return dockUser;
+    }
+    // A token that names the Dock issuer but does not verify here is never sent to Live: its issuer is
+    // not the Network session issuer Live knows.
+    if (r.reason === 'signature' && dockIssuerOf(token) === dockIssuer()) return refuse(token);
     // Only a token signed by a key Network publishes is decided here; anything else (no key yet, not a JWT, another
     // signer) is Live's to judge.
     if (!r.ok) return ['signature', 'malformed', 'no_key'].includes(r.reason) ? await viaLive() : refuse(token);
@@ -100,6 +123,13 @@ async function authenticate(token) {
     if (!user) return await viaLive();
     stats.local++;
     return user;
+}
+
+/** The unverified issuer of a JWT, only to choose which issuer to verify against; null otherwise. */
+function dockIssuerOf(token) {
+    const parts = String(token || '').split('.');
+    if (parts.length !== 3) return null;
+    try { return b64json(parts[1]).iss || null; } catch { return null; }
 }
 
 /** A JWT's iat (seconds), read without verifying (the token was verified when it was accepted); null otherwise. */
