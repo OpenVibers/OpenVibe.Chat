@@ -74,6 +74,17 @@ that target a `user`; Chat sends them to that user's sockets and persists nothin
 `source_platform: 'news'` and `system` (boolean); it targets a `stream` and is never
 saved.
 
+The `overlay-alert` frame is the overlay alert feed: the typed moment a streamer's OBS overlay
+shows ("X followed", "X tipped 5 Vibes: message", "X subscribed", "X raided with 12 viewers",
+"Goal reached"). Its shape is closed — `kind` (`follow`, `tip`, `sub`, `raid`, `goal`), `id`
+(unique per moment, ≤ 160 characters of `A-Za-z0-9:._-`), `at` (a date-time), `who`
+(`{name, avatar}` or null), `amount` (`{value, unit}` with the unit `vibes`, `usd` or `viewers`,
+or null) and `text` (the tipper's words, ≤ 200 characters, or null) — and it targets the
+`channel` the moment belongs to. Chat moderates those words the way a chat line is moderated
+(the blocked-word filter censors them, the channel's own filters drop them) and broadcasts the
+frame to that channel's room. Nothing is persisted, nothing reaches the global room, and the
+frame carries no account, no email and no internals.
+
 Before Live repoints, the separate **OpenVibe.Contracts** repository must register
 `chat.event.publish`, `chat.moderation.write`, and `chat.cache.invalidate` and add them to
 `manifests/services/chat.json`. Network's `principal_grants` and `DEFAULT_GRANTS` must grant
