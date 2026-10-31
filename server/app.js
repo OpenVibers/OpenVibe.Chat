@@ -20,6 +20,7 @@ const db = require('./db/database');
 const { banExemptionToken, authenticateWs, requestUser } = require('./auth/auth');
 const { trustProxy } = require('./net/client-ip');
 const { createInternalIngress } = require('./chat/internal-ingress');
+const { isExtensionOrigin } = require('./auth/extension-origin');
 
 function normalizeOrigin(origin) {
     if (!origin || typeof origin !== 'string') return null;
@@ -193,7 +194,20 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     // refuses the others itself (server/inbox/routes.js).
     const openCors = cors({ origin: true, credentials: false, allowedHeaders: ['Content-Type', 'X-Visitor-Token', 'Authorization'] });
     const openPath = (p) => p.startsWith('/api/chat/widget/') || p === '/api/chat/feeds' || p.startsWith('/api/chat/feeds/');
-    app.use((req, res, next) => (openPath(req.path) ? openCors : allowlistedCors)(req, res, next));
+    // Extension pages get no CORS grant (no echoed Origin, no credentials) and are not refused for the
+    // origin alone. Only a Bearer may act there; auth/auth.js refuses the cookie separately.
+    const extensionCors = (req, res, next) => {
+        if (req.method === 'OPTIONS') {
+            res.statusCode = 204;
+            res.setHeader('Content-Length', '0');
+            return res.end();
+        }
+        return next();
+    };
+    app.use((req, res, next) => {
+        if (isExtensionOrigin(req.headers.origin)) return extensionCors(req, res, next);
+        return (openPath(req.path) ? openCors : allowlistedCors)(req, res, next);
+    });
     // A workspace room's incoming hooks check a signature over the raw body, so they read it before the JSON parser does.
     app.post('/api/chat/hooks/:id', express.raw({ type: () => true, limit: '64kb' }), require('./rooms/hooks').ingress);
     app.use(express.json({ limit: '1mb' }));

@@ -12,6 +12,7 @@
 
 const ctx = require('../live-context');
 const session = require('./network-session');
+const { isExtensionOrigin } = require('./extension-origin');
 
 /**
  * What an hbt_ API token may do over REST, by scope (Live's apiTokenAllows, verbatim).
@@ -44,6 +45,10 @@ function extractTokenFrom(req) {
     if (authHeader && authHeader.startsWith('Bearer ')) {
         return { token: authHeader.slice(7), from: 'header' };
     }
+
+    // An extension page never authenticates with a cookie: only its Bearer counts. The page has host
+    // permissions, so the request works without CORS; a stray ov_token must not act for it.
+    if (isExtensionOrigin(req.headers.origin)) return { token: null, from: null };
 
     // The Network session cookie is shared with the browser.
     if (req.cookies) {
@@ -117,9 +122,23 @@ async function authenticateWs(token) {
 function requestUser(req) {
     if (!req._ovAuthUser) {
         const token = extractToken(req);
-        req._ovAuthUser = token ? session.authenticate(token).catch(() => null) : Promise.resolve(null);
+        req._ovAuthUser = token ? session.authenticate(token, { allowDock: isDmPath(req) }).catch(() => null) : Promise.resolve(null);
     }
     return req._ovAuthUser;
+}
+
+/** The DM API path (the only place a Dock token is allowed to go in Chat). */
+function isDmPath(req) {
+    const path = String(req.originalUrl || req.url || '').split('?')[0];
+    return path === '/api/dm' || path.startsWith('/api/dm/');
+}
+
+/** Reads only: DM GET/HEAD, plus marking a conversation read. Sending/creating/renaming are not allowed. */
+function isDmRead(req) {
+    if (!isDmPath(req)) return false;
+    if (req.method === 'GET' || req.method === 'HEAD') return true;
+    const path = String(req.originalUrl || req.url || '').split('?')[0];
+    return req.method === 'POST' && /^\/api\/dm\/conversations\/[^/]+\/read$/.test(path);
 }
 
 /**
@@ -152,8 +171,11 @@ async function requireAuth(req, res, next) {
     if (user.is_banned) {
         return res.status(403).json({ error: 'Account is banned', reason: user.ban_reason });
     }
+    if (user.auth_source === 'dock' && !isDmRead(req)) {
+        return res.status(403).json({ error: 'This extension can only read messages.' });
+    }
     req.user = user;
-    req.authSource = 'network';
+    req.authSource = user.auth_source === 'dock' ? 'dock' : 'network';
     next();
 }
 
@@ -172,9 +194,9 @@ async function optionalAuth(req, res, next) {
                     req.authSource = 'api_token';
                     req.tokenScopes = user.scopes || [];
                 }
-            } else {
+            } else if (user.auth_source !== 'dock' || isDmRead(req)) {
                 req.user = user;
-                req.authSource = 'network';
+                req.authSource = user.auth_source === 'dock' ? 'dock' : 'network';
             }
         }
     }
@@ -194,6 +216,7 @@ async function requireAdmin(req, res, next) {
 }
 
 module.exports = {
+    isDmPath, isDmRead,
     apiTokenAllows,
     extractToken,
     requestUser,
