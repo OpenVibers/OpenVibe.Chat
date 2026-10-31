@@ -270,8 +270,10 @@ body.oc-app-body { overflow: hidden; }
   .vb-how-sources a { display: inline-flex; align-items: center; min-height: 44px; }
 }
 @media (max-width: 520px) {
-  .vb-suggest { grid-template-columns: minmax(0, 1fr); }
-  .vb-suggest li:nth-child(n+3) { display: none; }
+  /* Every suggestion stays; the row scrolls sideways rather than hiding the later chips. */
+  .vb-suggest { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; margin: 0 -16px; padding: 0 16px 4px; }
+  .vb-suggest::-webkit-scrollbar { display: none; }
+  .vb-suggest > li { flex: 0 0 84%; min-width: 0; scroll-snap-align: start; }
   .vb-hello { justify-content: flex-end; padding-bottom: 4px; }
   .vb-sub { font-size: .92rem; margin-bottom: 16px; }
 }
@@ -279,7 +281,6 @@ body.oc-app-body { overflow: hidden; }
 @media (max-width: 520px) and (max-height: 700px) {
   .vb-hello .vb-mark { display: none; }
   .vb-hello h1 { font-size: 1.35rem; }
-  .vb-suggest li:nth-child(n+2) { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .vb-rail { transition: none; } }
 
