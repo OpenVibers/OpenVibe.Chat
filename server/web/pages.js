@@ -40,7 +40,7 @@ const { renderPage, contentSecurityPolicy, assetVersion, esc, SITE_NAME } = requ
 const { createSessionRoutes } = require('./session');
 const { createDiscoveryRoutes, homeJsonLd } = require('./discovery');
 const home = require('./home');
-const { pickBlock, pickRules, foldBlock } = require('./short');
+const { pickBlock, foldBlock } = require('./short');
 const sharedSeo = require('openvibe-shared/seo');
 const session = require('../auth/network-session');
 const historyStore = require('../chat/history-store');
@@ -288,7 +288,6 @@ function createWebRoutes({ config }) {
             { id: 'pane-how', label: 'How it works', html: parts.steps },
         ].filter((pane) => pane.html);
         const explore = pickBlock({ key: 'explore', label: 'Explore OpenVibe.Chat', head: 'Explore OpenVibe.Chat', panes });
-        const inlineStyles = [`@supports selector(:has(*)){@media (max-width:640px){${pickRules('explore', panes.map((pane) => pane.id))}}}`];
         const feedList = `<ol class="oc-feed${signedIn ? ' oc-room-feed' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${shown.map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>`;
         const appBody = () => `<section class="oc-room oc-global" aria-labelledby="oc-h">
 <header class="oc-room-head"><div class="oc-room-id"><h1 id="oc-h">Global chat</h1>
@@ -326,7 +325,6 @@ ${explore}
 ${foldBlock({ id: 'faq', head: '<h2 id="oc-h-faq">Questions</h2>', html: parts.faq })}
 ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html: parts.more })}`,
             showcase: true,
-            inlineStyles,
         });
     });
 

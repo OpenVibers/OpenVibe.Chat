@@ -5,9 +5,7 @@
  *   pickBlock()  several blocks of the same kind, one at a time on a phone, picked with a row of chips. Radio
  *                inputs and :has(), no script: every block stays in the page for crawlers, and a wider screen (or a
  *                browser without :has()) shows them all and no chips.
- *   foldBlock()  a part a reader rarely needs, closed on a phone and open where there is room. The page's own markup
- *                keeps it open, so a browser without the script shows it as before; the script closes it on a narrow
- *                screen and remembers the reader's choice.
+ *   foldBlock()  a part a reader rarely needs, in a fold that starts open on every screen: content is never hidden.
  *
  * The CSS for both lives in public/web/chat.css; the rule that shows the picked block is written for the page,
  * because there is one per block.
@@ -24,11 +22,9 @@ function pickBlock({ key, label, head = '', panes }) {
     // A pane with nothing to show is left out, so the chips and the rules that show them match the page.
     panes = (panes || []).filter((p) => p.html);
     if (!panes.length) return '';
-    const chips = panes.map((p, i) => `<input type="radio" name="pick-${esc(key)}" id="pk-${esc(key)}-${esc(p.id)}" value="${esc(p.id)}"${i === 0 ? ' checked' : ''}><label for="pk-${esc(key)}-${esc(p.id)}">${esc(p.label)}</label>`).join('');
-    // The pane carries its own id, so a link that points into it (a heading the page links to) still opens it on a
-    // phone: the CSS shows the pane a link points at.
-    const body = panes.map((p) => `<div class="pick-pane" id="${esc(p.id)}">${p.html}</div>`).join('');
-    return `<div class="pick" id="pick-${esc(key)}"><div class="pick-bar"><div class="pick-head"><h2>${esc(head || label)}</h2></div><div class="pick-row" role="radiogroup" aria-label="${esc(label)}">${chips}</div></div><div class="pick-body">${body}</div></div>`;
+    // Every block is on the page on every screen (the owner's rule, 2026-10-31); the chip row that picked one at a
+    // time on a phone is gone. The pane keeps its id, so a link into it still lands.
+    return panes.map((p) => `<div class="pick-pane" id="${esc(p.id)}">${p.html}</div>`).join('');
 }
 
 /** The rule that shows the picked block of a pick block: one per block, so the CSS is written for the page. */
@@ -47,7 +43,7 @@ function pickRules(key, ids) {
  *   foldBlock({ id, head, html })
  */
 function foldBlock({ id, head, html }) {
-    return `<details class="oc-fold oc-fold-block" id="${esc(id)}" open><summary>${head}<span class="oc-fold-hint">tap to open</span></summary>${html}</details>${foldScript(id)}`;
+    return `<details class="oc-fold oc-fold-block" id="${esc(id)}" open><summary>${head}</summary>${html}</details>`;
 }
 
 /** The script a fold carries: closed on a phone unless the reader opened it before, and it remembers that. */
