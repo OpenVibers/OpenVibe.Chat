@@ -423,8 +423,8 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-tp-succeeded { color: var(--oc-ok); border-color: color-mix(in srgb, var(--oc-ok) 45%, transparent); background: color-mix(in srgb, var(--oc-ok) 10%, transparent); }
 .oc-tp-failed { color: var(--oc-red); border-color: color-mix(in srgb, var(--oc-red) 45%, transparent); background: color-mix(in srgb, var(--oc-red) 10%, transparent); }
 .oc-tp-running { color: var(--oc-accent); border-color: color-mix(in srgb, var(--oc-accent) 45%, transparent); }
-.oc-tp-running .oc-i { animation: oc-spin 1s linear infinite; }
-@keyframes oc-spin { to { transform: rotate(360deg); } }
+.oc-tp-running .oc-i { animation: oc-breathe 1.2s ease-in-out infinite; }   /* running: it breathes, never spins */
+@keyframes oc-breathe { 50% { opacity: .35; transform: scale(.82); } }
 @media (prefers-reduced-motion: reduce) { .oc-tp-running .oc-i { animation: none; } }
 .oc-tp-says { margin: 0; }
 .oc-tp-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 6px 0 0; }
