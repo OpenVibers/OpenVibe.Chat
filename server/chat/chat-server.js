@@ -78,7 +78,13 @@ const {
     containsRegexSlur: _modContainsRegexSlur,
     containsConfiguredSlur: _modContainsConfiguredSlur,
     compileRegexList: _modCompileRegexList,
+    parseSlurFilterTerms: _modParseSlurFilterTerms,
+    parseRegexLines: _modParseRegexLines,
 } = require('./moderation-utils');
+
+// A channel named on join (the overlay page's `channel: '<username>'`) → its owner, for a minute.
+const CHANNEL_NAME_TTL_MS = 60 * 1000;
+const _channelByName = new Map();
 
 class ChatServer {
     constructor() {
@@ -503,7 +509,15 @@ class ChatServer {
                 await this._applyJoinToken(client, msg);
                 const oldStream = client.streamId;
                 const nextStreamId = parseInt(msg.streamId || msg.stream_id) || null;
-                const requestedChannel = parseInt(msg.channelUserId || msg.channel_user_id) || null;
+                let requestedChannel = parseInt(msg.channelUserId || msg.channel_user_id) || null;
+                // A room can also be named by its channel's username: the overlay page joins with
+                // `channel: '<username>'` (it may be offline, so it has no stream id to join with).
+                // The same channel room as `channelUserId` — with no more rights than an anonymous
+                // viewer in that room has.
+                if (!requestedChannel && typeof msg.channel === 'string') {
+                    const named = String(msg.channel).trim();
+                    if (/^[A-Za-z0-9._-]{1,80}$/.test(named)) requestedChannel = await this._channelOwnerByName(named);
+                }
                 // Load what this room's messages will read (stream, channel policy, the viewer's
                 // follows and decor, the channel's latest stream) before the socket is moved.
                 await ctx.warm({ user: client.user, streamId: nextStreamId, channelUserId: requestedChannel, ip: client.ip }).catch(() => {});
@@ -805,19 +819,28 @@ class ChatServer {
     }
 
     _parseSlurFilterTerms(rawTerms) {
-        return String(rawTerms || '')
-            .split(/[\n,]/)
-            .map((t) => t.trim().toLowerCase())
-            .filter(Boolean)
-            .slice(0, 200);
+        return _modParseSlurFilterTerms(rawTerms);
+    }
+    _parseRegexLines(rawRegexes) {
+        return _modParseRegexLines(rawRegexes);
     }
 
-    _parseRegexLines(rawRegexes) {
-        return String(rawRegexes || '')
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter(Boolean)
-            .slice(0, 300);
+    /**
+     * The owner of a channel named by its username (the overlay page's join: `channel: '<username>'`).
+     * The answer is cached for a minute — including "no such channel" — so a socket cannot turn
+     * every join into a Live lookup.
+     */
+    async _channelOwnerByName(name) {
+        const hit = _channelByName.get(name);
+        if (hit && Date.now() - hit.at < CHANNEL_NAME_TTL_MS) return hit.id;
+        let id = null;
+        try {
+            const owner = await ctx.ensureUserByUsername(name);
+            if (owner && owner.id) id = owner.id;
+        } catch (e) { console.warn('[Chat] channel name not resolved:', e.message); }
+        if (_channelByName.size > 500) _channelByName.clear();
+        _channelByName.set(name, { id, at: Date.now() });
+        return id;
     }
 
     // Normalization and matching are delegated to moderation-utils.js (shared module).

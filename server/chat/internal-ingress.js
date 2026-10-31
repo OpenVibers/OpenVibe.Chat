@@ -178,7 +178,35 @@ async function deliverMessage(chatServer, b, result) {
 
 const TARGETS = new Set(['stream', 'channel', 'owner-streams', 'global', 'all', 'user']);
 const FRAMES = new Set(['chat', 'system', 'donation', 'goal-update', 'goal-reached', 'update', 'voice-channels', 'alert', 'channel-sound', 'server_restart',
-    'media_queue_update', 'media_now_playing', 'redemption', 'vibe-coding', 'vc-call-invite', 'vc-call-response']);
+    'media_queue_update', 'media_now_playing', 'redemption', 'vibe-coding', 'vc-call-invite', 'vc-call-response', 'overlay-alert']);
+// The overlay alert feed (Live's server/overlay/overlay-alerts.js): one moment per message, in the
+// streamer's own room. The shape is closed — a name, an avatar, an amount and a tipper's words, and
+// nothing else: no account, no email, no internals.
+const OVERLAY_KINDS = ['follow', 'tip', 'sub', 'raid', 'goal'];
+const OVERLAY_UNITS = ['vibes', 'usd', 'viewers'];
+const OVERLAY_FRAME = ['type', 'kind', 'id', 'at', 'who', 'amount', 'text'];
+function validateOverlayFrame(f, target) {
+    fields(f, OVERLAY_FRAME);
+    if (!OVERLAY_KINDS.includes(f.kind)) bad('Invalid overlay alert');
+    if (!str(f.id, 160) || !/^[A-Za-z0-9:._-]+$/.test(f.id)) bad('Invalid overlay alert id');
+    if (!str(f.at, 40) || !Number.isFinite(Date.parse(f.at))) bad('Invalid overlay alert time');
+    if (f.who != null) {
+        if (!obj(f.who)) bad('Invalid overlay alert person');
+        fields(f.who, ['name', 'avatar']);
+        if (!str(f.who.name, 120)) bad('Invalid overlay alert person');
+        // An avatar is a picture, not a script: only a real image URL (or a path on this site).
+        if (f.who.avatar != null && (!str(f.who.avatar, 500) || !/^(?:https?:\/\/|\/)/i.test(f.who.avatar))) bad('Invalid overlay alert avatar');
+    }
+    if (f.amount != null) {
+        if (!obj(f.amount)) bad('Invalid overlay alert amount');
+        fields(f.amount, ['value', 'unit']);
+        if (!Number.isFinite(f.amount.value) || f.amount.value < 0) bad('Invalid overlay alert amount');
+        if (!OVERLAY_UNITS.includes(f.amount.unit)) bad('Invalid overlay alert unit');
+    }
+    if (f.text != null && !str(f.text, 200)) bad('Invalid overlay alert text');
+    // The room is the channel's own: the overlay feed never reaches a global room or another channel.
+    if (target.kind !== 'channel' || !int(target.id)) bad('Overlay alert target must be a channel');
+}
 // Transient call frames for one user's sockets; nothing is persisted.
 const CALL_FRAME = ['type', 'channelId', 'channelName', 'fromUserId', 'fromUsername', 'fromDisplayName', 'fromAvatarUrl', 'createdAt'];
 function validateCallFrame(f) {
@@ -203,6 +231,7 @@ function validateEvent(b) {
         if (b.target.kind !== 'stream') bad('News target must be a stream');
     }
     if (b.frame.type === 'alert' && (!int(b.frame.streamerId) || !optionalId(b.frame.streamId) || !['goal', 'donation'].includes(b.frame.kind))) bad('Invalid alert');
+    if (b.frame.type === 'overlay-alert') validateOverlayFrame(b.frame, b.target);
     if (b.frame.type === 'voice-channels' && (!Array.isArray(b.frame.channels) || b.frame.channels.length > 128)) bad('Invalid voice channels');
     if (b.frame.type === 'channel-sound' && (!int(b.frame.streamId) || !str(b.frame.command, 120) || (b.frame.userId != null && !int(b.frame.userId)) || (b.frame.anonId != null && !str(b.frame.anonId, 80)) || (b.frame.args != null && (!Array.isArray(b.frame.args) || b.frame.args.length > 20 || b.frame.args.some((a) => !str(a, 120)))) || (b.frame.relay != null && (!obj(b.frame.relay) || !str(b.frame.relay.username, 120))))) bad('Invalid channel sound');
     if (b.frame.type === 'alert' && (b.target.kind !== 'channel' || b.target.id !== b.frame.streamerId)) bad('Alert target must be its channel owner');
@@ -222,6 +251,8 @@ async function deliverEvent(chatServer, b) {
     const { kind, id } = b.target;
     const f = b.frame;
     if (f.type === 'alert') return require('./alert-sounds').playAlertSound(chatServer, f.streamerId, f.streamId || null, f.kind);
+    // The overlay alert feed: the streamer's own room, with the tipper's text moderated (chat/overlay-alerts.js).
+    if (f.type === 'overlay-alert') return require('./overlay-alerts').deliver(chatServer, f, id);
     if (f.type === 'channel-sound') {
         const stream = await ctx.ensureStream(f.streamId);
         if (!stream) missing('Stream not found');

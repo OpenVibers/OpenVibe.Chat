@@ -95,6 +95,29 @@ for (const cat of CORE_SLUR_CATEGORIES) {
 // ── Normalization helpers ────────────────────────────────────────────────────
 
 /**
+ * The channel's configured slur-filter terms: one per line or comma, lowercased, at most 200.
+ * (chat-server.js reads them the same way; the overlay feed reads them here.)
+ */
+function parseSlurFilterTerms(rawTerms) {
+    return String(rawTerms || '')
+        .split(/[\n,]/)
+        .map((t) => t.trim().toLowerCase())
+        .filter(Boolean)
+        .slice(0, 200);
+}
+
+/**
+ * The channel's configured slur-filter regexes: one per line, at most 300.
+ */
+function parseRegexLines(rawRegexes) {
+    return String(rawRegexes || '')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .slice(0, 300);
+}
+
+/**
  * Heavy normalization: strip everything to just unambiguous letters.
  * Used for configured-term substring matching where inter-word boundaries
  * are not needed.
@@ -337,6 +360,8 @@ module.exports = {
     CORE_SLUR_CATEGORIES,
     FRIENDLY_FILTER_CATEGORIES,
     friendlyFilterCategory,
+    parseSlurFilterTerms,
+    parseRegexLines,
     normalizeSlurText,
     normalizeSlurPatternText,
     containsCoreSlur,
