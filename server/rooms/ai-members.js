@@ -414,6 +414,14 @@ async function afterPost(room, message, user, deps = {}) {
             const note = vibeMemory.fromRequest(message.message);
             if (note && (await vibeMemory.add(user, note, { source: 'vibe', roomId: room.id }).catch(() => ({}))).note && steps) require('./how').step(steps, 'remember');
         }
+        // A plain "remind me …" is set even when the model only promised it (small models often do); the answer says so.
+        if (vibe && text && Number(room.owner_id) === Number(user.id) && !called.has('set_reminder')) {
+            const words = require('./vibe-reminders').fromRequest(message.message);
+            if (words) {
+                const set = await require('./vibe-reminders').create(user.subject_id || null, { text: words, timezone: deps.timezone || null }).catch(() => ({}));
+                if (set && set.reminder) text = `${text}\n\n⏰ Reminder set: **${set.reminder.title}**, ${String(set.reminder.when).replace(/^./, (c) => c.toLowerCase())}. Snooze or stop it on [openvibe.today](https://openvibe.today/me#reminders).`;
+            }
+        }
         if (!text) {
             const out = await aiClient.structured('chat.member.reply', {
                 ai_name: member.name, persona: member.persona || '', room: String(room.name || room.slug).slice(0, 120),

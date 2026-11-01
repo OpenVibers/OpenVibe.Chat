@@ -21,6 +21,9 @@
  *   queue_status      in a workspace room: what is queued, running and recently done
  *   remember / forget Vibe in a person's own chat with it, while their memory is on (server/rooms/vibe-memory.js):
  *                     keep a short note across their chats, or delete one by its id
+ *   set_reminder      Vibe in a person's own chat: a reminder on OpenVibe.Today from their own words ("stretch every 2
+ *                     hours from 9 to 5"), sent to their bell and push on every site (server/rooms/vibe-reminders.js);
+ *                     my_reminders lists them and stop_reminder stops one
  *   set_up_agent      Vibe in a person's own chat: one of their OpenVibe Agents for recurring work, daily or weekly, once
  *                     they agreed (server/rooms/vibe-agents.js); my_agents lists the ones they have
  *
@@ -85,6 +88,11 @@ const SET_UP_AGENT = fn('set_up_agent', 'Set up recurring work for this person a
         time_utc: { type: 'string', description: 'When it runs, HH:MM in UTC' },
         weekday: { type: 'integer', minimum: 0, maximum: 6, description: 'For weekly: 0 Sunday to 6 Saturday' },
     }, ['name', 'instructions', 'schedule', 'time_utc']);
+const SET_REMINDER = fn('set_reminder', 'Set a reminder for this person on OpenVibe.Today, from what they said: what to remind them of and when, in plain words ("stretch every 2 hours from 9 to 5", "take my meds every day at 9am and 9pm", "call mom on Sunday at 6pm", "check the oven in 20 minutes", "pay rent on the 1st of every month"). It arrives in their bell and as a push notification on every OpenVibe site. Never say you will remind them without calling this. If it answers with an error asking when, ask them.',
+    { text: { type: 'string', description: 'What and when, in their words, without "remind me to": "stretch every 2 hours from 9 to 5"' } }, ['text']);
+const MY_REMINDERS = fn('my_reminders', 'This person\'s active reminders on OpenVibe.Today: each one\'s id, words, when it fires (in words) and its next time.');
+const STOP_REMINDER = fn('stop_reminder', 'Stop one of this person\'s reminders, by its id (rem_…) from my_reminders, when they ask to cancel or stop it.',
+    { id: { type: 'string', description: 'The reminder\'s id, rem_…' } }, ['id']);
 const MY_AGENTS = fn('my_agents', 'The OpenVibe Agents this person has: each one\'s name, when it runs, whether it is paused, its next run and its page.');
 const QUEUE_STATUS = fn('queue_status', 'What is on this room\'s work queue: what is waiting, being worked on, and recently done or stuck, with who asked.');
 
@@ -100,7 +108,7 @@ const definitions = (member, room = null, { memory = false } = {}) => [
     ...(isVibe(member) ? [WEB] : []),
     ...(isWorkspace(room) ? [QUEUE, QUEUE_STATUS] : []),
     ...(hasMemory(member, room, memory) ? [REMEMBER, FORGET] : []),
-    ...(ownChat(member, room) ? [SET_UP_AGENT, MY_AGENTS] : []),
+    ...(ownChat(member, room) ? [SET_UP_AGENT, MY_AGENTS, SET_REMINDER, MY_REMINDERS, STOP_REMINDER] : []),
 ];
 
 const clip = (o) => { const s = typeof o === 'string' ? o : JSON.stringify(o); return s.length > RESULT_MAX ? `${s.slice(0, RESULT_MAX - 1)}…` : s; };
@@ -392,8 +400,18 @@ async function setUpAgent(args, ctx) {
 async function myAgents(_args, ctx) {
     return await require('./vibe-agents').list(subjectOf(ctx), { fetchImpl: ctx.fetchImpl });
 }
+// Reminders on OpenVibe.Today (plan L48): in the person's own time zone, the one their chat already knows.
+async function setReminder(args, ctx) {
+    return await require('./vibe-reminders').create(subjectOf(ctx), { text: args.text, timezone: ctx.timezone }, { fetchImpl: ctx.fetchImpl });
+}
+async function myReminders(_args, ctx) {
+    return await require('./vibe-reminders').list(subjectOf(ctx), { fetchImpl: ctx.fetchImpl });
+}
+async function stopReminder(args, ctx) {
+    return await require('./vibe-reminders').stop(subjectOf(ctx), args.id, { fetchImpl: ctx.fetchImpl });
+}
 
-const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus, remember, forget, set_up_agent: setUpAgent, my_agents: myAgents };
+const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus, remember, forget, set_up_agent: setUpAgent, my_agents: myAgents , set_reminder: setReminder, my_reminders: myReminders, stop_reminder: stopReminder };
 
 /**
  * Runs one tool call and returns both what the model reads (the JSON clipped to RESULT_MAX) and the whole result, so
@@ -404,7 +422,7 @@ async function runWithResult(name, raw, ctx = {}) {
     if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food')) || (name === 'web_search' && !isVibe(ctx.member))
         || ((name === 'queue_task' || name === 'queue_status') && !isWorkspace(ctx.room))
         || ((name === 'remember' || name === 'forget') && !(hasMemory(ctx.member, ctx.room, ctx.memory) && ctx.user))
-        || ((name === 'set_up_agent' || name === 'my_agents') && !(ownChat(ctx.member, ctx.room) && ctx.user))) {
+        || (['set_up_agent', 'my_agents', 'set_reminder', 'my_reminders', 'stop_reminder'].includes(name) && !(ownChat(ctx.member, ctx.room) && ctx.user))) {
         const error = { error: `no tool called ${String(name).slice(0, 64)}` };
         return { text: clip(error), result: error };
     }
