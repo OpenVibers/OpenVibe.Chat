@@ -257,6 +257,7 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     const limits = require('./net/actor-limits').limits.attach(metrics.registry);
     app.use('/api/chat', limits.identify, limits.reads('chat.read'));
     app.use('/api/dm', limits.identify, limits.reads('chat.dm.read'));
+    app.use('/api/vibe', limits.identify, limits.reads('chat.vibe.read'));
     app.use('/api/tts', limits.identify, limits.reads('chat.tts.read', { skip: (req) => req.path.startsWith('/audio/') }));
     app.use('/api/sounds', limits.identify, limits.reads('chat.sounds.read', { skip: (req) => req.path.startsWith('/file/') }));
     app.use('/api/emotes', limits.identify, limits.reads('chat.emotes.read', { skip: (req) => req.path.startsWith('/file/') }));
@@ -281,6 +282,8 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     app.use('/api/chat/ai', require('./chat/ai-routes'));
     app.use('/api/chat', require('./chat/routes'));
     app.use('/api/dm', require('./chat/dm-routes'));
+    // Vibe from any OpenVibe site (the Dock, plan L48 V2): ask, and read the answer, with the person's own token.
+    app.use('/api/vibe', require('./rooms/vibe-api'));
     app.use('/api/tts', require('./chat/tts-routes'));
     app.use('/api/sounds', require('./chat/sounds-routes'));
     // Custom emotes (Live's /api/emotes paths, plan T3): bytes go to OpenVibe.Media, rows are Chat's.
