@@ -13,9 +13,10 @@
 // keep what it recorded.
 //
 // Chat keeps the part that is chat:
-//   • Consecutive deploys fold into ONE stored message: while the newest chat row in ANY room is a
-//     deploy notice (nobody has spoken since) and its first deploy is under 3 hours old, that row is
-//     updated in place.
+//   • Consecutive deploys fold into ONE stored message: while no person has spoken in ANY room since
+//     the card and its first deploy is under 3 hours old, that row is updated in place. System rows
+//     (go-live announcements, rundown lines, goal notices) may land between the deploys and do not
+//     break the fold; only a line an actual person wrote does. The card stays at its row id.
 //   • The row stores data, not prose: metadata { kind: 'deploy', commits[], deploys, first_at,
 //     updated_at }. Clients render times from ISO timestamps, so they are always right.
 //   • The live broadcast carries the row id; clients replace the card with that id instead of
@@ -49,24 +50,47 @@ const cleanCommits = (commits) => (Array.isArray(commits) ? commits : []).filter
 const plainText = (meta) => `🚀 ${meta.commits.length} update${meta.commits.length === 1 ? '' : 's'} shipped: ${meta.commits.slice(0, 3).map(c => c.subject).join(' · ')}${meta.commits.length > 3 ? ` · and ${meta.commits.length - 3} more` : ''}`;
 
 /**
- * Insert a notice, or fold into the newest row when that row is itself a recent deploy notice.
- * "Newest" is across EVERY room: the global feed shows stream and channel messages too, so a card
- * that kept folding while people chatted in a stream ended up with a time range running past the
- * messages under it. Anyone speaking anywhere since the last card starts a new card.
+ * The recent deploy card to fold into, or null when a person has spoken since it. The card is the
+ * newest row with metadata kind 'deploy' above the newest row a person wrote (user_id, anon_id or
+ * a relayed source_platform). System notices — go-live announcements, the rundown, goal lines —
+ * carry no author and the deploy cards themselves are system rows, so they do not hide it.
+ * Live's AI bots post with source_platform 'ai' and are not people either.
+ */
+async function foldTarget(db, nowMs) {
+    const person = await db.get(`SELECT id FROM chat_messages
+        WHERE is_deleted = 0 AND message_type <> 'system'
+          AND (user_id IS NOT NULL OR anon_id IS NOT NULL
+               OR (message_type = 'chat' AND COALESCE(source_platform, '') <> 'ai')
+               OR (source_platform IS NOT NULL AND source_platform <> 'ai'))
+        ORDER BY id DESC LIMIT 1`);
+    const floor = person ? Number(person.id) : 0;
+    const row = await db.get(`SELECT id, metadata FROM chat_messages
+        WHERE is_deleted = 0 AND message_type = 'system' AND id > ? AND metadata LIKE ?
+        ORDER BY id DESC LIMIT 1`, [floor, '%"kind":"deploy"%']);
+    if (!row || !row.metadata) return null;
+    try {
+        const meta = JSON.parse(row.metadata);
+        if (meta && meta.kind === 'deploy' && nowMs - Date.parse(meta.first_at) < FOLD_WINDOW_MS) return { id: row.id, meta };
+    } catch { /* not ours */ }
+    return null;
+}
+
+/**
+ * Insert a notice, or fold into the newest recent deploy card when no person has spoken since it.
+ * The card is chosen across EVERY room: the global feed shows stream and channel messages too, so a
+ * card that kept folding while people chatted in a stream ended up with a time range running past
+ * the messages under it. A person speaking anywhere since the card starts a new one; system notices
+ * do not.
  */
 async function persist(db, commits) {
     const nowIso = new Date().toISOString();
-    const newest = await db.get('SELECT id, message_type, metadata FROM chat_messages WHERE is_deleted = 0 ORDER BY id DESC LIMIT 1');
-    let prev = null;
-    if (newest && newest.message_type === 'system' && newest.metadata) {
-        try { const m = JSON.parse(newest.metadata); if (m && m.kind === 'deploy' && Date.now() - Date.parse(m.first_at) < FOLD_WINDOW_MS) prev = m; } catch { /* not ours */ }
-    }
-    if (prev) {
+    const target = await foldTarget(db, Date.now());
+    if (target) {
         const seen = new Set(commits.map(c => c.hash));
-        const merged = commits.concat((prev.commits || []).filter(c => !seen.has(c.hash))).slice(0, MAX_COMMITS);
-        const meta = { kind: 'deploy', commits: merged, deploys: (prev.deploys || 1) + 1, first_at: prev.first_at, updated_at: nowIso };
-        await db.run('UPDATE chat_messages SET message = ?, metadata = ? WHERE id = ?', [plainText(meta), JSON.stringify(meta), newest.id]);
-        return { id: newest.id, meta, folded: true };
+        const merged = commits.concat((target.meta.commits || []).filter(c => !seen.has(c.hash))).slice(0, MAX_COMMITS);
+        const meta = { kind: 'deploy', commits: merged, deploys: (target.meta.deploys || 1) + 1, first_at: target.meta.first_at, updated_at: nowIso };
+        await db.run('UPDATE chat_messages SET message = ?, metadata = ? WHERE id = ?', [plainText(meta), JSON.stringify(meta), target.id]);
+        return { id: target.id, meta, folded: true };
     }
     const meta = { kind: 'deploy', commits: commits.slice(0, MAX_COMMITS), deploys: 1, first_at: nowIso, updated_at: nowIso };
     const res = await db.saveChatMessage({ stream_id: null, user_id: null, anon_id: null, username: 'OpenVibe.Live', message: plainText(meta), message_type: 'system', is_global: true, metadata: meta });

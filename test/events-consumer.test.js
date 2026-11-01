@@ -105,6 +105,12 @@ function deliver(event, { secret = SECRET, now = Date.now(), headers = {}, strip
 const cards = async () => (await h.db.all("SELECT id, metadata FROM chat_messages WHERE message_type = 'system' AND metadata LIKE '%\"kind\":\"deploy\"%' ORDER BY id")).map((r) => ({ id: r.id, ...JSON.parse(r.metadata) }));
 const card = async (id) => (await cards()).find((c) => c.id === id);
 const speak = async (text) => await h.db.saveChatMessage({ stream_id: streamId, user_id: viewer.id, username: viewer.username, message: text, message_type: 'chat', is_global: false });
+// Live's go-live line (server/streaming/live-events.js postLiveLink): a system row with no person behind it.
+const goLive = async () => await h.db.saveChatMessage({
+    stream_id: streamId, channel_user_id: streamer.id, user_id: null, username: 'OpenVibe.Live',
+    message: '🔴 Streamer is live. Share the stream: https://openvibe.live/@streamer',
+    message_type: 'system', is_global: false, metadata: { kind: 'live_link', url: 'https://openvibe.live/@streamer' },
+});
 const releaseRow = async (head) => await h.db.get('SELECT * FROM deploy_releases WHERE head = ?', [head]);
 
 t('boot with the consumer on and a stub Events', async () => {
@@ -249,6 +255,32 @@ t('folding as before: the next deploy folds into the last card; a stream message
     assert.notStrictEqual(next, first);
     assert.strictEqual((await card(next)).deploys, 1);
     assert.strictEqual((await card(first)).deploys, 3, 'the old card is left as it was');
+});
+
+t('folding crosses system notices: a go-live between deploys folds; a person or 3 hours starts a new card', async () => {
+    await speak('a person after the last card');
+    let r = await deliver(release([commit('e1', 'notice: one')]));
+    assert.strictEqual(r.body.outcome, 'announced');
+    const first = r.body.detail.message_id;
+    // Live announces the stream in the same channel: a system row, not a person, above the card.
+    await goLive();
+    r = await deliver(release([commit('e2', 'notice: two')]));
+    assert.deepStrictEqual([r.body.outcome, r.body.detail.message_id], ['folded', first]);
+    const folded = await card(first);
+    assert.strictEqual(folded.deploys, 2);
+    assert.deepStrictEqual(folded.commits.map((c) => c.subject), ['notice: two', 'notice: one']);
+    // A person's line above the card still starts a new one.
+    await speak('someone says hi');
+    r = await deliver(release([commit('e3', 'notice: three')]));
+    assert.strictEqual(r.body.outcome, 'announced');
+    const second = r.body.detail.message_id;
+    assert.notStrictEqual(second, first);
+    // The 3-hour window still starts a new card (the second card's first deploy is now old).
+    const old = JSON.parse((await h.db.get('SELECT metadata FROM chat_messages WHERE id = ?', [second])).metadata);
+    await h.db.run('UPDATE chat_messages SET metadata = ? WHERE id = ?', [JSON.stringify({ ...old, first_at: new Date(Date.now() - 4 * 3600e3).toISOString() }), second]);
+    r = await deliver(release([commit('e4', 'notice: four')]));
+    assert.strictEqual(r.body.outcome, 'announced');
+    assert.notStrictEqual(r.body.detail.message_id, second);
 });
 
 t('what a release event must be: from Live, a release subject, commits, not stale', async () => {
