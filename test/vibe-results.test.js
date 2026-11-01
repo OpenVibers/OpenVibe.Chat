@@ -130,6 +130,18 @@ t('a result of a day and a half ago is gone for good', async () => {
     assert.strictEqual(today.calls.length, 0, 'and nothing was stopped');
 });
 
+t('at most four results are kept with an answer', async () => {
+    script = [() => callTools(
+        toolCall('c1', 'set_reminder', { text: 'stretch every 2 hours from 9 to 5' }),
+        toolCall('c2', 'set_reminder', { text: 'walk every 3 hours from 9 to 5' }),
+        toolCall('c3', 'set_reminder', { text: 'water every 4 hours from 9 to 5' }),
+        toolCall('c4', 'set_reminder', { text: 'read every 5 hours from 9 to 5' }),
+        toolCall('c5', 'set_reminder', { text: 'rest every 6 hours from 9 to 5' })), () => say('All set.')];
+    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'set me five reminders', fresh: true } });
+    const a = await answer(asked.body.chat.slug, asked.body.message.id);
+    assert.strictEqual((a.results || []).length, 4, 'four is enough for a chip row');
+});
+
 t('the Dock\'s own timer shape reads as a chip', async () => {
     const results = require('../server/rooms/vibe-results');
     assert.deepStrictEqual(results.ofTool('start_timer', { timer: { kind: 'focus', focus_min: 25, rounds: 4, started_at: '2026-11-01T10:00:00.000Z', ends_at: '2026-11-01T10:25:00.000Z' } }),
