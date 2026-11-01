@@ -7,7 +7,11 @@
  *
  *   GET  /api/vibe/chat?slug=&after=   the chat (by slug, else the latest) and its messages: { chat, messages }, or
  *                                     { chat: null } before the first. after = a message id: only what came after it
- *                                     (the Dock polls this for Vibe's answer).
+ *                                     (the Dock polls this for Vibe's answer). A Vibe message carries what Vibe really
+ *                                     did (results: the reminders and timers it set or stopped), absent when none.
+ *   POST /api/vibe/undo { message_id, index }
+ *                                     undo one of those results: the reminder is stopped, the timer too, and the
+ *                                     result is marked undone. The person themself, in their own chat, within a day.
  *   POST /api/vibe/ask { message, slug?, timezone?, fresh? }
  *                                     post into that chat, else the latest one if it moved in the last 6 hours, else
  *                                     a new chat (fresh: always new). Vibe answers in the background, as on Chat.
@@ -23,6 +27,7 @@ const { requireAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
 const vibe = require('./vibe');
+const vibeResults = require('./vibe-results');
 const aiClient = require('../ai/client');
 
 const router = express.Router();
@@ -31,6 +36,7 @@ router.use(requireAuth);
 
 const SIX_HOURS = 6 * 3600 * 1000;
 const asked = limits('chat.vibe.ask', { minute: 12, hour: 300 });
+const undone = limits('chat.vibe.undo', { minute: 12, hour: 300 });   // like ask: undoing is as rare as asking
 const listened = limits('chat.vibe.listen', { minute: 20, hour: 200 });
 const AUDIO_MAX = 1024 * 1024;
 const AUDIO_TYPES = ['audio/webm', 'audio/ogg', 'audio/mp4'];
@@ -38,7 +44,11 @@ const AUDIO_TYPES = ['audio/webm', 'audio/ogg', 'audio/mp4'];
 const personOnly = (req, res, next) => (req.authSource === 'api_token' || req.authSource === 'dock' ? res.status(403).json({ error: 'Vibe is for the person themself', code: 'vibe.person_only' }) : next());
 const zone = (tz) => { try { new Intl.DateTimeFormat('en-US', { timeZone: String(tz) }); return String(tz).slice(0, 64); } catch { return null; } };
 const at = (ts) => { const d = new Date(String(ts || '').includes('T') ? ts : `${String(ts || '').replace(' ', 'T')}Z`); return Number.isNaN(d.getTime()) ? null : d.toISOString(); };
-const wire = (m) => ({ id: Number(m.id), from: m.ai_member_id ? 'vibe' : 'you', text: String(m.message || ''), at: at(m.created_at) });
+// A Vibe message: its text, and what Vibe really did for the person (the chips; server/rooms/vibe-results.js).
+const wire = (m) => {
+    const results = vibeResults.list(m.results);
+    return { id: Number(m.id), from: m.ai_member_id ? 'vibe' : 'you', text: String(m.message || ''), at: at(m.created_at), ...(results.length ? { results } : {}) };
+};
 const chatOf = (room) => (room ? { slug: room.slug, name: room.name || 'Vibe', url: `https://openvibe.chat/vibe/${encodeURIComponent(room.slug)}` } : null);
 
 async function latest(user) {
@@ -55,6 +65,29 @@ router.get('/chat', personOnly, async (req, res) => {
     return res.set('Cache-Control', 'private, no-store').json({ chat: chatOf(room), messages: rows.filter((m) => !m.is_deleted).map(wire) });
 });
 
+/**
+ * Undo what Vibe did in one of its answers: the reminder is stopped on OpenVibe.Today, the timer on the Dock, and the
+ * result is marked undone so it is not offered again. The person themself (personOnly, like ask), only in their own
+ * chat, only a result Vibe set, and only within a day of the answer.
+ *   POST /api/vibe/undo { message_id, index } → { results, undone }
+ */
+router.post('/undo', personOnly, undone, async (req, res) => {
+    const b = req.body && typeof req.body === 'object' ? req.body : {};
+    const messageId = Number(b.message_id);
+    const index = Number(b.index);
+    if (!Number.isInteger(messageId) || messageId <= 0) return res.status(422).json({ error: 'Which answer?', code: 'vibe.undo_message' });
+    if (!Number.isInteger(index) || index < 0) return res.status(422).json({ error: 'Which result?', code: 'vibe.undo_index' });
+    try {
+        const out = await vibeResults.undo({ messageId, index, user: req.user });
+        return res.set('Cache-Control', 'private, no-store').json(out);
+    } catch (err) {
+        const status = err && err.status ? err.status : 500;
+        return res.status(status).set('Cache-Control', 'private, no-store').json({
+            error: status === 500 ? 'That could not be undone' : String(err.message || 'That could not be undone'),
+            code: (err && err.code) || 'vibe.undo_failed',
+        });
+    }
+});
 
 const readAudio = express.raw({ type: AUDIO_TYPES, limit: AUDIO_MAX + 1 });
 const audioBody = (req, res, next) => readAudio(req, res, (err) => {

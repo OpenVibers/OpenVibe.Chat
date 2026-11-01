@@ -34,6 +34,7 @@ const config = require('../config');
 const aiClient = require('../ai/client');
 const credentials = require('../ai/credentials');
 const aiTools = require('./ai-tools');
+const vibeResults = require('./vibe-results');
 
 const MAX_PER_ROOM = 3;
 const TRANSCRIPT = 30;
@@ -305,7 +306,7 @@ function userPrompt({ member, context, transcript, askedBy, text }) {
  * The answer through chat.member.turn with tools: up to MAX_TOOL_ROUNDS rounds of tool calls run here, then a turn
  * with tool_choice none. → the reply text, or null when a turn failed (the caller falls back to chat.member.reply).
  */
-async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], user = null, messageId = null, memory = null, timezone = null, called = new Set(), onText = null, steps = null, signal = null }) {
+async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], user = null, messageId = null, memory = null, timezone = null, called = new Set(), onText = null, steps = null, results = null, signal = null }) {
     const tools = aiTools.definitions(member, room, { memory: memory !== null });
     const vibe = Number(room.assistant) === 1;
     const tz = timezoneOf(timezone);
@@ -334,6 +335,9 @@ async function answerWithTools({ room, member, context, transcript, askedBy, tex
             // tool still judges each result against the constraints they stated (11-01).
             const tool = await aiTools.runWithResult(c.function.name, c.function.arguments, { member, contextFor, subject, room, user, messageId, memory: memory !== null, timezone: tz, requestText: text, idempotencyKey: `${opts.idempotencyKey}-t${round}-${c.function.name}` });
             if (steps) require('./how').cite(steps, c.function.name, tool.result);
+            // What Vibe really did (a reminder or a timer it set or stopped): kept with the answer, as the chips.
+            const entry = vibeResults.ofTool(c.function.name, tool.result);
+            if (entry && results) results.push(entry);
             messages.push({ role: 'tool', tool_call_id: String(c.id || `call_${round}`).slice(0, 128), content: tool.text });
         }
     }
@@ -353,10 +357,13 @@ async function afterPost(room, message, user, deps = {}) {
     if (!member) return null;
     const rooms = deps.rooms || require('./rooms');
     const broadcast = deps.broadcast || ((frame) => require('../chat/chat-server').broadcastToRoom(room.id, frame));
+    const results = [];   // what Vibe really did for the person in this answer (the chips; server/rooms/vibe-results.js)
     const say = async (text, how = null) => {
         const posted = await rooms.postAsAi(room, member, text, how ? { how } : {});
-        broadcast({ type: 'room_message', room: room.slug, message: posted });
-        return posted;
+        // The results belong to the answer: they are written with it and read with it (the Dock, the /vibe page).
+        const saved = await vibeResults.save(posted && posted.id, results).catch(() => null);
+        broadcast({ type: 'room_message', room: room.slug, message: saved || posted });
+        return saved || posted;
     };
     if (inFlight.has(room.id)) return null;
     const own = member.engine === 'own' && member.engine_subject;
@@ -402,7 +409,7 @@ async function afterPost(room, message, user, deps = {}) {
         if (controller) stoppers.set(room.id, controller);
         if (config.ai.memberTools) {
             const images = await picturesFor(message, history, user).catch(() => []);
-            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, vibe ? 12000 : 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, timezone: deps.timezone, called, onText, steps, signal: controller && controller.signal }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
+            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, vibe ? 12000 : 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, timezone: deps.timezone, called, onText, steps, results, signal: controller && controller.signal }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
         }
         if (controller && controller.signal.aborted) {
             const sofar = clean(pending || '', 7900);
@@ -419,7 +426,32 @@ async function afterPost(room, message, user, deps = {}) {
             const words = require('./vibe-reminders').fromRequest(message.message);
             if (words) {
                 const set = await require('./vibe-reminders').create(user.subject_id || null, { text: words, timezone: deps.timezone || null }).catch(() => ({}));
-                if (set && set.reminder) text = `${text}\n\n⏰ Reminder set: **${set.reminder.title}**, ${String(set.reminder.when).replace(/^./, (c) => c.toLowerCase())}. Snooze or stop it on [openvibe.today](https://openvibe.today/me#reminders).`;
+                if (set && set.reminder) {
+                    text = `${text}\n\n⏰ Reminder set: **${set.reminder.title}**, ${String(set.reminder.when).replace(/^./, (c) => c.toLowerCase())}. Snooze or stop it on [openvibe.today](https://openvibe.today/me#reminders).`;
+                    const entry = vibeResults.ofTool('set_reminder', { reminder: set.reminder });
+                    if (entry) results.push(entry);
+                }
+            }
+        }
+        // A plain "start a 25 minute timer" is set even when the model only promised it (small models often do);
+        // the answer says so, and only when the timer really is set.
+        if (vibe && text && Number(room.owner_id) === Number(user.id) && !called.has('start_timer') && !called.has('stop_timer')) {
+            const want = require('./vibe-timer').fromRequest(message.message);
+            if (want) {
+                const timer = require('./vibe-timer');
+                const set = await (want.stop
+                    ? timer.stop(user.subject_id || null).catch(() => ({}))
+                    : timer.start(user.subject_id || null, want).catch(() => ({})));
+                if (set && set.timer) {
+                    text = `${text}\n\n⏱ ${set.said}`;
+                    // What Vibe really did (the timer it started): kept with the answer, as the chips.
+                    const entry = vibeResults.ofTool('start_timer', set);
+                    if (entry) results.push(entry);
+                } else if (set && set.stopped) {
+                    text = `${text}\n\n⏱ ${set.said}`;
+                    const entry = vibeResults.ofTool('stop_timer', set);
+                    if (entry) results.push(entry);
+                }
             }
         }
         // A plain "start a 25 minute timer" is set even when the model only promised it (small models often do);
