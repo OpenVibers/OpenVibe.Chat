@@ -224,7 +224,7 @@ function createWebRoutes({ config }) {
             actor, title: 'Sign in to continue', path: req.path, active: null, footer: 'compact', robots: 'noindex, nofollow',
             body: `<h1>Sign in to continue</h1>
 <p class="oc-muted">This page is for OpenVibe accounts. Sign in and you come straight back here.</p>
-<p><a class="oc-btn" href="/auth/login?next=${encodeURIComponent(req.path)}">Sign in with OpenVibe</a></p>`,
+<p><a class="oc-button" href="/auth/login?next=${encodeURIComponent(req.path)}">Sign in with OpenVibe</a></p>`,
         });
         return null;
     };
