@@ -20,6 +20,8 @@ const callTools = (...tc) => ({ choices: [{ index: 0, message: { role: 'assistan
 // OpenVibe.Today, the stand-in: it takes the reminder Vibe sets and stops it again.
 const REM = { id: 'rem_01JABCDEFGHJKMNPQRSTVWXYZ0', title: 'Stretch', summary: 'Every 2 hours, 9 am–5 pm', next_at: '2026-11-02T15:00:00.000Z', repeats: true, status: 'active' };
 const today = { calls: [] };
+// OpenVibe.Network, the stand-in: it holds the person's Dock timer.
+const net = { calls: [], timer: { kind: 'focus', started_at: '2026-11-01T09:00:00.000Z', ends_at: '2026-11-01T09:25:00.000Z', round: 1, rounds: 4, focus_min: 25, break_min: 5 } };
 const todayServer = http.createServer(async (req, res) => {
     const raw = await new Promise((r) => { let s = ''; req.on('data', (c) => { s += c; }); req.on('end', () => r(s)); });
     today.calls.push({ method: req.method, url: req.url, subject: req.headers['x-ov-subject'], body: raw ? JSON.parse(raw) : null });
@@ -58,7 +60,7 @@ t('boot', async () => {
 
 t('the reminder Vibe set is kept with its answer', async () => {
     script = [() => callTools(toolCall('c1', 'set_reminder', { text: 'stretch every 2 hours from 9 to 5' })), () => say('Set: **Stretch**, every 2 hours.')];
-    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Remind me to stretch every 2 hours' } });
+    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Remind me to stretch every 2 hours', fresh: true } });
     assert.strictEqual(asked.status, 201, asked.text);
     const a = await answer(asked.body.chat.slug, asked.body.message.id);
     assert.deepStrictEqual(a.results, [{
@@ -73,21 +75,21 @@ t('the reminder Vibe set is kept with its answer', async () => {
 
 t('an answer with nothing to show carries no results', async () => {
     script = [() => say('Hello!')];
-    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'hello' } });
+    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'hello', fresh: true } });
     const a = await answer(asked.body.chat.slug, asked.body.message.id);
     assert.strictEqual(a.results, undefined);
 });
 
 t('a plain "remind me …" the model only promised is a result too', async () => {
     script = [() => say('Of course, I will remind you.')];
-    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'remind me to stretch every 2 hours from 9 to 5' } });
+    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'remind me to stretch every 2 hours from 9 to 5', fresh: true } });
     const a = await answer(asked.body.chat.slug, asked.body.message.id);
     assert.deepStrictEqual((a.results || []).map((r) => [r.kind, r.action, r.title]), [['reminder', 'set', 'Stretch']], 'the net set it, so it is kept');
 });
 
 t('undo stops the reminder and is offered only once', async () => {
     script = [() => callTools(toolCall('c1', 'set_reminder', { text: 'stretch every 2 hours from 9 to 5' })), () => say('Set.')];
-    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Remind me to stretch every 2 hours' } });
+    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Remind me to stretch every 2 hours', fresh: true } });
     const a = await answer(asked.body.chat.slug, asked.body.message.id);
     today.calls.length = 0;
     const undone = await h.http('POST', '/api/vibe/undo', { token: ann.token, body: { message_id: a.id, index: 0 } });
@@ -107,7 +109,7 @@ t('undo stops the reminder and is offered only once', async () => {
 
 t('only the person themself may undo it', async () => {
     script = [() => callTools(toolCall('c1', 'set_reminder', { text: 'stretch every 2 hours from 9 to 5' })), () => say('Set.')];
-    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Remind me to stretch every 2 hours' } });
+    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Remind me to stretch every 2 hours', fresh: true } });
     const a = await answer(asked.body.chat.slug, asked.body.message.id);
     const other = await h.http('POST', '/api/vibe/undo', { token: bob.token, body: { message_id: a.id, index: 0 } });
     assert.strictEqual(other.status, 404, 'someone else\'s answer is not there to undo');
@@ -119,7 +121,7 @@ t('only the person themself may undo it', async () => {
 
 t('a result of a day and a half ago is gone for good', async () => {
     script = [() => callTools(toolCall('c1', 'set_reminder', { text: 'stretch every 2 hours from 9 to 5' })), () => say('Set.')];
-    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Remind me to stretch every 2 hours' } });
+    const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Remind me to stretch every 2 hours', fresh: true } });
     const a = await answer(asked.body.chat.slug, asked.body.message.id);
     await h.db.getDb().prepare('UPDATE room_messages SET created_at = ? WHERE id = ?').run(ago(25), a.id);
     const old = await h.http('POST', '/api/vibe/undo', { token: ann.token, body: { message_id: a.id, index: 0 } });
@@ -138,6 +140,38 @@ t('the Dock\'s own timer shape reads as a chip', async () => {
         { kind: 'timer', action: 'stopped', title: '25 min focus' });
     assert.strictEqual(results.ofTool('start_timer', { error: 'no timer' }), null, 'a tool that changed nothing is no chip');
     assert.strictEqual(results.ofTool('web_search', { ok: true }), null, 'and neither is something else Vibe did');
+});
+
+t('the timer Vibe started is kept with its answer, and undo stops it on the Dock', async () => {
+    const timer = require('../server/rooms/vibe-timer');
+    const realFetch = globalThis.fetch;
+    timer._setTokens({ getToken: async () => 'chat-network-token' });
+    globalThis.fetch = async (url, o = {}) => {
+        const s = String(url);
+        if (!s.includes('/dock/timer')) return realFetch(url, o);
+        net.calls.push({ method: o.method, body: o.body ? JSON.parse(o.body) : null, subject: o.headers && o.headers['X-OV-Subject'] });
+        return { ok: true, status: 200, json: async () => ({ state: { timer: net.timer }, counts: {}, sources_partial: false }) };
+    };
+    try {
+        script = [() => say('Sure, I will start that timer for you.')];
+        const asked = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'start a 25 minute focus timer', fresh: true } });
+        assert.strictEqual(asked.status, 201, asked.text);
+        const a = await answer(asked.body.chat.slug, asked.body.message.id);
+        assert.deepStrictEqual(a.results, [{ kind: 'timer', action: 'set', title: '25 min focus' }], 'the chip says what Vibe did');
+        assert.deepStrictEqual(net.calls[net.calls.length - 1].body, { minutes: 25, kind: 'focus', rounds: 4 }, 'the timer was asked for');
+        const undone = await h.http('POST', '/api/vibe/undo', { token: ann.token, body: { message_id: a.id, index: 0 } });
+        assert.strictEqual(undone.status, 200, undone.text);
+        assert.deepStrictEqual(undone.body.results, [{ kind: 'timer', action: 'stopped', title: '25 min focus' }], 'the chip reads as stopped');
+        const cleared = net.calls.filter((c) => c.body && c.body.clear === true);
+        assert.strictEqual(cleared.length, 1, 'the timer was stopped at OpenVibe.Network');
+        assert.strictEqual(cleared[0].subject, ann.subject_id, 'as the person themself');
+        const again = await h.http('POST', '/api/vibe/undo', { token: ann.token, body: { message_id: a.id, index: 0 } });
+        assert.strictEqual(again.status, 409, again.text);
+        assert.strictEqual(net.calls.filter((c) => c.body && c.body.clear === true).length, 1, 'and not stopped twice');
+    } finally {
+        globalThis.fetch = realFetch;
+        timer._setTokens(null);
+    }
 });
 
 t('done', async () => { if (aiClient) aiClient._setClient(null); todayServer.close(); await h.close(); });

@@ -442,8 +442,16 @@ async function afterPost(room, message, user, deps = {}) {
                 const set = await (want.stop
                     ? timer.stop(user.subject_id || null).catch(() => ({}))
                     : timer.start(user.subject_id || null, want).catch(() => ({})));
-                if (set && set.timer) text = `${text}\n\n⏱ ${set.said}`;
-                else if (set && set.stopped) text = `${text}\n\n⏱ ${set.said}`;
+                if (set && set.timer) {
+                    text = `${text}\n\n⏱ ${set.said}`;
+                    // What Vibe really did (the timer it started): kept with the answer, as the chips.
+                    const entry = vibeResults.ofTool('start_timer', set);
+                    if (entry) results.push(entry);
+                } else if (set && set.stopped) {
+                    text = `${text}\n\n⏱ ${set.said}`;
+                    const entry = vibeResults.ofTool('stop_timer', set);
+                    if (entry) results.push(entry);
+                }
             }
         }
         if (!text) {
