@@ -65,7 +65,6 @@ router.get('/chat', personOnly, async (req, res) => {
     return res.set('Cache-Control', 'private, no-store').json({ chat: chatOf(room), messages: rows.filter((m) => !m.is_deleted).map(wire) });
 });
 
-
 /**
  * Undo what Vibe did in one of its answers: the reminder is stopped on OpenVibe.Today, the timer on the Dock, and the
  * result is marked undone so it is not offered again. The person themself (personOnly, like ask), only in their own
