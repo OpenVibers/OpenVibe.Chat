@@ -465,8 +465,9 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-room-sub { margin: 0; font-size: .86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .oc-room-tools { display: flex; gap: 2px; margin-right: -8px; }
 .oc-ai-here { display: flex; align-items: flex-start; gap: 8px; margin: 0 0 8px; padding: 6px 10px; border-radius: 10px; background: color-mix(in srgb, #a78bfa 8%, transparent); color: var(--oc-muted); font-size: .88rem; }
-.oc-ai-here .oc-i { color: #c4b5fd; margin-top: 2px; }
-.oc-ai-here strong { color: #ddd6fe; }
+/* Half the hue, half the theme's text: it held on dark themes only (Daylight contrast probe, 2026-11-01). */
+.oc-ai-here .oc-i { color: color-mix(in srgb, #a78bfa 60%, var(--oc-text, var(--text-primary, #e6edf7))); margin-top: 2px; }
+.oc-ai-here strong { color: color-mix(in srgb, #a78bfa 45%, var(--oc-text, var(--text-primary, #e6edf7))); }
 .oc-msg-ai .vb-md { display: block; margin-top: 2px; }
 .oc-msg-ai .vb-md p { margin: 0 0 .5em; }
 .oc-del button { display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; vertical-align: middle; }
