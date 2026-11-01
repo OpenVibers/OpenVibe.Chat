@@ -9,8 +9,12 @@
   --oc-line: var(--border-color, rgba(255, 255, 255, .12));
   --oc-accent: var(--accent, #60a5fa);
   --oc-on-accent: var(--on-accent, #0a0f1c);
-  --oc-red: #f87171;
-  --oc-ok: #34d399;
+  /* Status colours follow the theme: the -text ones read on its background (a light theme's green is dark enough
+     for words), the -fill ones sit behind dark text (a button, a dot, a count). */
+  --oc-red: var(--danger-text, var(--danger, #f87171));
+  --oc-ok: var(--success-text, var(--success, #34d399));
+  --oc-red-fill: var(--danger, #f87171);
+  --oc-ok-fill: var(--success, #34d399);
   --oc-scale: 1;
 }
 * { box-sizing: border-box; }
@@ -117,7 +121,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-ring { position: fixed; right: 16px; bottom: 16px; z-index: 50; max-width: min(360px, calc(100vw - 32px)); margin: 0; padding: 14px 16px; background: var(--oc-panel); border: 1px solid var(--oc-accent); border-radius: 14px; box-shadow: 0 12px 32px rgba(0, 0, 0, .45); }
 .oc-ring-text { margin: 0 0 10px; }
 .oc-ring-actions { display: flex; gap: 8px; margin: 0; }
-.oc-ring-answer { background: var(--oc-ok); color: #06281c; }
+.oc-ring-answer { background: var(--oc-ok-fill); color: #06281c; }
 .oc-ring-gone { color: var(--oc-muted); }
 @media (max-width: 520px) { .oc-ring { left: 16px; right: 16px; max-width: none; } }
 @media (prefers-reduced-motion: no-preference) { .oc-ring:not(.oc-ring-gone) { animation: oc-ring-in .25s ease-out; } @keyframes oc-ring-in { from { transform: translateY(12px); opacity: 0; } } }
@@ -154,7 +158,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-srv-add, .oc-srv-explore { background: var(--oc-panel-2); color: var(--oc-ok); font-size: 1.35rem; font-weight: 500; }
 .oc-srv-explore { color: var(--oc-accent); font-size: 1.15rem; }
 .oc-srv-add:hover, .oc-srv-explore:hover { background: var(--oc-panel); }
-.oc-srv-dot, .oc-chan-dot { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--oc-red); color: #1a0505; font-size: .66rem; font-weight: 800; line-height: 18px; text-align: center; }
+.oc-srv-dot, .oc-chan-dot { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--oc-red-fill); color: #1a0505; font-size: .66rem; font-weight: 800; line-height: 18px; text-align: center; }
 .oc-srv-dot { position: absolute; right: -5px; bottom: -4px; border: 2px solid var(--oc-bg); line-height: 14px; }
 .oc-srv-side { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 14px 10px; overflow-y: auto; border-right: 1px solid var(--oc-line); }
 .oc-srv-head { padding: 0 6px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--oc-line); }
@@ -205,7 +209,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-chan-edit { flex-basis: 100%; }
 .oc-chan-edit summary { cursor: pointer; color: var(--oc-accent); font-size: .9rem; }
 .oc-chan-edit .oc-form { margin-top: 8px; }
-.oc-danger { background: var(--oc-red); color: #1a0505; }
+.oc-danger { background: var(--oc-red-fill); color: #1a0505; }
 .oc-link.oc-danger-link { color: var(--oc-red); margin-left: 8px; }
 @media (max-width: 1180px) {
   .oc-srv { grid-template-columns: 64px 220px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; height: auto; min-height: 0; }
@@ -317,7 +321,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-room-fv { margin: 0 0 12px; }
 .fd-preview { margin: 12px 0 18px; }
 .fd-dot { background: var(--oc-muted); }
-.fd-dot.fd-on { background: var(--oc-ok); }
+.fd-dot.fd-on { background: var(--oc-ok-fill); }
 .fd-key code { font-size: 1rem; user-select: all; }
 
 /* The developers page (server/web/developer-pages.js) */
