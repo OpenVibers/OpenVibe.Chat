@@ -297,6 +297,12 @@ t('the site: kinds on the rooms page, the call panel, roles and attachments in s
     assert.match(r.text, /id="oc-call-join" hidden>Listen in</);
     assert.match(r.text, /you are a participant/);
 
+    // Room pages carry a real description: the room's own line when it has one, else its name and size.
+    assert.match((await page('/r/tea-talk', null)).text, /<meta name="description" content="Tea Talk: a public room on OpenVibe\.Chat with \d+ member/);
+    const topic = 'Tea, biscuits and the small talk that makes a Tuesday afternoon go faster.';
+    assert.strictEqual((await api('PATCH', '/tea-talk', own, { topic })).status, 200);
+    assert.ok((await page('/r/tea-talk', null)).text.includes(`<meta name="description" content="${topic}">`), 'the room\'s own topic is the description');
+
     r = await page('/r/open-stage/settings', own);
     for (const role of ['moderator', 'speaker', 'participant', 'viewer', 'blocked']) assert.ok(r.text.includes(`>${role}</option>`), role);
     assert.ok(!r.text.includes('>member</option>'), 'call rooms have no members, they have participants');

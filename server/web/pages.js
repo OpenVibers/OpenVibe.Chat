@@ -827,10 +827,15 @@ ${people}
         const work = rooms.isWorkspace(room) ? await require('../rooms/workspace').list(room, me, { limit: 40 }) : null;
         const aiHere = ais.length ? `<p class="oc-ai-here">${ICONS.spark}<span>${ais.map((a) => `<strong>${esc(a.name)}</strong> <span class="oc-muted oc-ai-model">(${esc(aiMembers.modelOf(a))})</span>`).join(', ')} ${ais.length > 1 ? 'are' : 'is'} here: write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask</span></p>` : '';
         const memberCount = (await rooms.publicRoom(room)).members;
+        // A public room's own line when it has one long enough to read as a description; otherwise its name, size
+        // and what the page is for. Escaped by the layout's head builder like every other description.
+        const topic = typeof room.topic === 'string' ? room.topic.trim() : '';
+        const description = topic.length >= 40 ? topic
+            : `${room.name}: a ${room.visibility === 'public' ? 'public' : 'private'} room on OpenVibe.Chat with ${memberCount} ${memberCount === 1 ? 'member' : 'members'}. Read along, or sign in to talk.`;
         await page(req, res, 200, {
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady, feedView: !!feed,
             footer: 'compact', scripts: ais.length ? ['vibe-md.js'] : [], wide: !!work,
-            description: room.topic || `${room.name}, a ${isCall ? 'call' : room.kind === 'system' ? 'announcements' : 'chat'} room on OpenVibe.`,
+            description,
             page: { view: 'room', room: room.slug, kind: room.kind, pics: pictures.enabled() ? pictures.publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: can.join, talk: can.talk } } : {}) },
             body: `<header class="oc-room-head">
