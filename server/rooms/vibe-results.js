@@ -60,17 +60,32 @@ function reminder(r, action) {
     return entry({ kind: 'reminder', action, id: r.id, title: r.title, when: r.when || r.summary || r.next_at, url: REMINDER_URL });
 }
 
-/** A timer, set or stopped: "25 min focus" (the Dock's own shape: minutes, kind, label, rounds). */
+/** How long the timer runs: said outright ("minutes"), or the length of a focus block, or between its ends. */
+function minutesOf(t) {
+    const said = Number(t.minutes);
+    if (Number.isFinite(said) && said > 0) return Math.round(said);
+    const focus = Number(t.focus_min);
+    if (Number.isFinite(focus) && focus > 0) return Math.round(focus);
+    const from = Date.parse(t.started_at || '');
+    const to = Date.parse(t.ends_at || '');
+    if (Number.isFinite(from) && Number.isFinite(to) && to > from) return Math.round((to - from) / 60000);
+    return 0;
+}
+
+/** A timer, set or stopped: "25 min focus" (the Dock's own shape: minutes or a focus block, kind, label, rounds). */
 function timer(t, action) {
+    // A stopped timer comes back as "yes, it is stopped" and nothing more: the Dock's own word for it.
+    if (t === true) return entry({ kind: 'timer', action, title: 'Timer' });
     if (!t || typeof t !== 'object') return null;
-    const minutes = Number(t.minutes);
+    const minutes = minutesOf(t);
     const label = text(t.label, 60);
     const kind = text(t.kind, 40);
     const bits = [];
-    if (Number.isFinite(minutes) && minutes > 0) bits.push(Math.round(minutes) + ' min');
+    if (minutes) bits.push(minutes + ' min');
     if (label) bits.push(label);
-    else if (kind) bits.push(kind);
-    return entry({ kind: 'timer', action, title: bits.join(' ') || text(t.title, 120), when: text(t.when || t.summary, 120) });
+    else if (kind === 'focus') bits.push(kind);   // "25 min focus"; a plain countdown needs no word after it
+    const title = bits.join(' ') || text(t.title, 120) || (kind === 'focus' ? 'Focus' : 'Timer');
+    return entry({ kind: 'timer', action, title, when: text(t.when || t.summary, 120) });
 }
 
 /** The entry a tool call produced, or null when the call changed nothing the person can see or undo. */

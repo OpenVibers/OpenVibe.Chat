@@ -128,6 +128,18 @@ t('a result of a day and a half ago is gone for good', async () => {
     assert.strictEqual(today.calls.length, 0, 'and nothing was stopped');
 });
 
+t('the Dock\'s own timer shape reads as a chip', async () => {
+    const results = require('../server/rooms/vibe-results');
+    assert.deepStrictEqual(results.ofTool('start_timer', { timer: { kind: 'focus', focus_min: 25, rounds: 4, started_at: '2026-11-01T10:00:00.000Z', ends_at: '2026-11-01T10:25:00.000Z' } }),
+        { kind: 'timer', action: 'set', title: '25 min focus' }, 'a focus block says how long it runs');
+    assert.deepStrictEqual(results.ofTool('start_timer', { timer: { kind: 'timer', minutes: 10, label: 'Coffee' } }),
+        { kind: 'timer', action: 'set', title: '10 min Coffee' }, 'a plain countdown says so too');
+    assert.deepStrictEqual(results.ofTool('stop_timer', { stopped: { kind: 'focus', focus_min: 25 } }),
+        { kind: 'timer', action: 'stopped', title: '25 min focus' });
+    assert.strictEqual(results.ofTool('start_timer', { error: 'no timer' }), null, 'a tool that changed nothing is no chip');
+    assert.strictEqual(results.ofTool('web_search', { ok: true }), null, 'and neither is something else Vibe did');
+});
+
 t('done', async () => { if (aiClient) aiClient._setClient(null); todayServer.close(); await h.close(); });
 
 t.run();
