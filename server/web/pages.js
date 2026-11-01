@@ -667,6 +667,24 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
     };
     const KIND_LABEL = { community: '', call: 'call', system: 'announcements' };
     const ROLE_LABEL = { owner: 'owner', mod: 'moderator', speaker: 'speaker', participant: 'participant', member: 'member', viewer: 'viewer', blocked: 'blocked' };
+    /**
+     * How a room works, in its own words (market outcome: every room shows its rules and rate limits on the page): what a
+     * message may be, how fast one may post, slow mode, what is filtered, and who reads. The numbers are the ones
+     * rooms.post enforces (rooms.LIMITS), so the page can never promise one thing and do another.
+     */
+    function roomRules(room) {
+        const L = require('../rooms/rooms').LIMITS;
+        const items = [
+            `Messages up to ${L.maxText.toLocaleString('en-US')} characters`,
+            `At most ${L.rateMax} messages in ${L.rateSeconds} seconds each`,
+            room.slow_seconds > 0 ? `Slow mode: one message every ${Number(room.slow_seconds)} seconds (moderators are not slowed)` : 'No slow mode',
+            'Obvious spam is refused, and a word filter masks slurs',
+            'Moderators can remove messages',
+            room.visibility === 'private' ? 'Private: only the people invited read and post' : 'Anyone can read; members post',
+        ];
+        return `<details class="oc-rules"><summary>How this room works</summary><ul>${items.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></details>`;
+    }
+
     const kindBadge = (r) => (KIND_LABEL[r.kind] ? ` <span class="oc-badge oc-kind-${esc(r.kind)}">${KIND_LABEL[r.kind]}</span>` : '');
     // One room in a list: its initials, name with its kind and a lock when private, the topic or the members under it.
     const roomCard = (r) => `<li class="oc-row${r.unread ? ' oc-unread' : ''}"><a href="/r/${esc(r.slug)}">${ui.initials(r.name)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(r.name)}</strong>${kindBadge(r)}${r.visibility === 'private' ? `<span class="oc-row-lock" title="Private">${IC.lock}<span class="oc-sr">private</span></span>` : ''}</span>`
@@ -818,7 +836,7 @@ ${people}
             body: `<header class="oc-room-head">
 <a class="oc-icon-btn" href="/rooms" aria-label="All rooms" title="All rooms">${ICONS.back}</a>
 <div class="oc-room-id"><h1>${esc(room.name)}${room.visibility === 'private' ? `<span class="oc-room-lock" title="Private: only people invited read and post">${ICONS.lock}<span class="oc-sr">private</span></span>` : ''}${kindBadge(room)}</h1>
-<p class="oc-muted oc-room-sub">${room.topic ? `${esc(room.topic)} · ` : ''}${memberCount} ${memberCount === 1 ? 'member' : 'members'}${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole} <span class="oc-live" id="oc-live" hidden>● live</span></p></div>
+<p class="oc-muted oc-room-sub">${room.topic ? `${esc(room.topic)} · ` : ''}${memberCount} ${memberCount === 1 ? 'member' : 'members'}${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole} <span class="oc-live" id="oc-live" hidden>● live</span></p>${roomRules(room)}</div>
 <div class="oc-room-tools">${manage}${leave}</div>
 </header>
 ${aiHere}${error}
