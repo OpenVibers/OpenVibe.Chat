@@ -54,7 +54,7 @@ h1 { font-size: 1.6rem; line-height: 1.25; margin: .3em 0 .2em; }
 .oc-where { color: var(--oc-muted); font-size: .8em; text-decoration: none; margin-left: 4px; }
 .oc-text { white-space: pre-wrap; }
 .oc-badge { display: inline-block; font-size: .7em; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 0 6px; margin-left: 6px; border-radius: 999px; border: 1px solid var(--oc-line); color: var(--oc-muted); vertical-align: 1px; }
-.oc-badge-staff { color: #fbbf24; border-color: rgba(251, 191, 36, .45); }
+.oc-badge-staff { color: var(--warning-text, #fbbf24); border-color: rgba(251, 191, 36, .45); }
 .oc-badge-mod { color: var(--oc-ok); border-color: rgba(52, 211, 153, .45); }
 .oc-nobadges .oc-badge-staff, .oc-nobadges .oc-badge-mod { display: none; }
 .oc-mine .oc-name { color: var(--oc-accent); }
@@ -106,7 +106,7 @@ button[disabled] { opacity: .6; cursor: default; }
 h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 /* Room kinds, calls, the inbox */
 .oc-kind-call { color: var(--oc-ok); border-color: rgba(52, 211, 153, .45); }
-.oc-kind-system { color: #fbbf24; border-color: rgba(251, 191, 36, .45); }
+.oc-kind-system { color: var(--warning-text, #fbbf24); border-color: rgba(251, 191, 36, .45); }
 .oc-call { margin: 12px 0; padding: 10px 14px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 12px; }
 .oc-call h2 { margin: 0 0 4px; font-size: 1.05rem; }
 .oc-call-people { list-style: none; margin: 6px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 14px; }
