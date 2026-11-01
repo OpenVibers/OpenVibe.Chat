@@ -81,6 +81,8 @@ module.exports = {
     // OpenVibe.Actor, the fallback for Vibe's web search when the Search Fabric is down (server/rooms/web-search.js):
     // tasks for the person, with Chat's own token.
     actor: { internalUrl: strip(process.env.CHAT_ACTOR_INTERNAL_URL || 'http://127.0.0.1:4950') },
+    // OpenVibe.Today: a person's own reminders, set by Vibe ("remind me…", plan L48), with Chat's own token.
+    today: { internalUrl: strip(process.env.CHAT_TODAY_INTERNAL_URL || 'http://127.0.0.1:5100') },
 
     // openvibe.chat, the site (server/web/): global chat, messages and settings, served by Chat itself.
     web: {
