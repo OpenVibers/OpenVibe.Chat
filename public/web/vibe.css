@@ -350,3 +350,16 @@ body.oc-app-body { overflow: hidden; }
 .ib-av { flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--oc-panel-2); color: var(--oc-text); font-weight: 700; }
 .vb-bubble.ib-ai { background: color-mix(in srgb, var(--oc-accent) 14%, var(--oc-panel-2)); }
 .ib-page { max-width: var(--vb-col); margin: 4px auto 0; font-size: .8rem; color: var(--oc-muted); overflow-wrap: anywhere; }
+
+/* What Vibe did (plan L48 V2): a chip for each reminder or timer it set or stopped, under its answer */
+.vb-res { display: grid; gap: 6px; margin: 10px 0 2px; max-width: 560px; }
+.vb-res-c { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; padding: 9px 12px; border-radius: 14px;
+    border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 35%, var(--border, rgba(255,255,255,.1))); background: color-mix(in srgb, var(--accent, #3b82f6) 8%, transparent); }
+.vb-res-c > svg { width: 18px; height: 18px; fill: none; stroke: var(--accent, #3b82f6); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.vb-res-t { min-width: 0; font-size: .9rem; line-height: 1.4; }
+.vb-res-t small { display: block; color: var(--text-muted, #8b8b96); font-size: .8rem; }
+.vb-res-a { display: flex; gap: 6px; align-items: center; }
+.vb-res-a form { margin: 0; }
+.vb-res-c.is-stopped { border-color: var(--border, rgba(255,255,255,.1)); background: transparent; }
+.vb-res-c.is-stopped > svg { stroke: var(--text-muted, #8b8b96); }
+.vb-res-c.is-stopped .vb-res-t { color: var(--text-muted, #8b8b96); }

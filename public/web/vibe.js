@@ -134,6 +134,31 @@
     var md = el('div', 'vb-md'); md.innerHTML = MD ? MD.render(m.message) : '';
     if (!MD) md.textContent = m.message;
     body.appendChild(md); li.appendChild(body);
+    // What Vibe did, as on the server's page (resultChips in server/web/vibe-pages.js): Undo is the same plain form.
+    var res = Array.isArray(m.results) ? m.results : [];
+    if (res.length && room) {
+      var box = el('div', 'vb-res');
+      res.slice(0, 4).forEach(function (r, i) {
+        if (!r || (r.kind !== 'reminder' && r.kind !== 'timer')) return;
+        var set = r.action === 'set';
+        var c = el('div', 'vb-res-c' + (set ? '' : ' is-stopped'));
+        var t = el('div', 'vb-res-t');
+        var b = el('b', '', (r.kind === 'timer' ? (set ? 'Timer' : 'Timer stopped') : (set ? 'Reminder set' : 'Reminder stopped')) + ':');
+        t.appendChild(b); t.appendChild(document.createTextNode(' ' + String(r.title || '')));
+        if (r.when && set) t.appendChild(el('small', '', String(r.when)));
+        c.appendChild(t);
+        var a = el('div', 'vb-res-a');
+        if (set) {
+          var f = el('form'); f.method = 'post'; f.action = '/vibe/' + room + '/undo';
+          [['message_id', String(m.id)], ['index', String(i)]].forEach(function (kv) { var h = el('input'); h.type = 'hidden'; h.name = kv[0]; h.value = kv[1]; f.appendChild(h); });
+          var u = el('button', 'vb-act', 'Undo'); u.type = 'submit'; f.appendChild(u); a.appendChild(f);
+        }
+        if (r.url && /^https:\/\//.test(r.url)) { var o = el('a', 'vb-act', 'Open'); o.href = r.url; a.appendChild(o); }
+        if (a.childNodes.length) c.appendChild(a);
+        box.appendChild(c);
+      });
+      body.appendChild(box);
+    }
     // Copy, and Try again (it moves to this, the newest answer, when the person's message came just before).
     var row = el('div', 'vb-acts');
     var copy = el('button', 'vb-act', 'Copy'); copy.type = 'button'; copy.setAttribute('data-vb-copy', '');

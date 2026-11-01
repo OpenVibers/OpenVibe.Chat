@@ -123,11 +123,34 @@ function acts(slug) {
     return `<div class="vb-acts"><button type="button" class="vb-act" data-vb-copy hidden>Copy</button>${slug ? `<form method="post" action="/vibe/${esc(slug)}/retry" class="vb-retry"><button type="submit" class="vb-act">Try again</button></form>` : ''}</div>`;
 }
 
-function turn(m, me, hows = new Map(), retrySlug = null) {
+const RES_ICON = {
+    reminder: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>',
+    timer: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5M9 2h6"/></svg>',
+};
+/**
+ * What Vibe did in this answer (plan L48 V2; Chat's results on the message, rooms/vibe-results.js): a chip for each
+ * reminder or timer it set or stopped. Undo is a plain form (it works without JavaScript) for a day; Open goes to
+ * the person's reminders on Today. An undone one says "stopped" and offers nothing more.
+ */
+function resultChips(m, slug) {
+    const list = require('../rooms/vibe-results').list(m.results);
+    if (!list.length) return '';
+    const young = Date.now() - atOf(m.created_at) < DAY;
+    return `<div class="vb-res">${list.slice(0, 4).map((r, i) => {
+        if (r.kind !== 'reminder' && r.kind !== 'timer') return '';
+        const set = r.action === 'set';
+        const what = r.kind === 'timer' ? (set ? 'Timer' : 'Timer stopped') : (set ? 'Reminder set' : 'Reminder stopped');
+        const undo = set && young && slug ? `<form method="post" action="/vibe/${esc(slug)}/undo"><input type="hidden" name="message_id" value="${Number(m.id) || 0}"><input type="hidden" name="index" value="${i}"><button type="submit" class="vb-act">Undo</button></form>` : '';
+        const open = r.url && /^https:\/\//.test(r.url) ? `<a class="vb-act" href="${esc(r.url)}">Open</a>` : '';
+        return `<div class="vb-res-c${set ? '' : ' is-stopped'}">${RES_ICON[r.kind]}<div class="vb-res-t"><b>${what}:</b> ${esc(r.title || '')}${r.when && set ? `<small>${esc(r.when)}</small>` : ''}</div>${undo || open ? `<div class="vb-res-a">${undo}${open}</div>` : ''}</div>`;
+    }).join('')}</div>`;
+}
+
+function turn(m, me, hows = new Map(), retrySlug = null, slug = null) {
     const ai = !!m.ai_member_id;
     if (ai) {
         const info = hows.get(Number(m.id));
-        return `<li class="vb-turn vb-ai" data-id="${Number(m.id) || 0}">${MARK}<div class="vb-body"><p class="oc-sr">Vibe said:</p><div class="vb-md">${md.render(m.message)}</div>${how.chips(info, m.id)}${how.html(info, m.id)}${acts(retrySlug)}</div></li>`;
+        return `<li class="vb-turn vb-ai" data-id="${Number(m.id) || 0}">${MARK}<div class="vb-body"><p class="oc-sr">Vibe said:</p><div class="vb-md">${md.render(m.message)}</div>${resultChips(m, slug)}${how.chips(info, m.id)}${how.html(info, m.id)}${acts(retrySlug)}</div></li>`;
     }
     const mine = me && Number(m.user_id) === Number(me.id);
     return `<li class="vb-turn vb-me" data-id="${Number(m.id) || 0}"><div class="vb-bubble"><p class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</p>${esc(m.message).replace(/\n/g, '<br>')}${pictures.pageHtml(m.message)}</div></li>`;
@@ -210,7 +233,7 @@ ${MARK}
 <ul class="vb-suggest">${SUGGESTIONS.map((s) => `<li><button type="button" class="vb-chip" data-prompt="${esc(s.prompt)}"><b>${esc(s.title)}</b><span>${esc(s.text)}</span></button></li>`).join('')}</ul>
 </div>`;
         const thread = room
-            ? `<ol class="vb-thread" id="vb-thread">${messages.map((m, i) => turn(m, user, hows, i === messages.length - 1 && retryable ? room.slug : null)).join('')}${waiting ? `<li class="vb-turn vb-ai vb-wait" id="vb-wait">${MARK}<div class="vb-body"><span class="vb-dots" aria-label="Vibe is writing"><i></i><i></i><i></i></span><noscript><a href="/vibe/${esc(room.slug)}">Refresh to see Vibe's answer</a></noscript></div></li>` : ''}</ol>`
+            ? `<ol class="vb-thread" id="vb-thread">${messages.map((m, i) => turn(m, user, hows, i === messages.length - 1 && retryable ? room.slug : null, room.slug)).join('')}${waiting ? `<li class="vb-turn vb-ai vb-wait" id="vb-wait">${MARK}<div class="vb-body"><span class="vb-dots" aria-label="Vibe is writing"><i></i><i></i><i></i></span><noscript><a href="/vibe/${esc(room.slug)}">Refresh to see Vibe's answer</a></noscript></div></li>` : ''}</ol>`
             : '';
         const head = `<header class="vb-head">
 <button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show your chats">${ICON.menu}</button>
@@ -369,6 +392,21 @@ ${notes.length ? `<h2 class="vb-group">${notes.length} of ${memory.MAX_NOTES} no
         const room = await vibe.ownChat(req.params.slug, actor.user);
         if (!room) return res.redirect(303, '/vibe');
         try { await vibe.retry(room, actor.user); res.redirect(303, `/vibe/${room.slug}`); } catch (err) { await render(req, res, { room, status: err.status || 500, error: err.status ? err.message : 'That did not work. Try again in a minute.' }); }
+    });
+
+    // Undo what Vibe did (a reminder or a timer it set), from the chip under its answer: the person's own chat only, a
+    // day at most (rooms/vibe-results.js undo checks both, and that it was not undone already).
+    router.post('/vibe/:slug/undo', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await vibe.ownChat(req.params.slug, actor.user);
+        if (!room) return res.redirect(303, '/vibe');
+        const b = req.body || {};
+        try {
+            await require('../rooms/vibe-results').undo({ messageId: Number(b.message_id), index: Number(b.index), user: actor.user });
+            res.redirect(303, `/vibe/${room.slug}`);
+        } catch (err) {
+            await render(req, res, { room, status: err.status || 500, error: err.status ? err.message : 'That could not be undone. Try again in a moment.' });
+        }
     });
 
     router.post('/vibe/:slug/delete', formLimit, sameSite, async (req, res) => {
