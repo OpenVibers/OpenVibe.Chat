@@ -312,7 +312,7 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null } = {
 }
 
 // A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
-const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.created_at, m.is_deleted, m.ai_member_id, m.how,
+const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.created_at, m.is_deleted, m.ai_member_id, m.how, m.results,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle ELSE u.username END AS username,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.name ELSE u.display_name END AS display_name,
         u.profile_color, u.role AS user_role
