@@ -496,7 +496,11 @@ async function attachments(room) {
 
 function _reset() { _rate.clear(); }
 
+// What every room's page states about posting (market outcome: "every room shows its rules and rate limits").
+const LIMITS = Object.freeze({ maxText: MAX_TEXT, rateMax: RATE.max, rateSeconds: RATE.windowMs / 1000 });
+
 module.exports = {
+    LIMITS,
     isWorkspace, isStaffRoom,
     postAsAi,
     ensureSchema, create, list, bySlug, access, join, leave, post, history, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
