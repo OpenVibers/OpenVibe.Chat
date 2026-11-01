@@ -39,4 +39,4 @@ t('slow mode, when a room has it, is stated with its seconds', async () => {
     assert.ok(!/<p class="oc-muted oc-room-sub">[^<]*<details/.test(html), 'the fold is not inside the paragraph');
 });
 
-t('done', async () => { await h.close(); });
+t.run(async () => { if (h && h.close) await h.close(); });
