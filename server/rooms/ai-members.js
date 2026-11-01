@@ -422,6 +422,19 @@ async function afterPost(room, message, user, deps = {}) {
                 if (set && set.reminder) text = `${text}\n\n⏰ Reminder set: **${set.reminder.title}**, ${String(set.reminder.when).replace(/^./, (c) => c.toLowerCase())}. Snooze or stop it on [openvibe.today](https://openvibe.today/me#reminders).`;
             }
         }
+        // A plain "start a 25 minute timer" is set even when the model only promised it (small models often do);
+        // the answer says so, and only when the timer really is set.
+        if (vibe && text && Number(room.owner_id) === Number(user.id) && !called.has('start_timer') && !called.has('stop_timer')) {
+            const want = require('./vibe-timer').fromRequest(message.message);
+            if (want) {
+                const timer = require('./vibe-timer');
+                const set = await (want.stop
+                    ? timer.stop(user.subject_id || null).catch(() => ({}))
+                    : timer.start(user.subject_id || null, want).catch(() => ({})));
+                if (set && set.timer) text = `${text}\n\n⏱ ${set.said}`;
+                else if (set && set.stopped) text = `${text}\n\n⏱ ${set.said}`;
+            }
+        }
         if (!text) {
             const out = await aiClient.structured('chat.member.reply', {
                 ai_name: member.name, persona: member.persona || '', room: String(room.name || room.slug).slice(0, 120),

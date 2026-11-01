@@ -26,6 +26,8 @@
  *                     my_reminders lists them and stop_reminder stops one
  *   set_up_agent      Vibe in a person's own chat: one of their OpenVibe Agents for recurring work, daily or weekly, once
  *                     they agreed (server/rooms/vibe-agents.js); my_agents lists the ones they have
+ *   start_timer       Vibe in a person's own chat: the timer in their Dock, counting down on every OpenVibe site
+ *                     ("start a 25 minute timer", "a pomodoro") (server/rooms/vibe-timer.js); stop_timer stops it
  *
  *   definitions(member, room, { memory })  → the OpenAI-style tool list for this member
  *   run(name, args, ctx)         → the result as a string (JSON, at most RESULT_MAX characters), never throws
@@ -94,6 +96,13 @@ const MY_REMINDERS = fn('my_reminders', 'This person\'s active reminders on Open
 const STOP_REMINDER = fn('stop_reminder', 'Stop one of this person\'s reminders, by its id (rem_…) from my_reminders, when they ask to cancel or stop it.',
     { id: { type: 'string', description: 'The reminder\'s id, rem_…' } }, ['id']);
 const MY_AGENTS = fn('my_agents', 'The OpenVibe Agents this person has: each one\'s name, when it runs, whether it is paused, its next run and its page.');
+const START_TIMER = fn('start_timer', 'Start this person\'s timer in their Dock, the little floating surface every OpenVibe site draws: it counts down in the Dock\'s pill on every site they have open and rings at its end. Use it when they ask for a timer ("start a 25 minute timer", "set a timer for 10 minutes", "start a focus timer", "give me a pomodoro", "time me for 45 minutes"). With focus_rounds it becomes a focus block that alternates a focus round and a 5-minute break by itself. Never say a timer is running without calling this.',
+    {
+        minutes: { type: 'integer', minimum: 1, maximum: 180, description: 'How long it runs, in minutes (1 to 180)' },
+        label: { type: 'string', maxLength: 60, description: 'What it is for, in their words (optional)' },
+        focus_rounds: { type: 'integer', minimum: 1, maximum: 12, description: 'How many focus rounds in all, with a 5-minute break after each (optional; leave it out for a plain timer)' },
+    }, ['minutes']);
+const STOP_TIMER = fn('stop_timer', 'Stop this person\'s timer in their Dock, when they ask to stop, cancel or clear it.');
 const QUEUE_STATUS = fn('queue_status', 'What is on this room\'s work queue: what is waiting, being worked on, and recently done or stuck, with who asked.');
 
 const isVibe = (member) => !!member && member.handle === 'vibe';
@@ -108,7 +117,7 @@ const definitions = (member, room = null, { memory = false } = {}) => [
     ...(isVibe(member) ? [WEB] : []),
     ...(isWorkspace(room) ? [QUEUE, QUEUE_STATUS] : []),
     ...(hasMemory(member, room, memory) ? [REMEMBER, FORGET] : []),
-    ...(ownChat(member, room) ? [SET_UP_AGENT, MY_AGENTS, SET_REMINDER, MY_REMINDERS, STOP_REMINDER] : []),
+    ...(ownChat(member, room) ? [SET_UP_AGENT, MY_AGENTS, SET_REMINDER, MY_REMINDERS, STOP_REMINDER, START_TIMER, STOP_TIMER] : []),
 ];
 
 const clip = (o) => { const s = typeof o === 'string' ? o : JSON.stringify(o); return s.length > RESULT_MAX ? `${s.slice(0, RESULT_MAX - 1)}…` : s; };
@@ -410,8 +419,20 @@ async function myReminders(_args, ctx) {
 async function stopReminder(args, ctx) {
     return await require('./vibe-reminders').stop(subjectOf(ctx), args.id, { fetchImpl: ctx.fetchImpl });
 }
+// The timer in the person's Dock (plan L48 R2): the Network holds it, so it counts down on every site.
+async function startTimer(args, ctx) {
+    const rounds = Number(args.focus_rounds);
+    return await require('./vibe-timer').start(subjectOf(ctx), {
+        minutes: args.minutes, label: args.label || null,
+        kind: Number.isFinite(rounds) && rounds >= 1 ? 'focus' : 'timer',
+        rounds: Number.isFinite(rounds) && rounds >= 1 ? rounds : null,
+    }, { fetchImpl: ctx.fetchImpl });
+}
+async function stopTimer(_args, ctx) {
+    return await require('./vibe-timer').stop(subjectOf(ctx), { fetchImpl: ctx.fetchImpl });
+}
 
-const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus, remember, forget, set_up_agent: setUpAgent, my_agents: myAgents , set_reminder: setReminder, my_reminders: myReminders, stop_reminder: stopReminder };
+const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus, remember, forget, set_up_agent: setUpAgent, my_agents: myAgents , set_reminder: setReminder, my_reminders: myReminders, stop_reminder: stopReminder, start_timer: startTimer, stop_timer: stopTimer };
 
 /**
  * Runs one tool call and returns both what the model reads (the JSON clipped to RESULT_MAX) and the whole result, so
@@ -422,7 +443,7 @@ async function runWithResult(name, raw, ctx = {}) {
     if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food')) || (name === 'web_search' && !isVibe(ctx.member))
         || ((name === 'queue_task' || name === 'queue_status') && !isWorkspace(ctx.room))
         || ((name === 'remember' || name === 'forget') && !(hasMemory(ctx.member, ctx.room, ctx.memory) && ctx.user))
-        || (['set_up_agent', 'my_agents', 'set_reminder', 'my_reminders', 'stop_reminder'].includes(name) && !(ownChat(ctx.member, ctx.room) && ctx.user))) {
+        || (['set_up_agent', 'my_agents', 'set_reminder', 'my_reminders', 'stop_reminder', 'start_timer', 'stop_timer'].includes(name) && !(ownChat(ctx.member, ctx.room) && ctx.user))) {
         const error = { error: `no tool called ${String(name).slice(0, 64)}` };
         return { text: clip(error), result: error };
     }
