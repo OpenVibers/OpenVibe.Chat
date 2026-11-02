@@ -95,6 +95,7 @@ const SET_REMINDER = fn('set_reminder', 'Set a reminder for this person on OpenV
 const MY_REMINDERS = fn('my_reminders', 'This person\'s active reminders on OpenVibe.Today: each one\'s id, words, when it fires (in words) and its next time.');
 const STOP_REMINDER = fn('stop_reminder', 'Stop one of this person\'s reminders, by its id (rem_…) from my_reminders, when they ask to cancel or stop it.',
     { id: { type: 'string', description: 'The reminder\'s id, rem_…' } }, ['id']);
+const MY_DAY = fn('my_day', 'This person\'s day on OpenVibe.Today, for "plan my day", "what\'s on today", "how does my day look": their events and followed streams in the next 24 hours and the reminders that fire in them, with times in their zone. Use it to suggest a plan around what is already there (what to do when, reminders, a focus timer). It sets nothing, and in the same answer you may not set anything either: suggest, ask, and set what they agree to when they reply.');
 const MY_AGENTS = fn('my_agents', 'The OpenVibe Agents this person has: each one\'s name, when it runs, whether it is paused, its next run and its page.');
 const START_TIMER = fn('start_timer', 'Start this person\'s timer in their Dock, the little floating surface every OpenVibe site draws: it counts down in the Dock\'s pill on every site they have open and rings at its end. Use it when they ask for a timer ("start a 25 minute timer", "set a timer for 10 minutes", "start a focus timer", "give me a pomodoro", "time me for 45 minutes"). With focus_rounds it becomes a focus block that alternates a focus round and a 5-minute break by itself. Never say a timer is running without calling this.',
     {
@@ -117,7 +118,7 @@ const definitions = (member, room = null, { memory = false } = {}) => [
     ...(isVibe(member) ? [WEB] : []),
     ...(isWorkspace(room) ? [QUEUE, QUEUE_STATUS] : []),
     ...(hasMemory(member, room, memory) ? [REMEMBER, FORGET] : []),
-    ...(ownChat(member, room) ? [SET_UP_AGENT, MY_AGENTS, SET_REMINDER, MY_REMINDERS, STOP_REMINDER, START_TIMER, STOP_TIMER] : []),
+    ...(ownChat(member, room) ? [SET_UP_AGENT, MY_AGENTS, SET_REMINDER, MY_REMINDERS, STOP_REMINDER, MY_DAY, START_TIMER, STOP_TIMER] : []),
 ];
 
 const clip = (o) => { const s = typeof o === 'string' ? o : JSON.stringify(o); return s.length > RESULT_MAX ? `${s.slice(0, RESULT_MAX - 1)}…` : s; };
@@ -428,11 +429,14 @@ async function startTimer(args, ctx) {
         rounds: Number.isFinite(rounds) && rounds >= 1 ? rounds : null,
     }, { fetchImpl: ctx.fetchImpl });
 }
+async function myDay(_args, ctx) {
+    return await require('./vibe-day').day(subjectOf(ctx), { timezone: ctx.timezone || 'UTC', fetchImpl: ctx.fetchImpl });
+}
 async function stopTimer(_args, ctx) {
     return await require('./vibe-timer').stop(subjectOf(ctx), { fetchImpl: ctx.fetchImpl });
 }
 
-const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus, remember, forget, set_up_agent: setUpAgent, my_agents: myAgents , set_reminder: setReminder, my_reminders: myReminders, stop_reminder: stopReminder, start_timer: startTimer, stop_timer: stopTimer };
+const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus, remember, forget, set_up_agent: setUpAgent, my_agents: myAgents , set_reminder: setReminder, my_reminders: myReminders, stop_reminder: stopReminder, my_day: myDay, start_timer: startTimer, stop_timer: stopTimer };
 
 /**
  * Runs one tool call and returns both what the model reads (the JSON clipped to RESULT_MAX) and the whole result, so
@@ -443,8 +447,14 @@ async function runWithResult(name, raw, ctx = {}) {
     if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food')) || (name === 'web_search' && !isVibe(ctx.member))
         || ((name === 'queue_task' || name === 'queue_status') && !isWorkspace(ctx.room))
         || ((name === 'remember' || name === 'forget') && !(hasMemory(ctx.member, ctx.room, ctx.memory) && ctx.user))
-        || (['set_up_agent', 'my_agents', 'set_reminder', 'my_reminders', 'stop_reminder', 'start_timer', 'stop_timer'].includes(name) && !(ownChat(ctx.member, ctx.room) && ctx.user))) {
+        || (['set_up_agent', 'my_agents', 'set_reminder', 'my_reminders', 'stop_reminder', 'my_day', 'start_timer', 'stop_timer'].includes(name) && !(ownChat(ctx.member, ctx.room) && ctx.user))) {
         const error = { error: `no tool called ${String(name).slice(0, 64)}` };
+        return { text: clip(error), result: error };
+    }
+    // Plan my day (L48 V3): a turn that read the day suggests; it never fills the calendar by itself. What the person
+    // agrees to is set in their next message.
+    if ((name === 'set_reminder' || name === 'start_timer') && ctx.called && ctx.called.has('my_day')) {
+        const error = { error: 'This answer read their day to suggest a plan: suggest it and ask first. Set what they agree to when they reply.' };
         return { text: clip(error), result: error };
     }
     let args = {};

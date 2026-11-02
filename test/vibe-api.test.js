@@ -52,8 +52,10 @@ t('a question starts a chat and Vibe answers it in the background; the next one 
     assert.strictEqual(again.body.chat.slug, chat.slug, 'within six hours: the same chat');
     const fresh = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Something new', fresh: true } });
     assert.notStrictEqual(fresh.body.chat.slug, chat.slug, 'fresh: a new chat');
+    // The older chat's answer to "And reminders?" lands after the fresh chat was started: the fresh one stays current.
+    await answerAfter(ann.token, chat.slug, again.body.message.id);
     const latest = await h.http('GET', '/api/vibe/chat', { token: ann.token });
-    assert.strictEqual(latest.body.chat.slug, fresh.body.chat.slug, 'the latest chat first');
+    assert.strictEqual(latest.body.chat.slug, fresh.body.chat.slug, 'the chat they last wrote in, not the one an answer last arrived in');
 });
 
 t('a chat is its person\'s alone, and an empty message is refused', async () => {
@@ -66,3 +68,5 @@ t('a chat is its person\'s alone, and an empty message is refused', async () => 
 });
 
 t('done', async () => { aiClient._setClient(null); await h.close(); });
+
+t.run();
