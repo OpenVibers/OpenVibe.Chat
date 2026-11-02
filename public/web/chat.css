@@ -638,33 +638,26 @@ div.oc-set-row { cursor: default; }
   .oc-home-head a::after { content: ''; position: absolute; left: 0; right: 0; top: -11px; bottom: -11px; }
 }
 
-/* The front page on a phone (the owner's short-pages rule, 2026-10-30): the sections after the room become one pick
-   block, a row of chips picks one of them, and the parts a reader rarely needs become folds. Radio inputs and :has(),
-   no script for the chips. Everything is off until 640 px, so a wide screen shows the page as it was. */
-.pick-head { display: none; }
-.pick-row { display: none; }
-@supports selector(:has(*)) { @media (max-width: 640px) {
+/* The front page on a phone: the sections after the room are a pick block, every pane shown, stacked, each with its own
+   heading; the chips are a row of links that jump to a pane (the owner's rule, 2026-10-31: never hide content to
+   shorten), and the parts a reader rarely needs are folds. A wide screen shows the page as it was, with no chips. */
+.pick-head, .pick-row { display: none; }
+@media (max-width: 640px) {
   .pick-bar { margin-top: 40px; }
   .pick-head { display: block; }
-  .pick-head h2 { margin: 0 0 4px; font-family: var(--ov-font, 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif); font-size: clamp(20px, 2.4vw, 28px); font-weight: 700; letter-spacing: -.02em; }
+  .pick-head h2 { margin: 0 0 4px; font: 700 clamp(20px, 2.4vw, 28px)/1.2 var(--ov-font, 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif); letter-spacing: -.02em; }
   .pick-row { display: flex; gap: 8px; overflow-x: auto; margin: 10px 0 0; padding: 2px 0 4px; scrollbar-width: none; overscroll-behavior-x: contain; }
   .pick-row::-webkit-scrollbar { display: none; }
-  .pick-row input { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
-  .pick-row label { display: inline-flex; align-items: center; flex: none; min-height: 44px; padding: 0 15px; border-radius: 999px; border: 1px solid var(--oc-line); color: var(--oc-muted); font-size: .9rem; font-weight: 650; white-space: nowrap; cursor: pointer; }
-  .pick-row input:checked + label { color: var(--oc-text); border-color: var(--oc-accent); background: color-mix(in srgb, var(--oc-accent) 12%, transparent); }
-  .pick-row input:focus-visible + label { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
-  .pick .pick-pane { display: none; }
-  /* A link that points into a pane (a heading the page links to) opens that pane. */
-  .pick .pick-pane:target, .pick .pick-pane:has(:target) { display: block !important; }
-  .pick:has(.pick-pane:target) .pick-pane:not(:target):not(:has(:target)) { display: none !important; }
-  .pick .pick-pane h2 { display: none; }
+  .pick-chip { display: inline-flex; align-items: center; flex: none; min-height: 44px; padding: 0 15px; border-radius: 999px; border: 1px solid var(--oc-line); color: var(--oc-muted); font-size: .9rem; font-weight: 650; white-space: nowrap; text-decoration: none; }
+  .pick-chip:hover, .pick-chip:focus-visible { color: var(--oc-text); border-color: var(--oc-accent); }
+  .pick-chip:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+  .pick .pick-pane { scroll-margin-top: 72px; }
+  .pick .pick-pane + .pick-pane { margin-top: 26px; }
   /* The showcase cards are a little tighter on a phone: the same six cards, less air. */
   .pick .pick-pane .sc-card { gap: 10px; padding: 12px; }
   .pick .pick-pane .sc-card small { font-size: 13px; }
   .pick .pick-pane .sc-grid { gap: 8px; }
-  .pick .pick-pane .oc-home-head { justify-content: flex-end; }
-  .pick .pick-pane .oc-home-sec { margin-top: 20px; }
-} }
+}
 
 /* The guest's front page: the room is a taste of the chat, not the whole thing, so the sign-in below it comes into
    view sooner. The signed-in room (.oc-global) keeps its full height: it is the app. */
