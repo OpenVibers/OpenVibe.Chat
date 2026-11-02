@@ -552,7 +552,8 @@ t('routing: taking turns hands each waiting visitor to the next person; anyone o
     assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}/conversations/${one.id}`, bob, { assignee_id: 424242 })).status, 422, 'only to one of the people');
     assert.strictEqual((await agentsApi('PATCH', `/${inbox.id}/conversations/${one.id}`, ann, { assignee_id: null })).body.conversation.assignee_id, null);
     const app = await fetch(`${h.base}/inbox/${inbox.id}?f=mine&c=${two.id}`, { headers: { cookie: `ov_token=${bob.token}` } }).then((x) => x.text());
-    assert.ok(app.includes('Answered by') && app.includes(`data-conv="${two.id}"`) && app.includes('aria-current="page">Mine</a>'));
+    assert.ok(app.includes('Answered by') && app.includes(`data-conv="${two.id}"`));
+    assert.match(app, new RegExp(`<a class="ovk-sidebar-link is-here" href="/inbox/${inbox.id}\\?f=mine" aria-current="page"><svg[^>]*>[\\s\\S]*?</svg><span>Mine</span>`), 'the filter is a row of the sidebar, marked');
     await agentsApi('PATCH', `/${inbox.id}`, ann, { route: 'none' });
 });
 
@@ -581,8 +582,15 @@ t('the embed page and the loader: frame-ancestors follow the allowed sites', asy
 t('the people\'s pages: the list, a conversation and the settings with the snippet', async () => {
     const page = async (path, u) => { const r = await fetch(`${h.base}${path}`, { headers: { cookie: `ov_token=${u.token}` }, redirect: 'manual' }); return { status: r.status, text: await r.text() }; };
     assert.ok((await page('/inbox', ann)).text.includes(`href="/inbox/${inbox.id}"`));
-    const view = await page(`/inbox/${inbox.id}?c=${conv.id}`, bob);
-    assert.ok(view.text.includes('Hi, I can help with the refund.') && view.text.includes('vb-composer'));
+    const view = await page(`/inbox/${inbox.id}?c=${conv.id}&f=resolved`, bob);   // resolved by now: its row is under Resolved
+    assert.ok(view.text.includes('Hi, I can help with the refund.') && view.text.includes('id="ib-composer"'));
+    // On the network's conversation kit (11-02): the conversations are the kit's sidebar, a row per visitor with a second
+    // line, found by data-conv; the conversation is the kit's thread, the team's words captioned with who wrote them.
+    assert.ok(view.text.includes('<aside class="ovk-sidebar" id="ib-rail" aria-label="Conversations" data-ovk-sidebar>'), 'the kit\'s sidebar');
+    assert.match(view.text, new RegExp(`<a class="ovk-sidebar-item has-sub has-mark is-here" href="/inbox/${inbox.id}\\?c=${conv.id}&amp;f=resolved" aria-current="page" data-conv="${conv.id}"`), 'the open conversation\'s row');
+    assert.match(view.text, new RegExp(`data-conv="${conv.id}" data-who="[^"]*"><span class="ib-av" aria-hidden="true">[A-Z]</span><span class="ovk-sidebar-t">[^<]+</span><span class="ovk-sidebar-m">[^<]+</span><span class="ovk-sidebar-s">[^<]+</span></a>`), 'the visitor\'s initial, name, when, and a second line');
+    assert.match(view.text, /<li class="ovt-turn" data-id="\d+" data-author="agent">\s*<div class="ovt-you"><span class="ovt-caption">[^<]+<\/span><div class="ovt-bubble"><span class="ib-text">Hi, I can help with the refund\.<\/span>/, 'the reply, captioned');
+    assert.ok(view.text.includes('/web/inbox.css?v=') && !view.text.includes('/web/vibe.css?v=') && view.text.includes('ov-thread.js'), 'the inbox\'s own stylesheet on the kit');
     const settings = await page(`/inbox/${inbox.id}/settings`, ann);
     assert.ok(settings.text.includes('data-inbox=&quot;') && settings.text.includes('/widget.js'), 'the snippet is shown escaped');
     assert.strictEqual((await page(`/inbox/${inbox.id}`, h.addUser('cat', { subject: ids.newId('user') }))).status, 404);

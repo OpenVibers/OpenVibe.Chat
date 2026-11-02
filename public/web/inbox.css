@@ -1,0 +1,87 @@
+/* The support inbox (server/web/inbox-pages.js /inbox/:id, public/web/inbox.js) on the network's conversation kit
+   (openvibe-shared thread.css and kit.css draw the frame, the chats column, the turns and the composer). These are the
+   inbox's own parts in it: the status chips, a visitor's initial beside their row, unread rows, the head's actions,
+   the bubbles captioned with who wrote them, the conversation's facts, the saved replies, a picture, a translation and
+   the call. Theme tokens only. */
+
+/* Status: Vibe answers, waiting for a person, open with the team, resolved. */
+.ib-st { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .72rem; font-weight: 700; letter-spacing: .02em; line-height: 1.5;
+    border: 1px solid var(--oc-line); color: var(--oc-muted); white-space: nowrap; }
+.ib-st-bot { color: var(--oc-accent); border-color: color-mix(in srgb, var(--oc-accent) 45%, var(--oc-line)); }
+.ib-st-wait { color: var(--warning-text, #fbbf24); border-color: color-mix(in srgb, var(--warning, #f59e0b) 55%, var(--oc-line)); background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent); }
+.ib-st-open { color: var(--success-text, var(--oc-ok)); border-color: color-mix(in srgb, var(--oc-ok) 50%, var(--oc-line)); }
+.ib-st-done { opacity: .75; }
+
+/* The conversations: a visitor's initial beside both lines of the row; a row with something new is bold. */
+.ibk .ib-av { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--oc-panel-2); color: var(--oc-text); font-size: .85rem; font-weight: 700; }
+.ibk .ovk-sidebar-item.is-here .ib-av { background: color-mix(in srgb, var(--oc-accent) 22%, var(--oc-panel-2)); }
+.ibk .ovk-sidebar-item.ib-unread .ovk-sidebar-t { font-weight: 700; }
+.ibk .ovk-sidebar-item.ib-unread .ovk-sidebar-s { color: var(--oc-text); }
+
+/* The head: the visitor's tags, Resolve, Call, and More (who answers, back to Vibe). On a phone the tags give way. */
+.ibk .ib-head-acts { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ibk .ib-tags { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-ok { color: var(--oc-ok, #22c55e); font-weight: 800; }
+.ib-rate { font-size: .9rem; line-height: 1; }
+.ibk .ib-status { margin: 0; }
+.ib-btn { padding: 6px 12px; border-radius: 10px; border: 1px solid var(--oc-line); background: var(--oc-panel); color: var(--oc-text); font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.ib-btn:hover { border-color: color-mix(in srgb, var(--oc-accent) 45%, var(--oc-line)); }
+.ib-btn:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+.ib-call-btn { border-color: transparent; background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, #fff); }
+.ib-call-btn[hidden] { display: none; }
+.ibk .ib-more { position: relative; }
+.ibk .ib-more > summary { list-style: none; cursor: pointer; }
+.ibk .ib-more > summary::-webkit-details-marker { display: none; }
+.ib-pop { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; display: grid; gap: 10px; min-width: 240px; padding: 12px; border-radius: 14px;
+    border: 1px solid var(--oc-line); background: var(--oc-panel); box-shadow: 0 16px 40px -18px rgba(0, 0, 0, .55); }
+.ib-pop form { margin: 0; }
+.ib-assign { display: grid; gap: 4px; font-size: .85rem; color: var(--oc-muted); }
+.ib-assign select { padding: 6px 8px; border-radius: 10px; border: 1px solid var(--oc-line); background: var(--oc-bg); color: var(--oc-text); font: inherit; font-size: .9rem; }
+.ib-pop .ib-btn { width: 100%; }
+@media (max-width: 560px) { .ibk .ib-tags .ib-st, .ibk .ib-tags .ib-rate { display: none; } }
+
+/* The thread: the visitor's words as written (new lines kept), Vibe's answers tinted, who wrote each bubble above it. */
+.ibk .ib-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Vibe's answers are the assistant's, not a person's: an outlined bubble, its caption in the accent. */
+.ibk [data-author="ai"] .ovt-bubble { background: transparent; border: 1px solid color-mix(in srgb, var(--oc-accent) 45%, var(--oc-line)); }
+.ibk [data-author="ai"] .ovt-caption { color: var(--oc-accent); }
+.ibk .ovt-bubble .oc-pics, .ibk .ovt-reply .oc-pics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.ibk .oc-pic img { display: block; max-width: 220px; max-height: 220px; border-radius: 12px; }
+.ibk .ib-typing span { opacity: .8; }
+.ib-facts { display: grid; gap: 2px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--oc-line); color: var(--oc-muted); font-size: .82rem; overflow-wrap: anywhere; }
+.ib-facts p { margin: 0; }
+.ib-facts a { color: var(--oc-accent); }
+.ib-hello { max-width: 34rem; margin: 12vh auto 0; text-align: center; }
+.ib-hello h2 { margin: 0 0 6px; font-size: 1.3rem; }
+.ib-hello p { margin: 0; color: var(--oc-muted); line-height: 1.5; }
+
+/* Translate: under a visitor's message, and the reply into the visitor's language. */
+.ib-tr-btn { all: unset; margin-top: 4px; padding: 1px 4px; border-radius: 6px; color: var(--oc-muted); font-size: .78rem; cursor: pointer; }
+.ib-tr-btn:hover { color: var(--oc-accent); }
+.ib-tr-btn:focus-visible { outline: 2px solid var(--oc-accent); }
+.ib-tr { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid var(--oc-line); color: var(--oc-muted); }
+.ib-tr-pick { display: inline-flex; align-items: center; gap: 4px; color: var(--oc-muted); font-size: .8rem; }
+.ib-tr-pick[hidden] { display: none; }
+.ib-tr-pick select { max-width: 9.5em; padding: 2px 6px; border-radius: 8px; border: 1px solid var(--oc-line); background: var(--oc-bg); color: var(--oc-text); font: inherit; font-size: .8rem; }
+.ibk .ib-pic-btn { cursor: pointer; }
+.ibk .ib-pic-btn:focus-within { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
+.ibk .ib-fine { margin: 6px 4px 0; color: var(--oc-muted); font-size: .78rem; }
+.ibk .ovt-c-note:empty { display: none; }
+
+/* Saved replies: "/" at the start of the box lists them, above it. */
+.ib-pick { list-style: none; margin: 0 0 6px; padding: 4px; max-height: 260px; overflow-y: auto; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); }
+.ib-pick li { display: flex; gap: 8px; align-items: baseline; min-width: 0; padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+.ib-pick li span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--oc-muted); }
+.ib-pick li.is-on, .ib-pick li:hover { background: color-mix(in srgb, var(--oc-accent) 14%, transparent); }
+
+/* A voice call with the visitor: the bar above the reply box while one is open, and their shared screen above it. */
+.ib-callbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--oc-accent); background: var(--oc-panel); }
+.ib-callbar[hidden], .ib-callbar button[hidden] { display: none; }
+.ib-call-text { flex: 1 1 200px; font-weight: 600; }
+.ib-callbar button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--oc-line); background: transparent; color: var(--oc-text); font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; }
+.ib-callbar .ib-call-end { border-color: transparent; background: #dc2626; color: #fff; }
+.ib-screen { display: grid; gap: 6px; margin: 0 0 8px; padding: 8px; border-radius: 12px; border: 1px solid var(--oc-line); background: #000; }
+.ib-screen[hidden] { display: none; }
+.ib-screen figcaption { color: #e5e7eb; font-size: .85rem; font-weight: 600; }
+.ib-screen video { width: 100%; max-height: 50vh; border-radius: 8px; background: #000; object-fit: contain; }
+.ib-screen button { justify-self: end; padding: 4px 10px; border-radius: 999px; border: 1px solid #374151; background: transparent; color: #e5e7eb; font: inherit; font-size: .8rem; cursor: pointer; }
