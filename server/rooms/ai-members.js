@@ -231,7 +231,7 @@ function dateLine(now, timezone, askedBy) {
     return `Today is ${utc} (UTC); for ${askedBy} it is ${local} in ${timezone}.`;
 }
 
-function vibePrompt(member, askedBy, memory = null, { now = Date.now(), timezone = null } = {}) {
+function vibePrompt(member, askedBy, memory = null, { now = Date.now(), timezone = null, ownTools = false } = {}) {
     return [
         `You are ${member.name}, OpenVibe's assistant, in a private chat with ${askedBy} on OpenVibe.Chat. Only they read it.`,
         dateLine(now, timezoneOf(timezone), askedBy),
@@ -247,7 +247,9 @@ function vibePrompt(member, askedBy, memory = null, { now = Date.now(), timezone
         '- News: OpenVibe.News has no stories yet, so for news go to web_search with freshness "day" (or "week" for a roundup) and say which web source and date each story came from; never present a recorded stream or video as today\'s news.',
         '- When they send a picture you see it: describe what matters for their question (text in it, objects, a screenshot\'s error). Never guess who a person in it is.',
         '- Recurring work ("every morning, find me new remote jobs"): set_up_agent makes it one of their OpenVibe Agents, run daily or weekly on their own allowance with every result on its page. First say what it would do and when, and set it up only once they agree. my_agents lists the agents they have.',
-        '- You cannot yet make pictures, use their computer or set reminders. Say so plainly when asked, and offer what you can do instead.',
+        ownTools
+            ? '- In their own chat you can set reminders (set_reminder), list and stop them, start or stop their timer, and read their day (my_day). For "plan my day" or "what is on today": call my_day, suggest a plan around what is already there (what to do when, which reminders or a focus timer would help), and ask before you set anything; set what they agree to when they reply. You cannot yet make pictures or use their computer.'
+            : '- You cannot yet make pictures, use their computer or set reminders. Say so plainly when asked, and offer what you can do instead.',
         '- The earlier messages are this conversation: build on them. Never invent facts about the person or their plans; when you do not know, say so and ask.',
         memory === null
             ? '- Their memory is off: you keep no notes about them. If they ask you to remember something, say they can turn memory on at openvibe.chat/vibe/memory.'
@@ -302,6 +304,9 @@ function userPrompt({ member, context, transcript, askedBy, text }) {
     ].join('');
 }
 
+// "plan my day", "plan out my afternoon", "what's on today", "what does my day look like", "how's my week looking"
+const PLAN_DAY = /\b(plan(?:\s+out)?\s+(?:my|the)\s+(?:day|morning|afternoon|evening|tomorrow)|what(?:'s|\s+is)\s+on\s+(?:my\s+)?(?:today|tomorrow|my\s+(?:day|agenda|calendar))|what\s+does\s+my\s+(?:day|morning|afternoon|tomorrow)\s+look|how(?:'s|s|\s+is)\s+my\s+(?:day|week)\s+looking|my\s+agenda\b)/i;
+
 /**
  * The answer through chat.member.turn with tools: up to MAX_TOOL_ROUNDS rounds of tool calls run here, then a turn
  * with tool_choice none. → the reply text, or null when a turn failed (the caller falls back to chat.member.reply).
@@ -312,10 +317,20 @@ async function answerWithTools({ room, member, context, transcript, askedBy, tex
     const tz = timezoneOf(timezone);
     const prompt = userPrompt({ member, context, transcript, askedBy, text });
     const messages = [
-        { role: 'system', content: vibe ? vibePrompt(member, askedBy, memory, { timezone: tz }) : systemPrompt(member, room) },
+        { role: 'system', content: vibe ? vibePrompt(member, askedBy, memory, { timezone: tz, ownTools: tools.some((t) => t.function && t.function.name === 'my_day') }) : systemPrompt(member, room) },
         // Pictures the person sent (picturesFor): the model sees them with the text.
         { role: 'user', content: images.length ? [{ type: 'text', text: `${prompt}\n\n(${images.length === 1 ? 'The picture they sent is' : 'The pictures they sent are'} attached.)` }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] : prompt },
     ];
+    if (vibe && PLAN_DAY.test(String(text || '')) && tools.some((t) => t.function && t.function.name === 'my_day')) {
+        // "Plan my day" (L48 V3): the day is read before the first round, as if Vibe had called my_day itself, so a
+        // small model cannot plan without it; the turn then counts as having read the day (nothing is set in it).
+        called.add('my_day');
+        if (steps) require('./how').step(steps, 'my_day', '{}');
+        const tool = await aiTools.runWithResult('my_day', '{}', { member, contextFor, subject, room, user, messageId, memory: memory !== null, timezone: tz, requestText: text, called, idempotencyKey: `${opts.idempotencyKey}-day` });
+        if (steps) require('./how').cite(steps, 'my_day', tool.result);
+        messages.push({ role: 'assistant', content: null, tool_calls: [{ id: 'call_my_day', type: 'function', function: { name: 'my_day', arguments: '{}' } }] });
+        messages.push({ role: 'tool', tool_call_id: 'call_my_day', content: tool.text });
+    }
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
         if (signal && signal.aborted) return null;   // stopped (stop()): the caller keeps what was written
         const last = round === MAX_TOOL_ROUNDS;
@@ -506,4 +521,4 @@ const toWire = (m) => ({
 
 function _reset() { inFlight.clear(); personHour.clear(); stoppers.clear(); }
 
-module.exports = { MAX_PER_ROOM, LIMITS, AiMemberError, enabled, list, byId, add, update, remove, dropKey, relabelKey, modelOf, mentioned, handleOf, afterPost, stop, transcriptOf, vibePrompt, toWire, _reset };
+module.exports = { PLAN_DAY, MAX_PER_ROOM, LIMITS, AiMemberError, enabled, list, byId, add, update, remove, dropKey, relabelKey, modelOf, mentioned, handleOf, afterPost, stop, transcriptOf, vibePrompt, toWire, _reset };
