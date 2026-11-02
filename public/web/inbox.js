@@ -1,23 +1,24 @@
-/* A support inbox, live (server/web/inbox-pages.js /inbox/:id): the inbox's people follow every conversation over the
-   chat socket (inbox_watch). New conversations and messages appear in the list as they come, the open one grows, and a
-   reply is sent with Enter. The page works without this file (links and forms). A visitor's or agent's text is set with
-   textContent; Vibe's answers go through VibeMarkdown (vibe-md.js), which escapes everything first. */
+/* A support inbox, live (server/web/inbox-pages.js /inbox/:id), on the network's conversation kit (openvibe-shared
+   thread and kit.sidebar; ov-thread.js grows the reply box, sends on Enter and keeps the thread at the bottom). The
+   inbox's people follow every conversation over the chat socket (inbox_watch): new conversations and messages appear
+   in the list as they come, and the open one grows. The page works without this file (links and forms). A visitor's
+   or agent's text is set with textContent; Vibe's answers go through VibeMarkdown (vibe-md.js), which escapes
+   everything first. Rows and turns are drawn with the same markup as the server's. */
 (function () {
   'use strict';
   var cfg = (window.__OV_PAGE && window.__OV_PAGE.chat) || null;
   if (!cfg || cfg.view !== 'inbox') return;
-  var app = document.getElementById('vb');
-  var thread = document.getElementById('vb-thread');
-  var scroll = document.getElementById('vb-scroll');
-  var form = document.getElementById('vb-composer');
-  var input = document.getElementById('vb-input');
-  var list = document.getElementById('ib-list');
+  var thread = document.querySelector('[data-ovt-thread]');
+  var form = document.getElementById('ib-composer');
+  var input = form ? form.querySelector('[data-ovt-text]') : null;
+  var rail = document.getElementById('ib-rail');
+  var list = rail ? rail.querySelector('.ovk-sidebar-sec') : null;
   var latest = Number(cfg.latest) || 0, ws = null, delay = 1000, typingEl = null;
-  var STATUS = { bot: ['Vibe', 'vb-st-bot'], waiting: ['Waiting', 'vb-st-wait'], open: ['Open', 'vb-st-open'], resolved: ['Resolved', 'vb-st-done'] };
+  var STATUS = { bot: ['Vibe', 'ib-st-bot'], waiting: ['Waiting', 'ib-st-wait'], open: ['Open', 'ib-st-open'], resolved: ['Resolved', 'ib-st-done'] };
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function token() { var m = /(?:^|;\s*)ov_token=([^;]+)/.exec(document.cookie || ''); return m ? decodeURIComponent(m[1]) : undefined; }
-  function chip(s) { var c = el('span', 'vb-st ' + (STATUS[s] ? STATUS[s][1] : ''), STATUS[s] ? STATUS[s][0] : s); return c; }
+  function chip(s) { return el('span', 'ib-st ' + (STATUS[s] ? STATUS[s][1] : ''), STATUS[s] ? STATUS[s][0] : s); }
   // OpenVibe.Pics direct links in a person's reply, or a signed-in visitor's, show as pictures (only that host, at most four).
   var PICS = /https:\/\/openvibe\.pics\/i\/([2-9a-km-zA-HJ-NP-Z]{8})\.(?:jpg|png|gif|webp|avif)(?![\w\/.-])/g;
   function picsOf(text) {
@@ -32,31 +33,38 @@
   }
   function bare(t) { return String(t || '').replace(PICS, '').replace(/[ \t]+$/gm, '').trim(); }
   function plain(t) { return String(t || '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`~]+|^#+\s*|^>\s*/gm, '').replace(/\s+/g, ' ').trim(); }
-  function bottom() { if (scroll) scroll.scrollTop = scroll.scrollHeight; }
+  function bottom() { window.scrollTo(0, document.documentElement.scrollHeight); }
   function clearTyping() { if (typingEl) { typingEl.remove(); typingEl = null; } }
 
+  // One message, as the kit's turn (server/web/inbox-pages.js inboxTurn).
   function turn(m) {
-    if (m.author === 'system') { var s = el('li', 'ib-sys', m.body); s.dataset.id = String(m.id); return s; }
-    var li;
+    if (m.author === 'system') { var d = el('li', 'ovt-divider'); d.appendChild(el('span', null, m.body)); d.dataset.id = String(m.id); return d; }
+    var li = el('li', 'ovt-turn');
     if (m.author === 'visitor') {
-      li = el('li', 'vb-turn vb-ai ib-visitor');
-      li.appendChild(el('span', 'ib-av', (m.author_name || 'V').slice(0, 1).toUpperCase()));
-      var body = el('div', 'vb-body'); body.appendChild(el('p', 'ib-who', m.author_name || 'Visitor'));
+      var name = m.author_name || 'Visitor';
+      var bot = el('div', 'ovt-bot');
+      bot.appendChild(el('span', 'ovt-avatar is-who', name.slice(0, 1).toUpperCase())).setAttribute('aria-hidden', 'true');
+      var reply = el('div', 'ovt-reply');
+      var who = el('p', 'ovt-who'); who.appendChild(el('b', null, name)); reply.appendChild(who);
       var vp = m.account ? picsOf(m.body) : null;   // a signed-in visitor's pictures show, not their links
       var said = vp ? bare(m.body) : m.body;
-      if (said) body.appendChild(el('div', 'vb-md', said));
-      if (vp) body.appendChild(vp);
-      li.appendChild(body);
+      if (said) reply.appendChild(el('div', 'ovt-answer ib-text', said));
+      if (vp) reply.appendChild(vp);
+      bot.appendChild(reply); li.appendChild(bot);
+      li.dataset.author = 'visitor';
     } else {
-      li = el('li', 'vb-turn vb-me');
-      var b = el('div', 'vb-bubble' + (m.author === 'ai' ? ' ib-ai' : ''));
-      b.appendChild(el('p', 'ib-who', m.author === 'ai' ? 'Vibe (AI)' : (m.author_name || 'Agent')));
-      var text = el('div', 'vb-md');
-      var pics = m.author === 'agent' ? picsOf(m.body) : null;
-      if (m.author === 'ai' && window.VibeMarkdown) text.innerHTML = window.VibeMarkdown.render(m.body); else text.textContent = pics ? bare(m.body) : m.body;
-      if (text.textContent) b.appendChild(text);
-      if (pics) b.appendChild(pics);
-      li.appendChild(b);
+      var ai = m.author === 'ai';
+      var you = el('div', 'ovt-you');
+      you.appendChild(el('span', 'ovt-caption', ai ? 'Vibe (AI)' : (m.author_name || 'Agent')));
+      var bubble = el('div', 'ovt-bubble');
+      if (ai && window.VibeMarkdown) { var mdEl = el('div', 'vb-md'); mdEl.innerHTML = window.VibeMarkdown.render(m.body); bubble.appendChild(mdEl); }
+      else {
+        var pics = m.author === 'agent' ? picsOf(m.body) : null;
+        bubble.appendChild(el('span', 'ib-text', pics ? bare(m.body) : m.body));
+        if (pics) bubble.appendChild(pics);
+      }
+      you.appendChild(bubble); li.appendChild(you);
+      li.dataset.author = ai ? 'ai' : 'agent';
     }
     li.dataset.id = String(m.id);
     return li;
@@ -64,32 +72,54 @@
   function appendToThread(m) {
     if (!thread || thread.querySelector('[data-id="' + m.id + '"]')) return;
     // One's own reply, back over the socket before the POST answered: it is the one already shown.
-    if (m.author === 'agent') { var p = thread.querySelector('.vb-me:not([data-id])'); if (p) { p.dataset.id = String(m.id); latest = Math.max(latest, Number(m.id)); return; } }
+    if (m.author === 'agent') { var p = thread.querySelector('[data-author="agent"]:not([data-id])'); if (p) { p.dataset.id = String(m.id); latest = Math.max(latest, Number(m.id)); return; } }
     clearTyping();
-    var stick = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 160;
-    var li = turn(m); thread.appendChild(li); addTranslate(li);
+    var li = turn(m);
+    if (window.OVThread) window.OVThread.add(li); else { thread.appendChild(li); bottom(); }
+    addTranslate(li);
     latest = Math.max(latest, Number(m.id));
-    if (stick) bottom();
   }
+
+  // The rows: one per conversation, found by data-conv (kit.sidebar's item, server/web/inbox-pages.js conversationsRail).
   function listItem(convId) { return list ? list.querySelector('[data-conv="' + convId + '"]') : null; }
+  function setDot(a, kind) {
+    var old = a.querySelector('.ovk-sidebar-dot'); if (old) old.remove();
+    if (!kind) return;
+    var dot = el('i', 'ovk-sidebar-dot' + (kind === true ? '' : ' is-' + kind)); dot.setAttribute('aria-hidden', 'true');
+    a.insertBefore(dot, a.querySelector('.ovk-sidebar-s'));
+  }
+  function setLine(a, preview) {
+    var sub = a.querySelector('.ovk-sidebar-s'); if (!sub) return;
+    var who = a.getAttribute('data-who') || '';
+    sub.textContent = (who ? who + ' · ' : '') + plain(preview).slice(0, 140);
+  }
+  function setWhen(a, text) {
+    var meta = a.querySelector('.ovk-sidebar-m'); if (!meta) return;
+    var rate = /^(👍|👎) /.exec(meta.textContent);
+    meta.textContent = (rate ? rate[0] : '') + text;
+  }
+  function toTop(a) { var first = list.querySelector('.ovk-sidebar-item'); if (first && first !== a) list.insertBefore(a, first); }
   function touchList(convId, preview, status) {
     var a = listItem(convId);
     if (!a) return;
-    if (preview != null) { var p = a.querySelector('.ib-prev'); if (p) p.textContent = plain(preview).slice(0, 140); var t = a.querySelector('time'); if (t) t.textContent = 'now'; }
-    if (status) { var old = a.querySelector('.vb-st'); if (old) old.replaceWith(chip(status)); }
-    if (convId !== cfg.conversation && preview != null) a.classList.add('ib-unread');
-    var li = a.parentNode; if (li && li.parentNode && preview != null) li.parentNode.insertBefore(li, li.parentNode.firstChild);
+    if (preview != null) { setLine(a, preview); setWhen(a, 'now'); }
+    if (status) { a.setAttribute('data-status', status); setDot(a, status === 'waiting' ? 'needs' : a.classList.contains('ib-unread') ? true : null); }
+    if (String(convId) !== String(cfg.conversation) && preview != null) { a.classList.add('ib-unread'); if (a.getAttribute('data-status') !== 'waiting') setDot(a, true); }
+    if (preview != null) toTop(a);
   }
   function addConversation(c) {
-    if (listItem(c.id)) return;
-    if (!list) {
-      var nav = document.querySelector('.vb-rail-list'); var empty = document.getElementById('ib-empty'); if (empty) empty.remove();
-      list = el('ul', 'vb-chats'); list.id = 'ib-list'; nav.appendChild(list);
-    }
-    var li = el('li'); var a = el('a', 'vb-chat ib-conv ib-unread'); a.href = '/inbox/' + cfg.inbox + '?c=' + c.id; a.dataset.conv = c.id;
-    var row = el('span', 'ib-row'); row.appendChild(el('b', null, c.visitor_name || 'Visitor')); row.appendChild(chip(c.status)); row.appendChild(el('time', null, 'now'));
-    a.appendChild(row); a.appendChild(el('span', 'ib-prev', ''));
-    li.appendChild(a); list.insertBefore(li, list.firstChild);
+    if (!list || listItem(c.id)) return;
+    var empty = list.querySelector('.ovk-sidebar-empty'); if (empty) empty.remove();
+    var a = el('a', 'ovk-sidebar-item has-sub has-mark ib-unread'); a.href = '/inbox/' + cfg.inbox + '?c=' + c.id + '&f=' + (cfg.filter || 'active');
+    a.setAttribute('data-conv', c.id); a.setAttribute('data-who', c.status === 'bot' ? 'Vibe' : ''); a.setAttribute('data-status', c.status);
+    var mark = el('span', 'ib-av', String(c.visitor_name || 'V').slice(0, 1).toUpperCase()); mark.setAttribute('aria-hidden', 'true');
+    a.appendChild(mark);
+    a.appendChild(el('span', 'ovk-sidebar-t', c.visitor_name || 'Visitor'));
+    a.appendChild(el('span', 'ovk-sidebar-m', 'now'));
+    a.appendChild(el('span', 'ovk-sidebar-s', c.status === 'bot' ? 'Vibe' : 'New'));
+    setDot(a, c.status === 'waiting' ? 'needs' : true);
+    var first = list.querySelector('.ovk-sidebar-item');
+    if (first) list.insertBefore(a, first); else list.appendChild(a);
   }
 
   function connect() {
@@ -104,19 +134,20 @@
         touchList(m.conversation, m.message.body, null);
         if (m.conversation === cfg.conversation) appendToThread(m.message);
       } else if (m.type === 'inbox_assigned') {
-        var row2 = listItem(m.conversation); var prev = row2 && row2.querySelector('.ib-prev');
-        if (prev) { var who = prev.querySelector('.ib-who-has'); if (who) who.textContent = m.assignee === cfg.me ? 'You' : 'Someone'; }
+        var row = listItem(m.conversation);
+        if (row) { row.setAttribute('data-who', m.assignee == null ? '' : m.assignee === cfg.me ? 'You' : 'Someone'); var sub = row.querySelector('.ovk-sidebar-s'); if (sub) setLine(row, sub.textContent.replace(/^(You|Someone|Vibe|[^·]{1,40}) · /, '')); }
         if (m.conversation === cfg.conversation) { var sel = document.querySelector('.ib-assign select'); if (sel) sel.value = m.assignee == null ? '' : String(m.assignee); }
       } else if (m.type === 'inbox_rating') {
-        var item = listItem(m.conversation), row = item && item.querySelector('.ib-row');
-        if (row) { var old = row.querySelector('.ib-rate'); if (old) old.remove(); var r = el('span', 'ib-rate', m.rating > 0 ? '👍' : '👎'); if (m.comment) r.title = m.comment; row.insertBefore(r, row.querySelector('time')); }
+        var item = listItem(m.conversation), meta = item && item.querySelector('.ovk-sidebar-m');
+        if (meta) meta.textContent = (m.rating > 0 ? '👍 ' : '👎 ') + meta.textContent.replace(/^(👍|👎) /, '');
       } else if (m.type === 'inbox_call' && m.conversation === cfg.conversation) {
         if (m.state === 'ringing') callOffered(m.by); else callGone();
       } else if (m.type === 'inbox_status') {
         touchList(m.conversation, null, m.status);
-        if (m.conversation === cfg.conversation) { var h = document.querySelector('.vb-title .vb-st'); if (h) h.replaceWith(chip(m.status)); }
+        if (m.conversation === cfg.conversation) { var h = document.querySelector('.ib-tags .ib-st'); if (h) h.replaceWith(chip(m.status)); }
       } else if (m.type === 'inbox_typing' && m.conversation === cfg.conversation && thread) {
-        clearTyping(); typingEl = el('li', 'ib-sys', (m.who || 'Vibe') + ' is writing…'); thread.appendChild(typingEl); bottom();
+        clearTyping(); typingEl = el('li', 'ovt-divider ib-typing'); typingEl.appendChild(el('span', null, (m.who || 'Vibe') + ' is writing…'));
+        if (window.OVThread) window.OVThread.add(typingEl); else { thread.appendChild(typingEl); bottom(); }
         setTimeout(clearTyping, 60000);
       }
     };
@@ -130,8 +161,8 @@
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); });
   }
   function addTranslate(li) {
-    if (!li || !li.classList.contains('ib-visitor') || !li.dataset.id || li.querySelector('.ib-tr-btn')) return;
-    var body = li.querySelector('.vb-body'); if (!body) return;
+    if (!li || li.dataset.author !== 'visitor' || !li.dataset.id || li.querySelector('.ib-tr-btn')) return;
+    var body = li.querySelector('.ovt-reply'); if (!body) return;
     var b = el('button', 'ib-tr-btn', 'Translate'); b.type = 'button';
     b.addEventListener('click', function () {
       b.disabled = true; b.textContent = 'Translating…';
@@ -142,7 +173,7 @@
     });
     body.appendChild(b);
   }
-  if (thread) Array.prototype.forEach.call(thread.querySelectorAll('.ib-visitor'), addTranslate);
+  if (thread) Array.prototype.forEach.call(thread.querySelectorAll('[data-author="visitor"]'), addTranslate);
   var picIn = document.getElementById('ib-pic');
   if (picIn && input) {
     picIn.addEventListener('change', function () {
@@ -194,43 +225,39 @@
   function usePick(r) { input.value = r.body; closePick(); input.dispatchEvent(new Event('input')); input.focus(); }
 
   if (form && input) {
+    if (saved.length) input.setAttribute('aria-autocomplete', 'list');
     input.addEventListener('input', function () { picked = 0; showPick(); });
+    // In the capture phase, so a picked reply wins over ov-thread.js's Enter to send.
     input.addEventListener('keydown', function (e) {
       if (!pick) return;
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); picked = (picked + (e.key === 'ArrowDown' ? 1 : -1) + pick._list.length) % pick._list.length; showPick(); }
       else if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); e.stopImmediatePropagation(); usePick(pick._list[picked]); }
       else if (e.key === 'Escape') closePick();
-    });
-    var grow = function () { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px'; };
-    input.addEventListener('input', grow);
-    input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit ? form.requestSubmit() : form.submit(); } });
+    }, true);
+    // The kit grows the box and sends on Enter (ov-thread.js); an 'input' event keeps its size and Send in step.
+    var grow = function () { input.dispatchEvent(new Event('input')); };
     form.addEventListener('submit', function (e) {
       var text = input.value.trim(); if (!text) { e.preventDefault(); return; }
       if (!window.fetch) return;
       e.preventDefault();
-      var pending = turn({ id: 0, author: 'agent', author_name: 'You', body: text }); pending.removeAttribute('data-id'); thread.appendChild(pending); bottom();
+      var pending = turn({ id: 0, author: 'agent', author_name: 'You', body: text }); pending.removeAttribute('data-id');
+      if (window.OVThread) window.OVThread.add(pending); else { thread.appendChild(pending); bottom(); }
       input.value = ''; grow();
       fetch('/api/chat/inboxes/' + cfg.inbox + '/conversations/' + cfg.conversation + '/messages', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) })
         .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
         .then(function (x) {
           if (!x.ok) { pending.remove(); input.value = text; grow(); window.alert((x.d && x.d.error) || 'That did not send.'); return; }
-          if (thread.querySelector('[data-id="' + x.d.message.id + '"]')) pending.remove(); else pending.dataset.id = String(x.d.message.id);
+          // The socket may have answered first and given this very turn its id: only another turn with it is a copy.
+          var copy = thread.querySelector('[data-id="' + x.d.message.id + '"]');
+          if (copy && copy !== pending) pending.remove(); else pending.dataset.id = String(x.d.message.id);
           touchList(cfg.conversation, text, 'open');
         })
         .catch(function () { pending.remove(); input.value = text; grow(); });
     });
   }
-  // The rail on phones.
-  function setRail(open) {
-    app.classList.toggle('is-open', open);
-    var scrim = app.querySelector('.vb-scrim'); if (scrim) scrim.hidden = !open;
-    var btn = app.querySelector('[data-vb-open]'); if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-  }
   // "Answered by": choosing a person assigns at once.
   var assignSel = document.querySelector('.ib-assign select[data-autosubmit]');
   if (assignSel) assignSel.addEventListener('change', function () { assignSel.form.requestSubmit ? assignSel.form.requestSubmit() : assignSel.form.submit(); });
-  app.addEventListener('click', function (e) { if (e.target.closest('[data-vb-open]')) setRail(true); else if (e.target.closest('[data-vb-close]')) setRail(false); });
-  bottom();
   connect();
 
   // A voice call with the visitor (server/inbox/inbox.js startCall, support-call.js): Call starts it and joins; anyone

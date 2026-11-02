@@ -1,42 +1,10 @@
-/* Vibe, OpenVibe's assistant, on openvibe.chat (server/web/vibe-pages.js): the full-window app. The chats down the left,
-   the conversation in a readable column, one composer docked at the bottom. Colours are the network theme's (chat.css
-   maps them to --oc-*), so every theme, light ones included, carries through. */
-/* The inbox is a full-window app (its own scroll box); Vibe's pages are the conversation kit's, and the page scrolls. */
-body.oc-app-body:has(.vb) { overflow: hidden; }
+/* Vibe, OpenVibe's assistant, on openvibe.chat (server/web/vibe-pages.js), on the network's conversation kit
+   (openvibe-shared thread.css and kit.css draw the chats, the turns, the composer and the page). These are Vibe's own
+   parts. Colours are the network theme's (chat.css maps them to --oc-*), so every theme, light ones included, carries
+   through. The support inbox has its own stylesheet (inbox.css). */
 .vb-wrap { margin: 0; padding: 0; max-width: none; }
-.vb {
-  --vb-rail: 272px;
-  --vb-col: 768px;
-  --vb-radius: 22px;
-  display: grid;
-  grid-template-columns: var(--vb-rail) minmax(0, 1fr);
-  height: calc(100dvh - var(--ovnav-real-h, 52px));
-  min-height: 420px;
-}
 
-/* ── The rail ─────────────────────────────────────────────────────────────── */
-.vb-rail {
-  display: flex; flex-direction: column; min-height: 0;
-  background: color-mix(in srgb, var(--oc-panel) 70%, var(--oc-bg));
-  border-right: 1px solid var(--oc-line);
-  padding: 10px 8px 8px;
-}
-.vb-rail-top { display: flex; align-items: center; gap: 6px; padding: 2px 2px 8px; }
-.vb-new {
-  flex: 1; display: flex; align-items: center; gap: 10px; min-height: 40px; padding: 0 12px;
-  border-radius: 12px; color: var(--oc-text); text-decoration: none; font-weight: 600; font-size: .95rem;
-  border: 1px solid var(--oc-line); background: var(--oc-bg);
-  transition: background .15s, border-color .15s;
-}
-.vb-new:hover { background: var(--oc-panel-2); border-color: color-mix(in srgb, var(--oc-accent) 40%, var(--oc-line)); }
-.vb svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-.vb-icon {
-  all: unset; box-sizing: border-box; cursor: pointer; display: inline-grid; place-items: center;
-  width: 36px; height: 36px; border-radius: 10px; color: var(--oc-muted); flex: none;
-}
-.vb-icon:hover { background: var(--oc-panel-2); color: var(--oc-text); }
-.vb-icon:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
-.vb-rail-close, .vb-menu { display: none; }
+/* How Vibe did this, folded under an answer (server/rooms/how.js). */
 .vb-how { margin-top: 10px; font-size: .86rem; color: var(--oc-muted); }
 .vb-how summary { cursor: pointer; width: fit-content; padding: 2px 0; font-weight: 600; list-style: none; }
 .vb-how summary::-webkit-details-marker { display: none; }
@@ -61,41 +29,16 @@ body.oc-app-body:has(.vb) { overflow: hidden; }
 .vb-source-date { color: var(--oc-muted); white-space: nowrap; }
 .vb-how .vb-source { margin: 2px 2px 2px 0; color: var(--oc-muted); }
 .vb-how .vb-source:hover { color: var(--oc-text); }
-.vb-search { position: relative; margin: 0 2px 6px; }
-.vb-search svg { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--oc-muted); pointer-events: none; }
-.vb-search input {
-  box-sizing: border-box; width: 100%; min-height: 38px; padding: 0 12px 0 34px; border-radius: 10px;
-  border: 1px solid var(--oc-line); background: var(--oc-bg); color: var(--oc-text); font: inherit; font-size: .9rem;
-}
-.vb-search input:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; border-color: transparent; }
-.vb-chat.vb-hit { white-space: normal; }
+/* The chats column: a search's matches, a group's name, a note, today's allowance. */
 .vb-hit span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vb-hit small { display: block; margin-top: 2px; color: var(--oc-muted); font-size: .8rem; line-height: 1.35; overflow-wrap: anywhere; }
 .vb-hit mark { background: color-mix(in srgb, var(--oc-accent) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
-.vb-rail-list { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 2px; scrollbar-width: thin; }
 .vb-group { margin: 14px 10px 4px; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
-.vb-chats { list-style: none; margin: 0; padding: 0; }
-.vb-chat {
-  display: block; padding: 8px 10px; border-radius: 10px; color: var(--oc-text); text-decoration: none;
-  font-size: .92rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-}
-.vb-chat:hover { background: var(--oc-panel-2); }
-.vb-chat[aria-current="page"] { background: color-mix(in srgb, var(--oc-accent) 16%, var(--oc-panel-2)); font-weight: 600; }
 .vb-rail-note { margin: 14px 10px; color: var(--oc-muted); font-size: .9rem; line-height: 1.45; }
-.vb-rail-more { border-top: 1px solid var(--oc-line); margin-top: 6px; padding-top: 6px; display: grid; gap: 1px; }
-.vb-rail-more a { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; color: var(--oc-muted); text-decoration: none; font-size: .9rem; }
-@media (hover: hover) { .vb-rail-more a:hover { background: var(--oc-panel-2); color: var(--oc-text); } }
+
 .vb-allow { margin: 6px 10px 2px; font-size: .78rem; color: var(--oc-muted); }
 
-/* ── The conversation ─────────────────────────────────────────────────────── */
-.vb-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
-.vb-head {
-  display: flex; align-items: center; gap: 6px; min-height: 52px; padding: 6px 12px;
-  border-bottom: 1px solid transparent;
-}
-.vb-title { flex: 1; min-width: 0; margin: 0; font-size: 1rem; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.vb-empty .vb-title { color: var(--oc-muted); font-weight: 600; }
-.vb-head-new { color: var(--oc-muted); }
+/* The chat's options (rename, delete), from the head. */
 .vb-actions { position: relative; }
 .vb-actions > summary { list-style: none; }
 .vb-actions > summary::-webkit-details-marker { display: none; }
@@ -111,60 +54,25 @@ body.oc-app-body:has(.vb) { overflow: hidden; }
 .vb-pop .vb-danger { width: 100%; color: var(--oc-red); border-color: color-mix(in srgb, var(--oc-red) 45%, var(--oc-line)); background: transparent; }
 .vb-pop .vb-danger:hover { background: color-mix(in srgb, var(--oc-red) 12%, transparent); }
 
-.vb-scroll { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 8px 16px 24px; scroll-padding-bottom: 24px; }
-.vb-scroll > .oc-notice { max-width: var(--vb-col); margin: 8px auto; }
-.vb-thread { list-style: none; margin: 0 auto; padding: 8px 0 0; max-width: var(--vb-col); display: grid; grid-template-columns: minmax(0, 1fr); gap: 22px; }
-.vb-turn { display: flex; gap: 14px; min-width: 0; }
-/* The writing bubble's Stop (vibe.js showWait): at the bubble's end, quiet like the actions under answers. */
-.vb-stop { align-self: flex-start; margin-left: auto; padding: 4px 10px; border-radius: 8px; border: 1px solid var(--oc-line); background: transparent; color: var(--oc-muted); font: inherit; font-size: .8rem; cursor: pointer; }
-.vb-stop:hover { color: var(--oc-text); background: var(--oc-panel-2); }
-.vb-stop:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
-.vb-stop[disabled] { opacity: .5; cursor: default; }
-.vb-me { justify-content: flex-end; }
-.vb-bubble {
-  max-width: min(85%, 620px); padding: 10px 16px; border-radius: 20px 20px 6px 20px;
-  background: var(--oc-panel-2); line-height: 1.55; overflow-wrap: anywhere;
-}
-.vb-bubble .oc-pics { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.vb-bubble .oc-pic img { max-width: 220px; max-height: 220px; border-radius: 12px; display: block; }
+/* Vibe's mark, beside the welcome's greeting. */
 .vb-mark {
   flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; margin-top: 1px;
   background: linear-gradient(140deg, var(--oc-accent), color-mix(in srgb, var(--oc-accent) 45%, #a78bfa));
   color: var(--oc-on-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--oc-accent) 18%, transparent);
 }
 .vb-mark svg { width: 16px; height: 16px; stroke-width: 2.6; }
-.vb-body { flex: 1; min-width: 0; padding-top: 3px; }
 
 /* Vibe's answers: the Markdown styles live in chat.css (.vb-md, .md-table), which every page loads. */
 
-.vb-dots { display: inline-flex; gap: 5px; align-items: center; height: 26px; }
-.vb-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--oc-muted); opacity: .35; animation: vbDot 1.2s infinite ease-in-out; }
-.vb-dots i:nth-child(2) { animation-delay: .15s; }
-.vb-dots i:nth-child(3) { animation-delay: .3s; }
-@keyframes vbDot { 0%, 80%, 100% { opacity: .35; transform: translateY(0); } 40% { opacity: 1; transform: translateY(-3px); } }
-@media (prefers-reduced-motion: reduce) { .vb-dots i { animation: none; opacity: .7; } }
-
-/* An answer as it is written (vibe.js streamText): the text, then the dots, small. */
-.vb-wait .vb-streaming + .vb-dots { margin-top: 6px; transform: scale(.8); transform-origin: left center; }
-
-/* Under an answer: Copy and Try again, quiet until hovered; a code block's own Copy in its corner. */
-.vb-acts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.vb-acts form { display: contents; }
+/* Under an answer: Try again and the like, quiet until hovered (Copy is the kit's). */
 .vb-act {
   padding: 4px 10px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--oc-muted);
   font: inherit; font-size: .8rem; cursor: pointer;
 }
 .vb-act:hover { color: var(--oc-text); border-color: var(--oc-line); background: var(--oc-panel-2); }
-.vb-act:focus-visible, .vb-copy-code:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
-.vb-act.is-done, .vb-copy-code.is-done { color: var(--oc-green, var(--oc-accent)); }
+.vb-act:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
+.vb-act.is-done { color: var(--oc-green, var(--oc-accent)); }
 .vb-md pre { position: relative; }
-.vb-copy-code {
-  position: absolute; top: 6px; right: 6px; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--oc-line);
-  background: var(--oc-panel); color: var(--oc-muted); font: inherit; font-size: .75rem; cursor: pointer;
-}
-.vb-copy-code:hover { color: var(--oc-text); }
-.vb-copy-code::before { content: 'Copy'; }
-.vb-copy-code.is-done::before { content: 'Copied'; }
 
 /* ── A new chat ───────────────────────────────────────────────────────────── */
 .vb-hello { max-width: var(--vb-col); margin: 0 auto; min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px 0 8px; }
@@ -215,30 +123,6 @@ body.oc-app-body:has(.vb) { overflow: hidden; }
 .vb-notes small { grid-column: 1; color: var(--oc-muted); font-size: .8rem; }
 .vb-notes form { grid-column: 2; grid-row: 1 / span 2; }
 
-/* ── The composer ─────────────────────────────────────────────────────────── */
-.vb-dock { padding: 0 16px max(10px, env(safe-area-inset-bottom)); }
-.vb-composer {
-  max-width: var(--vb-col); margin: 0 auto; display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px;
-  padding: 8px 8px 8px 18px; border-radius: var(--vb-radius); border: 1px solid var(--oc-line);
-  background: var(--oc-panel); box-shadow: 0 10px 34px rgba(0, 0, 0, .22);
-  transition: border-color .15s, box-shadow .15s;
-}
-.vb-composer:focus-within { border-color: color-mix(in srgb, var(--oc-accent) 55%, var(--oc-line)); box-shadow: 0 10px 34px rgba(0, 0, 0, .22), 0 0 0 3px color-mix(in srgb, var(--oc-accent) 16%, transparent); }
-.vb-composer textarea {
-  flex: 1; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--oc-text);
-  font: inherit; font-size: 1rem; line-height: 1.5; padding: 7px 0; max-height: 40vh; overflow-y: auto;
-}
-.vb-composer textarea::placeholder { color: var(--oc-muted); }
-.vb-composer textarea:focus-visible { outline: none; }
-.vb-send {
-  all: unset; box-sizing: border-box; cursor: pointer; flex: none; width: 38px; height: 38px; border-radius: 50%;
-  display: grid; place-items: center; background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, var(--oc-on-accent));
-  transition: opacity .15s, transform .15s;
-}
-.vb-send svg { stroke-width: 2.4; }
-.vb-send:hover { transform: translateY(-1px); }
-.vb-send:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
-.vb-send[disabled], .vb-composer.is-empty .vb-send { opacity: .4; cursor: default; transform: none; }
 /* The modes: a row of chips under the box (Chat · Research · Agent · Code); the checked one is lit. */
 .vb-modes { order: 3; flex-basis: 100%; display: flex; gap: 6px; margin: 0 0 0 -10px; padding: 2px 0 0; border: 0; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .vb-modes::-webkit-scrollbar { display: none; }
@@ -250,42 +134,27 @@ body.oc-app-body:has(.vb) { overflow: hidden; }
 @media (hover: hover) { .vb-modes span:hover { color: var(--oc-text); } }
 .vb-fine { max-width: var(--vb-col); margin: 6px auto 0; text-align: center; font-size: .76rem; color: var(--oc-muted); }
 
-/* ── Phones and narrow windows: the rail slides in over the chat ──────────── */
-.vb-scrim { display: none; }
+/* ── Phones ── */
 @media (max-width: 860px) {
-  .vb { grid-template-columns: minmax(0, 1fr); }
-  .vb-rail {
-    position: fixed; z-index: 30; top: var(--ovnav-real-h, 52px); bottom: 0; left: 0; width: min(300px, 86vw);
-    transform: translateX(-102%); transition: transform .22s cubic-bezier(.2, .7, .2, 1); box-shadow: 18px 0 50px rgba(0, 0, 0, .35);
-  }
-  .vb.is-open .vb-rail { transform: none; }
-  .vb-scrim { display: block; position: fixed; inset: var(--ovnav-real-h, 52px) 0 0 0; z-index: 25; background: rgba(0, 0, 0, .45); }
-  .vb-scrim[hidden] { display: none; }
-  .vb-rail-close, .vb-menu { display: inline-grid; }
-  .vb-scroll { padding: 4px 12px 18px; }
-  .vb-dock { padding: 0 10px max(8px, env(safe-area-inset-bottom)); }
-  .vb-thread { gap: 18px; }
-  .vb-turn { gap: 10px; }
-  .vb-bubble { max-width: 88%; }
   /* The link from "How Vibe did this" to the answer's chips is a tap target on a phone. */
   .vb-how-sources a { display: inline-flex; align-items: center; min-height: 44px; }
 }
+/* On a phone the four ideas are a row you swipe, every one there: a page is never shortened by hiding what it holds
+   (the owner, 2026-10-31). Two of them used to be hidden, three on a short phone. */
 @media (max-width: 520px) {
-  .vb-suggest { grid-template-columns: minmax(0, 1fr); }
-  .vb-suggest li:nth-child(n+3) { display: none; }
+  .vb-suggest { display: flex; gap: 8px; overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scrollbar-width: none; padding-bottom: 2px; }
+  .vb-suggest::-webkit-scrollbar { display: none; }
+  .vb-suggest li { flex: 0 0 min(78%, 280px); scroll-snap-align: start; }
   .vb-hello { justify-content: flex-end; padding-bottom: 4px; }
   .vb-sub { font-size: .92rem; margin-bottom: 16px; }
 }
-/* A short phone (an SE, a landscape tablet with the keyboard up): the greeting, one suggestion and the composer fit. */
+/* A short phone (an SE, a landscape tablet with the keyboard up): the greeting, the row of ideas and the composer fit. */
 @media (max-width: 520px) and (max-height: 700px) {
   .vb-hello .vb-mark { display: none; }
   .vb-hello h1 { font-size: 1.35rem; }
-  .vb-suggest li:nth-child(n+2) { display: none; }
 }
-@media (prefers-reduced-motion: reduce) { .vb-rail { transition: none; } }
 
 /* A picture waiting to go with the next message (vibe.js), above the composer; the attach button inside it. */
-.vb-composer .vb-attach { width: 38px; height: 38px; margin-left: -8px; }
 .vb-preview { max-width: var(--vb-col); margin: 0 auto 8px; display: flex; }
 .vb-preview[hidden] { display: none; }
 .vb-preview figure { position: relative; margin: 0; }
@@ -293,64 +162,6 @@ body.oc-app-body:has(.vb) { overflow: hidden; }
 .vb-preview button { all: unset; box-sizing: border-box; cursor: pointer; position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%;
   display: grid; place-items: center; background: var(--oc-panel-2); color: var(--oc-text); border: 1px solid var(--oc-line); font-size: 14px; line-height: 1; }
 .vb-preview button:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 1px; }
-.vb-bubble img.vb-local { display: block; max-width: 220px; max-height: 220px; border-radius: 12px; margin-top: 8px; }
-
-
-/* ── Support inbox (server/web/inbox-pages.js, public/web/inbox.js): the same app, a conversation per visitor ── */
-.vb-st { display: inline-block; margin-left: 6px; padding: 1px 8px; border-radius: 999px; font-size: .72rem; font-weight: 700; letter-spacing: .02em; vertical-align: 2px;
-  border: 1px solid var(--oc-line); color: var(--oc-muted); }
-.vb-st-bot { color: var(--oc-accent); border-color: color-mix(in srgb, var(--oc-accent) 45%, var(--oc-line)); }
-.vb-st-wait { color: var(--warning-text, #fbbf24); border-color: color-mix(in srgb, var(--warning, #f59e0b) 55%, var(--oc-line)); background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent); }
-.vb-st-open { color: var(--success-text, var(--oc-ok)); border-color: color-mix(in srgb, var(--oc-ok) 50%, var(--oc-line)); }
-.vb-st-done { opacity: .75; }
-.ib .vb-new .ib-dot { width: 12px; height: 12px; border-radius: 50%; flex: none; }
-.ib-tabs { display: flex; gap: 4px; padding: 0 4px 6px; }
-.ib-tabs a { flex: 1; text-align: center; padding: 6px 8px; border-radius: 9px; color: var(--oc-muted); text-decoration: none; font-size: .85rem; }
-.ib-tabs a[aria-current="page"], .ib-tabs a:hover { background: var(--oc-panel-2); color: var(--oc-text); }
-.ib-conv { white-space: normal; display: grid; gap: 2px; }
-.ib-row { display: flex; align-items: center; gap: 4px; min-width: 0; }
-.ib-row b { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-row .vb-st { margin-left: 4px; }
-.ib-rate { font-size: .85rem; line-height: 1; }
-.ib-ok { color: var(--oc-ok, #22c55e); font-weight: 800; margin-left: 4px; font-size: .9em; }
-.ib-assign { display: inline-flex; align-items: center; margin-right: 8px; font-size: .85rem; color: var(--oc-muted); }
-.ib-assign select { margin-left: 6px; font-size: .85rem; padding: 4px 8px; }
-.ib-who-has { color: var(--oc-accent); font-weight: 600; }
-.ib-pic-btn { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; color: var(--oc-muted); flex: none; font-size: 1.1rem; }
-.ib-pic-btn:hover { color: var(--oc-accent); background: color-mix(in srgb, var(--oc-accent) 12%, transparent); }
-.ib-pic-btn:focus-within { outline: 2px solid var(--oc-accent); }
-.ib-tr-btn { all: unset; cursor: pointer; font-size: .78rem; color: var(--oc-muted); margin-top: 2px; border-radius: 6px; padding: 1px 4px; }
-.ib-tr-btn:hover { color: var(--oc-accent); }
-.ib-tr-btn:focus-visible { outline: 2px solid var(--oc-accent); }
-.ib-tr { margin: 4px 0 0; padding-left: 10px; border-left: 2px solid var(--oc-line); color: var(--oc-muted); }
-.ib-tr-pick select { font-size: .8rem; padding: 2px 6px; margin-left: 4px; }
-.ib-pick { list-style: none; margin: 0 0 6px; padding: 4px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); max-height: 260px; overflow-y: auto; }
-.ib-pick li { display: flex; gap: 8px; align-items: baseline; padding: 6px 10px; border-radius: 8px; cursor: pointer; min-width: 0; }
-.ib-pick li span { color: var(--oc-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.ib-pick li.is-on, .ib-pick li:hover { background: color-mix(in srgb, var(--oc-accent) 14%, transparent); }
-.ib-row time { margin-left: auto; font-size: .75rem; color: var(--oc-muted); flex: none; }
-.ib-prev { color: var(--oc-muted); font-size: .84rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-unread .ib-row b, .ib-unread .ib-prev { color: var(--oc-text); font-weight: 700; }
-.ib-actions { display: flex; gap: 6px; }
-.ib-actions button { padding: 6px 12px; border-radius: 10px; border: 1px solid var(--oc-line); background: var(--oc-panel); color: var(--oc-text); font: inherit; font-size: .85rem; cursor: pointer; }
-.ib-actions button:hover { border-color: color-mix(in srgb, var(--oc-accent) 45%, var(--oc-line)); }
-/* A voice call with the visitor: the Call button beside the actions, and the bar above the reply box while one is open. */
-.ib-call-btn { margin-left: 6px; padding: 6px 14px; border-radius: 10px; border: 0; background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, #fff); font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; }
-.ib-call-btn[hidden], .ib-callbar[hidden], .ib-callbar button[hidden] { display: none; }
-.ib-callbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--oc-accent); background: var(--oc-panel); }
-.ib-call-text { flex: 1 1 200px; font-weight: 600; }
-.ib-callbar button { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--oc-line); background: transparent; color: var(--oc-text); font: inherit; font-size: .85rem; font-weight: 700; cursor: pointer; }
-.ib-callbar .ib-call-end { border-color: transparent; background: #dc2626; color: #fff; }
-.ib-screen { margin: 0 0 8px; padding: 8px; border-radius: 12px; border: 1px solid var(--oc-line); background: #000; display: grid; gap: 6px; }
-.ib-screen[hidden] { display: none; }
-.ib-screen figcaption { color: #e5e7eb; font-size: .85rem; font-weight: 600; }
-.ib-screen video { width: 100%; max-height: 50vh; border-radius: 8px; background: #000; object-fit: contain; }
-.ib-screen button { justify-self: end; padding: 4px 10px; border-radius: 999px; border: 1px solid #374151; background: transparent; color: #e5e7eb; font: inherit; font-size: .8rem; cursor: pointer; }
-.ib-sys { text-align: center; color: var(--oc-muted); font-size: .82rem; }
-.ib-who { margin: 0 0 2px; font-size: .74rem; font-weight: 700; color: var(--oc-muted); }
-.ib-av { flex: none; width: 30px; height: 30px; border-radius: 50%; display: inline-grid; place-items: center; background: var(--oc-panel-2); color: var(--oc-text); font-weight: 700; }
-.vb-bubble.ib-ai { background: color-mix(in srgb, var(--oc-accent) 14%, var(--oc-panel-2)); }
-.ib-page { max-width: var(--vb-col); margin: 4px auto 0; font-size: .8rem; color: var(--oc-muted); overflow-wrap: anywhere; }
 
 /* What Vibe did (plan L48 V2): a chip for each reminder or timer it set or stopped, under its answer */
 .vb-res { display: grid; gap: 6px; margin: 10px 0 2px; max-width: 560px; }
@@ -368,7 +179,7 @@ body.oc-app-body:has(.vb) { overflow: hidden; }
 /* ── Vibe on the network's conversation UI (openvibe-shared/thread, plan L55 C4) ───────────────────────────────────
    The kit draws the chats (kit.sidebar), the turns, Copy, the composer and the page; these are Vibe's own parts in it:
    its icons, the modes and attach in the composer's tools, the picture preview, the fine print, the search's snippets,
-   the chat's options and the welcome. (The inbox still draws the older .vb layout above.) */
+   the chat's options and the welcome. */
 .vbk { --vb-col: 780px; }
 .vbk svg:not(.ovt-ic):not(.ovk-i) { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 .vbk .ovt-btn svg:not(.ovt-ic) { width: 20px; height: 20px; }

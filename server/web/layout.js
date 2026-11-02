@@ -104,7 +104,8 @@ function contentSecurityPolicy(nonce) {
  * rooms/messages for the navigation), script / callScript / ringScript (public/web/chat.js, call.js, ring.js: a call
  * coming in, on every page of a signed-in person while calls are on), app (Vibe's full-window app, server/web/vibe-pages.js:
  * vibe.css + vibe-md.js + vibe.js, and no footer), kit (the network's conversation UI, openvibe-shared/thread: kit.css,
- * thread.css, kit-web.js and ov-thread.js; Vibe's pages), appScript (the app's own script instead of vibe.js: inbox.js), feedView
+ * thread.css, kit-web.js and ov-thread.js; Vibe's pages and the support inbox), appScript and appStyle (the app's own
+ * script and stylesheet instead of vibe.js and vibe.css: inbox.js and inbox.css), feedView
  * (a feed's card on the page: feed-view.css + feed-view.js, server/feeds/), scripts (more of
  * public/web's scripts by name, e.g. support.js), footer ('full', the default, on front pages, directories and docs;
  * 'compact', one quiet line, on pages people work in: a room, a channel, a conversation, a task, settings),
@@ -146,7 +147,7 @@ ${INSTALL_LINKS}
 ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` : ''}
 ${(o.inlineStyles || []).map((css) => `<style>${css}</style>`).join('\n')}
 ${o.kit ? `<link rel="stylesheet" href="${ovServe.url('kit.css')}">\n<link rel="stylesheet" href="${ovServe.url('thread.css')}">` : ''}
-${o.app ? `<link rel="stylesheet" href="${asset('vibe.css')}">` : ''}
+${o.app ? `<link rel="stylesheet" href="${asset(o.appStyle || 'vibe.css')}">` : ''}
 ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
 ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join('\n')}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>

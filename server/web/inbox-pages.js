@@ -6,8 +6,10 @@
  *   GET  /embed/inbox/:id            the chat panel the widget opens in an iframe (public/web/embed.js); its
  *                                    Content-Security-Policy frame-ancestors are the inbox's allowed sites (any when none)
  *   GET  /inbox                      the inboxes a person works in, and a form to make one
- *   GET  /inbox/:id                  the inbox: conversations down the left (waiting first), one open in the middle, a
- *                                    reply box; live through public/web/inbox.js (inbox_watch). ?c=<conversation>
+ *   GET  /inbox/:id                  the inbox, on the network's conversation kit: the conversations in the kit's sidebar
+ *                                    (the filters, then a row per visitor, waiting first), one open as the kit's thread,
+ *                                    the reply box its composer; live through public/web/inbox.js (inbox_watch), styled
+ *                                    by public/web/inbox.css. ?c=<conversation>&f=active|mine|waiting|resolved
  *   GET  /inbox/:id/settings         name, greeting, colour, Vibe's instructions and pages, allowed sites, people, the snippet
  *   POST /inbox · /inbox/:id/settings · /inbox/:id/members · /inbox/:id/members/:uid/delete ·
  *        /inbox/:id/c/:cid (reply) · /inbox/:id/c/:cid/status       forms, so all of it works without JavaScript
@@ -21,10 +23,16 @@ const pictures = require('../rooms/pictures');
 const { embedOf, sendExport } = require('../inbox/routes');
 const records = require('../inbox/records');
 const { esc, asset } = require('./layout');
+const kit = require('openvibe-shared/kit');
+const thread = require('openvibe-shared/thread');
+// A visitor's initial, in a circle, beside their row.
+const initialMark = (name) => `<span class="ib-av" aria-hidden="true">${esc(String(name || 'V').slice(0, 1).toUpperCase())}</span>`;
+// A preview line without Markdown's marks (Vibe's answers are Markdown).
+const plainText = (t) => String(t || '').replace(/!?\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`~]+|^#+\s*|^>\s*/gm, '').replace(/\s+/g, ' ').trim().slice(0, 140);
 
 const WIDGET = path.join(__dirname, '..', '..', 'public', 'web', 'widget.js');
 const TR_LANGS = [['en', 'English'], ['es', 'Spanish'], ['pt', 'Portuguese'], ['fr', 'French'], ['de', 'German'], ['it', 'Italian'], ['nl', 'Dutch'], ['pl', 'Polish'], ['tr', 'Turkish'], ['ru', 'Russian'], ['uk', 'Ukrainian'], ['ar', 'Arabic'], ['hi', 'Hindi'], ['id', 'Indonesian'], ['vi', 'Vietnamese'], ['th', 'Thai'], ['ja', 'Japanese'], ['ko', 'Korean'], ['zh', 'Chinese'], ['sv', 'Swedish']];
-const STATUS = { bot: ['Vibe', 'vb-st-bot'], waiting: ['Waiting', 'vb-st-wait'], open: ['Open', 'vb-st-open'], resolved: ['Resolved', 'vb-st-done'] };
+const STATUS = { bot: ['Vibe', 'ib-st-bot'], waiting: ['Waiting', 'ib-st-wait'], open: ['Open', 'ib-st-open'], resolved: ['Resolved', 'ib-st-done'] };
 const json = (v, d) => { if (Array.isArray(v)) return v; try { return JSON.parse(v || 'null') || d; } catch { return d; } };
 const ago = (ts) => {
     const t = Date.parse(String(ts || '').includes('T') ? ts : `${String(ts || '').replace(' ', 'T')}Z`);
@@ -82,7 +90,7 @@ function mountInboxPages(router, { page, viewerOf, needUser, sameSite, formLimit
     });
 
     // ── The inbox's people ──
-    const statusChip = (s) => `<span class="vb-st ${STATUS[s] ? STATUS[s][1] : ''}">${esc(STATUS[s] ? STATUS[s][0] : s)}</span>`;
+    const statusChip = (s) => `<span class="ib-st ${STATUS[s] ? STATUS[s][1] : ''}">${esc(STATUS[s] ? STATUS[s][0] : s)}</span>`;
 
     router.get('/inbox', async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
@@ -127,52 +135,108 @@ ${list}
         const filter = ['active', 'mine', 'waiting', 'resolved'].includes(req.query.f) ? req.query.f : 'active';
         const list = await inboxes.conversations(inbox, { status: filter, user: actor.user });
         const team = await inboxes.members(inbox);
+        const counts = (await inboxes.mine(actor.user)).find((i) => i.id === inbox.id) || { waiting: 0 };
         const nameOf = (id) => { const m = team.find((x) => x.user_id === Number(id)); return m ? (m.display_name || m.username) : null; };
         const current = req.query.c ? await inboxes.conversation(inbox, req.query.c) : null;
         const saved = await inboxes.savedReplies(inbox);
         const msgs = current ? await inboxes.messages(current) : [];
         if (current) await inboxes.markRead(inbox, current);
-        const item = (c) => `<li><a class="vb-chat ib-conv" href="/inbox/${esc(inbox.id)}?c=${esc(c.id)}&amp;f=${filter}"${current && c.id === current.id ? ' aria-current="page"' : ''} data-conv="${esc(c.id)}">
-<span class="ib-row"><b>${esc(c.visitor_name || 'Visitor')}</b>${c.verified ? '<span class="ib-ok" title="Verified by your site">✓</span>' : ''}${statusChip(c.status)}${c.rating ? `<span class="ib-rate" title="${esc(c.rating_comment || '')}">${c.rating > 0 ? '👍' : '👎'}</span>` : ''}<time>${esc(ago(c.last_message_at))}</time></span>
-<span class="ib-prev">${c.assignee_id && c.status !== 'resolved' ? `<span class="ib-who-has">${esc(Number(c.assignee_id) === Number(actor.user.id) ? 'You' : nameOf(c.assignee_id) || 'Someone')}</span> · ` : ''}${esc(c.preview || '')}</span></a></li>`;
-        // A person's or a signed-in visitor's message shows its pictures inline, not their links as text.
-        const shown = (m) => (m.author === 'agent' || m.account ? pictures.withoutLinks(m.body) : m.body);
-        const turn = (m) => {
-            if (m.author === 'system') return `<li class="ib-sys" data-id="${m.id}">${esc(m.body)}</li>`;
-            if (m.author === 'visitor') return `<li class="vb-turn vb-ai ib-visitor" data-id="${m.id}"><span class="ib-av" aria-hidden="true">${esc((current.visitor_name || 'V').slice(0, 1).toUpperCase())}</span><div class="vb-body"><p class="ib-who">${esc(current.visitor_name || 'Visitor')}</p>${shown(m) ? `<div class="vb-md">${esc(shown(m)).replace(/\n/g, '<br>')}</div>` : ''}${m.account ? pictures.pageHtml(m.body) : ''}</div></li>`;
-            return `<li class="vb-turn vb-me" data-id="${m.id}"><div class="vb-bubble${m.author === 'ai' ? ' ib-ai' : ''}"><p class="ib-who">${m.author === 'ai' ? 'Vibe (AI)' : esc(m.author_name || 'Agent')}</p>${m.author === 'ai' ? `<div class="vb-md">${md.render(m.body)}</div>` : esc(shown(m)).replace(/\n/g, '<br>')}${m.author === 'agent' ? pictures.pageHtml(m.body) : ''}</div></li>`;
-        };
-        const tabs = [['active', 'Active'], ['mine', 'Mine'], ['waiting', 'Waiting'], ['resolved', 'Resolved']].map(([k, l]) => `<a href="/inbox/${esc(inbox.id)}?f=${k}"${k === filter ? ' aria-current="page"' : ''}>${l}</a>`).join('');
-        const assignForm = current ? `<form method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}/assign" class="ib-assign"><label>Answered by <select name="assignee" data-autosubmit><option value="">nobody yet</option>${team.map((m) => `<option value="${m.user_id}"${Number(current.assignee_id) === m.user_id ? ' selected' : ''}>${esc(m.user_id === Number(actor.user.id) ? 'me' : (m.display_name || m.username))}</option>`).join('')}</select></label><noscript><button type="submit">Assign</button></noscript></form>` : '';
-        const actions = current ? `${assignForm}<form method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}/status" class="ib-actions">
-${current.status !== 'resolved' ? '<button name="status" value="resolved">Resolve</button>' : '<button name="status" value="open">Reopen</button>'}
-${Number(inbox.ai_enabled) && current.status !== 'bot' && current.status !== 'resolved' ? '<button name="status" value="bot">Back to Vibe</button>' : ''}</form>${current.status !== 'resolved' && config.calls.enabled ? '<button type="button" class="ib-call-btn" id="ib-call" hidden>Call</button>' : ''}` : '';
-        const body = `<div class="vb ib" id="vb" data-inbox="${esc(inbox.id)}" data-conv="${current ? esc(current.id) : ''}">
-<aside class="vb-rail" id="vb-rail" aria-label="Conversations">
-<div class="vb-rail-top"><a class="vb-new" href="/inbox/${esc(inbox.id)}/settings"><span class="ib-dot" style="background:${esc(inbox.color)}"></span><span>${esc(inbox.name)}</span></a>
-<button class="vb-icon vb-rail-close" type="button" data-vb-close aria-label="Close the list">&times;</button></div>
-<nav class="ib-tabs" aria-label="Filter">${tabs}</nav>
-<nav class="vb-rail-list" aria-label="Conversations">${list.length ? `<ul class="vb-chats" id="ib-list">${list.map(item).join('')}</ul>` : '<p class="vb-rail-note" id="ib-empty">No conversations here yet. Add the snippet from Settings to your site.</p>'}</nav>
-<nav class="vb-rail-more" aria-label="More"><a href="/inbox/${esc(inbox.id)}/settings"><span>Settings and snippet</span></a><a href="/inbox"><span>All inboxes</span></a></nav>
-</aside>
-<div class="vb-scrim" data-vb-close hidden></div>
-<section class="vb-main" aria-label="Conversation">
-<header class="vb-head"><button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show conversations">&#9776;</button>
-<h1 class="vb-title">${current ? `${esc(current.visitor_name || 'Visitor')}${Number(current.verified) ? ' <span class="ib-ok" title="Verified by your site">✓</span>' : ''} ${statusChip(current.status)}${current.rating ? ` <span class="ib-rate" title="${esc(current.rating_comment || 'The visitor\'s rating')}">${Number(current.rating) > 0 ? '👍' : '👎'}</span>` : ''}` : esc(inbox.name)}</h1>${actions}</header>
-<div class="vb-scroll" id="vb-scroll">
-${current ? `${Number(current.verified) ? `<p class="ib-page">Verified by your site${current.visitor_email ? ` · <a href="mailto:${esc(current.visitor_email)}">${esc(current.visitor_email)}</a>` : ''} · id ${esc(current.external_id || '')}</p>` : ''}${current.rating_comment ? `<p class="ib-page">Rated ${Number(current.rating) > 0 ? '👍' : '👎'}: “${esc(current.rating_comment)}”</p>` : ''}${current.page_url ? `<p class="ib-page">From <a href="${esc(current.page_url)}" rel="noopener nofollow" target="_blank">${esc(current.page_url)}</a></p>` : ''}<ol class="vb-thread" id="vb-thread">${msgs.map(turn).join('')}</ol>`
-        : `<div class="vb-hello"><h1>${list.length ? 'Pick a conversation' : 'No conversations yet'}</h1><p class="vb-sub">${list.length ? 'Waiting ones come first: those visitors asked for a person.' : 'Paste the snippet from Settings into your site. Visitors write; Vibe answers; you take over when it matters.'}</p></div>`}
-</div>
-${current ? `<div class="vb-dock"><figure class="ib-screen" id="ib-screen" hidden><figcaption id="ib-screen-who"></figcaption><video id="ib-screen-video" autoplay playsinline muted></video><button type="button" id="ib-screen-full">Full screen</button></figure><div class="ib-callbar" id="ib-callbar" role="group" aria-label="Voice call" hidden><span class="ib-call-text" id="ib-call-text"></span><button type="button" id="ib-call-join" hidden>Join the call</button><button type="button" id="ib-call-mute" aria-pressed="false" hidden>Mute</button><button type="button" class="ib-call-end" id="ib-call-end">End call</button></div><form class="vb-composer" id="vb-composer" method="post" action="/inbox/${esc(inbox.id)}/c/${esc(current.id)}">
-<label class="oc-sr" for="vb-input">Reply</label><textarea id="vb-input" name="message" rows="1" maxlength="4000" placeholder="Reply as ${esc(actor.user.display_name || actor.user.username)}${saved.length ? ' · / for saved replies' : ''}" required aria-autocomplete="list"></textarea>
-${pictures.enabled() ? '<label class="ib-pic-btn" title="Send a picture"><input type="file" id="ib-pic" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" hidden><span aria-hidden="true">&#128206;</span><span class="oc-sr">Send a picture</span></label>' : ''}<button class="vb-send" type="submit" aria-label="Send">&#8593;</button></form><p class="vb-fine">Replying takes the conversation from Vibe. <label class="ib-tr-pick" hidden>Translate my reply into <select id="ib-tr-to"><option value="">a language…</option>${TR_LANGS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label></p></div>` : ''}
-</section>
-</div>`;
+        const me = Number(actor.user.id);
+        const body = `<div class="ibk" id="ib" data-inbox="${esc(inbox.id)}" data-conv="${current ? esc(current.id) : ''}">${thread.page({
+            sidebar: conversationsRail({ inbox, list, filter, current, me, nameOf, waiting: counts.waiting }),
+            head: thread.head({ title: current ? (current.visitor_name || 'Visitor') : inbox.name, sidebar: 'ib-rail', sidebarLabel: 'Show conversations', actions: headActions({ inbox, current, team, me }) }),
+            turns: current ? [...facts(current), ...msgs.map((m) => inboxTurn(m, current))] : [],
+            empty: `<div class="ib-hello"><h2>${list.length ? 'Pick a conversation' : 'No conversations yet'}</h2><p>${list.length ? 'Waiting ones come first: those visitors asked for a person.' : 'Paste the snippet from Settings into your site. Visitors write; Vibe answers; you take over when it matters.'}</p></div>`,
+            composer: current ? replyBox({ inbox, current, actor, saved }) : '',
+            label: current ? `Conversation with ${current.visitor_name || 'a visitor'}` : inbox.name,
+        })}</div>`;
         await page(req, res, 200, {
-            actor, app: true, appScript: 'inbox.js', scripts: ['support-call.js'], active: 'inbox', path: `/inbox/${inbox.id}`, title: `${inbox.name} · Inbox`, robots: 'noindex, nofollow', body,
-            page: { view: 'inbox', inbox: inbox.id, conversation: current ? current.id : null, call: !!(current && inboxes.convShape(current).call), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: actor.user.id, filter, saved: saved.map((r) => ({ shortcut: r.shortcut, body: r.body })) },
+            actor, app: true, kit: true, appScript: 'inbox.js', appStyle: 'inbox.css', scripts: ['support-call.js'], active: 'inbox', path: `/inbox/${inbox.id}`, title: `${current ? `${current.visitor_name || 'Visitor'} · ` : ''}${inbox.name} · Inbox`, robots: 'noindex, nofollow', body,
+            page: { view: 'inbox', inbox: inbox.id, conversation: current ? current.id : null, call: !!(current && inboxes.convShape(current).call), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me, filter, saved: saved.map((r) => ({ shortcut: r.shortcut, body: r.body })) },
         });
     });
+
+    // ── The inbox on the network's conversation kit (openvibe-shared/thread and kit.sidebar, plan L55 C4) ──────────
+    // The conversations are the kit's sidebar: the four filters as its rows, then one row per visitor (their initial,
+    // name, when, a dot when they wait for a person, and a second line: who answers, then their last words). The open
+    // conversation is the kit's thread: the visitor on the left with their initial, Vibe and the team on the right,
+    // each bubble captioned with who wrote it; the reply box is the kit's composer. public/web/inbox.js keeps it live
+    // and draws new rows and turns with the same markup.
+    function conversationsRail({ inbox, list, filter, current, me, nameOf, waiting }) {
+        const base = `/inbox/${inbox.id}`;
+        const answeredBy = (c) => (c.assignee_id && c.status !== 'resolved' ? (Number(c.assignee_id) === me ? 'You' : nameOf(c.assignee_id) || 'Someone') : c.status === 'bot' ? 'Vibe' : '');
+        const item = (c) => {
+            const who = answeredBy(c);
+            return {
+                href: `${base}?c=${c.id}&f=${filter}`, label: `${c.visitor_name || 'Visitor'}${Number(c.verified) ? ' ✓' : ''}`,
+                meta: `${c.rating ? (Number(c.rating) > 0 ? '👍 ' : '👎 ') : ''}${ago(c.last_message_at)}`,
+                dot: c.status === 'waiting' ? 'needs' : null, mark: initialMark(c.visitor_name),
+                sub: [who, plainText(c.preview)].filter(Boolean).join(' · ') || 'No messages yet',
+                here: !!(current && c.id === current.id), attrs: { 'data-conv': c.id, 'data-who': who },
+            };
+        };
+        const tab = (k, label, icon, extra = {}) => ({ href: `${base}?f=${k}`, label, icon, here: k === filter, ...extra });
+        return kit.sidebar({
+            id: 'ib-rail', label: 'Conversations',
+            action: { href: `${base}/settings`, label: 'Settings and snippet', icon: 'pencil' },
+            nav: [tab('active', 'Active', 'chat'), tab('mine', 'Mine', 'hand'), tab('waiting', 'Waiting', 'bell', { count: waiting }), tab('resolved', 'Resolved', 'check')],
+            sections: [{ title: inbox.name, items: list.map(item), empty: filter === 'active' ? 'No conversations yet. Add the snippet from Settings to your site.' : 'None here.' }],
+            foot: '<p class="ovt-side-foot"><a href="/inbox">All your inboxes</a></p>',
+        });
+    }
+
+    // The head: who is on the line, then what can be done (resolve or reopen, a call, and More: who answers, back to Vibe).
+    function headActions({ inbox, current, team, me }) {
+        if (!current) return '';
+        const base = `/inbox/${esc(inbox.id)}/c/${esc(current.id)}`;
+        const tags = `<span class="ib-tags">${Number(current.verified) ? '<span class="ib-ok" title="Verified by your site">✓</span>' : ''}${statusChip(current.status)}${current.rating ? `<span class="ib-rate" title="${esc(current.rating_comment || 'The visitor\'s rating')}">${Number(current.rating) > 0 ? '👍' : '👎'}</span>` : ''}</span>`;
+        const status = `<form method="post" action="${base}/status" class="ib-status">${current.status !== 'resolved' ? '<button class="ib-btn" name="status" value="resolved">Resolve</button>' : '<button class="ib-btn" name="status" value="open">Reopen</button>'}</form>`;
+        const call = current.status !== 'resolved' && config.calls.enabled ? '<button type="button" class="ib-btn ib-call-btn" id="ib-call" hidden>Call</button>' : '';
+        const assign = `<form method="post" action="${base}/assign" class="ib-assign"><label for="ib-assignee">Answered by</label><select id="ib-assignee" name="assignee" data-autosubmit><option value="">nobody yet</option>${team.map((m) => `<option value="${m.user_id}"${Number(current.assignee_id) === m.user_id ? ' selected' : ''}>${esc(m.user_id === me ? 'me' : (m.display_name || m.username))}</option>`).join('')}</select><noscript><button type="submit" class="ib-btn">Assign</button></noscript></form>`;
+        const back = Number(inbox.ai_enabled) && current.status !== 'bot' && current.status !== 'resolved' ? `<form method="post" action="${base}/status"><button class="ib-btn" name="status" value="bot">Hand back to Vibe</button></form>` : '';
+        return `<div class="ib-head-acts">${tags}${status}${call}<details class="ib-more"><summary class="ovt-btn" aria-label="More for this conversation" title="More">${thread.icon('more')}</summary><div class="ib-pop">${assign}${back}</div></details></div>`;
+    }
+
+    // What the team should know first: verified by their site, the rating, the page they wrote from. A line, not a turn.
+    function facts(current) {
+        const lines = [];
+        if (Number(current.verified)) lines.push(`Verified by your site${current.visitor_email ? ` · <a href="mailto:${esc(current.visitor_email)}">${esc(current.visitor_email)}</a>` : ''} · id ${esc(current.external_id || '')}`);
+        if (current.rating_comment) lines.push(`Rated ${Number(current.rating) > 0 ? '👍' : '👎'}: “${esc(current.rating_comment)}”`);
+        if (current.page_url) lines.push(`From <a href="${esc(current.page_url)}" rel="noopener nofollow" target="_blank">${esc(current.page_url)}</a>`);
+        return lines.length ? [`<li class="ib-facts">${lines.map((l) => `<p>${l}</p>`).join('')}</li>`] : [];
+    }
+
+    // One message as the kit's turn. The same markup as public/web/inbox.js turn().
+    function inboxTurn(m, current) {
+        const shown = m.author === 'agent' || m.account ? pictures.withoutLinks(m.body) : m.body;
+        if (m.author === 'system') return `<li class="ovt-divider" data-id="${m.id}"><span>${esc(m.body)}</span></li>`;
+        if (m.author === 'visitor') {
+            const name = current.visitor_name || 'Visitor';
+            return thread.turn({
+                who: { name, initials: name.slice(0, 1).toUpperCase() },
+                reply: `${shown ? `<div class="ovt-answer ib-text">${esc(shown)}</div>` : ''}${m.account ? pictures.pageHtml(m.body) : ''}`,
+                attrs: { 'data-id': m.id, 'data-author': 'visitor' },
+            });
+        }
+        const ai = m.author === 'ai';
+        return thread.turn({
+            you: { caption: ai ? 'Vibe (AI)' : (m.author_name || 'Agent'), html: ai ? `<div class="vb-md">${md.render(m.body)}</div>` : `<span class="ib-text">${esc(shown)}</span>${m.author === 'agent' ? pictures.pageHtml(m.body) : ''}` },
+            reply: null, attrs: { 'data-id': m.id, 'data-author': ai ? 'ai' : 'agent' },
+        });
+    }
+
+    // The reply box: the kit's composer, with a picture, a translation and the call above it while one is open.
+    function replyBox({ inbox, current, actor, saved }) {
+        const pic = pictures.enabled() ? `<label class="ovt-btn ib-pic-btn" title="Send a picture"><input type="file" id="ib-pic" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" hidden>${thread.icon('attach')}<span class="ovt-sr">Send a picture</span></label>` : '';
+        const tr = `<label class="ib-tr-pick" hidden><span>Translate my reply into</span> <select id="ib-tr-to"><option value="">a language…</option>${TR_LANGS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>`;
+        const call = `<figure class="ib-screen" id="ib-screen" hidden><figcaption id="ib-screen-who"></figcaption><video id="ib-screen-video" autoplay playsinline muted></video><button type="button" id="ib-screen-full">Full screen</button></figure><div class="ib-callbar" id="ib-callbar" role="group" aria-label="Voice call" hidden><span class="ib-call-text" id="ib-call-text"></span><button type="button" id="ib-call-join" hidden>Join the call</button><button type="button" id="ib-call-mute" aria-pressed="false" hidden>Mute</button><button type="button" class="ib-call-end" id="ib-call-end">End call</button></div>`;
+        return call + thread.composer({
+            action: `/inbox/${inbox.id}/c/${current.id}`, name: 'message', id: 'ib-composer', label: 'Reply', maxlength: 4000,
+            placeholder: `Reply as ${actor.user.display_name || actor.user.username}${saved.length ? ' · / for saved replies' : ''}`,
+            tools: pic + tr,
+            foot: '<p class="ib-fine">Replying takes the conversation from Vibe.</p>',
+        });
+    }
 
     router.post('/inbox/:id/c/:cid', formLimit, sameSite, async (req, res) => {
         const a = await agentInbox(req, res); if (!a) return;
