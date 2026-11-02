@@ -1,7 +1,8 @@
 /* Vibe, OpenVibe's assistant, on openvibe.chat (server/web/vibe-pages.js): the full-window app. The chats down the left,
    the conversation in a readable column, one composer docked at the bottom. Colours are the network theme's (chat.css
    maps them to --oc-*), so every theme, light ones included, carries through. */
-body.oc-app-body { overflow: hidden; }
+/* The inbox is a full-window app (its own scroll box); Vibe's pages are the conversation kit's, and the page scrolls. */
+body.oc-app-body:has(.vb) { overflow: hidden; }
 .vb-wrap { margin: 0; padding: 0; max-width: none; }
 .vb {
   --vb-rail: 272px;
@@ -363,3 +364,34 @@ body.oc-app-body { overflow: hidden; }
 .vb-res-c.is-stopped { border-color: var(--border, color-mix(in srgb, var(--text-primary, #fff) 10%, transparent)); background: transparent; }
 .vb-res-c.is-stopped > svg { stroke: var(--text-muted, #8b8b96); }
 .vb-res-c.is-stopped .vb-res-t { color: var(--text-muted, #8b8b96); }
+
+/* ── Vibe on the network's conversation UI (openvibe-shared/thread, plan L55 C4) ───────────────────────────────────
+   The kit draws the chats (kit.sidebar), the turns, Copy, the composer and the page; these are Vibe's own parts in it:
+   its icons, the modes and attach in the composer's tools, the picture preview, the fine print, the search's snippets,
+   the chat's options and the welcome. (The inbox still draws the older .vb layout above.) */
+.vbk { --vb-col: 780px; }
+.vbk svg:not(.ovt-ic):not(.ovk-i) { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.vbk .ovt-btn svg:not(.ovt-ic) { width: 20px; height: 20px; }
+.vbk .vb-modes { order: 0; flex-basis: auto; margin: 0; padding: 0; }
+.vbk .vb-attach { flex: none; width: 36px; height: 36px; margin: 0; }
+.vbk .vb-preview { max-width: none; margin: 0 0 8px; }
+.vbk .vb-fine { margin: 6px 4px 0; text-align: left; }
+.vbk .vb-fine a { color: var(--oc-accent); }
+.vbk .ovt-c-note:empty { display: none; }
+.vbk .vb-allow { margin: 8px 8px 0; }
+.vbk .vb-local { display: block; max-width: 220px; max-height: 180px; margin-top: 8px; border-radius: 12px; object-fit: cover; }
+/* A search: where each chat matched, under its name. */
+.vbk .ovk-sidebar-item.vb-hit { flex-wrap: wrap; row-gap: 2px; padding-block: 6px; }
+.vbk .vb-hit-s { flex-basis: 100%; min-width: 0; font-size: .78rem; line-height: 1.35; color: var(--oc-muted); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.vbk .vb-hit-s mark { background: color-mix(in srgb, var(--oc-accent) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
+/* The chat's options (rename, delete) open from the head. */
+.vbk .vb-actions > summary { cursor: pointer; }
+.vbk .vb-pop { right: 0; }
+/* What Vibe did, its sources and how, under the answer: the kit's spacing. */
+.vbk .ovt-reply > .vb-res, .vbk .ovt-reply > .vb-sources, .vbk .ovt-reply > .vb-how { margin-top: 0; }
+.vbk .vb-retry { display: inline; margin: 0; }
+/* The welcome: Vibe's mark, the greeting, four ideas (the kit's start page puts the composer under them). */
+.vbk .vb-hello { min-height: 0; padding: 0; }
+.vbk .ovt-answer.vb-streaming { opacity: .92; }
+/* Memory: a plain page in the frame; on a wide screen its head held only New chat, which the chats column has. */
+@media (min-width: 761px) { .vbk .ovt.is-page .ovt-head { display: none; } }

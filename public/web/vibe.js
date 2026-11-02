@@ -1,8 +1,11 @@
-/* Vibe on openvibe.chat (server/web/vibe-pages.js): makes the app live. The page works without this file (forms post,
-   the server renders every message); here a first message starts the chat in place, answers arrive over the room
-   socket (/ws/chat join_room, room_message, room_ai_typing), the composer grows with its text and sends on Enter, the
-   rail slides in on phones, and a draft typed while signed out survives the sign-in. A person's text is always set
-   with textContent; Vibe's answers go through VibeMarkdown (public/web/vibe-md.js), which escapes everything first. */
+/* Vibe on openvibe.chat (server/web/vibe-pages.js): makes the app live. The page is the network's conversation UI
+   (openvibe-shared/thread, plan L55 C4): ov-thread.js grows the composer, sends on Enter, adds Copy, filters the chats
+   and keeps the thread at the bottom; kit-web.js opens the chats on a phone. The page works without either (forms
+   post, the server renders every message). Here: a first message starts the chat in place, answers arrive over the
+   room socket (/ws/chat join_room, room_message, room_ai_typing, room_ai_delta) and are written in as they come, a
+   picture or a text file goes with a message, the modes, Stop, Try again, and a draft typed while signed out survives
+   the sign-in. A person's text is always set with textContent; Vibe's answers go through VibeMarkdown
+   (public/web/vibe-md.js), which escapes everything first. */
 (function () {
   'use strict';
   var cfg = (window.__OV_PAGE && window.__OV_PAGE.chat) || null;
@@ -10,44 +13,42 @@
   var MD = window.VibeMarkdown;
   var DRAFT = 'ov-vibe-draft';
   var app = document.getElementById('vb');
-  var scroll = document.getElementById('vb-scroll');
+  if (!app) return;
+  var box = app.querySelector('[data-ovt]');
   var form = document.getElementById('vb-composer');
-  var input = document.getElementById('vb-input');
-  var titleEl = document.getElementById('vb-title');
+  var input = form && form.querySelector('[data-ovt-text]');
+  var sendBtn = form && form.querySelector('[data-ovt-send]');
+  var stopBtn = form && form.querySelector('[data-ovt-stop]');
   var room = cfg.room || null;
   var latest = Number(cfg.latest) || 0;
   var ws = null, delay = 1000, sending = false, waitTimer = null;
   var fileInput = document.getElementById('vb-file');
   var previewEl = document.getElementById('vb-preview');
   var picture = null;   // { file, url }: a picture waiting to go with the next message
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function token() { var m = /(?:^|;\s*)ov_token=([^;]+)/.exec(document.cookie || ''); return m ? decodeURIComponent(m[1]) : undefined; }
   function store(fn) { try { return fn(window.localStorage); } catch (e) { return null; } }
   // The browser's IANA zone (America/New_York) with each message: Vibe's prompt then states the person's local date.
   function timezone() { try { return Intl.DateTimeFormat().resolvedOptions().timeZone || null; } catch (e) { return null; } }
-  function nearBottom() { return scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 160; }
-  function toBottom() { scroll.scrollTop = scroll.scrollHeight; }
-  function markSvg() {
-    var s = el('span', 'vb-mark'); s.setAttribute('aria-hidden', 'true');
-    s.innerHTML = '<svg viewBox="0 0 24 24"><path d="M5 5l7 14 7-14"/></svg>';
-    return s;
-  }
+  // The page scrolls as a whole (the kit has no inner scroll box).
+  function nearBottom() { return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 220; }
+  function toBottom() { window.scrollTo({ top: document.documentElement.scrollHeight, behavior: reduce ? 'auto' : 'smooth' }); }
+  function kitEnhance(scope) { if (window.OVThread && window.OVThread.enhance) window.OVThread.enhance(scope); }
+  // The kit's composer reads its own input event (it grows and wakes Send); a box filled from here sends one too.
+  function changed() { if (input) input.dispatchEvent(new Event('input', { bubbles: true })); }
 
   // ── The composer ──
-  function grow() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, window.innerHeight * 0.4) + 'px'; form.classList.toggle('is-empty', !input.value.trim() && !picture); }
   if (input) {
-    input.addEventListener('input', grow);
-    input.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && window.matchMedia('(hover: hover)').matches) { e.preventDefault(); form.requestSubmit ? form.requestSubmit() : form.submit(); }
-    });
+    // A picture alone may be sent: Send wakes for it even with no words (the kit wakes it only for words).
+    input.addEventListener('input', function () { if (picture && sendBtn) sendBtn.disabled = false; });
     var saved = cfg.signedIn ? store(function (s) { var v = s.getItem(DRAFT); s.removeItem(DRAFT); return v; }) : null;
-    if (saved && !input.value) input.value = saved;
-    grow();
+    if (saved && !input.value) { input.value = saved; changed(); }
     if (!('ontouchstart' in window)) input.focus();
   }
-  document.querySelectorAll('.vb-chip[data-prompt]').forEach(function (b) {
-    b.addEventListener('click', function () { input.value = b.getAttribute('data-prompt'); grow(); form.requestSubmit ? form.requestSubmit() : form.submit(); });
+  [].forEach.call(document.querySelectorAll('.vb-chip[data-prompt]'), function (b) {
+    b.addEventListener('click', function () { input.value = b.getAttribute('data-prompt'); changed(); if (form.requestSubmit) form.requestSubmit(); else form.submit(); });
   });
 
   // ── A picture with the message: it goes to OpenVibe.Pics as the person, and Vibe sees it ──
@@ -58,6 +59,7 @@
     if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; }
     if (fileInput) fileInput.value = '';
     if (input) input.required = true;
+    changed();
   }
   // A text file goes into the message itself, as a fenced block named after it, cut to what still fits in the box.
   var TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|log|xml|ya?ml|toml|ini|html|css|m?js|ts|py|go|rs|java|c|h|cpp|rb|php|sh|sql)$/i;
@@ -74,7 +76,7 @@
       if (space < 200) { notice('The box is nearly full. Send what is there first.'); return; }
       var cut = text.length > space;
       input.value = head + (cut ? text.slice(0, space - 20) + '\n… (cut to fit)' : text) + '\n```';
-      grow(); input.focus();
+      changed(); input.focus();
       if (cut) notice('The file was longer than a message: its first part is in the box.');
     };
     reader.onerror = function () { notice('That file could not be read.'); };
@@ -89,12 +91,12 @@
     picture = { file: file, url: URL.createObjectURL(file) };
     var fig = el('figure');
     var img = el('img'); img.src = picture.url; img.alt = 'The picture you are sending';
-    var rm = el('button', null, '\u00d7'); rm.type = 'button'; rm.setAttribute('aria-label', 'Remove the picture');
+    var rm = el('button', null, '×'); rm.type = 'button'; rm.setAttribute('aria-label', 'Remove the picture');
     rm.addEventListener('click', function () { clearPicture(); input.focus(); });
     fig.appendChild(img); fig.appendChild(rm);
     previewEl.appendChild(fig); previewEl.hidden = false;
     input.required = false;
-    form.classList.remove('is-empty');
+    if (sendBtn) sendBtn.disabled = false;
     input.focus();
   }
   var attachBtn = app.querySelector('[data-vb-attach]');
@@ -108,92 +110,81 @@
     });
   }
 
-  // ── The thread ──
-  function thread() {
-    var t = document.getElementById('vb-thread');
-    if (t) return t;
-    var hello = scroll.querySelector('.vb-hello'); if (hello) hello.remove();
-    app.classList.remove('vb-empty');
-    t = el('ol', 'vb-thread'); t.id = 'vb-thread';
-    scroll.appendChild(t);
+  // ── The thread (the kit's markup: a turn is the person's message and the answer under it) ──
+  function threadEl() {
+    var t = app.querySelector('[data-ovt-thread]');
+    // The first message: the welcome goes, and the composer docks at the bottom.
+    if (box) box.classList.remove('is-start');
+    var hello = app.querySelector('.ovt-empty-state'); if (hello) hello.hidden = true;
     return t;
   }
-  function have(id) { return id && document.querySelector('.vb-turn[data-id="' + Number(id) + '"]'); }
+  function have(id) { return id && app.querySelector('[data-me="' + Number(id) + '"],[data-ai="' + Number(id) + '"]'); }
+  function lastTurn() { var t = threadEl(); return t && t.lastElementChild; }
   function meTurn(text, id, localPicture) {
-    var li = el('li', 'vb-turn vb-me'); if (id) li.dataset.id = String(id);
-    var b = el('div', 'vb-bubble'); b.appendChild(el('p', 'oc-sr', 'You said:'));
-    String(text).split('\n').forEach(function (line, i) { if (i) b.appendChild(document.createElement('br')); b.appendChild(document.createTextNode(line)); });
+    var li = el('li', 'ovt-turn is-new'); if (id) li.setAttribute('data-me', String(id));
+    var you = el('div', 'ovt-you');
+    var b = el('div', 'ovt-bubble');
+    b.appendChild(el('span', 'oc-sr', 'You said:'));
+    b.appendChild(document.createTextNode(String(text)));
     if (localPicture) { var img = el('img', 'vb-local'); img.src = localPicture; img.alt = 'Your picture'; b.appendChild(img); }
-    li.appendChild(b);
+    you.appendChild(b); li.appendChild(you);
     return li;
   }
-  function aiTurn(m) {
-    var li = el('li', 'vb-turn vb-ai'); li.dataset.id = String(m.id);
-    li.appendChild(markSvg());
-    var body = el('div', 'vb-body'); body.appendChild(el('p', 'oc-sr', 'Vibe said:'));
-    var md = el('div', 'vb-md'); md.innerHTML = MD ? MD.render(m.message) : '';
-    if (!MD) md.textContent = m.message;
-    body.appendChild(md); li.appendChild(body);
-    // What Vibe did, as on the server's page (resultChips in server/web/vibe-pages.js): Undo is the same plain form.
+  // The answer side of a turn: Vibe's mark, then its reply.
+  function botOf(li) {
+    var bot = li.querySelector('.ovt-bot');
+    if (!bot) {
+      bot = el('div', 'ovt-bot');
+      var av = el('span', 'ovt-avatar'); av.setAttribute('aria-hidden', 'true');
+      bot.appendChild(av); bot.appendChild(el('div', 'ovt-reply'));
+      li.appendChild(bot);
+    }
+    return bot.querySelector('.ovt-reply');
+  }
+  // Vibe's answer, as the server draws it (answerOf in server/web/vibe-pages.js): Undo is the same plain form.
+  function fillAnswer(reply, m) {
+    reply.textContent = '';
+    reply.appendChild(el('p', 'oc-sr', 'Vibe said:'));
+    var ans = el('div', 'ovt-answer'); ans.setAttribute('data-ovt-answer', '');
+    if (MD) ans.innerHTML = MD.render(m.message); else ans.textContent = m.message;
+    reply.appendChild(ans);
     var res = Array.isArray(m.results) ? m.results : [];
     if (res.length && room) {
-      var box = el('div', 'vb-res');
+      var resBox = el('div', 'vb-res');
       res.slice(0, 4).forEach(function (r, i) {
         if (!r || (r.kind !== 'reminder' && r.kind !== 'timer')) return;
         var set = r.action === 'set';
         var c = el('div', 'vb-res-c' + (set ? '' : ' is-stopped'));
         var t = el('div', 'vb-res-t');
-        var b = el('b', '', (r.kind === 'timer' ? (set ? 'Timer' : 'Timer stopped') : (set ? 'Reminder set' : 'Reminder stopped')) + ':');
-        t.appendChild(b); t.appendChild(document.createTextNode(' ' + String(r.title || '')));
+        t.appendChild(el('b', '', (r.kind === 'timer' ? (set ? 'Timer' : 'Timer stopped') : (set ? 'Reminder set' : 'Reminder stopped')) + ':'));
+        t.appendChild(document.createTextNode(' ' + String(r.title || '')));
         if (r.when && set) t.appendChild(el('small', '', String(r.when)));
         c.appendChild(t);
         var a = el('div', 'vb-res-a');
         if (set) {
           var f = el('form'); f.method = 'post'; f.action = '/vibe/' + room + '/undo';
           [['message_id', String(m.id)], ['index', String(i)]].forEach(function (kv) { var h = el('input'); h.type = 'hidden'; h.name = kv[0]; h.value = kv[1]; f.appendChild(h); });
-          var u = el('button', 'vb-act', 'Undo'); u.type = 'submit'; f.appendChild(u); a.appendChild(f);
+          var u = el('button', 'ovt-act', 'Undo'); u.type = 'submit'; f.appendChild(u); a.appendChild(f);
         }
-        if (r.url && /^https:\/\//.test(r.url)) { var o = el('a', 'vb-act', 'Open'); o.href = r.url; a.appendChild(o); }
+        if (r.url && /^https:\/\//.test(r.url)) { var o = el('a', 'ovt-act', 'Open'); o.href = r.url; a.appendChild(o); }
         if (a.childNodes.length) c.appendChild(a);
-        box.appendChild(c);
+        resBox.appendChild(c);
       });
-      body.appendChild(box);
+      reply.appendChild(resBox);
     }
-    // Copy, and Try again (it moves to this, the newest answer, when the person's message came just before).
-    var row = el('div', 'vb-acts');
-    var copy = el('button', 'vb-act', 'Copy'); copy.type = 'button'; copy.setAttribute('data-vb-copy', '');
-    row.appendChild(copy);
-    var prev = thread().lastElementChild;
-    if (room && prev && prev.classList.contains('vb-me')) {
-      [].forEach.call(document.querySelectorAll('.vb-retry'), function (f) { f.remove(); });
-      var form = el('form', 'vb-retry'); form.method = 'post'; form.action = '/vibe/' + room + '/retry';
-      var again = el('button', 'vb-act', 'Try again'); again.type = 'submit'; form.appendChild(again);
-      row.appendChild(form);
+    // Copy (ov-thread.js shows it where the clipboard works), and Try again under the newest answer to the person's
+    // last message (it moves here from an older one).
+    var meta = el('div', 'ovt-meta'); var acts = el('span', 'ovt-acts');
+    var copy = el('button', 'ovt-act'); copy.type = 'button'; copy.setAttribute('data-ovt-copy', ''); copy.hidden = true;
+    copy.appendChild(el('span', null, 'Copy'));
+    acts.appendChild(copy);
+    if (room && reply.closest('.ovt-turn').querySelector('.ovt-you')) {
+      [].forEach.call(app.querySelectorAll('.vb-retry'), function (f) { f.remove(); });
+      var again = el('form', 'vb-retry'); again.method = 'post'; again.action = '/vibe/' + room + '/retry';
+      var b = el('button', 'ovt-act', 'Try again'); b.type = 'submit'; again.appendChild(b);
+      acts.appendChild(again);
     }
-    body.appendChild(row);
-    enhance(li);
-    return li;
-  }
-  // Copy buttons: the whole answer as its text, and each code block on its own. Shown only where the clipboard works.
-  function copyText(btn, text) {
-    if (!navigator.clipboard) return;
-    navigator.clipboard.writeText(text).then(function () {
-      // A code block's button draws its label in CSS (so copying the whole answer never picks it up): a class says Copied.
-      var code = btn.classList.contains('vb-copy-code');
-      var was = btn.textContent;
-      if (!code) btn.textContent = 'Copied';
-      btn.classList.add('is-done');
-      setTimeout(function () { if (!code) btn.textContent = was; btn.classList.remove('is-done'); }, 1500);
-    }, function () { notice('Copying did not work here. Select the text instead.'); });
-  }
-  function enhance(scope) {
-    if (!navigator.clipboard) return;
-    [].forEach.call(scope.querySelectorAll('[data-vb-copy]'), function (b) { b.hidden = false; });
-    [].forEach.call(scope.querySelectorAll('.vb-ai .vb-md pre'), function (pre) {
-      if (pre.querySelector('.vb-copy-code')) return;
-      var b = el('button', 'vb-copy-code'); b.type = 'button'; b.setAttribute('aria-label', 'Copy this code');
-      pre.appendChild(b);
-    });
+    meta.appendChild(acts); reply.appendChild(meta);
   }
   // "How Vibe did this" under an agent task's answer that arrives while the page is open (the server folds it on load).
   function attachHow(li, id) {
@@ -232,110 +223,120 @@
   }
   // The id "How Vibe did this" links to: the answer's one set of chips, never a second copy.
   function sourcesId(li) {
-    var id = li && li.dataset ? li.dataset.id : null;
+    var id = li && li.getAttribute('data-ai');
     return id ? 'vb-sources-' + String(id).replace(/[^a-zA-Z0-9_-]/g, '') : null;
   }
   function renderSources(li, info) {
-    var body = li.querySelector('.vb-body');
-    if (!info || !body || body.querySelector('.vb-sources')) return;
+    var reply = li.querySelector('.ovt-reply');
+    if (!info || !reply || reply.querySelector('.vb-sources')) return;
     var links = sourceChips(info);
     if (!links.length) return;
     var ul = el('ul', 'vb-sources'); ul.setAttribute('aria-label', 'Sources');
     var sid = sourcesId(li); if (sid) ul.id = sid;
     links.forEach(function (c) { var row = el('li'); row.appendChild(chipLink(c)); ul.appendChild(row); });
-    var md = body.querySelector('.vb-md');
-    if (md && md.nextSibling) body.insertBefore(ul, md.nextSibling);
-    else if (md) body.appendChild(ul);
-    else body.insertBefore(ul, body.firstChild);
+    var ans = reply.querySelector('.ovt-answer');
+    if (ans && ans.nextSibling) reply.insertBefore(ul, ans.nextSibling); else reply.appendChild(ul);
   }
   function stepsOf(raw) {
     var h = null; try { h = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (e) { h = null; }
     return h && h.steps && h.steps.length ? { lines: h.steps, sources: h.sources || [], citations: h.citations || [] } : null;
   }
   function renderHow(li, info) {
-      var body = li.querySelector('.vb-body');
-      if (!info || !body || body.querySelector('.vb-how')) return;
-      renderSources(li, info);
-      var det = el('details', 'vb-how'); det.appendChild(el('summary', null, 'How Vibe did this'));
-      var ul = el('ul');
-      (info.lines || []).forEach(function (l) { ul.appendChild(el('li', null, l)); });
-      var links = sourceChips(info);
-      if (links.length) {
-        var src = el('li', 'vb-how-sources');
-        var link = el('a', null, 'Sources (' + links.length + ') under this answer');
-        var sid = sourcesId(li); if (sid) link.href = '#' + sid;
-        src.appendChild(link);
-        ul.appendChild(src);
-      }
-      if (info.actor_url && /^https:\/\/openvibe\.actor\//.test(info.actor_url)) { var li2 = el('li'); var a2 = el('a', null, 'Every step on OpenVibe Agents'); a2.href = info.actor_url; li2.appendChild(a2); ul.appendChild(li2); }
-      det.appendChild(ul);
-      var acts = body.querySelector('.vb-acts');
-      if (acts) body.insertBefore(det, acts); else body.appendChild(det);
+    var reply = li.querySelector('.ovt-reply');
+    if (!info || !reply || reply.querySelector('.vb-how')) return;
+    renderSources(li, info);
+    var det = el('details', 'vb-how'); det.appendChild(el('summary', null, 'How Vibe did this'));
+    var ul = el('ul');
+    (info.lines || []).forEach(function (l) { ul.appendChild(el('li', null, l)); });
+    var links = sourceChips(info);
+    if (links.length) {
+      var src = el('li', 'vb-how-sources');
+      var link = el('a', null, 'Sources (' + links.length + ') under this answer');
+      var sid = sourcesId(li); if (sid) link.href = '#' + sid;
+      src.appendChild(link);
+      ul.appendChild(src);
+    }
+    if (info.actor_url && /^https:\/\/openvibe\.actor\//.test(info.actor_url)) { var li2 = el('li'); var a2 = el('a', null, 'Every step on OpenVibe Agents'); a2.href = info.actor_url; li2.appendChild(a2); ul.appendChild(li2); }
+    det.appendChild(ul);
+    var meta = reply.querySelector('.ovt-meta');
+    if (meta) reply.insertBefore(det, meta); else reply.appendChild(det);
   }
-  function clearWait() { var w = document.getElementById('vb-wait'); if (w) w.remove(); if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; } }
-  // Stop: what Vibe wrote so far stays as its answer (POST /api/chat/vibe/:slug/stop); shown once the chat exists (a new
-  // chat's first bubble is drawn before it does, so the first words add it).
-  function addStop(li) {
-    if (!room || !li || li.querySelector('.vb-stop')) return;
-    var stop = el('button', 'vb-act vb-stop', 'Stop'); stop.type = 'button';
-    stop.addEventListener('click', function () {
-      stop.disabled = true;
-      fetch('/api/chat/vibe/' + encodeURIComponent(room) + '/stop', { method: 'POST', credentials: 'same-origin' }).catch(function () { stop.disabled = false; });
-    });
-    li.appendChild(stop);
+
+  // ── Vibe writing ──
+  // The turn that waits for Vibe: the newest one, open, its live line breathing (nothing spins).
+  function waitingTurn() { return app.querySelector('[data-ovt-thread] > .ovt-turn[data-open]'); }
+  function setStop(on) { if (stopBtn) stopBtn.hidden = !(on && room); if (sendBtn) sendBtn.hidden = !!(on && room); }
+  function clearWait() {
+    var w = waitingTurn();
+    if (w) {
+      w.removeAttribute('data-open');
+      var bot = w.querySelector('.ovt-bot');
+      if (bot && !bot.querySelector('[data-ovt-answer]:not(.vb-streaming)')) bot.remove();
+    }
+    if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; }
+    setStop(false);
   }
-  function showWait() {
-    if (document.getElementById('vb-wait')) return;
-    var li = el('li', 'vb-turn vb-ai vb-wait'); li.id = 'vb-wait';
-    li.appendChild(markSvg());
-    var body = el('div', 'vb-body'); var dots = el('span', 'vb-dots'); dots.setAttribute('aria-label', 'Vibe is writing');
-    dots.appendChild(el('i')); dots.appendChild(el('i')); dots.appendChild(el('i'));
-    body.appendChild(dots); li.appendChild(body);
-    addStop(li);
-    thread().appendChild(li);
-    // An answer takes up to a minute with tools; after two the dots give way to a way forward.
+  function giveUpLater() {
+    if (waitTimer) clearTimeout(waitTimer);
+    // An answer takes up to a minute with tools; after two the live line gives way to a way forward.
     waitTimer = setTimeout(function () { clearWait(); notice('Vibe did not answer this time. Send your message again, or try again in a minute.'); }, 120000);
   }
-  // The answer as it is written (room_ai_delta: the whole text so far): the waiting bubble shows it, rendered like the
+  function showWait() {
+    var li = waitingTurn();
+    if (!li) {
+      li = lastTurn();
+      if (!li || li.querySelector('.ovt-bot')) { li = el('li', 'ovt-turn'); threadEl().appendChild(li); }
+      li.setAttribute('data-open', '');
+      var reply = botOf(li);
+      var work = el('details', 'ovt-work'); work.open = true; work.setAttribute('data-open', '');
+      var sum = el('summary'); var line = el('span', 'ovt-w-live', 'Vibe is writing…'); line.setAttribute('data-ovt-live', '');
+      sum.appendChild(line); work.appendChild(sum);
+      reply.appendChild(work);
+    }
+    setStop(true);
+    giveUpLater();
+  }
+  // The answer as it is written (room_ai_delta: the whole text so far): the waiting turn shows it, rendered like the
   // finished answer, until that message arrives and takes its place. Screen readers hear the finished one only.
   function streamText(text) {
     showWait();
-    var w = document.getElementById('vb-wait'); if (!w) return;
-    addStop(w);
+    var w = waitingTurn(); if (!w) return;
     var stick = nearBottom();
-    var body = w.querySelector('.vb-body');
-    var md = body.querySelector('.vb-md');
-    if (!md) {
-      body.textContent = '';
-      md = el('div', 'vb-md vb-streaming'); md.setAttribute('aria-hidden', 'true');
-      body.appendChild(md);
-      var dots = el('span', 'vb-dots'); dots.setAttribute('aria-label', 'Vibe is writing');
-      dots.appendChild(el('i')); dots.appendChild(el('i')); dots.appendChild(el('i'));
-      body.appendChild(dots);
-    }
-    if (MD) md.innerHTML = MD.render(String(text || '')); else md.textContent = String(text || '');
-    if (waitTimer) { clearTimeout(waitTimer); waitTimer = setTimeout(function () { clearWait(); notice('Vibe did not answer this time. Send your message again, or try again in a minute.'); }, 120000); }
+    var reply = botOf(w);
+    var ans = reply.querySelector('.vb-streaming');
+    if (!ans) { ans = el('div', 'ovt-answer vb-streaming'); ans.setAttribute('aria-hidden', 'true'); reply.appendChild(ans); }
+    if (MD) ans.innerHTML = MD.render(String(text || '')); else ans.textContent = String(text || '');
+    giveUpLater();
     if (stick) toBottom();
   }
   function notice(text) {
-    var old = scroll.querySelector('.vb-live-notice'); if (old) old.remove();
+    var old = app.querySelector('.vb-live-notice'); if (old) old.remove();
     var p = el('p', 'oc-notice oc-error vb-live-notice', text); p.setAttribute('role', 'alert');
-    scroll.appendChild(p); toBottom();
+    var scroll = app.querySelector('.ovt-scroll'); (scroll || app).appendChild(p); toBottom();
   }
   function add(m) {
     if (!m || have(m.id)) return;
     latest = Math.max(latest, Number(m.id) || 0);
     var stick = nearBottom();
     if (m.ai_member_id) {
-      clearWait(); var turnEl = aiTurn(m); thread().appendChild(turnEl); refreshRail();
-      if (/^✅ Done:/.test(String(m.message || ''))) attachHow(turnEl, m.id);
-      else if (m.how) renderHow(turnEl, stepsOf(m.how));
-    }
-    else {
+      // The answer takes the waiting turn's place, or the newest turn that has none yet, or a turn of its own.
+      var li = waitingTurn() || lastTurn();
+      if (!li || (li.querySelector('.ovt-bot') && !li.hasAttribute('data-open'))) { li = el('li', 'ovt-turn'); threadEl().appendChild(li); }
+      if (waitTimer) { clearTimeout(waitTimer); waitTimer = null; }
+      setStop(false);
+      li.removeAttribute('data-open');
+      li.setAttribute('data-ai', String(m.id));
+      fillAnswer(botOf(li), m);
+      li.classList.add('is-fresh');
+      kitEnhance(li);
+      refreshRail();
+      if (/^✅ Done:/.test(String(m.message || ''))) attachHow(li, m.id);
+      else if (m.how) renderHow(li, stepsOf(m.how));
+    } else {
       // The line sent from here already shows (without an id until the server answered): give it its id.
-      var pending = document.querySelector('.vb-turn.vb-me:not([data-id])');
-      if (pending && Number(m.user_id) === Number(cfg.me)) pending.dataset.id = String(m.id);
-      else thread().appendChild(meTurn(m.message, m.id));
+      var pending = app.querySelector('[data-ovt-thread] > .ovt-turn:not([data-me]) > .ovt-you');
+      if (pending && Number(m.user_id) === Number(cfg.me)) pending.parentNode.setAttribute('data-me', String(m.id));
+      else threadEl().appendChild(meTurn(m.message, m.id));
     }
     if (stick) toBottom();
   }
@@ -348,6 +349,11 @@
       .then(function (d) { if (d && d.messages) d.messages.forEach(add); })
       .catch(function () {});
   }
+  function removeMessage(id) {
+    var li = have(id); if (!li) return;
+    if (li.getAttribute('data-me') === String(Number(id))) li.remove();
+    else { var bot = li.querySelector('.ovt-bot'); if (bot) bot.remove(); li.removeAttribute('data-ai'); if (!li.querySelector('.ovt-you')) li.remove(); }
+  }
   function connect() {
     if (!room || !window.WebSocket) return;
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
@@ -358,62 +364,43 @@
       else if (m.type === 'room_message' && m.room === room) add(m.message);
       else if (m.type === 'room_ai_typing' && m.room === room) { showWait(); if (nearBottom()) toBottom(); }
       else if (m.type === 'room_ai_delta' && m.room === room) streamText(m.text);
-      else if (m.type === 'room_message_deleted' && m.room === room) { var x = have(m.id); if (x) x.remove(); }
+      else if (m.type === 'room_message_deleted' && m.room === room) removeMessage(m.id);
       else if (m.type === 'auth_revoked') notice('You were signed out. Sign in again to keep chatting.');
     };
     ws.onclose = function () { ws = null; if (room) { setTimeout(connect, delay); delay = Math.min(delay * 2, 30000); } };
   }
 
-  // ── The rail ──
+  // ── The chats (the network's sidebar, kit.sidebar): rebuilt from data with text nodes after each answer ──
   function refreshRail() {
     fetch('/api/chat/vibe?limit=100', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
       if (!d) return;
       var allow = document.getElementById('vb-allow');
       if (allow && d.allowance && !allow.hasAttribute('data-own')) allow.textContent = Math.max(0, d.allowance.per_day - d.allowance.used_today) + ' of ' + d.allowance.per_day + ' answers left today';
-      var list = document.querySelector('.vb-rail-list'); if (!list || !d.chats) return;
-      // Rebuilt from data with text nodes (the server's grouping, kept simple here: Today and Earlier).
+      var secs = app.querySelector('#vb-rail .ovk-sidebar-secs'); if (!secs || !d.chats) return;
+      if (new URLSearchParams(location.search).get('q')) return;   // search results stay until the search is left
       var start = new Date(); start.setUTCHours(0, 0, 0, 0);
-      list.textContent = '';
       var groups = [{ label: 'Today', chats: [] }, { label: 'Earlier', chats: [] }];
       d.chats.forEach(function (c) { var at = Date.parse(String(c.last_message_at).indexOf('T') < 0 ? String(c.last_message_at).replace(' ', 'T') + 'Z' : c.last_message_at); (at >= start.getTime() ? groups[0] : groups[1]).chats.push(c); });
+      secs.textContent = '';
       groups.forEach(function (g) {
         if (!g.chats.length) return;
-        list.appendChild(el('p', 'vb-group', g.label));
-        var ul = el('ul', 'vb-chats');
+        var sec = el('section', 'ovk-sidebar-sec');
+        sec.appendChild(el('h2', 'ovk-sidebar-h', g.label));
         g.chats.forEach(function (c) {
-          var li = el('li'); var a = el('a', 'vb-chat', c.name); a.href = '/vibe/' + c.slug;
+          var a = el('a', 'ovk-sidebar-item' + (c.slug === room ? ' is-here' : '')); a.href = '/vibe/' + c.slug;
           if (c.slug === room) a.setAttribute('aria-current', 'page');
-          li.appendChild(a); ul.appendChild(li);
+          a.appendChild(el('span', 'ovk-sidebar-t', c.name));
+          sec.appendChild(a);
         });
-        list.appendChild(ul);
+        secs.appendChild(sec);
       });
     }).catch(function () {});
   }
-  function setRail(open) {
-    app.classList.toggle('is-open', open);
-    var scrim = app.querySelector('.vb-scrim'); if (scrim) scrim.hidden = !open;
-    var btn = app.querySelector('[data-vb-open]'); if (btn) btn.setAttribute('aria-expanded', open ? 'true' : 'false');
-  }
-  app.addEventListener('click', function (e) {
-    if (e.target.closest('[data-vb-open]')) setRail(true);
-    else if (e.target.closest('[data-vb-close]')) setRail(false);
-  });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && app.classList.contains('is-open')) setRail(false); });
-  // ── Search chats: typing narrows the listed chats by name at once; Enter searches inside them too (?q=) ──
-  var q = document.getElementById('vb-q');
+  // The search's words come back into the box from the address (the page never repeats them).
+  var q = app.querySelector('#vb-rail .ovk-sidebar-find input');
   var searched = null;
   try { searched = new URLSearchParams(location.search).get('q'); } catch (e) { searched = null; }
-  if (q && searched) q.value = searched.slice(0, 80);   // the page never repeats it (server/web/vibe-pages.js)
-  if (q && !searched) q.addEventListener('input', function () {
-    var v = q.value.trim().toLowerCase();
-    var list = document.querySelector('.vb-rail-list'); if (!list) return;
-    [].forEach.call(list.querySelectorAll('.vb-chats'), function (ul) {
-      var shown = 0;
-      [].forEach.call(ul.children, function (li) { var hit = !v || li.textContent.toLowerCase().indexOf(v) >= 0; li.hidden = !hit; if (hit) shown++; });
-      ul.hidden = !shown;
-      var head = ul.previousElementSibling; if (head && head.classList.contains('vb-group')) head.hidden = !shown;
-    });
-  });
+  if (q && searched) q.value = searched.slice(0, 80);
   // Forms that undo something (Memory's "Forget everything") ask first.
   [].forEach.call(app.querySelectorAll('form[data-vb-confirm]'), function (f) { f.addEventListener('submit', function (e) { if (!window.confirm(f.getAttribute('data-vb-confirm'))) e.preventDefault(); }); });
   var del = app.querySelector('[data-vb-delete]');
@@ -424,8 +411,18 @@
     r.addEventListener('change', function () { if (r.checked && input && r.getAttribute('data-placeholder') && !form.dataset.signin) input.placeholder = r.getAttribute('data-placeholder'); input.focus(); });
   });
 
+  // ── Stop: what Vibe wrote so far stays as its answer (POST /api/chat/vibe/:slug/stop) ──
+  if (stopBtn) stopBtn.addEventListener('click', function (e) {
+    e.preventDefault();
+    if (!room) return;
+    stopBtn.disabled = true;
+    fetch('/api/chat/vibe/' + encodeURIComponent(room) + '/stop', { method: 'POST', credentials: 'same-origin' })
+      .catch(function () {}).then(function () { stopBtn.disabled = false; });
+  });
+
   // ── Sending ──
   if (form) form.addEventListener('submit', function (e) {
+    if (e.submitter && e.submitter === stopBtn) { e.preventDefault(); return; }
     var text = input.value.trim();
     if (!text && !picture) { e.preventDefault(); return; }
     if (form.dataset.signin) {
@@ -438,12 +435,12 @@
     if (!window.fetch || sending) return;
     e.preventDefault();
     sending = true;
-    var old = scroll.querySelector('.vb-live-notice'); if (old) old.remove();
+    var old = app.querySelector('.vb-live-notice'); if (old) old.remove();
     var sendingPicture = picture;
     var mine = meTurn(text, null, sendingPicture && sendingPicture.url);
-    thread().appendChild(mine);
+    threadEl().appendChild(mine);
     showWait(); toBottom();
-    input.value = ''; picture = null; if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; } if (fileInput) fileInput.value = ''; input.required = true; grow();
+    input.value = ''; picture = null; if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; } if (fileInput) fileInput.value = ''; input.required = true; changed();
     var url, init;
     var modeEl = form.querySelector('input[name="mode"]:checked'), mode = modeEl ? modeEl.value : 'chat';
     if (mode !== 'chat' && !sendingPicture) {
@@ -458,48 +455,42 @@
       url = room ? '/api/chat/rooms/' + encodeURIComponent(room) + '/messages' : '/api/chat/vibe';
       init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, timezone: timezone() }) };
     }
+    function putBack(msg) { mine.remove(); clearWait(); input.value = text; if (sendingPicture) choosePicture(sendingPicture.file); changed(); notice(msg); }
     fetch(url, init)
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: null }; }); })
       .then(function (x) {
-        if (!x.ok) { mine.remove(); clearWait(); input.value = text; if (sendingPicture) choosePicture(sendingPicture.file); grow(); notice((x.d && x.d.error) || 'That did not send. Try again.'); return; }
-        if (x.d.message && x.d.message.id) { mine.dataset.id = String(x.d.message.id); latest = Math.max(latest, Number(x.d.message.id)); }
+        if (!x.ok) { putBack((x.d && x.d.error) || 'That did not send. Try again.'); return; }
+        if (x.d.message && x.d.message.id) { mine.setAttribute('data-me', String(x.d.message.id)); latest = Math.max(latest, Number(x.d.message.id)); }
         if (!room && x.d.room) {
           room = x.d.room.slug;
           history.replaceState(null, '', '/vibe/' + room);
-          if (titleEl) titleEl.textContent = x.d.room.name;
+          var titleEl = app.querySelector('.ovt-title'); if (titleEl) titleEl.textContent = x.d.room.name;
           document.title = x.d.room.name + ' · Vibe · OpenVibe.Chat';
           form.action = '/vibe/' + room;
+          setStop(true);
           refreshRail();
           connect();
         }
       })
-      .catch(function () { mine.remove(); clearWait(); input.value = text; if (sendingPicture) choosePicture(sendingPicture.file); grow(); notice('You seem to be offline. Your message is back in the box.'); })
+      .catch(function () { putBack('You seem to be offline. Your message is back in the box.'); })
       .then(function () { sending = false; });
   });
 
-  enhance(app);
-  app.addEventListener('click', function (e) {
-    var whole = e.target.closest('[data-vb-copy]');
-    if (whole) { var md = whole.closest('.vb-body').querySelector('.vb-md'); if (md) copyText(whole, md.innerText.trim()); return; }
-    var code = e.target.closest('.vb-copy-code');
-    if (code) { var c = code.parentNode.querySelector('code'); if (c) copyText(code, c.textContent); }
-  });
   // Try again: Vibe's last answer goes and a new one is written (POST /api/chat/vibe/:slug/retry).
   app.addEventListener('submit', function (e) {
     var f = e.target.closest('.vb-retry'); if (!f || !room) return;
     e.preventDefault();
-    var li = f.closest('.vb-turn');
+    var li = f.closest('.ovt-turn');
     fetch('/api/chat/vibe/' + encodeURIComponent(room) + '/retry', { method: 'POST', credentials: 'same-origin' })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: null }; }); })
       .then(function (x) {
         if (!x.ok) { notice((x.d && x.d.error) || 'That did not work. Try again in a minute.'); return; }
-        if (li) li.remove();
+        if (li) { var bot = li.querySelector('.ovt-bot'); if (bot) bot.remove(); li.removeAttribute('data-ai'); }
         showWait(); toBottom();
       })
       .catch(function () { notice('You seem to be offline.'); });
   });
   if (cfg.waiting) showWait();
   connect();
-  if (!cfg.memory) toBottom();   // the Memory page reads from the top
   window.addEventListener('pagehide', function () { var w = ws; room = null; if (w) w.close(); });
 })();

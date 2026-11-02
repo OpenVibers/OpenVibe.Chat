@@ -48,7 +48,7 @@ t('everywhere else the limits stay: 2000 characters, spam refused', async () => 
 
 t('the composer takes 12000 characters and the attach button takes text files', async () => {
     const page = await fetch(`${h.base}/vibe`, { headers: { cookie: `ov_token=${ann.token}` } }).then((x) => x.text());
-    assert.match(page, /<textarea id="vb-input" name="message" rows="1" maxlength="12000"/);
+    assert.match(page, /<textarea id="ovt-text" name="message" rows="1"[^>]*maxlength="12000"/);
     assert.match(page, /<input type="file" id="vb-file" accept="[^"]*text\/plain[^"]*\.csv[^"]*\.py[^"]*" hidden>/);
     assert.match(page, /aria-label="Add (a picture or )?a text file"/);
 });
