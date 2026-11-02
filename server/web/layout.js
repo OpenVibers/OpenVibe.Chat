@@ -81,7 +81,8 @@ function navConfig(o, config) {
 function contentSecurityPolicy(nonce) {
     return [
         "default-src 'self'",
-        `script-src 'self' 'nonce-${nonce}' https://static.cloudflareinsights.com`,
+        // 'inline-speculation-rules': the shared navbar's prefetch rules (Shared 4.70) run under the nonce policy too.
+        `script-src 'self' 'nonce-${nonce}' 'inline-speculation-rules' https://static.cloudflareinsights.com`,
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob: https:",
         "media-src 'self' blob: https:",
