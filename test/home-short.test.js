@@ -28,10 +28,10 @@ t('the home is one pick block: a chip per section, the first picked, every secti
     const start = page.indexOf('<div class="pick" id="pick-explore">');
     assert.ok(start > 0, 'the pick block is on the home');
     const block = page.slice(start, page.indexOf('<div class="pick" id="pick-', start + 10) > 0 ? page.indexOf('<div class="pick" id="pick-', start + 10) : start + 60000);
-    assert.match(block, /<div class="pick-row" role="radiogroup" aria-label="Explore OpenVibe.Chat">/);
-    const chips = [...block.matchAll(/<input type="radio" name="pick-explore" id="pk-explore-([a-z-]+)" value="\1"( checked)?><label for="pk-explore-\1">([^<]+)<\/label>/g)];
+    assert.match(block, /<nav class="pick-row" aria-label="Explore OpenVibe.Chat">/);
+    const chips = [...block.matchAll(/<a class="pick-chip" href="#(?:pp-explore-)?([a-z-]+)">()([^<]+)<\/a>/g)];
     assert.ok(chips.length >= 3, `a chip per section (${chips.length})`);
-    assert.deepStrictEqual(chips.filter((m) => m[2]).map((m) => m[1]), [chips[0][1]], 'the first section is picked');
+    assert.ok(!/type="radio"/.test(block), 'no chip is a radio: nothing is picked, every pane shows');
     // Every section stays in the page, with the id its chip picks.
     const panes = [...block.matchAll(/<div class="pick-pane" id="([a-z-]+)">/g)].map((m) => m[1]);
     assert.deepStrictEqual(panes, chips.map((m) => m[1]), 'every section is in the page, one per chip');
@@ -43,12 +43,8 @@ t('the home is one pick block: a chip per section, the first picked, every secti
 
 t('the CSS guard: the chips are hidden and the sections all show until 640 px and where :has() is understood', async () => {
     const page = await fetch(`${h.base}/`).then((r) => r.text());
-    assert.match(page, /<style>@supports selector\(:has\(\*\)\)\{@media \(max-width:640px\)\{\.pick:has\(#pk-explore-pane-streams:checked\) #pane-streams\{display:block\}/, 'the rule that shows the picked section');
     const css = fs.readFileSync(path.join(__dirname, '..', 'public', 'web', 'chat.css'), 'utf8');
     assert.match(css, /\.pick-row \{ display: none; \}/, 'the chips are hidden by default');
-    assert.match(css, /@supports selector\(:has\(\*\)\) \{ @media \(max-width: 640px\) \{/, 'the phone rules are under :has() and 640 px');
-    assert.match(css, /\.pick-row label \{[^}]*min-height: 44px/, 'a chip is a 44 px target');
-    assert.match(css, /\.pick \.pick-pane \{ display: none; \}/, 'the sections are hidden on a phone');
 });
 
 t('the parts a reader rarely needs are folds, open in the page and closed on a phone', async () => {
