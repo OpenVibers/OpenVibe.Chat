@@ -333,7 +333,7 @@ async function answerWithTools({ room, member, context, transcript, askedBy, tex
             if (steps) require('./how').step(steps, c.function.name, c.function.arguments);
             // The person's own words travel with the tool call: Vibe searches a shorter query than they wrote, and the
             // tool still judges each result against the constraints they stated (11-01).
-            const tool = await aiTools.runWithResult(c.function.name, c.function.arguments, { member, contextFor, subject, room, user, messageId, memory: memory !== null, timezone: tz, requestText: text, idempotencyKey: `${opts.idempotencyKey}-t${round}-${c.function.name}` });
+            const tool = await aiTools.runWithResult(c.function.name, c.function.arguments, { member, contextFor, subject, room, user, messageId, memory: memory !== null, timezone: tz, requestText: text, called, idempotencyKey: `${opts.idempotencyKey}-t${round}-${c.function.name}` });
             if (steps) require('./how').cite(steps, c.function.name, tool.result);
             // What Vibe really did (a reminder or a timer it set or stopped): kept with the answer, as the chips.
             const entry = vibeResults.ofTool(c.function.name, tool.result);

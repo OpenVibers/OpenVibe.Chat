@@ -81,3 +81,5 @@ t('a plain "remind me …" is recognised; a question about reminders is not', as
 });
 
 t('done', async () => { await h.close(); });
+
+t.run();

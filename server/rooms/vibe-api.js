@@ -52,9 +52,9 @@ const wire = (m) => {
 const chatOf = (room) => (room ? { slug: room.slug, name: room.name || 'Vibe', url: `https://openvibe.chat/vibe/${encodeURIComponent(room.slug)}` } : null);
 
 async function latest(user) {
-    const list = await vibe.list(user, { limit: 1 });
-    const first = Array.isArray(list) ? list[0] : (list && list.chats ? list.chats[0] : null);
-    return first ? await vibe.ownChat(first.slug, user) : null;
+    // The chat they last wrote in (vibe.current): an answer arriving later in an older chat does not take its place.
+    const slug = await vibe.current(user);
+    return slug ? await vibe.ownChat(slug, user) : null;
 }
 
 router.get('/chat', personOnly, async (req, res) => {

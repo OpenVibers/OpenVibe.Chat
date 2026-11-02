@@ -188,6 +188,20 @@ async function list(user, { limit = 100 } = {}) {
 }
 
 /**
+ * The chat a person is in: the one they last wrote in, not the one an answer last arrived in. A Vibe answer that lands
+ * in an older chat after they started a fresh one (asked, then "New chat" before the answer came) must not take the
+ * fresh one's place in the Dock. A chat they have not written in yet (made fresh, empty) counts from when it was made.
+ */
+async function current(user) {
+    if (!user) return null;
+    const row = await db.get(`SELECT r.slug FROM rooms r
+        WHERE r.owner_id = ? AND r.assistant = 1 AND r.archived_at IS NULL
+        ORDER BY GREATEST(r.created_at, COALESCE((SELECT MAX(m.created_at) FROM room_messages m WHERE m.room_id = r.id AND m.ai_member_id IS NULL), r.created_at)) DESC, r.id DESC
+        LIMIT 1`, [user.id]);
+    return row ? row.slug : null;
+}
+
+/**
  * Search chats (the rail's box): the person's own chats whose name or any message holds `q`, ignoring case, newest
  * first, each with its newest matching message as `hit` (null when only the name matched). Under 2 characters: none.
  */
@@ -258,4 +272,4 @@ async function countReply(user) {
         ON CONFLICT (user_id, day) DO UPDATE SET replies = vibe_usage.replies + 1`, [user.id, today()]);
 }
 
-module.exports = { VIBE, MAX_CHATS, TITLE_MAX, SEARCH_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, search, ownChat, rename, remove, retry, lastExchange, repliesToday, countReply, engineOf: async (user) => { const e = await engineOf(user); return { own: e.own, label: e.label, ...(e.own ? { you: youOf(e.cred) } : {}) }; }, setEngine };
+module.exports = { VIBE, current, MAX_CHATS, TITLE_MAX, SEARCH_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, search, ownChat, rename, remove, retry, lastExchange, repliesToday, countReply, engineOf: async (user) => { const e = await engineOf(user); return { own: e.own, label: e.label, ...(e.own ? { you: youOf(e.cred) } : {}) }; }, setEngine };
