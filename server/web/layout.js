@@ -102,7 +102,8 @@ function contentSecurityPolicy(nonce) {
  * prefs (the person's chat preferences: timestamps, compact, font_scale, show_badges), counts (unread
  * rooms/messages for the navigation), script / callScript / ringScript (public/web/chat.js, call.js, ring.js: a call
  * coming in, on every page of a signed-in person while calls are on), app (Vibe's full-window app, server/web/vibe-pages.js:
- * vibe.css + vibe-md.js + vibe.js, and no footer), appScript (the app's own script instead of vibe.js: inbox.js), feedView
+ * vibe.css + vibe-md.js + vibe.js, and no footer), kit (the network's conversation UI, openvibe-shared/thread: kit.css,
+ * thread.css, kit-web.js and ov-thread.js; Vibe's pages), appScript (the app's own script instead of vibe.js: inbox.js), feedView
  * (a feed's card on the page: feed-view.css + feed-view.js, server/feeds/), scripts (more of
  * public/web's scripts by name, e.g. support.js), footer ('full', the default, on front pages, directories and docs;
  * 'compact', one quiet line, on pages people work in: a room, a channel, a conversation, a task, settings),
@@ -143,6 +144,7 @@ ${INSTALL_LINKS}
 <link rel="stylesheet" href="${ovServe.url('items.css')}">
 ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` : ''}
 ${(o.inlineStyles || []).map((css) => `<style>${css}</style>`).join('\n')}
+${o.kit ? `<link rel="stylesheet" href="${ovServe.url('kit.css')}">\n<link rel="stylesheet" href="${ovServe.url('thread.css')}">` : ''}
 ${o.app ? `<link rel="stylesheet" href="${asset('vibe.css')}">` : ''}
 ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
 ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join('\n')}
@@ -152,6 +154,7 @@ ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join
 ${o.script ? `<script src="${asset('chat.js')}" defer></script>` : ''}
 ${o.callScript ? `<script src="${asset('call.js')}" defer></script>` : ''}
 ${o.ringScript ? `<script src="${asset('ring.js')}" defer></script>` : ''}
+${o.kit ? `<script src="${ovServe.url('kit-web.js')}" defer></script>\n<script src="${ovServe.url('ov-thread.js')}" defer></script>` : ''}
 ${o.app ? `<script src="${asset('vibe-md.js')}" defer></script>\n<script src="${asset(o.appScript || 'vibe.js')}" defer></script>` : ''}
 </head>
 <body class="${[cls, o.app ? 'oc-app-body' : ''].filter(Boolean).join(' ')}"${scale}>

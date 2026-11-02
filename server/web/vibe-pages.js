@@ -23,6 +23,8 @@ const vibe = require('../rooms/vibe');
 const how = require('../rooms/how');
 const memory = require('../rooms/vibe-memory');
 const { esc } = require('./layout');
+const kit = require('openvibe-shared/kit');
+const thread = require('openvibe-shared/thread');
 
 const SUGGESTIONS = [
     { title: 'Catch me up', text: 'on today\'s tech news', prompt: 'What happened in tech news today? Give me the highlights with links.' },
@@ -79,48 +81,52 @@ function snippet(text, q) {
 const MARK = '<span class="vb-mark" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 5l7 14 7-14"/></svg></span>';
 
 function rail({ chats, current, signedIn, allowance, query = '', here = null }) {
-    const groups = groupChats(chats);
+    // The network's one sidebar (openvibe-shared kit.sidebar, plan L35; the conversation kit's, L55 C4): New chat, the
+    // search, Vibe's places as rows, then the chats by when they last moved. A drawer on a phone (kit-web.js).
     // The search's own words are never written back into the page (a link could carry anyone's words): the box gets
-    // them from the address in the browser, and the results say only what matched in the person's own chats.
-    const found = query
-        ? (chats.length
-            ? `<p class="vb-group">Chats that match</p><ul class="vb-chats">${chats.map((c) => `<li><a class="vb-chat vb-hit" href="/vibe/${esc(c.slug)}"${c.slug === current ? ' aria-current="page"' : ''}><span>${esc(c.name)}</span>${c.hit ? `<small>${snippet(c.hit, query)}</small>` : ''}</a></li>`).join('')}</ul>`
-            : '<p class="vb-rail-note">No chat matches your search.</p>') + '<p class="vb-rail-note"><a href="/vibe">All your chats</a></p>'
-        : null;
-    const list = !signedIn
-        ? '<p class="vb-rail-note">Sign in to keep your chats. They are private to you.</p>'
-        : found || (groups.length
-            ? groups.map((g) => `<p class="vb-group">${esc(g.label)}</p><ul class="vb-chats">${g.chats.map((c) => `<li><a class="vb-chat" href="/vibe/${esc(c.slug)}"${c.slug === current ? ' aria-current="page"' : ''}>${esc(c.name)}</a></li>`).join('')}</ul>`).join('')
-            : '<p class="vb-rail-note">Your chats with Vibe show up here.</p>');
+    // them from the address in the browser, and the results say only which of the person's own chats matched.
+    const item = (c) => ({ href: `/vibe/${c.slug}`, label: c.name, here: c.slug === current });
+    let sections;
+    if (!signedIn) sections = [{ title: '', items: [], empty: 'Sign in to keep your chats. They are private to you.' }];
+    else if (query) {
+        sections = chats.length ? [{ title: 'Chats that match', items: chats.map(item) }] : [{ title: '', items: [], empty: 'No chat matches your search.' }];
+        sections.push({ title: '', items: [{ href: '/vibe', label: 'All your chats' }] });
+    } else {
+        const groups = groupChats(chats);
+        sections = groups.length ? groups.map((g) => ({ title: g.label, items: g.chats.map(item) })) : [{ title: '', items: [], empty: 'Your chats with Vibe show up here.' }];
+    }
     const left = allowance ? Math.max(0, allowance.per_day - allowance.used_today) : null;
     const own = allowance && allowance.engine && allowance.engine.own ? allowance.engine : null;   // Vibe on their own model
-    return `<aside class="vb-rail" id="vb-rail" aria-label="Your chats with Vibe">
-<div class="vb-rail-top">
-<a class="vb-new" href="/vibe">${ICON.new}<span>New chat</span></a>
-<button class="vb-icon vb-rail-close" type="button" data-vb-close aria-label="Close the chat list">${ICON.close}</button>
-</div>
-${signedIn ? `<form class="vb-search" action="/vibe" method="get" role="search">${ICON.search}<label class="oc-sr" for="vb-q">Search your chats</label><input id="vb-q" name="q" type="search" maxlength="${vibe.SEARCH_MAX}" placeholder="Search chats" autocomplete="off" enterkeyhint="search"></form>` : ''}
-<nav class="vb-rail-list" aria-label="Chats with Vibe">${list}</nav>
-<nav class="vb-rail-more" aria-label="More of OpenVibe.Chat">
-<a href="https://openvibe.actor/tasks" title="Every task you gave an agent, one-off or recurring, with what it cost">${ICON.tasks}<span>Tasks</span></a>
-<a href="https://openvibe.actor/me/agents" title="Recurring work in plain words: an agent with standing instructions, a memory you can edit, a schedule and quiet hours">${ICON.agents}<span>Your agents</span></a>
-${signedIn ? `<a href="/vibe/memory" title="What Vibe remembers about you across your chats: see, add or delete each note"${here === 'memory' ? ' aria-current="page"' : ''}>${ICON.memory}<span>Memory</span></a>` : ''}
-<a href="https://openvibe.bot/machines" title="Your computers and robots: pair one, see its screen, set what agents may do on it">${ICON.computer}<span>Computers &amp; robots</span></a>
-<a href="/work" title="A room where your team and Vibe work together: a work queue, alerts and a shared screen">${ICON.team}<span>Work together</span></a>
-<a href="/messages">${ICON.messages}<span>Messages</span></a>
-<a href="/rooms">${ICON.rooms}<span>Rooms and servers</span></a>
-<a href="/">${ICON.globe}<span>Global chat</span></a>
-</nav>
-${own ? `<p class="vb-allow" id="vb-allow" data-own="1">No daily limit: Vibe thinks with ${esc(own.you)}</p>` : left != null ? `<p class="vb-allow" id="vb-allow">${left} of ${allowance.per_day} answers left today</p>` : ''}
-</aside>`;
+    const allow = own ? `<p class="vb-allow" id="vb-allow" data-own="1">No daily limit: Vibe thinks with ${esc(own.you)}</p>`
+        : left != null ? `<p class="vb-allow" id="vb-allow">${left} of ${allowance.per_day} answers left today</p>` : '';
+    // Chat's other places, quietly at the foot (the network's navbar reaches them too).
+    const more = [['https://openvibe.bot/machines', 'Computers & robots'], ['/work', 'Work together'], ['/messages', 'Messages'], ['/rooms', 'Rooms and servers'], ['/', 'Global chat']];
+    const html = kit.sidebar({
+        id: 'vb-rail', label: 'Your chats with Vibe',
+        action: { href: '/vibe', label: 'New chat', icon: 'pencil' },
+        find: signedIn ? { action: '/vibe', name: 'q', placeholder: 'Search chats', label: 'Search your chats' } : null,
+        nav: [
+            { href: 'https://openvibe.actor/tasks', label: 'Tasks', icon: 'list' },
+            { href: 'https://openvibe.actor/me/agents', label: 'Your agents', icon: 'robot' },
+            ...(signedIn ? [{ href: '/vibe/memory', label: 'Memory', icon: 'book', here: here === 'memory' }] : []),
+        ],
+        sections,
+        foot: `<p class="ovt-side-foot">${more.map(([href, label]) => `<a href="${esc(href)}">${esc(label)}</a>`).join('')}</p>${allow}`,
+    });
+    if (!query) return html;
+    // A search: under each chat that matched, where it matched (the person's own words or Vibe's), the match marked.
+    return chats.reduce((out, c) => (c.hit ? out.replace(
+        new RegExp(`<a class="ovk-sidebar-item( is-here)?" href="/vibe/${c.slug}"([^>]*)><span class="ovk-sidebar-t">([^<]*)</span>`),
+        (m, here, rest, name) => `<a class="ovk-sidebar-item vb-hit${here || ''}" href="/vibe/${c.slug}"${rest}><span class="ovk-sidebar-t">${name}</span><small class="vb-hit-s">${snippet(c.hit, query)}</small>`,
+    ) : out), html);
 }
 
 /**
- * Under each answer: Copy (shown by vibe.js; it needs the clipboard) and, under the answer to the person's last message,
- * Try again (a form, so it works without JavaScript too).
+ * Under each answer: Copy (shown by ov-thread.js where the clipboard works) and, under the answer to the person's last
+ * message, Try again (a form, so it works without JavaScript too).
  */
 function acts(slug) {
-    return `<div class="vb-acts"><button type="button" class="vb-act" data-vb-copy hidden>Copy</button>${slug ? `<form method="post" action="/vibe/${esc(slug)}/retry" class="vb-retry"><button type="submit" class="vb-act">Try again</button></form>` : ''}</div>`;
+    return `<div class="ovt-meta"><span class="ovt-acts"><button type="button" class="ovt-act" data-ovt-copy hidden>${thread.icon('copy')}<span>Copy</span></button>${slug ? `<form method="post" action="/vibe/${esc(slug)}/retry" class="vb-retry"><button type="submit" class="ovt-act">Try again</button></form>` : ''}</span></div>`;
 }
 
 const RES_ICON = {
@@ -146,14 +152,36 @@ function resultChips(m, slug) {
     }).join('')}</div>`;
 }
 
-function turn(m, me, hows = new Map(), retrySlug = null, slug = null) {
-    const ai = !!m.ai_member_id;
-    if (ai) {
-        const info = hows.get(Number(m.id));
-        return `<li class="vb-turn vb-ai" data-id="${Number(m.id) || 0}">${MARK}<div class="vb-body"><p class="oc-sr">Vibe said:</p><div class="vb-md">${md.render(m.message)}</div>${resultChips(m, slug)}${how.chips(info, m.id)}${how.html(info, m.id)}${acts(retrySlug)}</div></li>`;
-    }
+/** What the person said, for their bubble: their words (the bubble keeps line breaks) and any picture. */
+function youOf(m, me) {
     const mine = me && Number(m.user_id) === Number(me.id);
-    return `<li class="vb-turn vb-me" data-id="${Number(m.id) || 0}"><div class="vb-bubble"><p class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</p>${esc(m.message).replace(/\n/g, '<br>')}${pictures.pageHtml(m.message)}</div></li>`;
+    return { html: `<span class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</span>${esc(m.message)}${pictures.pageHtml(m.message)}` };
+}
+/** Vibe's answer: the rendered Markdown, what it did (reminders, timers), its sources and how, then Copy and Try again. */
+function answerOf(m, hows, retrySlug, slug) {
+    const info = hows.get(Number(m.id));
+    return `<p class="oc-sr">Vibe said:</p>${thread.answer({ html: md.render(m.message), copy: false })}${resultChips(m, slug)}${how.chips(info, m.id)}${how.html(info, m.id)}${acts(retrySlug)}`;
+}
+/** Vibe writing: the live line, open (ov-thread.js and vibe.js follow it). */
+const WRITING = thread.work({ open: true, live: 'Vibe is writing' });
+/**
+ * The chat as turns: each message of the person's with the answer that follows it. data-me / data-ai carry the two
+ * message ids, so a message that arrives over the socket is never drawn twice.
+ */
+function turnsOf(messages, me, hows, { retrySlug = null, slug = null, waiting = false } = {}) {
+    const specs = [];
+    for (const [i, m] of messages.entries()) {
+        const last = i === messages.length - 1;
+        if (m.ai_member_id) {
+            const reply = answerOf(m, hows, last ? retrySlug : null, slug);
+            const open = specs[specs.length - 1];
+            if (open && open.reply == null) { open.reply = reply; open.ai = m.id; }
+            else specs.push({ reply, ai: m.id });
+        } else specs.push({ you: youOf(m, me), me: m.id, reply: null });
+    }
+    const tail = specs[specs.length - 1];
+    if (waiting && tail && tail.reply == null) { tail.reply = WRITING; tail.open = true; }
+    return specs.map((t) => thread.turn({ you: t.you || {}, reply: t.reply, open: !!t.open, attrs: { 'data-me': t.me, 'data-ai': t.ai } }));
 }
 
 // The composer's modes (plan track K): Chat answers here and now; the others are agent tasks that answer here when done.
@@ -174,18 +202,23 @@ function composer({ slug, signedIn, enabled, prefill = '', engine = null }) {
     const pics = pictures.enabled();
     const label = pics ? 'Add a picture or a text file' : 'Add a text file';
     const attach = signedIn && enabled
-        ? `<input type="file" id="vb-file" accept="${pics ? 'image/jpeg,image/png,image/gif,image/webp,image/avif,' : ''}${TEXT_FILES}" hidden><button class="vb-icon vb-attach" type="button" data-vb-attach aria-label="${label}" title="${label}">${ICON.attach}</button>`
+        ? `<input type="file" id="vb-file" accept="${pics ? 'image/jpeg,image/png,image/gif,image/webp,image/avif,' : ''}${TEXT_FILES}" hidden><button class="ovt-btn vb-attach" type="button" data-vb-attach aria-label="${label}" title="${label}">${ICON.attach}</button>`
         : '';
-    return `<div class="vb-preview" id="vb-preview" hidden></div>
-<form class="vb-composer" id="vb-composer" method="${signedIn ? 'post' : 'get'}" action="${action}"${signedIn ? '' : ' data-signin="1"'}>
-${signedIn ? '' : `<input type="hidden" name="next" value="${slug ? `/vibe/${esc(slug)}` : (prefill ? `/vibe?ask=${encodeURIComponent(prefill)}` : '/vibe')}">`}
-${attach}
-<label class="oc-sr" for="vb-input">Message Vibe</label>
-<textarea id="vb-input" name="message" rows="${prefill ? 3 : 1}" maxlength="12000" placeholder="${signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)'}"${enabled ? '' : ' disabled'}${prefill ? ' autofocus' : ''} required>${esc(prefill)}</textarea>
-<button class="vb-send" type="submit" aria-label="Send"${enabled ? '' : ' disabled'}>${ICON.send}</button>
-<fieldset class="vb-modes" aria-label="What Vibe does with it">${MODES.map(([value, label, hint, placeholder], i) => `<label title="${esc(hint)}"><input type="radio" name="mode" value="${value}" data-placeholder="${esc(placeholder)}"${i ? '' : ' checked'}><span>${label}</span></label>`).join('')}</fieldset>
-</form>
-<p class="vb-fine">${!enabled ? 'Vibe is resting right now. Try again later.' : engine && engine.own ? `Vibe thinks with ${esc(engine.you)} (<a href="/settings#oc-ai-key">change</a>). It can get things wrong: check what matters.` : 'Vibe can get things wrong. Check what matters.'}</p>`;
+    const modes = `<fieldset class="vb-modes" aria-label="What Vibe does with it">${MODES.map(([value, label, hint, placeholder], i) => `<label title="${esc(hint)}"><input type="radio" name="mode" value="${value}" data-placeholder="${esc(placeholder)}"${i ? '' : ' checked'}><span>${label}</span></label>`).join('')}</fieldset>`;
+    const fine = !enabled ? 'Vibe is resting right now. Try again later.' : engine && engine.own ? `Vibe thinks with ${esc(engine.you)} (<a href="/settings#oc-ai-key">change</a>). It can get things wrong: check what matters.` : 'Vibe can get things wrong. Check what matters.';
+    let html = thread.composer({
+        action, method: signedIn ? 'post' : 'get', name: 'message', id: 'vb-composer', attrs: signedIn ? {} : { 'data-signin': '1' },
+        label: 'Message Vibe', placeholder: signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)', value: prefill, maxlength: 12000,
+        hidden: signedIn ? {} : { next: slug ? `/vibe/${slug}` : (prefill ? `/vibe?ask=${encodeURIComponent(prefill)}` : '/vibe') },
+        top: '<div class="vb-preview" id="vb-preview" hidden></div>', tools: attach + modes,
+        // Stop is drawn hidden: vibe.js shows it while Vibe writes, and it keeps what was written so far.
+        stopAction: signedIn ? '' : null,
+        foot: `<p class="vb-fine">${fine}</p>`,
+    });
+    // A box filled from "Ask Vibe" is where the cursor goes, script or not.
+    if (prefill) html = html.replace('data-ovt-text', 'data-ovt-text autofocus');
+    if (!enabled) html = html.replace('data-ovt-text', 'data-ovt-text disabled').replace('data-ovt-send aria-label', 'data-ovt-send disabled aria-label');
+    return html;
 }
 
 function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit, notice }) {
@@ -232,31 +265,25 @@ ${MARK}
 <p class="vb-sub">OpenVibe's assistant. I search the web and all of OpenVibe (news, deals, jobs, rentals, videos), read the pages and pictures you share, remember what you ask me to, and set up work that runs every day for you.</p>
 <ul class="vb-suggest">${SUGGESTIONS.map((s) => `<li><button type="button" class="vb-chip" data-prompt="${esc(s.prompt)}"><b>${esc(s.title)}</b><span>${esc(s.text)}</span></button></li>`).join('')}</ul>
 </div>`;
-        const thread = room
-            ? `<ol class="vb-thread" id="vb-thread">${messages.map((m, i) => turn(m, user, hows, i === messages.length - 1 && retryable ? room.slug : null, room.slug)).join('')}${waiting ? `<li class="vb-turn vb-ai vb-wait" id="vb-wait">${MARK}<div class="vb-body"><span class="vb-dots" aria-label="Vibe is writing"><i></i><i></i><i></i></span><noscript><a href="/vibe/${esc(room.slug)}">Refresh to see Vibe's answer</a></noscript></div></li>` : ''}</ol>`
-            : '';
-        const head = `<header class="vb-head">
-<button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show your chats">${ICON.menu}</button>
-${room ? `<h1 class="vb-title" id="vb-title">${esc(title)}</h1>` : `<p class="vb-title" id="vb-title">${esc(title)}</p>`}
-${room ? `<details class="vb-actions"><summary class="vb-icon" aria-label="Chat options">${ICON.more}</summary><div class="vb-pop">
+        const head = thread.head({
+            title: room ? title : '', sidebar: 'vb-rail', sidebarLabel: 'Show your chats',
+            actions: room ? `<details class="vb-actions"><summary class="ovt-btn" aria-label="Chat options">${ICON.more}</summary><div class="vb-pop">
 <form method="post" action="/vibe/${esc(room.slug)}/rename" class="vb-rename"><label for="vb-name">Name</label><input id="vb-name" name="name" maxlength="${vibe.TITLE_MAX}" value="${esc(room.name)}" required><button type="submit">Rename</button></form>
 <form method="post" action="/vibe/${esc(room.slug)}/delete" data-vb-delete><button type="submit" class="vb-danger">Delete this chat</button></form>
-</div></details>` : `<a class="vb-icon vb-head-new" href="/vibe" aria-label="New chat">${ICON.new}</a>`}
-</header>`;
-        const body = `<div class="vb${room ? '' : ' vb-empty'}" id="vb">
-${rail({ chats, current: room && room.slug, signedIn: !!user, allowance, query: searching ? query : '' })}
-<div class="vb-scrim" data-vb-close hidden></div>
-<section class="vb-main" aria-label="${room ? 'Your chat with Vibe' : 'A new chat with Vibe'}">
-${head}
-<div class="vb-scroll" id="vb-scroll">
-${error ? notice('error', error) : ''}
-${room ? thread : hello}
-</div>
-<div class="vb-dock">${composer({ slug: room && room.slug, signedIn: !!user, enabled, prefill: room ? '' : prefillOf(req.query || {}), engine: allowance && allowance.engine })}</div>
-</section>
-</div>`;
+</div></details>` : '',
+        });
+        const turns = room ? turnsOf(messages, user, hows, { retrySlug: retryable ? room.slug : null, slug: room.slug, waiting: !!waiting }) : [];
+        const problem = error ? notice('error', error) : '';
+        const body = `<div class="vbk" id="vb">${thread.page({
+            sidebar: rail({ chats, current: room && room.slug, signedIn: !!user, allowance, query: searching ? query : '' }),
+            head,
+            turns: problem && room ? [thread.turn({ avatar: false, reply: problem }), ...turns] : turns,
+            empty: problem + hello,
+            composer: composer({ slug: room && room.slug, signedIn: !!user, enabled, prefill: room ? '' : prefillOf(req.query || {}), engine: allowance && allowance.engine }),
+            center: !room, label: room ? 'Your chat with Vibe' : 'A new chat with Vibe',
+        })}</div>`;
         await page(req, res, status, {
-            actor, app: true, active: 'vibe', path: room ? `/vibe/${room.slug}` : '/vibe',
+            actor, app: true, kit: true, active: 'vibe', path: room ? `/vibe/${room.slug}` : '/vibe',
             title: room ? `${room.name} · Vibe` : 'Vibe, OpenVibe\'s assistant',
             fullTitle: room ? undefined : 'Vibe: chat with OpenVibe\'s assistant · OpenVibe.Chat',
             description: 'Chat with Vibe, OpenVibe\'s free assistant: it searches news, deals, jobs, rentals and videos across OpenVibe, reads pages you link and helps you think.',
@@ -276,18 +303,11 @@ ${room ? thread : hello}
     async function renderMemory(req, res, actor, { status = 200, error = null, draft = '' } = {}) {
         const user = actor.user;
         const [notes, on, chats, allowance] = await Promise.all([memory.list(user), memory.isOn(user), vibe.list(user), allowanceOf(user)]);
-        const body = `<div class="vb" id="vb">
-${rail({ chats, current: null, signedIn: true, allowance, here: 'memory' })}
-<div class="vb-scrim" data-vb-close hidden></div>
-<section class="vb-main" aria-label="What Vibe remembers about you">
-<header class="vb-head">
-<button class="vb-icon vb-menu" type="button" data-vb-open aria-controls="vb-rail" aria-expanded="false" aria-label="Show your chats">${ICON.menu}</button>
-<p class="vb-title" id="vb-title">Memory</p>
-<a class="vb-icon vb-head-new" href="/vibe" aria-label="New chat">${ICON.new}</a>
-</header>
-<div class="vb-scroll" id="vb-scroll">
-${error ? notice('error', error) : ''}
-<div class="vb-page">
+        const body = `<div class="vbk" id="vb">${thread.page({
+            sidebar: rail({ chats, current: null, signedIn: true, allowance, here: 'memory' }),
+            head: thread.head({ title: '', sidebar: 'vb-rail', sidebarLabel: 'Show your chats', newHref: '/vibe' }),
+            label: 'What Vibe remembers about you', cls: 'is-page',
+            main: `${error ? notice('error', error) : ''}<div class="vb-page">
 <h1>What Vibe remembers about you</h1>
 <p class="vb-sub">Short notes Vibe keeps across your chats with it: what you asked it to remember, or a preference you told it. Only your own chats with Vibe read them, never a room it was added to. It never keeps passwords, keys or card numbers.</p>
 <form class="vb-mem-switch" method="post" action="/vibe/memory/switch">
@@ -304,12 +324,10 @@ ${notes.length ? `<h2 class="vb-group">${notes.length} of ${memory.MAX_NOTES} no
 <form method="post" action="/vibe/memory/${n.id}/delete"><button type="submit" class="vb-btn vb-btn-quiet" aria-label="Delete the note: ${esc(n.text.slice(0, 60))}">Delete</button></form></li>`).join('')}</ul>
 <form method="post" action="/vibe/memory/clear" data-vb-confirm="Delete every note? Vibe forgets them all."><button type="submit" class="vb-btn vb-danger">Forget everything</button></form>`
         : '<p class="vb-rail-note">Nothing yet. Tell Vibe “remember that I…” in a chat, or add a note above.</p>'}
-</div>
-</div>
-</section>
-</div>`;
+</div>`,
+        })}</div>`;
         await page(req, res, status, {
-            actor, app: true, active: 'vibe', path: '/vibe/memory', title: 'Memory · Vibe', robots: 'noindex, nofollow', body,
+            actor, app: true, kit: true, active: 'vibe', path: '/vibe/memory', title: 'Memory · Vibe', robots: 'noindex, nofollow', body,
             page: { view: 'vibe', memory: true, room: null, me: user.id, latest: 0, waiting: false, enabled: vibe.enabled(), signedIn: true },
         });
     }

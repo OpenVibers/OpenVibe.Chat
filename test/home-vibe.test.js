@@ -25,7 +25,7 @@ t('the front page leads to Vibe: the first action, an Ask Vibe box, the question
 
 t('the box opens Vibe with the question in it, signed out too', async () => {
     const vibe = await fetch(`${h.base}/vibe?ask=${encodeURIComponent('Plan a picnic for six')}`).then((r) => r.text());
-    assert.match(vibe, /<textarea id="vb-input"[^>]*>Plan a picnic for six<\/textarea>/);
+    assert.match(vibe, /<textarea id="ovt-text"[^>]*>Plan a picnic for six<\/textarea>/);
 });
 
 t.run(async () => { if (h && h.close) await h.close(); });

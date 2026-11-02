@@ -166,7 +166,7 @@ t('the page: the notes with Delete, add, switch, forget everything; signed out a
     assert.match(page.text, /<h1>What Vibe remembers about you<\/h1>/);
     assert.match(page.text, /<b>Memory is on\.<\/b>/);
     assert.match(page.text, /<li><p>Uses kilometres<\/p><small>Added by you · /);
-    assert.match(page.text, /<a href="\/vibe\/memory" title="[^"]+" aria-current="page">/, 'the rail marks Memory');
+    assert.match(page.text, /<a class="ovk-sidebar-link is-here" href="\/vibe\/memory" aria-current="page">/, 'the rail marks Memory');
     assert.match(page.text, /noindex, nofollow/);
     const added = await web('POST', '/vibe/memory', ann, { text: 'Prefers short answers' });
     assert.deepStrictEqual([added.status, added.location], [303, '/vibe/memory']);
@@ -185,7 +185,7 @@ t('the page: the notes with Delete, add, switch, forget everything; signed out a
     await web('POST', '/vibe/memory/clear', ann, {});
     assert.deepStrictEqual(await memory.list(userOf(ann)), []);
     assert.match((await web('GET', '/vibe/memory', ann)).text, /Nothing yet/);
-    assert.match((await web('GET', '/vibe', ann)).text, /<a href="\/vibe\/memory" title="What Vibe remembers about you/, 'the rail links it from Vibe');
+    assert.match((await web('GET', '/vibe', ann)).text, /<a class="ovk-sidebar-link" href="\/vibe\/memory">/, 'the rail links it from Vibe');
     assert.ok(!(await web('GET', '/vibe', null)).text.includes('href="/vibe/memory"'), 'signed out: no Memory link');
 });
 

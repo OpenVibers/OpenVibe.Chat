@@ -74,8 +74,8 @@ t('the page offers Try again under the last answer only, and Copy (shown by the 
     await answers(s2, 2);
     const page = await web('GET', `/vibe/${s2}`, ann);
     assert.strictEqual((page.text.match(/class="vb-retry"/g) || []).length, 1, 'one Try again');
-    assert.match(page.text, /<button type="button" class="vb-act" data-vb-copy hidden>Copy<\/button><form method="post" action="\/vibe\/v-[0-9a-f]{12}\/retry" class="vb-retry"><button type="submit" class="vb-act">Try again<\/button><\/form><\/div><\/div><\/li><\/ol>/, 'under the last answer');
-    assert.strictEqual((page.text.match(/data-vb-copy hidden/g) || []).length, 2, 'Copy under each answer');
+    assert.match(page.text, /data-ovt-copy hidden>[\s\S]{0,400}?<span>Copy<\/span><\/button><form method="post" action="\/vibe\/v-[0-9a-f]{12}\/retry" class="vb-retry"><button type="submit" class="ovt-act">Try again<\/button><\/form><\/span><\/div><\/div><\/div>\s*<\/li><\/ol>/, 'under the last answer');
+    assert.strictEqual((page.text.match(/data-ovt-copy hidden/g) || []).length, 2, 'Copy under each answer');
     const form = await web('POST', `/vibe/${s2}/retry`, ann, {});
     assert.deepStrictEqual([form.status, form.location], [303, `/vibe/${s2}`]);
 });

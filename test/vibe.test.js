@@ -148,12 +148,12 @@ t('the app page: signed out it invites a sign-in, signed in it lists the chats a
     const signed = await web('GET', '/vibe', ann);
     assert.ok(signed.text.includes('What can I help with, Ann?'));
     assert.strictEqual((signed.text.match(/<h1[\s>]/g) || []).length, 1, 'one h1 on a new chat: the greeting (the header names it in a <p>)');
-    assert.ok(signed.text.includes('class="vb-chat" href="/vibe/v-'), 'the rail lists their chats');
+    assert.ok(signed.text.includes('class="ovk-sidebar-item" href="/vibe/v-'), 'the rail lists their chats (the network\'s one sidebar, kit.sidebar)');
     // The rail leads to the rest of the person's agent: their tasks, their computers and robots, team workspaces.
     assert.ok(/href="https:\/\/openvibe\.actor\/tasks"[^>]*>[\s\S]*?<span>Tasks<\/span>/.test(signed.text), 'Tasks');
     assert.ok(/href="https:\/\/openvibe\.actor\/me\/agents"[^>]*>[\s\S]*?<span>Your agents<\/span>/.test(signed.text), 'Your agents: recurring work');
-    assert.ok(/href="https:\/\/openvibe\.bot\/machines"[^>]*>[\s\S]*?<span>Computers &amp; robots<\/span>/.test(signed.text), 'Computers & robots');
-    assert.ok(/href="\/work"[^>]*>[\s\S]*?<span>Work together<\/span>/.test(signed.text), 'Work together');
+    assert.ok(signed.text.includes('<a href="https://openvibe.bot/machines">Computers &amp; robots</a>'), 'Computers & robots, at the foot');
+    assert.ok(signed.text.includes('<a href="/work">Work together</a>'), 'Work together, at the foot');
     const form = await web('POST', '/vibe', ann, { message: 'hello from a form' });
     assert.strictEqual(form.status, 303);
     assert.ok(/^\/vibe\/v-[0-9a-f]{12}$/.test(form.location), form.location);
@@ -166,9 +166,9 @@ t('the app page: signed out it invites a sign-in, signed in it lists the chats a
 t('Ask Vibe from any OpenVibe site: the selection and the page fill a new chat\'s box, never send it', async () => {
     let r = await web('GET', `/vibe?ask=${encodeURIComponent('What is <b>WHIP</b>?')}&from=${encodeURIComponent('https://openvibe.live/docs/whip#top')}`, ann);
     assert.strictEqual(r.status, 200);
-    assert.match(r.text, /<textarea id="vb-input"[^>]*autofocus[^>]*>About this, on https:\/\/openvibe\.live\/docs\/whip:\n\nWhat is &lt;b&gt;WHIP&lt;\/b&gt;\?<\/textarea>/);
+    assert.match(r.text, /<textarea id="ovt-text"[^>]*autofocus[^>]*>About this, on https:\/\/openvibe\.live\/docs\/whip:\n\nWhat is &lt;b&gt;WHIP&lt;\/b&gt;\?<\/textarea>/);
     r = await web('GET', `/vibe?from=${encodeURIComponent('https://evil.test/x')}`, ann);
-    assert.match(r.text, /<textarea id="vb-input"[^>]*><\/textarea>/, 'only an OpenVibe site\'s address is taken');
+    assert.match(r.text, /<textarea id="ovt-text"[^>]*><\/textarea>/, 'only an OpenVibe site\'s address is taken');
     r = await web('GET', `/vibe?ask=${encodeURIComponent('hello')}`);
     assert.match(r.text, /name="next" value="\/vibe\?ask=hello"/, 'signed out, the question survives the sign-in');
 });
@@ -178,12 +178,12 @@ t('search chats: the rail\'s box finds a chat by its name or by any message in i
     assert.strictEqual(made.status, 201, made.text);
     await answers(made.body.room.slug, 1);   // Vibe's answer lists rice and lentils
     const signed = await web('GET', '/vibe', ann);
-    assert.match(signed.text, /<form class="vb-search" action="\/vibe" method="get" role="search">/);
-    assert.ok(!(await web('GET', '/vibe')).text.includes('vb-search'), 'signed out, there is nothing to search');
+    assert.match(signed.text, /<form class="ovk-sidebar-find" role="search" method="get" action="\/vibe">/);
+    assert.ok(!(await web('GET', '/vibe')).text.includes('ovk-sidebar-find'), 'signed out, there is nothing to search');
     let r = await web('GET', '/vibe?q=BICYCLE', ann);
-    assert.ok(r.text.includes('<p class="vb-group">Chats that match</p>'));
+    assert.ok(r.text.includes('<h2 class="ovk-sidebar-h">Chats that match</h2>'));
     assert.ok(!r.text.includes('BICYCLE'), 'the search\'s own words are never written back into the page');
-    assert.match(r.text, new RegExp(`class="vb-chat vb-hit" href="/vibe/${made.body.room.slug}"><span>Find me a cheap blue bicycle near the…</span><small>Find me a cheap blue <mark>bicycle</mark> near the river</small>`));
+    assert.match(r.text, new RegExp(`class="ovk-sidebar-item vb-hit" href="/vibe/${made.body.room.slug}"><span class="ovk-sidebar-t">Find me a cheap blue bicycle near the…</span><small class="vb-hit-s">Find me a cheap blue <mark>bicycle</mark> near the river</small>`));
     r = await web('GET', '/vibe?q=lentils', ann);
     assert.ok(r.text.includes('<mark>lentils</mark>'), 'a match in Vibe\'s answer counts');
     assert.ok((await web('GET', '/vibe?q=100%25', ann)).text.includes('No chat matches your search.'), '% is a character, not a wildcard');
