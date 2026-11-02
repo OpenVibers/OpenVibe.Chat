@@ -293,7 +293,9 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-stream, .oc-more a { display: grid; gap: 2px; height: 100%; box-sizing: border-box; padding: 12px 14px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); color: var(--oc-text); text-decoration: none; }
 .oc-stream:hover, .oc-stream:focus-visible, .oc-more a:hover, .oc-more a:focus-visible { border-color: var(--oc-accent); }
 .oc-stream .oc-muted, .oc-more span { font-size: .88rem; color: var(--oc-muted); }
-.oc-badge-live { color: #fecaca; border-color: rgba(248, 113, 113, .6); background: rgba(127, 29, 29, .55); }
+/* Solid, a shade under the live red, white text: about 5:1 on every theme (the translucent dark red read at 2.3:1 on
+   Daylight's white, WCAG AA sweep 11-02). */
+.oc-badge-live { color: #fff; border-color: transparent; background: color-mix(in srgb, var(--live-red, #ef4444) 80%, #000); }
 .oc-steps { list-style: none; counter-reset: oc-step; margin: 12px 0 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr)); }
 .oc-steps li { counter-increment: oc-step; padding: 14px 16px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); }
 .oc-steps li::before { content: counter(oc-step); display: inline-grid; place-items: center; width: 26px; height: 26px; margin-bottom: .4rem; border-radius: 50%; background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, var(--oc-on-accent)); font-weight: 800; font-size: .85rem; }
