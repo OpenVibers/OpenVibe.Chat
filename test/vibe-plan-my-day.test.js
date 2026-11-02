@@ -85,6 +85,28 @@ t('when Today cannot answer, Vibe is told so plainly', async () => {
     assert.match(out.error, /unreachable/);
 });
 
+t('"plan my day" reaches the model with the day already read, so a small model cannot skip it', async () => {
+    const { PLAN_DAY } = require('../server/rooms/ai-members');
+    ['Plan my day for me', 'plan out my afternoon', "what's on today?", 'What does my day look like', 'hows my week looking'].forEach((m) => assert.ok(PLAN_DAY.test(m), m));
+    ['Plan a trip to Lisbon', 'remind me at 3pm', 'what is on TV'].forEach((m) => assert.ok(!PLAN_DAY.test(m), m));
+    const aiClient = require('../server/ai/client');
+    const seen = [];
+    const say = (content) => ({ choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }] });
+    aiClient._setClient({ runs: { create: async (workflow, ...rest) => { seen.push(JSON.stringify(rest)); return { run: { status: 'succeeded', output: workflow === 'chat.member.turn' ? say('Here is a plan. Shall I set the reminders?') : { text: 'ok' } } }; } } });
+    const ask = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Plan my day for me', timezone: 'Asia/Tokyo', fresh: true } });
+    assert.strictEqual(ask.status, 201, ask.text);
+    let answer = null;
+    let tries = 0;
+    while (!answer && tries++ < 60) {
+        const r = await h.http('GET', `/api/vibe/chat?slug=${encodeURIComponent(ask.body.chat.slug)}&after=${ask.body.message.id}`, { token: ann.token });
+        answer = (r.body.messages || []).find((m) => m.from === 'vibe') || null;
+        if (!answer) await new Promise((r2) => setTimeout(r2, 100));
+    }
+    assert.ok(answer, 'Vibe answered');
+    assert.ok(seen.some((x) => x.includes('call_my_day')), 'the model saw the day as a my_day result');
+    aiClient._setClient(null);
+});
+
 t('done', async () => { await h.close(); });
 
 t.run();
