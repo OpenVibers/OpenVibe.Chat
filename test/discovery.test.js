@@ -43,10 +43,21 @@ t('/llms.txt describes the site, its public pages and its machine-readable endpo
         assert.ok(r.text.includes(of_), `mentions ${of_}`);
     }
     for (const re of PRIVATE) assert.ok(!re.test(r.text), `no private path in llms.txt (${re})`);
-    // AGT-5: a page with a twin is linked at it; Vibe, Developers and Updates have none and are marked HTML; Optional last.
+    // AGT-5: every page is linked at its twin; Optional last.
     assert.ok(r.text.includes(`(${SITE}/index.md)`) && r.text.includes(`(${SITE}/rooms.md)`), 'own pages link their twins');
-    assert.ok(r.text.includes(`(${SITE}/vibe) (HTML)`) && r.text.includes(`(${SITE}/updates) (HTML)`));
+    assert.ok(r.text.includes(`(${SITE}/vibe.md)`) && r.text.includes(`(${SITE}/updates.md)`) && r.text.includes(`(${SITE}/developers.md)`), 'Vibe, Developers and Updates have twins now');
     assert.ok(r.text.includes('\n## Optional\n') && r.text.lastIndexOf('\n## ') === r.text.indexOf('\n## Optional\n'), 'Optional is last');
+});
+
+t('every page that names a twin has one: /vibe, /developers and /updates too (11-03)', async () => {
+    for (const p of ['/vibe', '/developers', '/updates', '/']) {
+        const page = await fetch(`${h.base}${p}`, { headers: { accept: 'text/html' }, redirect: 'manual' });
+        const named = /text\/markdown/.test(page.headers.get('link') || '');
+        const twin = await req(p === '/' ? '/index.md' : `${p}.md`);
+        assert.ok(named, `${p} names a twin`);
+        assert.strictEqual(twin.status, 200, `${p}'s twin answers`);
+        assert.match(twin.type, /^text\/markdown/);
+    }
 });
 
 t('/llms-full.txt carries every public page and what it is, at least 500 characters', async () => {
