@@ -43,6 +43,10 @@ t('/llms.txt describes the site, its public pages and its machine-readable endpo
         assert.ok(r.text.includes(of_), `mentions ${of_}`);
     }
     for (const re of PRIVATE) assert.ok(!re.test(r.text), `no private path in llms.txt (${re})`);
+    // AGT-5: a page with a twin is linked at it; Vibe, Developers and Updates have none and are marked HTML; Optional last.
+    assert.ok(r.text.includes(`(${SITE}/index.md)`) && r.text.includes(`(${SITE}/rooms.md)`), 'own pages link their twins');
+    assert.ok(r.text.includes(`(${SITE}/vibe) (HTML)`) && r.text.includes(`(${SITE}/updates) (HTML)`));
+    assert.ok(r.text.includes('\n## Optional\n') && r.text.lastIndexOf('\n## ') === r.text.indexOf('\n## Optional\n'), 'Optional is last');
 });
 
 t('/llms-full.txt carries every public page and what it is, at least 500 characters', async () => {
