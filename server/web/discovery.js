@@ -121,25 +121,24 @@ function createDiscoveryRoutes({ config }) {
     router.get('/llms.txt', (req, res) => {
         res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.llmsTxt({
             name: 'OpenVibe.Chat',
-            // AGT-5: own pages link their Markdown twins (openvibe-shared 4.108.0); Vibe, Developers and Updates have none
-            // and are marked HTML. ## Optional is what an agent may skip.
+            // AGT-5: own pages link their Markdown twins (openvibe-shared 4.108.0). ## Optional is what an agent may skip.
             markdown: true,
             base: site,
             summary: 'OpenVibe.Chat: Vibe, OpenVibe\'s free assistant, global chat for the whole OpenVibe network, the chat of every stream on OpenVibe.Live, servers with text and voice channels, rooms, direct messages, calls and AI members.',
             details: 'One OpenVibe account works here and on every other OpenVibe site. Anyone can read the global chat and the public rooms without an account; posting needs a signed-in person. The global chat and the public room pages are readable as plain HTML without JavaScript and update live over the site\'s own WebSocket. Direct messages, room settings and the API are per-person and are never listed here.',
             sections: [
                 { title: 'Start here', links: [
-                    { title: 'Vibe', url: abs('/vibe'), html: true, note: 'OpenVibe\'s assistant: searches the web and OpenVibe, reads pages and pictures, remembers what it is asked to, sets up recurring work; chats are private to the signed-in person' },
+                    { title: 'Vibe', url: abs('/vibe'), note: 'OpenVibe\'s assistant: searches the web and OpenVibe, reads pages and pictures, remembers what it is asked to, sets up recurring work; chats are private to the signed-in person' },
                     { title: 'Global chat', url: abs('/'), note: 'one room for everyone on OpenVibe, newest messages at the end' },
                     { title: 'Rooms', url: abs('/rooms'), note: 'every public room, with its topic and activity' },
                     { title: 'Servers', url: abs('/servers'), note: 'public servers: groups with text and voice channels, roles and invites' },
                 ] },
                 { title: 'Build with it', links: [
-                    { title: 'Developers', url: abs('/developers'), html: true, note: 'a support inbox or a room on any website with one tag, the visitor API, openvibe-sdk/chat, feeds from Claude Code, signed webhooks, the limits' },
+                    { title: 'Developers', url: abs('/developers'), note: 'a support inbox or a room on any website with one tag, the visitor API, openvibe-sdk/chat, feeds from Claude Code, signed webhooks, the limits' },
                 ] },
             ],
             optional: [
-                { title: 'What shipped on OpenVibe.Chat', url: abs('/updates'), html: true },
+                { title: 'What shipped on OpenVibe.Chat', url: abs('/updates') },
                 { title: 'Sitemap', url: abs('/sitemap.xml'), note: 'the public pages above' },
                 { title: 'robots.txt', url: abs('/robots.txt') },
                 { title: 'Full text for language models', url: abs('/llms-full.txt') },

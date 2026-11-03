@@ -3,7 +3,9 @@
 // page's own route in this router, anonymously and in-process, so a twin cannot drift from its page and a
 // signed-in view is never used. Only pages whose rendered robots tag starts with "index" get a twin: private
 // servers and rooms, /messages, /settings and the SEO-7 gated pages stay noindex and have none.
-const PUBLIC_PATH_RE = /^\/(?:$|servers$|rooms$|s\/[a-z0-9-]+(?:\/[a-z0-9-]+)?$|r\/[a-z0-9-]+$)/i;
+// /vibe, /developers and /updates are public pages too: each named a twin in its head and Link header that answered
+// 404 (11-03, tools/llms-twins-probe.js).
+const PUBLIC_PATH_RE = /^\/(?:$|servers$|rooms$|vibe$|developers$|updates$|s\/[a-z0-9-]+(?:\/[a-z0-9-]+)?$|r\/[a-z0-9-]+$)/i;
 
 /** An anonymous GET request for one path, as the router's handlers expect it. */
 function anonymousRequest(path, query = '') {
