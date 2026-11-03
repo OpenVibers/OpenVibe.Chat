@@ -10,6 +10,7 @@ module.exports = {
     site: 'openvibe.chat',
     api: '/api',
     docs: '/developers',
+    openapi: '/openapi.json',
     policy: {
         auth: ['none', 'Network OIDC'],
         rateLimit: '900 GET/HEAD API requests a minute per address, 180 writes; web forms are limited to 30 a minute',
