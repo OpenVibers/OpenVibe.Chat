@@ -221,16 +221,18 @@ async function timeline(req) {
     if (q.bucket_ms < 1000 || (until - q.since) / q.bucket_ms > MAX_BUCKETS) bad('Invalid bucket_ms');
     const col = q.channel_user_id != null ? 'channel_user_id' : 'stream_id';
     // Buckets start at since: bucket n covers [since + n·bucket_ms, since + (n+1)·bucket_ms).
+    // people: the different chatters in the bucket (CHATTER: a user, an anonymous viewer or a relayed name, once each).
+    // Live's VOD clip cutter reads 12+ messages from 3+ people as a reacted room (item 151, C08).
     const rows = await db.all(
-        `SELECT n, COUNT(*) AS count, MAX(id) AS max_id FROM (
-            SELECT id, floor((extract(epoch FROM ov_ts(timestamp)) * 1000 - ?) / ?)::bigint AS n
+        `SELECT n, COUNT(*) AS count, COUNT(DISTINCT chatter) AS people, MAX(id) AS max_id FROM (
+            SELECT id, ${CHATTER} AS chatter, floor((extract(epoch FROM ov_ts(timestamp)) * 1000 - ?) / ?)::bigint AS n
             FROM chat_messages
             WHERE ${col} = ? AND is_deleted = 0 AND timestamp >= ? AND timestamp < ?
               AND COALESCE(source_platform, '') <> 'ai') m
          WHERE n IS NOT NULL AND n >= 0 GROUP BY n ORDER BY n`,
         [q.since, q.bucket_ms, q[col], sqlTime(q.since), sqlTime(until)]);
     return {
-        buckets: rows.map((r) => ({ t: q.since + Number(r.n) * q.bucket_ms, count: Number(r.count) })),
+        buckets: rows.map((r) => ({ t: q.since + Number(r.n) * q.bucket_ms, count: Number(r.count), ...(Number(r.people) > 0 ? { people: Number(r.people) } : {}) })),
         max_id: rows.length ? Math.max(...rows.map((r) => Number(r.max_id))) : null,
     };
 }

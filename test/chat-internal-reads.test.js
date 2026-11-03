@@ -191,11 +191,13 @@ t('N2b dm block state: whether either user blocked the other', async () => {
 
 t('N3 timeline: buckets from since, oldest first, empty ones left out', async () => {
     const tl = (q, status) => read(`/timeline?${q}`, 'chat.analysis.read', 'chat.timeline-result@1', status);
+    // people: the different chatters (C08). The first minute is one viewer twice; the third is an anonymous viewer, a
+    // relayed Twitch name and the viewer again, and the system line is nobody.
     assert.deepStrictEqual(await tl(`stream_id=${streamId}&since=${T}&until=${T + 600e3}&bucket_ms=60000`), {
-        ok: true, buckets: [{ t: T, count: 2 }, { t: T + 60e3, count: 2 }, { t: T + 120e3, count: 4 }], max_id: ids.sys,
+        ok: true, buckets: [{ t: T, count: 2, people: 1 }, { t: T + 60e3, count: 2, people: 2 }, { t: T + 120e3, count: 4, people: 3 }], max_id: ids.sys,
     });
     assert.deepStrictEqual(await tl(`channel_user_id=${streamer.id}&since=${T + 30e3}&until=${T + 90e3}&bucket_ms=30000`), {
-        ok: true, buckets: [{ t: T + 30e3, count: 1 }, { t: T + 60e3, count: 2 }], max_id: ids.v3,
+        ok: true, buckets: [{ t: T + 30e3, count: 1, people: 1 }, { t: T + 60e3, count: 2, people: 2 }], max_id: ids.v3,
     });
     assert.deepStrictEqual(await tl(`stream_id=${streamId}&since=${T + 900e3}&until=${T + 960e3}&bucket_ms=60000`), { ok: true, buckets: [], max_id: null });
     for (const q of [`since=${T}&bucket_ms=60000`, `stream_id=${streamId}&channel_user_id=${streamer.id}&since=${T}&bucket_ms=60000`,
