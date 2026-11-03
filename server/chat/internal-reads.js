@@ -210,6 +210,8 @@ async function dmBlockState(req) {
 }
 
 // ── N3: timeline ──
+// People's chat only: Live's AI viewers (source_platform 'ai') are left out, so their chatter never makes a "spike" the
+// AI then clips (item 151, C07: AI clips are excluded from human signals).
 async function timeline(req) {
     const q = query(req, { channel_user_id: 'id', stream_id: 'id', since: 'ms', until: 'ms', bucket_ms: 'id' });
     if ((q.channel_user_id == null) === (q.stream_id == null)) bad('Give channel_user_id or stream_id');
@@ -223,7 +225,8 @@ async function timeline(req) {
         `SELECT n, COUNT(*) AS count, MAX(id) AS max_id FROM (
             SELECT id, floor((extract(epoch FROM ov_ts(timestamp)) * 1000 - ?) / ?)::bigint AS n
             FROM chat_messages
-            WHERE ${col} = ? AND is_deleted = 0 AND timestamp >= ? AND timestamp < ?) m
+            WHERE ${col} = ? AND is_deleted = 0 AND timestamp >= ? AND timestamp < ?
+              AND COALESCE(source_platform, '') <> 'ai') m
          WHERE n IS NOT NULL AND n >= 0 GROUP BY n ORDER BY n`,
         [q.since, q.bucket_ms, q[col], sqlTime(q.since), sqlTime(until)]);
     return {

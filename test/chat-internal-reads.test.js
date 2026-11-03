@@ -204,6 +204,16 @@ t('N3 timeline: buckets from since, oldest first, empty ones left out', async ()
         check('chat.timeline-result@1', await tl(q, 400));
 });
 
+t('N3 timeline: Live\'s AI viewers (source_platform ai) are not chat activity', async () => {
+    const tl = (q) => read(`/timeline?${q}`, 'chat.analysis.read', 'chat.timeline-result@1');
+    const before = await tl(`stream_id=${streamId}&since=${T}&until=${T + 600e3}&bucket_ms=60000`);
+    await line('ai1', { ms: T + 70e3, username: 'Sora (AI)', platform: 'ai' });
+    await line('ai2', { ms: T + 75e3, username: 'Kai (AI)', platform: 'ai' });
+    const after = await tl(`stream_id=${streamId}&since=${T}&until=${T + 600e3}&bucket_ms=60000`);
+    assert.deepStrictEqual(after.buckets, before.buckets, 'the AI\'s chatter makes no spike');
+    await h.db.run('DELETE FROM chat_messages WHERE id = ANY(?::bigint[])', [[ids.ai1, ids.ai2]]);
+});
+
 t('N1c first chat: whether this identity has ever chatted in the channel', async () => {
     await h.db.run(`INSERT INTO stream_first_chats (chatter_key, channel_user_id) VALUES ('user:123', ?), ('anon:anonX', ?), ('ext:[Twitch] foo', ?)`,
         [streamer.id, streamer.id, streamer.id]);
