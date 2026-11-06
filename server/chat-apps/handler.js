@@ -28,7 +28,19 @@ function createHandler({ config, store, providers, network, actor, now = () => D
             return linkCommand({ message: { ...m, userId: ident }, provider: p, store, network, config });
         }
         const subject = await resolve({ app: m.app, serviceUserId: ident });
-        if (!subject) return send(m, 'Link your account first: send /link in a direct message.');
+        if (!subject) {
+            // The confirm page sends the person back here with a 6-digit code. Only the chat
+            // account that started /link can finish it (Network checks the identity), and only in
+            // a direct message: a code in a group would be read by everyone there.
+            const code = privateChat ? (/^\d{6}$/.test(String(m.command ? m.args : m.text || '').trim()) ? String(m.command ? m.args : m.text).trim() : null) : null;
+            if (code) {
+                const out = await network.finish({ app: m.app, serviceUserId: ident, code }).catch(() => null);
+                if (out?.ok) return send(m, 'You are linked. Ask me anything — I am your OpenVibe agent here.');
+                if (out?.error === 'code') return send(m, out.attemptsLeft ? `That code is not right. ${out.attemptsLeft} ${out.attemptsLeft === 1 ? 'try' : 'tries'} left; after that, send /link again.` : 'That code is not right. Send /link to start again.');
+                if (out?.error === 'expired') return send(m, 'That code expired. Send /link to start again.');
+            }
+            return send(m, 'Link your account first: send /link in a direct message.');
+        }
         if (m.command === 'unlink') return unlinkCommand({ message: { ...m, userId: ident }, subject, provider: p, network, forget: resolve.forget });
         if (m.command === 'settings') {
             if (privateChat || !await p.isAdmin({ message: m })) return send(m, 'Only a group or workspace administrator can change these settings.');

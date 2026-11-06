@@ -70,12 +70,16 @@ nginx serves `openvibe.chat` through `location /` to Chat, so no new location is
 
 ## How it behaves
 
-- **Linking.** `/link` in a direct message answers a one-time URL. The person opens it signed in
-  to Network, sees which app and name is being linked, and confirms; Network writes the account
-  link and Chat writes its own used token. `/unlink` removes it. Until then only `/link` and
-  `/help` answer. A link is used once, expires in ten minutes, and the token is stored only as a
-  SHA-256 hash. A second person confirming the same chat account is refused; so is replacing a
-  different linked account with the same service.
+- **Linking is two-way.** `/link` in a direct message answers a one-time URL. The person opens it
+  signed in to Network, sees that this chat account will talk to their agent and approve its
+  steps, and confirms. The page then shows a **6-digit code** (10 minutes, kept only as a hash):
+  the person sends that code to the bot **from the same chat** to finish. Only then is the account
+  link written; a confirm URL forwarded to somebody else links nothing, because only the chat
+  account that started `/link` can finish it. Three wrong codes cancel it and the code expires.
+  The code is accepted only in a direct message (never in a group) and only from an unlinked
+  account. `/unlink` removes the link. Until linking finishes only `/link` and `/help` answer.
+  A link is used once; the token is stored only as a SHA-256 hash. A second person confirming the
+  same chat account is refused; so is replacing a different linked account with the same service.
 - **A message.** Group answers only when the bot is mentioned or the message replies to it.
   A direct message is a private policy: the agent may use the person's tools and memory. A group
   is `answer_only` (public tools, no acting) or `act_with_approvals`; a group never gets the
@@ -113,7 +117,9 @@ nginx serves `openvibe.chat` through `location /` to Chat, so no new location is
 - A provider access token, an interaction token and the raw event are not stored: a delivery keeps
   only what the answer needs.
 - The link POST on Network checks same-origin, the person must be signed in, and the confirm page
-  shows the app and the chat name before asking.
+  shows the app and the chat name before asking. Confirming only mints a code; the link exists
+  only after the same chat account sends that code to the bot. A forwarded confirm URL therefore
+  cannot attach somebody else's agent to the sender's chat.
 - Account deletion removes the person's link tokens, approval buttons and queued deliveries; the
   export includes their chat-app links and approvals.
 
@@ -121,6 +127,9 @@ nginx serves `openvibe.chat` through `location /` to Chat, so no new location is
 
 `node test/run.js chat-apps` covers the three signed payloads across the real HTTP boundary
 (401 without the signature, 503 when an app is off, one delivery stored per event id), linking,
-an unlinked sender refused, a wrong person's button refused, two presses deciding once, an
-expired button, group mention rules, group admin settings, the moderation refusal, the rates and
-the provider calls. `node test/run.js account-data` covers export and deletion.
+the 6-digit code finishing from the starter's chat (and a wrong chat account and a wrong code
+refused), an unlinked sender refused, a wrong person's button refused, two presses deciding once,
+an expired button, group mention rules, group admin settings, the moderation refusal, the rates
+and the provider calls. Network's `node test/run.js chat-app-links` covers the code's hash at
+rest, its 10-minute expiry, three wrong codes cancelling the link, and the real service-token
+gate. `node test/run.js account-data` covers export and deletion.

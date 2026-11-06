@@ -17,21 +17,42 @@ const { signButton } = require('openvibe-sdk/chat-apps');
         slack: { botToken: 'fixture', signingSecret: 'fixture-slack', teamId: 'T123' } } };
     const store = createStore({ db });
     const sent = [], starts = [], decisions = [], links = [];
-    let linked = false, admin = false;
+    let linked = false, admin = false, pendingCode = null, pendingUser = null;
     const subject = 'usr_01J8Z3Q4R5S6T7V8W9X0Y1Z2T1';
     const providers = Object.fromEntries(['telegram','discord','slack'].map(app => [app, { on: true, botUserId: '999', botUsername: 'our_bot', sendText: async b => sent.push(b), sendButtons: async b => sent.push(b), isAdmin: async () => admin }]));
-    const network = { resolve: async () => linked ? subject : null, registerPending: async b => { links.push(b); return true; }, unlink: async () => { linked = false; return true; } };
+    const network = {
+        resolve: async () => linked ? subject : null,
+        registerPending: async b => { links.push(b); return true; },
+        // Network only finishes a link for the chat account that started it and only with its code.
+        finish: async ({ serviceUserId, code }) => {
+            if (serviceUserId !== pendingUser) return { ok: false, error: 'no_link' };
+            if (code !== pendingCode) return { ok: false, error: 'code', attemptsLeft: 2 };
+            linked = true; pendingCode = null;
+            return { ok: true, subject };
+        },
+        unlink: async () => { linked = false; return true; },
+    };
     const actor = { start: async b => { starts.push(b); return { id: 'task1' }; }, task: async () => ({ state: 'succeeded', result: { answer: 'The answer.', artifacts: [{ name: 'Report', url: 'https://openvibe.actor/file/1' }] } }), approvals: async () => [], decide: async b => { decisions.push(b); return {}; } };
     const handler = createHandler({ config: cfg, store, providers, network, actor });
     for (const app of ['telegram','discord','slack']) {
         const fixture = require(`./fixtures/chat-apps/${app}.json`);
         const m = parse(app, fixture, providers[app], cfg.chatApps);
         assert.ok(m); assert.equal(m.chatType, 'private');
-        linked = false;
+        linked = false; pendingCode = null; pendingUser = null;
         await handler.handle(m, `${app}-unlinked`); assert.equal(starts.length, 0);
         await handler.handle({ ...m, command: 'link', kind: 'command' }, `${app}-link`);
-        assert.ok(links.at(-1).token.length === 43);
-        linked = true;
+        assert.ok(links.at(-1).token.length === 43, 'a one-time link was registered');
+        assert.equal(links.at(-1).botUsername, 'our_bot');
+        pendingCode = '123456'; pendingUser = identity(m);
+        // Another chat account sending the code finishes nothing.
+        await handler.handle({ ...m, userId: 'stranger', text: '123456', command: null, kind: 'message' }, `${app}-code-wrong-person`);
+        assert.equal(linked, false);
+        // A wrong code does not link.
+        await handler.handle({ ...m, text: '000000', command: null, kind: 'message' }, `${app}-code-wrong`);
+        assert.equal(linked, false); assert.match(sent.at(-1).text, /not right/);
+        // The chat account that started /link finishes with the code.
+        await handler.handle({ ...m, text: '123456', command: null, kind: 'message' }, `${app}-code`);
+        assert.equal(linked, true); assert.match(sent.at(-1).text, /You are linked/);
         await handler.handle(m, `${app}-ask`); assert.equal(starts.at(-1).policy, 'dm');
         assert.match(sent.at(-1).text, /Report: https/);
         starts.length = 0;

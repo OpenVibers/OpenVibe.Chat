@@ -39,7 +39,7 @@ async function linkCommand({ message, provider, store, network, config, log = co
     try {
         const registered = await network.registerPending({
             token, app: message.app, serviceUserId: message.userId,
-            serviceUsername: message.userName, expiresAt,
+            serviceUsername: message.userName, botUsername: provider.botUsername, expiresAt,
         });
         if (!registered) throw new Error('Link registration failed');
     } catch (err) {
@@ -48,7 +48,7 @@ async function linkCommand({ message, provider, store, network, config, log = co
     const url = `${config.chatApps.linkUrl}?t=${encodeURIComponent(token)}`;
     await provider.sendText({
         chatId: message.chatId,
-        text: `Link your ${message.app} account to OpenVibe: open this link while you are signed in to openvibe.network and confirm it.\n\n${url}\n\nThe link is good for ${Math.round(config.chatApps.linkTtlMs / 60000)} minutes and works once.`,
+        text: `Link your ${message.app} account to OpenVibe: open this link while you are signed in to openvibe.network and confirm it. The page shows a 6-digit code — send that code to me here, from this chat, to finish.\n\n${url}\n\nThe link is good for ${Math.round(config.chatApps.linkTtlMs / 60000)} minutes and works once.`,
     });
 
     return { token, url };

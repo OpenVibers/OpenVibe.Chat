@@ -53,12 +53,12 @@ function createNetworkClient({ http = null } = {}) {
 
     return {
         /** Register the one-time link token with the Network (its page asks the person). */
-        async registerPending({ token, app, serviceUserId, serviceUsername, expiresAt }) {
+        async registerPending({ token, app, serviceUserId, serviceUsername, botUsername, expiresAt }) {
             const out = await call({
                 method: 'POST', path: '/internal/chat-app-links', idempotent: true,
                 json: {
                     token, app, service_user_id: serviceUserId, service_username: serviceUsername || null,
-                    expires_at: new Date(expiresAt).toISOString(),
+                    bot_handle: botUsername || null, expires_at: new Date(expiresAt).toISOString(),
                 },
             });
             return !!(out && out.ok !== false);
@@ -69,6 +69,23 @@ function createNetworkClient({ http = null } = {}) {
             const out = await call({ method: 'GET', path: '/internal/chat-app-links', query: { t: token } });
             if (!out) return { state: 'unknown' };
             return { state: out.state || 'pending', subject: out.subject || null, app: out.app || null, service_username: out.service_username || null };
+        },
+
+        /**
+         * Finish a link: the chat account that started /link sends the 6-digit code from the
+         * confirm page. Network checks the code (three wrong codes cancel it) and only then
+         * writes the account link; a person who is already linked here never needs this.
+         */
+        async finish({ app, serviceUserId, code }) {
+            try {
+                const out = await call({
+                    method: 'POST', path: '/internal/chat-app-links/finish', idempotent: false,
+                    json: { app, service_user_id: serviceUserId, code },
+                });
+                return out && typeof out === 'object' ? out : { ok: false, error: 'unavailable' };
+            } catch (err) {
+                return { ok: false, error: err && err.status === 409 ? 'conflict' : 'unavailable' };
+            }
         },
 
         /** The OpenVibe subject of a person in a chat app, or null when they are not linked. */

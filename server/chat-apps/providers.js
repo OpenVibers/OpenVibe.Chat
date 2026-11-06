@@ -21,7 +21,7 @@ function createProviders({ config, fetchImpl = globalThis.fetch }) {
             app,
             get on() { return Boolean(cfg.callbackSecret && c.botToken && (app === 'telegram' ? c.secretToken : app === 'discord' ? c.publicKey && c.applicationId : c.signingSecret && c.teamId)); },
             get botUserId() { return known[app]?.id || known[app]?.user_id || null; },
-            get botUsername() { return c.username || known[app]?.username || null; },
+            get botUsername() { return c.username || known[app]?.username || known[app]?.user || null; },
             async whoami() {
                 if (!this.on) return;
                 known[app] = await api(app, app === 'telegram' ? 'getMe' : app === 'discord' ? 'users/@me' : 'auth.test', {}, app === 'discord' ? 'GET' : 'POST');
