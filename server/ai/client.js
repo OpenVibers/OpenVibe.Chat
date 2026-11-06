@@ -13,6 +13,11 @@ const config = require('../config');
 let _ai = null;
 let _http = null;
 let _tokens = null;
+// Why the last run answered nothing, when the caller can show it: `ai.resting` today. Cleared by a run that
+// succeeds. A product asks lastProblem() instead of turning "no answer" into an error.
+let _lastProblem = null;
+const problemOf = (run) => (run && run.error && run.error.code === 'ai.resting' ? 'ai.resting' : null);
+function lastProblem() { return _lastProblem; }
 
 /** The HTTP client behind ai() (Chat's token for openvibe.ai), for calls the SDK's AI client has no method for. */
 function http() { ai(); return _http; }
@@ -48,6 +53,7 @@ function enabled() {
  */
 async function structured(workflow, input, opts = {}) {
     if (!(opts.force ? config.oauth.clientSecret : enabled())) return null;
+    _lastProblem = null;
     try {
         const { runs } = ai();
         // A person's own provider key (ai.run-request `credential`): the SDK's runs.create does not carry it, so such a
@@ -65,6 +71,7 @@ async function structured(workflow, input, opts = {}) {
                 ...(opts.attribution !== undefined ? { attribution: opts.attribution } : {}),
             });
         const run = body && (body.run || body);
+        _lastProblem = problemOf(run);
         if (!run || run.status !== 'succeeded' || run.synthetic) return null;
         return run.output || null;
     } catch (err) {
@@ -82,6 +89,7 @@ async function structured(workflow, input, opts = {}) {
 async function stream(workflow, input, opts = {}, onText = () => {}) {
     if (!(opts.force ? config.oauth.clientSecret : enabled())) return null;
     if (_ai && !_tokens) return structured(workflow, input, opts);
+    _lastProblem = null;
     try {
         if (!_tokens) ai();
         const token = await _tokens.getToken();
@@ -92,7 +100,14 @@ async function stream(workflow, input, opts = {}, onText = () => {}) {
             body: JSON.stringify({ workflow, input, ...(opts.credential ? { credential: opts.credential } : {}), ...(opts.attribution !== undefined ? { attribution: opts.attribution } : {}) }),
             signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout,
         });
-        if (!res.ok) { console.warn(`[AI] ${workflow}: AI answered ${res.status}`); return null; }
+        if (!res.ok) {
+            if (res.status === 503) {
+                const problem = await res.json().catch(() => null);
+                _lastProblem = problem && problem.code === 'ai.resting' ? 'ai.resting' : null;
+            }
+            console.warn(`[AI] ${workflow}: AI answered ${res.status}`);
+            return null;
+        }
         // Stopped by the person (opts.signal): the run is cancelled at AI, so it spends nothing more.
         const runId = res.headers.get('x-openvibe-run-id');
         if (opts.signal && runId) opts.signal.addEventListener('abort', () => { try { const { runs } = ai(); if (runs && runs.cancel) runs.cancel(runId).catch(() => {}); } catch { /* AI away */ } }, { once: true });
@@ -120,6 +135,7 @@ async function stream(workflow, input, opts = {}, onText = () => {}) {
                 }
             }
         }
+        _lastProblem = problemOf(run);
         if (!run || run.status !== 'succeeded' || run.synthetic) return null;
         return run.output || null;
     } catch (err) {
@@ -128,4 +144,5 @@ async function stream(workflow, input, opts = {}, onText = () => {}) {
     }
 }
 
-module.exports = { structured, stream, enabled, http, _setClient(c) { _ai = c; }, _setHttp(h) { _http = h; }, _setTokens(t) { _tokens = t; }, _reset() { _ai = null; _http = null; _tokens = null; } };
+module.exports = { structured, stream, enabled, http, lastProblem, _setClient(c) { _ai = c; }, _setHttp(h) { _http = h; }, _setTokens(t) { _tokens = t; },
+    _setProblem(p) { _lastProblem = p; }, _reset() { _ai = null; _http = null; _tokens = null; _lastProblem = null; } };
