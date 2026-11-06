@@ -38,6 +38,7 @@ function createHandler({ config, store, providers, network, actor, now = () => D
                 if (out?.ok) return send(m, 'You are linked. Ask me anything — I am your OpenVibe agent here.');
                 if (out?.error === 'code') return send(m, out.attemptsLeft ? `That code is not right. ${out.attemptsLeft} ${out.attemptsLeft === 1 ? 'try' : 'tries'} left; after that, send /link again.` : 'That code is not right. Send /link to start again.');
                 if (out?.error === 'expired') return send(m, 'That code expired. Send /link to start again.');
+                if (out?.error === 'conflict') return send(m, 'This chat account is already linked to another OpenVibe account, or that account already has a chat account of this service.');
             }
             return send(m, 'Link your account first: send /link in a direct message.');
         }
