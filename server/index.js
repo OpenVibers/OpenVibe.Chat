@@ -57,6 +57,7 @@ async function start() {
     const relay = serviceOutbox.configure({ config });
     const events = createEventsConsumer({ chatServer, secrets: config.events.secrets });
     const { app, handleUpgrade } = createApp({ chatServer, relay, events, callServer });
+    void app.locals.chatApps.start();
     server.on('request', app);
     server.on('upgrade', (req, socket, head) => { handleUpgrade(req, socket, head).catch(() => { try { socket.destroy(); } catch { /* */ } }); });
     relay.start();
@@ -105,6 +106,7 @@ async function start() {
             () => require('./rooms/workspace').stop(),
             () => subs.stop(),
             () => { if (valkey) return valkey.close(); },
+            () => app.locals.chatApps.stop(),
             () => chatServer.close(),
             () => callServer.close(),
         ],
