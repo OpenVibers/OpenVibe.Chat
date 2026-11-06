@@ -189,6 +189,15 @@ t('sign-in, the Frame, robots, sitemap and /updates', async () => {
     assert.strictEqual(r.status, 302);
     const u = new URL(r.headers.get('location'));
     assert.deepStrictEqual([u.pathname, u.searchParams.get('client_id'), u.searchParams.get('redirect_uri')], ['/oauth/authorize', 'chat', `${SITE}/auth/callback`]);
+    assert.strictEqual(u.searchParams.get('code_challenge_method'), 'S256');
+    assert.match(u.searchParams.get('code_challenge'), /^[A-Za-z0-9_-]{43}$/, 'PKCE S256 from openvibe-sdk/sso');
+    assert.match(r.headers.getSetCookie().join('; '), /ov_oauth_verifier=[^;]+; .*Path=\/auth/i, 'the verifier stays in its own flow cookie');
+    // GET /auth/health: no refusal from the Network here, so not a 503.
+    const health = await req('GET', '/auth/health');
+    assert.strictEqual(health.status, 200);
+    const reported = JSON.parse(health.text);
+    assert.strictEqual(reported.ok, true);
+    assert.ok(['ok', 'unknown'].includes(reported.client), reported.client);
     assert.strictEqual((await req('GET', '/shared/navbar.js')).status, 200);
     assert.strictEqual((await req('GET', '/web/chat.css')).status, 200);
     assert.match((await req('GET', '/robots.txt')).text, /Disallow: \/messages/);
