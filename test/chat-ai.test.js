@@ -83,6 +83,15 @@ t('falls back to the extractive summary when AI does not answer', async () => {
     aiClient._setClient(null);
 });
 
+t('a failed run remembers ai.resting for the caller to show; a success clears it', async () => {
+    aiClient._setClient({ runs: { create: async () => ({ run: { status: 'failed', error: { code: 'ai.resting', detail: 'AI is resting for a moment' } } }) } });
+    assert.strictEqual(await aiClient.structured('chat.insight', {}), null);
+    assert.strictEqual(aiClient.lastProblem(), 'ai.resting');
+    aiClient._setClient({ runs: { create: async () => ({ run: { status: 'succeeded', output: { ok: 1 } } }) } });
+    assert.deepStrictEqual(await aiClient.structured('chat.insight', {}), { ok: 1 });
+    assert.strictEqual(aiClient.lastProblem(), null);
+});
+
 t('the job is off unless CHAT_AI_ENABLED is set', async () => {
     const cfg = require('../server/config');
     assert.strictEqual(cfg.ai.enabled, true, 'this boot enabled it');

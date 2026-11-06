@@ -112,6 +112,15 @@ t('the switch: CHAT_AI_MEMBERS=0 keeps every AI member quiet', async () => {
     } finally { config.ai.members = true; }
 });
 
+t('AI is resting: the member says so in AI\'s own words instead of a generic failure', async () => {
+    aiClient._setClient({ runs: { create: async () => ({ run: { status: 'failed', error: { code: 'ai.resting', detail: 'AI is resting for a moment' } } }) } });
+    await api('POST', '/our-kitchen/messages', ann, { message: '@pantry one more question?' });
+    await settle(300);
+    const last = (await api('GET', '/our-kitchen/messages', ann)).body.messages.pop();
+    assert.match(last.message, /AI is resting for a moment/, last.message);
+    assert.ok(!/could not answer just now/.test(last.message), last.message);
+});
+
 t('the pages: AI messages are badged and not profile links; settings add and remove AI members', async () => {
     const page = await web('GET', '/r/our-kitchen', ann);
     assert.strictEqual(page.status, 200);
