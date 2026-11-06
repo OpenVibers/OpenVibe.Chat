@@ -518,8 +518,34 @@ function replaceUrlsForTTS(text, username) {
     );
 }
 
+/**
+ * Emotes are read by their name only (the owner, 2026-11-06): Kick's [emote:123456:Name] and [emoji:Name], Discord's
+ * <:name:123> and <a:name:123>, and :shortcode: all become "Name" (underscores read as spaces), and the same word said
+ * three or more times in a row (emote spam) is read once. Runs before the <> strip, which would otherwise leave
+ * Discord's ":name:123" to be read out.
+ */
+function speakableEmotes(text) {
+    const name = (n) => ' ' + String(n).replace(/_+/g, ' ').trim() + ' ';
+    let t = String(text == null ? '' : text)
+        .replace(/\[(?:emote|emoji):(?:\d+:)?([A-Za-z0-9_]{1,64})\]/g, (_m, n) => name(n))
+        .replace(/<a?:([A-Za-z0-9_]{1,64}):\d+>/g, (_m, n) => name(n))
+        .replace(/(^|\s):([A-Za-z0-9_+-]{2,32}):(?=\s|$)/g, (_m, pre, n) => pre + name(n));
+    // Runs of the same word: one or two stay as they are ("no no"); three or more are read once.
+    const words = t.split(/\s+/).filter(Boolean);
+    const out = [];
+    for (let i = 0; i < words.length;) {
+        let j = i;
+        while (j + 1 < words.length && words[j + 1].toLowerCase() === words[i].toLowerCase()) j++;
+        const run = j - i + 1;
+        out.push(words[i]);
+        if (run === 2) out.push(words[i + 1]);
+        i = j + 1;
+    }
+    return out.join(' ');
+}
+
 function sanitize(text, maxLen, username) {
-    let clean = String(text || '').replace(/[<>]/g, '').replace(/[\x00-\x1f]/g, ' ').trim();
+    let clean = speakableEmotes(text).replace(/[<>]/g, '').replace(/[\x00-\x1f]/g, ' ').trim();
     clean = replaceUrlsForTTS(clean, username);
     if (maxLen && clean.length > maxLen) clean = clean.slice(0, maxLen);
     return clean;
@@ -690,6 +716,7 @@ module.exports = {
     PER_USER_BASE_VOICES,
     VOICE_BOUNDS,
     sanitize,
+    speakableEmotes,
     getTTSSettings,
     invalidateSettingsCache,
     getQueueLimits,
