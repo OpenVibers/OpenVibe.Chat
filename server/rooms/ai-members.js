@@ -480,7 +480,12 @@ async function afterPost(room, message, user, deps = {}) {
         // A model on someone's own computer (credential provider node): its label reads "<model> on Fran's computer(s)".
         const onComputer = own && /'s computers?$/.test(String(member.engine_label || ''));
         if (!text) {
-            if (!own) return await say('I could not answer just now. Try again in a minute.');
+            if (!own) {
+                // AI is resting (503 ai.resting: every provider is out of balance, paused or busy): say its sentence
+                // instead of a generic failure, so the person knows to try again in a minute rather than debug.
+                const resting = typeof aiClient.lastProblem === 'function' && aiClient.lastProblem() === 'ai.resting';
+                return await say(resting ? 'AI is resting for a moment. Try again in a minute.' : 'I could not answer just now. Try again in a minute.');
+            }
             if (onComputer) return await say(vibe
                 ? 'I could not reach the model on your computer just now. Is it on, with its model server running (Ollama, LM Studio or llama.cpp), and "Let my AI use this computer\'s models" on at openvibe.bot/machines? You can switch me back to OpenVibe\'s model in Settings, under "Your AI key".'
                 : 'I could not reach the model on my manager\'s computer just now. Try again later, or the room\'s owner can switch me to OpenVibe\'s model.');
