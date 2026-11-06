@@ -219,6 +219,43 @@ module.exports = {
         vibeRepliesPerDay: Math.max(1, int(process.env.CHAT_VIBE_REPLIES_PER_DAY, 100)),
     },
 
+    // The chat apps (Telegram, Discord, Slack): your OpenVibe agent in each of them (the agent plan of
+    // 2026-10-30, stage A4). Each app is OFF until its own token and its own secret are here: the owner's
+    // settings (the same way AI's provider keys and Watch's secrets are configured). An app without its
+    // token answers nothing and its webhook is never set.
+    chatApps: {
+        telegram: {
+            botToken: process.env.CHAT_TELEGRAM_BOT_TOKEN || '',
+            // The secret token setWebhook's secret_token made (Telegram sends it in
+            // X-Telegram-Bot-Api-Secret-Token; it is checked before a delivery is read).
+            secretToken: process.env.CHAT_TELEGRAM_SECRET_TOKEN || '',
+            username: process.env.CHAT_TELEGRAM_USERNAME || '',
+        },
+        discord: {
+            botToken: process.env.CHAT_DISCORD_BOT_TOKEN || '',
+            // The application's public key (64 hex characters), the one Discord signs its interactions with.
+            publicKey: process.env.CHAT_DISCORD_PUBLIC_KEY || '',
+            applicationId: process.env.CHAT_DISCORD_APPLICATION_ID || '',
+        },
+        slack: {
+            botToken: process.env.CHAT_SLACK_BOT_TOKEN || '',
+            teamId: process.env.CHAT_SLACK_TEAM_ID || '',
+            // The app's signing secret (Slack signs each delivery with it).
+            signingSecret: process.env.CHAT_SLACK_SIGNING_SECRET || '',
+        },
+        // The secret the buttons are signed with (the app's own, never the app's token).
+        callbackSecret: process.env.CHAT_APPS_CALLBACK_SECRET || '',
+        // Where a person confirms a link (the Network's page; the person is signed in there).
+        linkUrl: strip(process.env.CHAT_LINK_CONFIRM_URL || 'https://openvibe.network/chat-apps/link'),
+        // How long a link token and a button live.
+        linkTtlMs: Math.min(600_000, Math.max(60_000, int(process.env.CHAT_LINK_TTL_MS, 10 * 60 * 1000))),
+        callbackTtlMs: Math.max(60_000, int(process.env.CHAT_CALLBACK_TTL_MS, 30 * 60 * 1000)),
+        // A group's own rate: how many answers an hour its members get.
+        ratePerHour: Math.max(1, int(process.env.CHAT_APPS_RATE_PER_HOUR, 20)),
+        // A group's own rate: how many answers an hour one member gets.
+        perUserRatePerHour: Math.max(1, int(process.env.CHAT_APPS_PER_USER_RATE_PER_HOUR, 10)),
+    },
+
     // Channel sound clips live on disk. At cutover this is Live's sounds directory: stored rows
     // hold absolute paths into it, and Live's donation alerts read the alert sounds from there.
     sounds: {

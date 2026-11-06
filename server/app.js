@@ -84,6 +84,9 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
         }
         res.set('Cache-Control', 'public, max-age=3600').set('Access-Control-Allow-Origin', '*').json({ ...doc, paths });
     });
+    const chatApps = require('./chat-apps').createChatApps();
+    app.locals.chatApps = chatApps;
+    app.use('/hooks/chat-apps', chatApps.router);
     app.disable('x-powered-by');
     // Cloudflare → nginx → Node: TRUST_PROXY hops, but a hop past nginx only when it is a
     // Cloudflare address (DNS-only hosts reach nginx directly with a client-written X-Forwarded-For).

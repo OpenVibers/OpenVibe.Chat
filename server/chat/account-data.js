@@ -81,6 +81,10 @@ const EXPORTS = [
     // Feeds (server/feeds/feeds.js): the feeds, without their key's hash, and what was published to them.
     ['feeds.json', `SELECT id, kind, title, room_id, managed_stream_id, settings, key_hint, legacy_source, created_at, last_event_at FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['feed_events.json', `SELECT e.feed_id, e.session_key, e.event_id, e.type, e.summary, e.payload, e.created_at FROM feed_events e JOIN feeds f ON f.id = e.feed_id WHERE f.owner_subject = ANY(@s) OR f.owner_id = ANY(@ids) ORDER BY e.id DESC LIMIT ${LIMIT}`],
+    // Their chat-app accounts (migrations/0037_chat_apps.sql): the one-time links they made and the
+    // buttons their agent's approvals put in a chat. The group settings are the group's, not theirs.
+    ['chat_app_links.json', `SELECT app, service_user_id, service_username, state, created_at, expires_at, used_at FROM chat_app_link_tokens WHERE subject = ANY(@s) ORDER BY created_at DESC LIMIT ${LIMIT}`],
+    ['chat_app_approvals.json', `SELECT app, chat_id, action, approval_id, state, created_at, expires_at, used_at FROM chat_app_callbacks WHERE subject = ANY(@s) ORDER BY created_at DESC LIMIT ${LIMIT}`],
 ];
 
 async function exportPart(d, subject) {
@@ -153,6 +157,11 @@ const ERASE_AFTER_ROOMS = [
     [null, "UPDATE room_tasks SET runner = 'a former member' WHERE runner ~ '^user:[0-9]+$' AND substr(runner, 6)::bigint = ANY(@ids)"],
     // Their own AI key is gone with them (OpenVibe.AI erases it): members that thought with it go back to OpenVibe's model.
     [null, "UPDATE room_ai_members SET engine = 'openvibe', engine_subject = NULL, engine_label = NULL WHERE engine_subject = ANY(@s)"],
+    // Their chat-app deliveries, links and approval buttons go. A delivery's text is kept only until it
+    // is answered or pruned (24 h); these are the ones the linked account still had queued.
+    [null, "DELETE FROM chat_app_deliveries WHERE EXISTS (SELECT 1 FROM chat_app_link_tokens t WHERE t.subject = ANY(@s) AND t.app = chat_app_deliveries.app AND t.service_user_id = chat_app_deliveries.message->>'userId')"],
+    ['chat_app_links', 'DELETE FROM chat_app_link_tokens WHERE subject = ANY(@s)'],
+    ['chat_app_approvals', 'DELETE FROM chat_app_callbacks WHERE subject = ANY(@s)'],
 ];
 // Their channel (only when they have Live ids): emotes, sounds, moderators, stats, audio requests, the Live mirrors.
 const ERASE_CHANNEL = [

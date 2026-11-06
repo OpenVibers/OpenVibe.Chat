@@ -33,7 +33,7 @@ t('export, then erase and confirm', async () => {
     const d = require('../server/db/database').getDb();
     {
         const missing = await uncovered(d, {
-            taskKeyed: ['calls', 'channel_moderators', 'channel_sounds', 'chat_messages', 'chat_server_invites', 'chat_server_members',
+            taskKeyed: ['calls', 'channel_moderators', 'channel_sounds', 'chat_app_callbacks', 'chat_app_link_tokens', 'chat_messages', 'chat_server_invites', 'chat_server_members',
                 'ctx_channels', 'ctx_managed_streams', 'ctx_streams', 'dm_conversations', 'dm_participants', 'emotes', 'inbox_actions',
                 'inbox_members', 'inbox_saved_replies', 'inbox_webhooks', 'pending_ip_messages', 'room_hooks', 'room_members', 'room_messages',
                 'user_tags', 'vibe_asks', 'vibe_deliveries', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_usage'],
@@ -53,6 +53,11 @@ t('export, then erase and confirm', async () => {
     await d.prepare('INSERT INTO network_blocks (blocker_subject, blocked_subject, active, revision, updated_at) VALUES (?, ?, 1, 1, 0), (?, ?, 1, 1, 0)').run(dana.subject_id, otto.subject_id, otto.subject_id, dana.subject_id);
     await d.prepare("INSERT INTO moderation_actions (action_type, actor_user_id, target_user_id, actor_subject_id) VALUES ('timeout', ?, ?, ?)").run(otto.id, dana.id, otto.subject_id);
     await d.prepare("INSERT INTO user_tags (user_id, tag_id) VALUES (?, 'veteran')").run(dana.id);
+    // Chat-app rows (migrations/0037_chat_apps.sql): her linked chat account, a button and a queued delivery.
+    const future = new Date(Date.now() + 600000).toISOString();
+    await d.prepare("INSERT INTO chat_app_link_tokens (token_hash, app, service_user_id, service_username, state, subject, expires_at) VALUES ('h-dana', 'telegram', '123', 'dana_tg', 'used', ?, ?)").run(dana.subject_id, future);
+    await d.prepare("INSERT INTO chat_app_callbacks (id, app, chat_id, user_id, subject, action, approval_id, state, expires_at) VALUES ('cb-dana', 'telegram', '123', '123', ?, 'approve', 'apr1', 'used', ?)").run(dana.subject_id, future);
+    await d.prepare("INSERT INTO chat_app_deliveries (app, id, message, state) VALUES ('telegram', 'd-dana', ?::jsonb, 'done')").run(JSON.stringify({ app: 'telegram', userId: '123', text: 'her queued text' }));
 
     const sent = [];
     let failNext = false;
@@ -68,6 +73,8 @@ t('export, then erase and confirm', async () => {
     assert.deepStrictEqual(files['chat_messages.json'].map((m) => m.message), ['hi otto']);
     assert.deepStrictEqual(files['direct_messages.json'].map((m) => m.message), ['psst']);
     assert.ok(files['moderation_on_you.json'][0] && !('actor_user_id' in files['moderation_on_you.json'][0]), "moderation on them, without who acted");
+    assert.deepStrictEqual(files['chat_app_links.json'].map((l) => l.service_user_id), ['123'], 'her linked chat account');
+    assert.deepStrictEqual(files['chat_app_approvals.json'].map((c) => c.approval_id), ['apr1'], 'the button made for her');
     assert.strictEqual(await accountData.apply(exp, { send }), 'unchanged');
     assert.strictEqual(sent.length, 1);
 
@@ -82,6 +89,9 @@ t('export, then erase and confirm', async () => {
     assert.strictEqual((await q('SELECT * FROM network_blocks')).length, 0, 'blocks both ways');
     assert.strictEqual((await q('SELECT * FROM moderation_actions')).length, 1, 'moderation history stays');
     assert.strictEqual((await q('SELECT * FROM user_tags')).length, 0, 'the tags table is Chat’s and goes');
+    assert.strictEqual((await q('SELECT * FROM chat_app_link_tokens')).length, 0, 'her chat-app link goes');
+    assert.strictEqual((await q('SELECT * FROM chat_app_callbacks')).length, 0, 'her approval buttons go');
+    assert.strictEqual((await q('SELECT * FROM chat_app_deliveries')).length, 0, 'her queued chat text goes');
     assert.strictEqual((await d.prepare('SELECT username FROM ctx_users WHERE id = ?').get(dana.id)).username, `deleted-${dana.id}`);
     assert.strictEqual(await accountData.apply(del, { send }), 'confirmed', 'the retry confirms without erasing again');
     const conf = sent[1];

@@ -1,0 +1,1 @@
+{"type":"event_callback","team_id":"T123","event_id":"Ev123","event":{"type":"message","user":"U123","channel":"D123","channel_type":"im","text":"hello","ts":"1800000000.000001"}}
