@@ -307,6 +307,8 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     // Vibe from any OpenVibe site (the Dock, plan L48 V2): ask, and read the answer, with the person's own token.
     app.use('/api/vibe', require('./rooms/vibe-api'));
     app.use('/api/tts', require('./chat/tts-routes'));
+    // The desk asks Chat for the sound of a line the agent said (Agent Streams S4; capability chat.tts.speak).
+    app.use('/api/agent-voice', require('./chat/tts-machine'));
     app.use('/api/sounds', require('./chat/sounds-routes'));
     // Custom emotes (Live's /api/emotes paths, plan T3): bytes go to OpenVibe.Media, rows are Chat's.
     app.use('/api/emotes', require('./chat/emotes-routes'));
