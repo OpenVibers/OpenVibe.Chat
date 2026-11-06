@@ -59,8 +59,28 @@ async function guard(req, res, next) {
     next();
 }
 
+// Per person: the desk speaks at most one line every 20 s (Live paces it), so 6 a minute and 900 a day is room for a
+// curtain-free stream and a ceiling for a leaked token (TTS spends Chat's own budget).
+const PER_MINUTE = 6;
+const PER_DAY = 900;
+const spoken = new Map();   // person → { minute, minuteAt, day, dayAt }
+function allow(person, now = Date.now()) {
+    const e = spoken.get(person) || { minute: 0, minuteAt: now, day: 0, dayAt: now };
+    if (now - e.minuteAt >= 60_000) { e.minute = 0; e.minuteAt = now; }
+    if (now - e.dayAt >= 86_400_000) { e.day = 0; e.dayAt = now; }
+    if (e.minute >= PER_MINUTE || e.day >= PER_DAY) { spoken.set(person, e); return false; }
+    e.minute += 1; e.day += 1;
+    spoken.set(person, e);
+    if (spoken.size > 50_000) spoken.clear();
+    return true;
+}
+
 router.post('/speak', guard, async (req, res) => {
     try {
+        if (!allow(req.principal.person)) {
+            res.set('Retry-After', '20');
+            return res.status(429).json({ error: 'Too many lines spoken right now', code: 'voice_rate_limited' });
+        }
         const body = req.body || {};
         const text = String(body.text || '').trim().slice(0, MAX_CHARS);
         if (!text) return res.status(400).json({ error: 'text is required', code: 'text_required' });
@@ -80,3 +100,4 @@ router.post('/speak', guard, async (req, res) => {
 });
 
 module.exports = router;
+module.exports._allow = allow;
