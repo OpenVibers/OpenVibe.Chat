@@ -24,7 +24,8 @@ const MAX_CHARS = 220;
 
 const router = express.Router();
 router.use(express.json({ limit: '8kb' }));
-router.use(requireAuth);
+// The guard belongs to this route alone. The router is mounted under /api/tts, whose other routes (the voice
+// catalogue, the settings, the stashed clips) are public and must stay that way.
 
 /** The voice is for the person themself: an API token or a Dock token is refused. */
 const personOnly = (req, res, next) => (req.authSource === 'api_token' || req.authSource === 'dock'
@@ -38,7 +39,7 @@ function personOf(req) {
     return 'anonymous';
 }
 
-router.post('/speak', personOnly, async (req, res) => {
+router.post('/speak', requireAuth, personOnly, async (req, res) => {
     try {
         const person = personOf(req);
         if (!allow(person)) {
