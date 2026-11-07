@@ -37,6 +37,7 @@ const cache = require('openvibe-shared/cache-policy');
 const { requireAuth, optionalAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
+const parties = require('./parties');
 const ctx = require('../live-context');
 
 const router = express.Router();
@@ -56,7 +57,7 @@ const readLimit = limits('chat.room.read_mark', { minute: 60, hour: 1200 });
 const attachLimit = limits('chat.room.attach', { minute: 10, hour: 100 });
 
 function send(res, err) {
-    if (err instanceof rooms.RoomError) return res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof rooms.RoomError || err instanceof parties.PartyError) return res.status(err.status).json({ error: err.message, code: err.code });
     console.error('[Rooms]', err && err.message);
     return res.status(500).json({ error: 'Something went wrong' });
 }
@@ -114,6 +115,65 @@ router.get('/', optionalAuth, async (req, res) => {
 
 router.post('/', requireAuth, createLimit, async (req, res) => {
     try { res.status(201).json({ room: await rooms.create(req.user, req.body || {}) }); } catch (err) { send(res, err); }
+});
+
+
+// ── Watch parties (Agent Streams S7) ─────────────────────────
+// A party is a private Chat room of kind 'party' on a public agent stream or its VOD. Joining is by the link's
+// secret; the stream's page may count a listed party, and the count never carries a name.
+router.post('/parties', requireAuth, createLimit, async (req, res) => {
+    try {
+        const out = await parties.create(req.user, req.body || {});
+        res.status(201).json({ party: out.party, join_secret: out.join_secret });
+    } catch (err) { send(res, err); }
+});
+
+/** GET /parties/count?agent_stream= — how many listed parties, a number (the stream page's "3 parties watching"). */
+router.get('/parties/count', optionalAuth, async (req, res) => {
+    try {
+        res.set('Cache-Control', 'no-store');
+        res.json(await parties.count(req.query.agent_stream));
+    } catch (err) { send(res, err); }
+});
+
+router.get('/:slug/party', optionalAuth, async (req, res) => {
+    try {
+        const row = await parties.bySlug(req.params.slug);
+        const party = parties.partyOf(row);
+        if (!row || !party) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
+        if (!(await parties.mayView(row, party, req.user || null, req.query.k))) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
+        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ party: parties.view(row, party) });
+    } catch (err) { send(res, err); }
+});
+
+/** Join with the link's secret; membership is remembered after it. */
+router.post('/:slug/party/join', requireAuth, manageLimit, async (req, res) => {
+    try {
+        const row = await parties.bySlug(req.params.slug);
+        const party = parties.partyOf(row);
+        if (!row || !party) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
+        res.json(await parties.joinWithLink(row, party, req.user, (req.body || {}).k));
+    } catch (err) { send(res, err); }
+});
+
+/** The host moves the VOD (a live party follows the live edge, so there is no position). */
+router.put('/:slug/party', requireAuth, manageLimit, async (req, res) => {
+    try {
+        const row = await parties.bySlug(req.params.slug);
+        const party = parties.partyOf(row);
+        if (!row || !party) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
+        if (!(await parties.mayView(row, party, req.user, null))) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
+        res.json({ party: await parties.setSync(row, party, req.user, req.body || {}) });
+    } catch (err) { send(res, err); }
+});
+
+router.post('/:slug/party/end', requireAuth, manageLimit, async (req, res) => {
+    try {
+        const row = await parties.bySlug(req.params.slug);
+        const party = parties.partyOf(row);
+        if (!row || !party) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
+        res.json({ party: await parties.end(row, party, req.user) });
+    } catch (err) { send(res, err); }
 });
 
 router.get('/:slug', optionalAuth, async (req, res) => {
