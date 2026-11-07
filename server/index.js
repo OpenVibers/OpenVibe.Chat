@@ -53,6 +53,16 @@ async function start() {
     } catch (err) {
         console.warn('[Chat] owner settings unavailable, voice keys fall back to the environment:', err && err.message);
     }
+    // The chat apps' bot accounts (chat.apps, the owner-setup design): config.chatApps reads the panel's values first
+    // and the environment second, every time. A failure leaves the environment's values in place.
+    let chatAppSettings = null;
+    try {
+        chatAppSettings = await require('./chat-apps/owner-settings').createChatAppSettings({ db: db.getDb(), log: console });
+        chatAppSettings.install(config);
+        console.log(`[Chat] owner settings ready (${chatAppSettings.namespace})`);
+    } catch (err) {
+        console.warn('[Chat] chat-app settings unavailable, the chat apps read the environment:', err && err.message);
+    }
 
     // Shared per-actor rate-limit counters on Valkey (ADR-035); without VALKEY_URL they count in this
     // process, as before. openvibe-sdk/valkey's createValkey returns null when the URL is unset.
@@ -69,7 +79,7 @@ async function start() {
     callServer.init(server);
     const relay = serviceOutbox.configure({ config });
     const events = createEventsConsumer({ chatServer, secrets: config.events.secrets });
-    const { app, handleUpgrade } = createApp({ chatServer, relay, events, callServer, settings });
+    const { app, handleUpgrade } = createApp({ chatServer, relay, events, callServer, settings, chatAppSettings });
     void app.locals.chatApps.start();
     server.on('request', app);
     server.on('upgrade', (req, socket, head) => { handleUpgrade(req, socket, head).catch(() => { try { socket.destroy(); } catch { /* */ } }); });
