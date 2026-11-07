@@ -311,9 +311,9 @@ t('the site: kinds on the rooms page, the call panel, roles and attachments in s
     assert.match(r.text, /· seen <time/, 'moderators see when people were last here');
     await api('POST', '/tea-talk/attachments', own, { service: 'community', resource: 'general', title: 'General <b>' });
     r = await page('/r/tea-talk/settings', own);
-    assert.match(r.text, /<a href="https:\/\/openvibe\.community\/s\/general">General &lt;b&gt;<\/a>/);
+    assert.match(r.text, /<a href="https:\/\/openvibe\.community\/forum\/general">General &lt;b&gt;<\/a>/);
     assert.match(r.text, /action="\/r\/tea-talk\/attachments\/community\/general\/detach"/);
-    assert.ok(!(await page('/r/tea-talk', own)).text.includes('openvibe.community/s/general'), 'the room page itself makes no claim about the space');
+    assert.ok(!(await page('/r/tea-talk', own)).text.includes('openvibe.community/forum/general'), 'the room page itself makes no claim about the space');
 
     r = await page('/r/openvibe-news', out);
     assert.match(r.text, /Announcements from OpenVibe staff/);
