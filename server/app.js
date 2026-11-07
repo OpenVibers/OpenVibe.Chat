@@ -313,6 +313,9 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     app.use('/api/dm', require('./chat/dm-routes'));
     // Vibe from any OpenVibe site (the Dock, plan L48 V2): ask, and read the answer, with the person's own token.
     app.use('/api/vibe', require('./rooms/vibe-api'));
+    // A companion's answer, read aloud in the character's own voice (the person's own token, the agent
+    // voice's per-person limiter).
+    app.use('/api/tts', require('./chat/tts-person'));
     app.use('/api/tts', require('./chat/tts-routes'));
     // The desk asks Chat for the sound of a line the agent said (Agent Streams S4; capability chat.tts.speak).
     app.use('/api/agent-voice', require('./chat/tts-machine'));
