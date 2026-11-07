@@ -39,6 +39,7 @@ t('export, then erase and confirm', async () => {
                 'user_tags', 'vibe_asks', 'vibe_deliveries', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_usage'],
             exempt: {
                 account_data_events: 'the ledger of requests itself: which export and deletion Chat applied',
+                config_snapshots: 'D11 owner settings: created_by/activated_by is the acting administrator (usr_...) for the config audit trail; the values are network configuration, not the person\'s account data, and are kept for rollback/history',
                 hidden_relay_users: 'a moderation record of a relay account hidden from a channel, kept for accountability',
                 room_member_timeouts: 'a moderation record of a room timeout, kept for accountability like moderation_actions',
             },
