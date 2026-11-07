@@ -102,7 +102,9 @@ t('a stranger without the key, or with a wrong one, sees the missing-room 404', 
         assert.strictEqual(r.status, 404, `${path}: ${r.text}`);
         assert.strictEqual(r.body.code, 'rooms.not_found');
     }
-    const wrongRoom = await api('GET', `/parties/${party.id}?k=${encodeURIComponent(key.slice(0, -1) + 'x')}`, bob);
+    // One character off (never the same character: a key that already ends in x would be the right key).
+    const wrongKey = key.slice(0, -1) + (key.endsWith('x') ? 'y' : 'x');
+    const wrongRoom = await api('GET', `/parties/${party.id}?k=${encodeURIComponent(wrongKey)}`, bob);
     assert.strictEqual(wrongRoom.status, 404);
 });
 
