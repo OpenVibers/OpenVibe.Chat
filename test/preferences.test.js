@@ -40,7 +40,7 @@ t('reading needs a signed-in person; nothing stored yet is {} at revision 0', as
     assert.strictEqual(r.status, 401);
     r = await h.http('GET', '/api/chat/preferences', { token: ann.token });
     assert.strictEqual(r.status, 200, r.text);
-    assert.deepStrictEqual(r.body, { namespace: NS, version: 1, revision: 0, preferences: {} });
+    assert.deepStrictEqual(r.body, { namespace: NS, version: 2, revision: 0, preferences: {} });
     assert.strictEqual(r.headers.get('etag'), '"0"');
     assert.ok(r.headers.get('cache-control').includes('no-store'));
     const tok = h.tokenRequests.find((x) => x.audience === 'openvibe.network');

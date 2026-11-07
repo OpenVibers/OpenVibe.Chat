@@ -49,6 +49,7 @@ const prefs = require('../prefs/chat-preferences');
 const prefStores = require('../prefs/stores');
 const ctx = require('../live-context');
 const permissions = require('../auth/permissions');
+const db = require('../db/database');
 
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public', 'web');
 const ANON = Object.freeze({ kind: 'anonymous' });
@@ -544,6 +545,9 @@ ${box('group_invites', 'People can add me to groups', dmSet.group_invites !== fa
 ${box('previews', 'Message text in notifications', dmSet.previews !== false)}
 ${box('show_in_user_list', 'My name in chat user lists', pres.show_in_user_list !== false, 'Off: you are counted, not named')}
 </section>
+<section class="oc-set" aria-labelledby="oc-set-agents"><h2 id="oc-set-agents">AI agents</h2>
+${box('agents_read_messages', "Agents don't read my messages", p.agents_read_messages !== false, 'Co-pilot rooms leave you out of what the agent reads')}
+</section>
 <section class="oc-set" aria-labelledby="oc-set-sound"><h2 id="oc-set-sound">Speech and sounds</h2>
 ${box('tts_send', 'Read my messages aloud', tts.send !== false, 'Where the streamer has text-to-speech on')}
 ${box('tts_send_while_live', 'Also while I broadcast', tts.send_while_live !== false)}
@@ -623,6 +627,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
             compact: b.compact === '1' ? true : null,
             show_badges: b.show_badges === '1' ? null : false,
             hide_emotes: b.hide_emotes === '1' ? true : null,
+            agents_read_messages: b.agents_read_messages === '1' ? null : false,
             font_scale: Object.prototype.hasOwnProperty.call(FONT_SCALES, b.font_size) ? FONT_SCALES[b.font_size] : null,
         };
         const on = (k) => b[k] === '1';
@@ -665,7 +670,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
             return next(err);
         }
     };
-    const KIND_LABEL = { community: '', call: 'call', system: 'announcements' };
+    const KIND_LABEL = { community: '', call: 'call', system: 'announcements', agent_stream: 'co-pilot' };
     const ROLE_LABEL = { owner: 'owner', mod: 'moderator', speaker: 'speaker', participant: 'participant', member: 'member', viewer: 'viewer', blocked: 'blocked' };
     /**
      * How a room works, in its own words (market outcome: every room shows its rules and rate limits on the page): what a
@@ -687,18 +692,25 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
 
     const kindBadge = (r) => (KIND_LABEL[r.kind] ? ` <span class="oc-badge oc-kind-${esc(r.kind)}">${KIND_LABEL[r.kind]}</span>` : '');
     // One room in a list: its initials, name with its kind and a lock when private, the topic or the members under it.
+    /** The agent's poll in a Co-pilot room: a card with one button per option, and close/veto for moderators. */
+    const agentPollCard = (r, v, can) => `<section class="oc-agent-poll" aria-labelledby="oc-poll-q"><h2 id="oc-poll-q">${esc(v.question)}</h2>
+<form method="post" action="/r/${esc(r.slug)}/poll" class="oc-agent-poll-vote"><input type="hidden" name="poll_id" value="${esc(v.poll_id)}"><ol>${v.options.map((o) => `<li><button type="submit" name="option" value="${esc(o.id)}"><span>${esc(o.label)}</span><small>${o.votes} vote${o.votes === 1 ? '' : 's'}</small></button></li>`).join('')}</ol></form>
+<p class="oc-muted">One vote each. ${v.options.length > 1 ? `Type !1 to !${v.options.length} too.` : ''}</p>${can && can.moderate ? `<form method="post" action="/r/${esc(r.slug)}/poll/close" class="oc-inline"><input type="hidden" name="poll_id" value="${esc(v.poll_id)}"><button class="oc-pill" type="submit" name="action" value="close">Close poll</button><button class="oc-pill" type="submit" name="action" value="veto">Veto result</button></form>` : ''}</section>`;
     const roomCard = (r) => `<li class="oc-row${r.unread ? ' oc-unread' : ''}"><a href="/r/${esc(r.slug)}">${ui.initials(r.name)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(r.name)}</strong>${kindBadge(r)}${r.visibility === 'private' ? `<span class="oc-row-lock" title="Private">${IC.lock}<span class="oc-sr">private</span></span>` : ''}</span>`
         + `<span class="oc-row-sub">${esc(r.topic || `${r.members} member${r.members === 1 ? '' : 's'}`)}${r.unread ? `<span class="oc-dot" aria-label="${r.unread} new">${r.unread > 9 ? '9+' : r.unread}</span>` : ''}</span></span></a></li>`;
     const roomMessage = (m, can, slug, me) => {
         const t = hhmm(m.created_at);
         const ai = m.ai_member_id != null;
-        const del = (can.moderate || (me && !ai && m.user_id === me.id)) ? `<form class="oc-del" method="post" action="/r/${esc(slug)}/delete/${Number(m.id)}"><button type="submit" title="Delete this message" aria-label="Delete this message">${ICONS.trash}</button></form>` : '';
-        const who = ai
+        const agent = !!m.agent_stream;
+        const del = (can.moderate || (me && !ai && !agent && m.user_id === me.id)) ? `<form class="oc-del" method="post" action="/r/${esc(slug)}/delete/${Number(m.id)}"><button type="submit" title="Delete this message" aria-label="Delete this message">${ICONS.trash}</button></form>` : '';
+        const who = agent
+            ? `<span class="oc-name oc-ai-name">${esc(m.display_name || 'AI agent')}</span> <span class="oc-badge oc-ai" title="The stream's AI agent">AI agent</span>`
+            : ai
             ? `<span class="oc-name oc-ai-name">${esc(m.display_name || 'AI')}</span> <span class="oc-badge oc-ai" title="An AI member of this room">AI</span>`
             : `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)}`;
         // An AI member writes Markdown (lists, bold, links): vibe-md.js escapes every character first, then marks it up.
         const text = ai ? `<div class="oc-text vb-md">${md.render(m.message)}</div>` : `<span class="oc-text">${linkify(m.message)}</span>`;
-        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${ai ? '' : pictures.pageHtml(m.message)}${del}</li>`;
+        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${ai ? '' : pictures.pageHtml(m.message)}${del}</li>`;
     };
     const applyRoomChange = async (room) => await roomRoutes.applyRoomChange(room);
 
@@ -821,6 +833,11 @@ ${people}
         const yourRole = me && YOU_ARE[can.role] ? ` · you are ${YOU_ARE[can.role]}` : '';
         const isCall = room.kind === 'call';
         const callReady = isCall && !!require('../config').calls.enabled;
+        // A Co-pilot room says what it is before anyone types, and shows the agent's poll when one is open.
+        const isAgentRoom = room.kind === 'agent_stream';
+        const agentPollModule = isAgentRoom ? require('../chat/agent-poll') : null;
+        const agentPollRow = isAgentRoom ? await agentPollModule.openPoll(room.id) : null;
+        const agentPollView = agentPollRow ? agentPollModule.pollView(agentPollRow, await agentPollModule.votesOf(agentPollRow.id)) : null;
         const ais = aiMembers.enabled() ? (await aiMembers.list(room)).filter((a) => Number(a.enabled)) : [];
         // A feed the owner shows here (server/feeds/): its card above the messages.
         const feed = await require('../feeds/feeds').forRoom(room.id);
@@ -841,9 +858,11 @@ ${people}
             body: `<header class="oc-room-head">
 <a class="oc-icon-btn" href="/rooms" aria-label="All rooms" title="All rooms">${ICONS.back}</a>
 <div class="oc-room-id"><h1>${esc(room.name)}${room.visibility === 'private' ? `<span class="oc-room-lock" title="Private: only people invited read and post">${ICONS.lock}<span class="oc-sr">private</span></span>` : ''}${kindBadge(room)}</h1>
-<p class="oc-muted oc-room-sub">${room.topic ? `${esc(room.topic)} · ` : ''}${memberCount} ${memberCount === 1 ? 'member' : 'members'}${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole} <span class="oc-live" id="oc-live" hidden>● live</span></p>${roomRules(room)}</div>
+<p class="oc-muted oc-room-sub">${room.topic && !isAgentRoom ? `${esc(room.topic)} · ` : ''}${memberCount} ${memberCount === 1 ? 'member' : 'members'}${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole} <span class="oc-live" id="oc-live" hidden>● live</span></p>${roomRules(room)}</div>
 <div class="oc-room-tools">${manage}${leave}</div>
 </header>
+${isAgentRoom ? `<aside class="oc-agent-banner" role="note"><strong>Co-pilot room</strong> ${esc(require('../chat/agent-room').BANNER)}</aside>` : ''}
+${agentPollView ? agentPollCard(room, agentPollView, can) : ''}
 ${aiHere}${error}
 ${isCall ? callPanel(room, can, me) : ''}
 ${feed ? `<div class="fv oc-room-fv" data-feed="${esc(feed.id)}"></div>` : ''}
@@ -863,6 +882,30 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         res.redirect(303, `/r/${room.slug}#oc-compose`);
     }));
 
+    // A Co-pilot room's poll: one vote each, and the owner or a moderator may close it or veto its result.
+    router.post('/r/:slug/poll', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
+        const poll = require('../chat/agent-poll');
+        const body = req.body || {};
+        const row = await db.get('SELECT * FROM agent_room_polls WHERE id = ? AND room_id = ?', [String(body.poll_id || ''), room.id]);
+        if (row) await poll.castVote({ poll: row, user: actor.user, optionId: body.option });
+        res.redirect(303, `/r/${room.slug}#oc-poll-q`);
+    }));
+    router.post('/r/:slug/poll/close', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).moderate) return res.redirect(303, '/rooms');
+        const poll = require('../chat/agent-poll');
+        const body = req.body || {};
+        const row = await db.get('SELECT * FROM agent_room_polls WHERE id = ? AND room_id = ?', [String(body.poll_id || ''), room.id]);
+        if (row && row.state === 'open') {
+            if (body.action === 'veto') await poll.vetoPoll(row, String(actor.user.username || actor.user.subject_id || 'moderator'));
+            else await poll.closePoll(row);
+        }
+        res.redirect(303, `/r/${room.slug}`);
+    }));
     router.post('/r/:slug/picture', formLimit, sameSite, (req, res, next) => pictureForm(req, res, (err) => {
         if (!err) return next();
         const why = err.code === 'LIMIT_FILE_SIZE' ? `A picture can be up to ${Math.round((require('../config').pics.maxBytes || 20 * 1024 * 1024) / 1024 / 1024)} MB.` : 'That upload did not work.';

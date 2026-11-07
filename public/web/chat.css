@@ -698,3 +698,21 @@ div.oc-set-row { cursor: default; }
     border: 1px solid var(--border, rgba(255, 255, 255, .1)); border-radius: 12px; background: var(--bg-card, #121826); box-shadow: 0 16px 40px -18px rgba(0, 0, 0, .6);
     font-size: .84rem; line-height: 1.5; color: var(--text-secondary, #96a7c2); }
 .oc-rules > ul li + li { margin-top: 3px; }
+
+/* A Co-pilot room's banner and the agent's poll (Agent Streams S5). */
+.oc-agent-banner { margin: 4px 0 12px; padding: 10px 14px; border: 1px solid color-mix(in srgb, var(--accent, #3b82f6) 40%, transparent);
+    border-radius: 12px; background: color-mix(in srgb, var(--accent, #3b82f6) 10%, transparent); color: var(--text-secondary, #96a7c2);
+    font-size: .9rem; line-height: 1.45; }
+.oc-agent-banner strong { color: var(--text-primary, #e8eefc); }
+.oc-agent-poll { margin: 0 0 14px; padding: 12px 14px; border: 1px solid var(--border, rgba(255, 255, 255, .1)); border-radius: 12px;
+    background: var(--bg-card, #121826); }
+.oc-agent-poll h2 { margin: 0 0 10px; font-size: 1rem; line-height: 1.35; }
+.oc-agent-poll-vote ol { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.oc-agent-poll-vote button { width: 100%; min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 8px 12px; border: 1px solid var(--border, rgba(255, 255, 255, .14)); border-radius: 10px; background: transparent;
+    color: var(--text-primary, #e8eefc); font: inherit; text-align: left; cursor: pointer; }
+.oc-agent-poll-vote button:hover, .oc-agent-poll-vote button:focus-visible { border-color: var(--accent, #3b82f6);
+    background: color-mix(in srgb, var(--accent, #3b82f6) 12%, transparent); }
+.oc-agent-poll-vote small { color: var(--text-secondary, #96a7c2); white-space: nowrap; }
+.oc-kind-agent_stream { color: var(--accent, #3b82f6); border-color: color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent); }
+@media (max-width: 480px) { .oc-agent-banner, .oc-agent-poll { padding: 9px 11px; } }

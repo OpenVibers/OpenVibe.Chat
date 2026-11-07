@@ -70,3 +70,13 @@ center (MagicBrowse privacy), getstream.io (Stream vs Sendbird), rumbletalk.com,
    signed, with the verified visitor, to look up an order: Intercom's "data connectors", Zendesk's "actions"),
    retention (finished conversations kept 30 days to 2 years, or forever) and export (CSV, JSON). Next: sharing the page
    with the visitor's permission (co-browsing-lite).
+
+## Co-pilot rooms (Agent Streams S5)
+
+A public or unlisted agent stream has a room of kind `agent_stream`, id `agent:<ags_id>`, made by Live. Its pinned
+banner says, before anyone types: "The AI agent reads this chat between steps. It may answer you by name." The agent
+never reads the raw room: Codes and Actor ask `GET /api/v1/rooms/agent:<id>/digest?since=` and get at most ten items
+and 1,500 characters, with links reduced to their domain, and with timed-out or banned people, accounts younger than a
+day and anyone who set "Agents don't read my messages" left out. Polls are 2–4 options, 30–120 s, one vote each, one
+poll at a time and one every five minutes; the owner or a moderator can close or veto one. The agent's answer line is
+posted by its labelled "AI agent" identity, at most one every 20 s.

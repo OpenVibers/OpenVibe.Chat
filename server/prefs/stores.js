@@ -2,6 +2,7 @@
  * The user modules Chat owns (openvibe-contracts 0.41.0), one store each (./module-store.js):
  *
  *   preferences  chat.preferences     display (timestamps, compact, font_scale, show_badges, hide_emotes)
+ *                                     and agents_read_messages (whether an AI agent may read the person's messages)
  *   tts          chat.tts_defaults    text-to-speech and sounds (send, send_while_live, volume, sounds,
  *                                     sound_volume, sources) — Live's chat panel reads and writes it
  *   dm           chat.dm_settings     new_conversations (everyone | nobody), group_invites, previews —
