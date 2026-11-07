@@ -22,6 +22,11 @@
 const db = require('../db/database');
 
 const MAX_EXPIRY_MS = 24 * 60 * 60 * 1000;
+// A person holder whose last socket closed keeps the remote this long (a reload, a phone between networks); after it
+// the remote is free. Coming back inside it restores the holder's own expiry.
+let AWAY_GRACE_MS = 60 * 1000;
+/** Tests shorten the minute; nothing else calls this. */
+function setAwayGraceForTests(ms) { AWAY_GRACE_MS = Math.max(1, Number(ms) || 60 * 1000); }
 const MAX_WATCHERS = 500;
 const KINDS = ['person', 'ai', 'nobody'];
 
@@ -32,6 +37,7 @@ class LeaseError extends Error {
 const _cache = new Map();   // roomId → state
 const _timers = new Map();  // roomId → expiry timer
 const _meta = new Map();    // roomId → { id, slug }
+const _away = new Map();    // roomId → { subject, expires_ms } the holder's own expiry while their seat waits
 const _queues = new Map();  // roomId → tail of that room's operations
 let _onExpire = null;
 
@@ -211,9 +217,22 @@ async function current(room, watchers, now = Date.now()) {
         }
         const list = watchers === undefined ? state.watchers : watchersOf(watchers);
         if (!sameWatchers(state.watchers, list)) { state = { ...state, watchers: list }; changed = true; }
+        const away = _away.get(room.id);
         if (state.holder.kind === 'person' && !state.watchers.includes(state.holder.subject)) {
-            state = becomeNobody(state, now);
-            changed = holderChanged = true;
+            // Gone: the seat waits AWAY_GRACE_MS (as an expiry, so a restart and the timer both honour it).
+            if (!away || away.subject !== state.holder.subject) {
+                _away.set(room.id, { subject: state.holder.subject, expires_ms: state.expires_ms });
+                const until = now + AWAY_GRACE_MS;
+                state = { ...state, expires_ms: state.expires_ms == null ? until : Math.min(state.expires_ms, until) };
+                changed = holderChanged = true;
+            }
+        } else if (away) {
+            // Back inside the minute (or the holder changed): the holder's own expiry again.
+            _away.delete(room.id);
+            if (state.holder.kind === 'person' && state.holder.subject === away.subject) {
+                state = { ...state, expires_ms: away.expires_ms };
+                changed = holderChanged = true;
+            }
         }
         if (holderChanged) await persist(room.id, state);
         _cache.set(room.id, state);
@@ -360,6 +379,7 @@ function setExpiryHandler(fn) { _onExpire = typeof fn === 'function' ? fn : null
 /** Forget a room's live copy; the next read comes from room_control_leases (tests and recovery). */
 function evict(roomId) {
     _cache.delete(roomId);
+    _away.delete(roomId);
     const timer = _timers.get(roomId);
     if (timer) clearTimeout(timer);
     _timers.delete(roomId);
@@ -371,6 +391,7 @@ function close() {
     _cache.clear();
     _queues.clear();
     _meta.clear();
+    _away.clear();
     _onExpire = null;
 }
 
@@ -378,5 +399,5 @@ module.exports = {
     MAX_EXPIRY_MS, MAX_WATCHERS, KINDS, LeaseError,
     thingFor, state, request, grant, release, take, reconcile,
     setExpiryHandler, evict, close,
-    _watchersOf: watchersOf,
+    _watchersOf: watchersOf, setAwayGraceForTests,
 };

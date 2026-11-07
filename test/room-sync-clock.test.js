@@ -6,7 +6,8 @@
  *   - Chat stamps at_ms and seq, fans the state out and gives it to a member who joins later;
  *   - `time` answers a ping with Chat's clock on the same socket;
  *   - the first request takes a free remote, the holder passes it on, take-back always wins, a time limit
- *     expires into nobody, and a person holder who leaves is released;
+ *     expires into nobody, and a person holder who leaves keeps the remote a minute (back in time: still theirs);
+ *   - the clock plays OpenVibe media only, and only the owner hands the remote to an AI;
  *   - the durable rows survive dropping the modules' memory copies.
  */
 const assert = require('assert');
@@ -53,7 +54,7 @@ t('a room has nobody holding the remote at seq 1, and a signed-out socket cannot
 
     const guest = await h.ws({});
     await join(guest);
-    guest.sendJson({ type: 'sync', media: 'https://media.openvibe.network/vod/test.webm', position_ms: 0 });
+    guest.sendJson({ type: 'sync', media: 'https://openvibe.media/vod/test.webm', position_ms: 0 });
     const refused = await guest.next((m) => m.type === 'sync_error');
     assert.strictEqual(refused.code, 'sync.sign_in');
     guest.sendJson({ type: 'lease.request' });
@@ -68,7 +69,7 @@ t('the first request takes the free remote, and only its holder can set the cloc
     await join(annWs); await lease(annWs);
     await join(bobWs); await lease(bobWs);
 
-    bobWs.sendJson({ type: 'sync', media: 'https://media.openvibe.network/vod/test.webm', position_ms: 1000 });
+    bobWs.sendJson({ type: 'sync', media: 'https://openvibe.media/vod/test.webm', position_ms: 1000 });
     assert.strictEqual((await bobWs.next((m) => m.type === 'sync_error')).code, 'sync.not_holder');
 
     annWs.sendJson({ type: 'lease.request' });
@@ -78,11 +79,11 @@ t('the first request takes the free remote, and only its holder can set the cloc
     assert.deepStrictEqual(granted.state.watchers, [ann.subject_id, bob.subject_id].sort());
     assert.ok((await lease(annWs, (s) => s.holder.subject === ann.subject_id)).granted, 'the requester is told too');
 
-    annWs.sendJson({ type: 'sync', media: 'https://media.openvibe.network/vod/test.webm', position_ms: 60000, rate: 1, paused: false });
+    annWs.sendJson({ type: 'sync', media: 'https://openvibe.media/vod/test.webm', position_ms: 60000, rate: 1, paused: false });
     const clock = await sync(bobWs);
     assert.strictEqual(clock.room, room.slug);
     assert.deepStrictEqual([clock.state.media, clock.state.position_ms, clock.state.rate, clock.state.paused],
-        ['https://media.openvibe.network/vod/test.webm', 60000, 1, false]);
+        ['https://openvibe.media/vod/test.webm', 60000, 1, false]);
     assert.strictEqual(clock.state.set_by, ann.subject_id);
     assert.strictEqual(clock.state.seq, 1);
     assert.ok(Math.abs(clock.state.at_ms - Date.now()) < 2000, 'at_ms is the server clock');
@@ -150,12 +151,38 @@ t('the first request takes the free remote, and only its holder can set the cloc
     const fromDbLease = await lease(catWs);
     assert.deepStrictEqual([fromDbSync.state.position_ms, fromDbSync.state.set_by, fromDbLease.state.holder.subject], [30000, ann.subject_id, ann.subject_id]);
 
-    // A person holder whose last socket leaves is released.
+    // The clock plays OpenVibe media only: a link to somebody else's server is refused.
+    annWs.sendJson({ type: 'sync', media: 'https://tracker.example.com/film.webm', position_ms: 0 });
+    assert.strictEqual((await annWs.next((m) => m.type === 'sync_error')).code, 'sync.media');
+
+    // A person holder whose last socket leaves keeps the remote a minute (shortened here), then it is free.
+    const controlLease = require('../server/rooms/control-lease');
+    controlLease.setAwayGraceForTests(400);
     annWs.sendJson({ type: 'lease.grant', to: { kind: 'person', subject: bob.subject_id } });
-    await lease(catWs, (s) => s.holder.subject === bob.subject_id);
+    await lease(catWs, (s) => s.holder.subject === bob.subject_id && s.expires_ms == null);
     close(bobWs);
+    const away = await lease(catWs, (s) => s.holder.subject === bob.subject_id && s.expires_ms != null);
+    assert.ok(away.state.expires_ms <= Date.now() + 400 + 50, 'the seat waits at most the grace');
     const released = await lease(catWs, (s) => s.holder.kind === 'nobody');
     assert.strictEqual(released.state.holder.subject, null);
+    assert.strictEqual(released.reason, 'expired');
+
+    // Back inside the minute: still theirs, with their own (open) expiry again.
+    controlLease.setAwayGraceForTests(10000);
+    let bobBack = await h.ws({ token: bob.token });
+    await join(bobBack);
+    annWs.sendJson({ type: 'lease.take' });
+    await lease(catWs, (s) => s.holder.subject === ann.subject_id);
+    annWs.sendJson({ type: 'lease.grant', to: { kind: 'person', subject: bob.subject_id } });
+    await lease(catWs, (s) => s.holder.subject === bob.subject_id && s.expires_ms == null);
+    close(bobBack);
+    await lease(catWs, (s) => s.holder.subject === bob.subject_id && s.expires_ms != null);
+    bobBack = await h.ws({ token: bob.token });
+    await join(bobBack);
+    const kept = await lease(catWs, (s) => s.holder.subject === bob.subject_id && s.expires_ms == null);
+    assert.strictEqual(kept.state.holder.kind, 'person');
+    controlLease.setAwayGraceForTests(60 * 1000);
+    close(bobBack);
 
     close(annWs);
     close(catWs);
@@ -167,6 +194,13 @@ t('an AI can hold the remote, and only the owner takes it back', async () => {
     await join(annWs); await lease(annWs);
     await join(catWs); await lease(catWs);
 
+    annWs.sendJson({ type: 'lease.take' });
+    await lease(catWs, (s) => s.holder.subject === ann.subject_id);
+    // A guest holding the remote cannot hand it to an AI: that is the owner's call.
+    annWs.sendJson({ type: 'lease.grant', to: { kind: 'person', subject: cat.subject_id } });
+    await lease(catWs, (s) => s.holder.subject === cat.subject_id);
+    catWs.sendJson({ type: 'lease.grant', to: { kind: 'ai', subject: 'ai:vibe' } });
+    assert.strictEqual((await catWs.next((m) => m.type === 'lease_error')).code, 'lease.not_owner');
     annWs.sendJson({ type: 'lease.take' });
     await lease(catWs, (s) => s.holder.subject === ann.subject_id);
     annWs.sendJson({ type: 'lease.grant', to: { kind: 'ai', subject: 'ai:vibe' } });
@@ -185,3 +219,5 @@ t('an AI can hold the remote, and only the owner takes it back', async () => {
 t('close', async () => {
     await h.close();
 });
+
+t.run();

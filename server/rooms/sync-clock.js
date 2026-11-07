@@ -7,8 +7,10 @@
  * The latest state lives in the module's Map (the live copy) and in room_sync_clocks (the durable copy). The cache is
  * per process, like Chat's other room state; a second process reads the row from the database.
  *
- * Media is a Media ref or an https URL. A set may leave media out to keep the room's current one, and may leave
- * position_ms out to pause or resume where the timeline is now.
+ * Media is a Media ref or an https URL on an OpenVibe host (a domain one of the Contracts service manifests names).
+ * Party v1 plays OpenVibe media only: a holder must not be able to point every viewer's player, and so their
+ * addresses, at a server outside the platform. A set may leave media out to keep the room's current one, and may
+ * leave position_ms out to pause or resume where the timeline is now.
  */
 const db = require('../db/database');
 
@@ -18,6 +20,34 @@ const MEDIA_ID = /^(med_[0-9A-HJKMNP-TV-Z]{26}|legacy:[a-z][a-z0-9-]{1,39}:(vod|
 const HTTP_URL = /^https:\/\/[^\s]{1,2048}$/;
 const ROLE = /^[a-z][a-z0-9_]{1,39}$/;
 const VARIANT = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+
+/** The platform's own hosts: every domain the pinned Contracts service manifests name (exact names, no wildcard). */
+let _hosts = null;
+function firstPartyHosts() {
+    if (_hosts) return _hosts;
+    const fs = require('fs');
+    const path = require('path');
+    const out = new Set();
+    try {
+        const dir = path.join(path.dirname(require.resolve('openvibe-contracts/package.json')), 'manifests', 'services');
+        for (const f of fs.readdirSync(dir)) {
+            if (!f.endsWith('.json')) continue;
+            const m = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8'));
+            for (const d of Array.isArray(m.domains) ? m.domains : []) if (typeof d === 'string') out.add(d.toLowerCase());
+        }
+    } catch (err) {
+        console.warn('[Sync] the Contracts manifests could not be read; only Media refs are accepted:', err && err.message);
+    }
+    _hosts = out;
+    return out;
+}
+
+function onOpenVibe(url) {
+    try {
+        const u = new URL(url);
+        return u.protocol === 'https:' && !u.username && !u.password && !u.port && firstPartyHosts().has(u.hostname.toLowerCase());
+    } catch (e) { return false; }
+}
 
 class SyncError extends Error {
     constructor(code, message) { super(message || code); this.code = code; }
@@ -69,6 +99,7 @@ function rowState(row, room) {
 function mediaOf(value) {
     if (typeof value === 'string') {
         if (!HTTP_URL.test(value)) throw new SyncError('sync.media', 'media is an https URL or a Media ref');
+        if (!onOpenVibe(value)) throw new SyncError('sync.media', 'a party plays OpenVibe media: the link must be on an OpenVibe site');
         return value;
     }
     if (!value || typeof value !== 'object' || Array.isArray(value)) {

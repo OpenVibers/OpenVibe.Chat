@@ -35,7 +35,8 @@ State:
   "set_by": "usr_01JAB2C3D4E5F6G7H8J9K0MNPS", "seq": 7 }
 ```
 
-`media` is a `media.media-ref@1` object or an `https` URL. A player is at
+`media` is a `media.media-ref@1` object or an `https` URL on an OpenVibe host (a domain a Contracts service manifest
+names; Party v1 plays OpenVibe media only, so a holder cannot point every viewer's player at an outside server). A player is at
 `position_ms + (serverNow - at_ms) * rate` while `paused` is false, and at `position_ms` while it is true. `at_ms`
 is always Chat's clock when Chat accepted the set; a player measures that clock with `time` (below).
 
@@ -108,13 +109,15 @@ All on the same room socket, all fanned out to the room by Chat:
 | `{ "type": "lease.take", "expires_ms": … }` (also `lease.take_back` and `lease.revoke`) | `{ "type": "lease", "room", "state", "taken": true }` | the room's owner, or chat staff |
 
 `to` may also be `{ "kind": "ai", "subject": "ai:vibe" }` or `{ "kind": "nobody", "subject": null }`. A `person`
-target must be one of the room's current watchers, so a remote never goes to somebody who is not there. An `ai`
-target is accepted as the room owner names it; Chat has no socket for it, so the owner takes it back to end the AI's
-turn.
+target must be one of the room's current watchers, so a remote never goes to somebody who is not there. Only the
+room's owner (or chat staff) may hand the remote to an `ai` (`lease.not_owner` otherwise): an AI acts with the room's
+authority. Chat has no socket for it, so the owner takes it back to end the AI's turn.
 
 `expires_ms` is an absolute epoch instant within the next 24 hours. At that instant Chat makes the holder `nobody`,
 increments `seq` and broadcasts the state with `"reason": "expired"`. A person holder who leaves the room (their
-last socket closes, or they are removed) is released the same way. Take-back always wins and needs no consent.
+last socket closes, or they are removed) keeps the remote for one minute: the state's `expires_ms` becomes at most a
+minute away, and coming back inside it restores their own expiry. After the minute the remote is free, the same way.
+Take-back always wins and needs no consent.
 
 Errors:
 
@@ -132,8 +135,8 @@ Codes: `lease.sign_in`, `lease.not_joined`, `lease.not_holder`, `lease.not_owner
 - **A held remote is never grabbed by request**, only granted by its holder or taken back by the owner.
 - **Watchers are the room, live.** They are the signed-in subjects connected to the room now; joining or leaving
   refreshes them, and they do not bump `seq`.
-- **A leave releases a person holder.** There is no grace period: the next request finds the remote free, and the
-  owner can always take it.
+- **A leave keeps the seat for a minute.** A reload or a phone between networks does not lose the remote; after a
+  minute away it is free, and the owner can always take it at once.
 
 ## Client use
 

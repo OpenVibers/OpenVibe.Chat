@@ -690,7 +690,10 @@ class ChatServer {
                         else if (result.granted) this.broadcastToRoom(room.id, { type: 'lease', room: room.slug, state: result.state, granted: true });
                         else this.broadcastToRoom(room.id, { type: 'lease.request', room: room.slug, request: result.request });
                     } else if (msg.type === 'lease.grant') {
-                        const result = await controlLease.grant(room, subject, msg.to || msg.holder, { watchers, expires_ms: msg.expires_ms });
+                        const to = msg.to || msg.holder;
+                        // An AI holder acts with the room's authority, so only the owner (or chat staff) hands it the remote.
+                        if (to && to.kind === 'ai' && !access.manage) { this.sendTo(ws, { type: 'lease_error', room: room.slug, code: 'lease.not_owner', message: 'Only the room\'s owner can hand the remote to an AI' }); break; }
+                        const result = await controlLease.grant(room, subject, to, { watchers, expires_ms: msg.expires_ms });
                         this.broadcastToRoom(room.id, { type: 'lease', room: room.slug, state: result.state, granted: true });
                     } else if (msg.type === 'lease.release') {
                         const result = await controlLease.release(room, subject, { watchers });
