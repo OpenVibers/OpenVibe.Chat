@@ -50,21 +50,23 @@ const permissions = require('../auth/permissions');
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$/;
 const RESERVED = new Set(['global', 'new', 'rooms', 'settings', 'messages', 'updates', 'auth', 'api', 'admin', 'staff', 'help', 'system', 'ice-servers']);
-const KINDS = ['community', 'call', 'system'];
+const KINDS = ['community', 'call', 'system', 'agent_stream'];
 const ROLES = ['owner', 'mod', 'speaker', 'participant', 'member', 'viewer', 'blocked'];
 /** The roles each kind has (owner is never assigned: a room has one, its creator). */
 const KIND_ROLES = Object.freeze({
     community: ['owner', 'mod', 'member', 'viewer', 'blocked'],
     call: ['owner', 'mod', 'speaker', 'participant', 'viewer', 'blocked'],
     system: ['owner', 'mod', 'viewer', 'blocked'],
+    agent_stream: ['owner', 'mod', 'member', 'viewer', 'blocked'],
 });
 /** What joining a public room makes you (a call room's owner picks one of JOIN_ROLES_CALL). */
-const JOIN_ROLE = Object.freeze({ community: 'member', call: 'participant', system: 'viewer' });
+const JOIN_ROLE = Object.freeze({ community: 'member', call: 'participant', system: 'viewer', agent_stream: 'member' });
 const JOIN_ROLES_CALL = ['speaker', 'participant', 'viewer'];
 const POSTERS = Object.freeze({
     community: new Set(['owner', 'mod', 'member']),
     call: new Set(['owner', 'mod', 'speaker', 'participant']),
     system: new Set(['owner', 'mod']),
+    agent_stream: new Set(['owner', 'mod', 'member']),
 });
 const TALKERS = new Set(['owner', 'mod', 'speaker']);
 const ROLE_ORDER = { owner: 0, mod: 1, speaker: 2, participant: 3, member: 4, viewer: 5, blocked: 6 };
@@ -282,6 +284,14 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
         const last = await db.get('SELECT created_at FROM room_messages WHERE room_id = ? AND user_id = ? ORDER BY id DESC LIMIT 1', [room.id, user.id]);
         if (last && now - Date.parse(`${String(last.created_at).replace(' ', 'T')}Z`) < room.slow_seconds * 1000) fail(429, 'rooms.slow_mode', `Slow mode: one message every ${room.slow_seconds} seconds`);
     }
+    // A poll vote: in a Co-pilot room, !1 to !4 chooses an option of the open poll.
+    if (kindOf(room) === 'agent_stream' && /^![1-4]$/.test(body)) {
+        try {
+            const polls = require('../chat/agent-poll');
+            const open = await polls.openPoll(room.id);
+            if (open) await polls.castVote({ poll: open, user, optionId: body.slice(1) });
+        } catch { /* a vote that does not count is never a failed message */ }
+    }
     const filtered = wordFilter.check(body);
     const message = filtered.safe ? body : filtered.filtered;
     const id = await db.tx(async () => {
@@ -312,10 +322,10 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null } = {
 }
 
 // A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
-const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.created_at, m.is_deleted, m.ai_member_id, m.how, m.results,
-        CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle ELSE u.username END AS username,
-        CASE WHEN m.ai_member_id IS NOT NULL THEN a.name ELSE u.display_name END AS display_name,
-        u.profile_color, u.role AS user_role
+const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.created_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results,
+        CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle WHEN m.agent_stream THEN 'aiagent' ELSE u.username END AS username,
+        CASE WHEN m.ai_member_id IS NOT NULL THEN a.name WHEN m.agent_stream THEN 'AI agent' ELSE u.display_name END AS display_name,
+        m.agent_stream, u.profile_color, u.role AS user_role
     FROM room_messages m LEFT JOIN ctx_users u ON u.id = m.user_id AND m.ai_member_id IS NULL
     LEFT JOIN room_ai_members a ON a.id = m.ai_member_id`;
 async function messageById(id) { return await db.get(`${MSG_SELECT} WHERE m.id = ?`, [id]) || null; }

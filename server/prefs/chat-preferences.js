@@ -1,7 +1,8 @@
 /**
  * A person's chat preferences: the OpenVibe.Network user module `chat.preferences`
- * (openvibe-contracts manifests/namespaces/chat.preferences.json, schema v1: timestamps, compact,
- * font_scale, show_badges, hide_emotes). Chat owns the namespace since the Wave 6 cutover. The store
+ * (openvibe-contracts manifests/namespaces/chat.preferences.json, schema v2: timestamps, compact,
+ * font_scale, show_badges, hide_emotes, and agents_read_messages ('Agents don't read my messages',
+ * Agent Streams S5: the digest leaves the person out when it is false)). Chat owns the namespace since the Wave 6 cutover. The store
  * (get, update, handleEvent, invalidate) is ./module-store.js; the other chat.* modules are ./stores.js.
  */
 'use strict';

@@ -85,6 +85,9 @@ const EXPORTS = [
     // buttons their agent's approvals put in a chat. The group settings are the group's, not theirs.
     ['chat_app_links.json', `SELECT app, service_user_id, service_username, state, created_at, expires_at, used_at FROM chat_app_link_tokens WHERE subject = ANY(@s) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['chat_app_approvals.json', `SELECT app, chat_id, action, approval_id, state, created_at, expires_at, used_at FROM chat_app_callbacks WHERE subject = ANY(@s) ORDER BY created_at DESC LIMIT ${LIMIT}`],
+    // Co-pilot rooms (S5): the polls they voted in, and their reactions to room messages.
+    ['agent_room_votes.json', `SELECT poll_id, option_id, voted_at FROM agent_room_poll_votes WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
+    ['room_reactions.json', `SELECT message_id, reaction, created_at FROM room_message_reactions WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
 ];
 
 async function exportPart(d, subject) {
@@ -128,6 +131,8 @@ const ERASE_AFTER_ROOMS = [
     ['vibe_memory_off', 'DELETE FROM vibe_memory_off WHERE user_id = ANY(@ids)'],
     ['vibe_own_engine', 'DELETE FROM vibe_own_engine WHERE user_id = ANY(@ids)'],
     ['vibe_asks', 'DELETE FROM vibe_asks WHERE user_id = ANY(@ids)'],
+    ['agent_room_votes', 'DELETE FROM agent_room_poll_votes WHERE user_id = ANY(@ids)'],
+    ['room_reactions', 'DELETE FROM room_message_reactions WHERE user_id = ANY(@ids)'],
     ['vibe_deliveries', 'DELETE FROM vibe_deliveries WHERE user_id = ANY(@ids)'],
     // Support inboxes (server/inbox/inbox.js): the inboxes they own go with every conversation in them; in others,
     // their replies stay for the visitor without their name, and their place on the team goes.

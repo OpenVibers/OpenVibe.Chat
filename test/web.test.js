@@ -123,10 +123,11 @@ t('settings save to the chat.preferences record', async () => {
     let r = await req('GET', '/settings', { headers: cookie(alice) });
     assert.strictEqual(r.status, 200);
     assert.match(r.text, /name="timestamps"/);
+    assert.match(r.text, /name="agents_read_messages"/, 'the agents-don\'t-read setting is on the page');
     r = await req('POST', '/settings', form(alice, { timestamps: '1', compact: '1', font_size: 'large' }));
     assert.strictEqual(r.headers.get('location'), '/settings?saved=1');
     const rec = h.netModules.records.get(h.netModules.key('chat.preferences', alice.subject_id));
-    assert.deepStrictEqual(rec && rec.data, { timestamps: true, compact: true, show_badges: false, font_scale: 1.18 });
+    assert.deepStrictEqual(rec && rec.data, { timestamps: true, compact: true, show_badges: false, font_scale: 1.18, agents_read_messages: false });
     const page = await req('GET', '/', { headers: cookie(alice) });
     assert.match(page.text, /<body class="oc-compact oc-times oc-nobadges" style="--oc-scale:1.18">/, 'the site follows them too');
 });

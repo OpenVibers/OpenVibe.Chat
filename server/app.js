@@ -115,6 +115,8 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     // ── Internal (loopback; never routed by nginx) ─────────────
     app.use('/internal/chat', express.json({ limit: '64kb' }), createInternalIngress({ chatServer }));
     // Live's reads of the chat tables Chat owns, in place of its mirrored copy (plan T3 J4b, server/chat/internal-reads.js).
+    // Live makes the Co-pilot room of a public or unlisted agent stream (Agent Streams S5).
+    app.use('/internal/chat', express.json({ limit: '64kb' }), require('./chat/agent-room-internal'));
     app.use('/internal/chat', express.json({ limit: '64kb' }), require('./chat/internal-reads'));
     // OpenVibe.Help's per-ticket conversation (capability chat.ticket.write, server/chat/internal-tickets.js).
     app.use('/internal/chat', express.json({ limit: '64kb' }), require('./chat/internal-tickets'));
@@ -132,6 +134,9 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     // Control first (chat.resource.control: archive a person's room), then the index for everything else.
     app.use('/api/v1/resources/control', require('./registry/resource-control').router());
     app.use('/api/v1/resources', require('./registry/resource-index').router());
+    // What a task's service may read of a Co-pilot room: the digest, the polls and the answer line
+    // (Agent Streams S5). A service token only; the room is the owner's.
+    app.use('/api/v1/rooms', require('./chat/agent-routes'));
     app.get('/health', (req, res) => res.json({ ok: true, service: 'chat' }));
     // Readiness in the openvibe-shared/ready shape (status ready/degraded/not_ready, named checks):
     // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
@@ -287,6 +292,8 @@ function createApp({ chatServer, relay, events = null, callServer = null }) {
     // The person's chat settings: the Network user modules Chat owns (server/prefs/stores.js).
     for (const [mount, router] of Object.entries(require('./prefs/routes').ROUTES)) app.use(`/api/chat/${mount}`, router);
     // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
+    // The people of a Co-pilot room vote on the agent's poll (Agent Streams S5).
+    app.use('/api/chat/rooms', require('./chat/agent-poll-routes'));
     app.use('/api/chat/rooms', require('./rooms/routes'));
     app.use('/api/chat/vibe', require('./rooms/vibe-routes'));
     // Support inboxes (server/inbox/): the widget's visitor API, and the inbox's people.
