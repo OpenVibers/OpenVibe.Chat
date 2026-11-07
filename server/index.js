@@ -26,6 +26,7 @@ const { createValkey } = require('openvibe-sdk/valkey');
 const { gracefulStop, telemetry } = require('openvibe-sdk/service');
 const { createPgTelemetrySink, startTelemetryRetention } = require('openvibe-sdk/telemetry');
 const { createApp } = require('./app');
+const settingsLib = require('./settings');
 
 let rejectionsLogged = false;
 
@@ -40,6 +41,28 @@ async function start() {
     console.log(`[Chat] OpenVibe.Chat starting (db ${config.db.url ? 'postgresql' : 'pglite'}, Live ${config.live.internalUrl}, events ${config.events.url || 'off'}, consumer ${config.events.secrets.length ? 'on' : 'off'})`);
     // PostgreSQL (DATABASE_URL; migrations first, as the owner) or, outside production, an embedded PGlite.
     await db.initDb();
+
+    // D11 owner settings (chat.voices): created before the app mounts /internal/config. A failure leaves Chat
+    // serving (the voice keys fall back to the environment and Live's site setting) and says why in the log.
+    let settings = null;
+    try {
+        const made = settingsLib.createSettings({ db: db.getDb(), log: console });
+        await made.ready;
+        settings = settingsLib.activate(made);
+        console.log(`[Chat] owner settings ready (${settings.namespace})`);
+    } catch (err) {
+        console.warn('[Chat] owner settings unavailable, voice keys fall back to the environment:', err && err.message);
+    }
+    // The chat apps' bot accounts (chat.apps, the owner-setup design): config.chatApps reads the panel's values first
+    // and the environment second, every time. A failure leaves the environment's values in place.
+    let chatAppSettings = null;
+    try {
+        chatAppSettings = await require('./chat-apps/owner-settings').createChatAppSettings({ db: db.getDb(), log: console });
+        chatAppSettings.install(config);
+        console.log(`[Chat] owner settings ready (${chatAppSettings.namespace})`);
+    } catch (err) {
+        console.warn('[Chat] chat-app settings unavailable, the chat apps read the environment:', err && err.message);
+    }
 
     // Shared per-actor rate-limit counters on Valkey (ADR-035); without VALKEY_URL they count in this
     // process, as before. openvibe-sdk/valkey's createValkey returns null when the URL is unset.
@@ -56,7 +79,7 @@ async function start() {
     callServer.init(server);
     const relay = serviceOutbox.configure({ config });
     const events = createEventsConsumer({ chatServer, secrets: config.events.secrets });
-    const { app, handleUpgrade } = createApp({ chatServer, relay, events, callServer });
+    const { app, handleUpgrade } = createApp({ chatServer, relay, events, callServer, settings, chatAppSettings });
     void app.locals.chatApps.start();
     server.on('request', app);
     server.on('upgrade', (req, socket, head) => { handleUpgrade(req, socket, head).catch(() => { try { socket.destroy(); } catch { /* */ } }); });

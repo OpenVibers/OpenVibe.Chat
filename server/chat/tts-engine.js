@@ -19,6 +19,8 @@ const os = require('os');
 const db = require('../db/database');
 // Site settings are Live's (site_settings); read through the Live context projection.
 const ctx = require('../live-context');
+// Owner settings (chat.voices): the admin panel's value wins, the env is the fallback, the Live site setting last.
+const owner = require('../settings');
 
 // ── Voice Catalog ─────────────────────────────────────────────
 // Every voice available on the platform — combines RS-Companion's
@@ -160,10 +162,10 @@ function getTTSSettings() {
         enabled:               ctx.getSetting('tts_enabled') !== false,
         provider:              ctx.getSetting('tts_provider') || 'espeak-ng',
         googleApiKey:          ctx.getSetting('tts_google_api_key') || '',
-        googleServiceAccount:  ctx.getSetting('tts_google_service_account') || '',
-        awsAccessKeyId:        ctx.getSetting('tts_aws_access_key_id') || '',
-        awsSecretAccessKey:    ctx.getSetting('tts_aws_secret_access_key') || '',
-        awsRegion:             ctx.getSetting('tts_aws_region') || 'us-east-1',
+        googleServiceAccount:  owner.value('google_cloud_service_account_json', 'CHAT_GOOGLE_SERVICE_ACCOUNT_JSON', ctx.getSetting('tts_google_service_account') || ''),
+        awsAccessKeyId:        owner.value('amazon_polly_access_key_id', 'CHAT_POLLY_ACCESS_KEY_ID', ctx.getSetting('tts_aws_access_key_id') || ''),
+        awsSecretAccessKey:    owner.value('amazon_polly_secret_access_key', 'CHAT_POLLY_SECRET_ACCESS_KEY', ctx.getSetting('tts_aws_secret_access_key') || ''),
+        awsRegion:             owner.value('amazon_polly_region', 'CHAT_POLLY_REGION', ctx.getSetting('tts_aws_region') || 'us-east-1'),
         maxLength:             ctx.getSetting('tts_max_length') || 200,
         maxQueuePerUser:       ctx.getSetting('tts_max_queue_per_user') || 3,
         maxQueueGlobal:        ctx.getSetting('tts_max_queue_global') || 20,
@@ -318,9 +320,9 @@ function _getGoogleAccessToken(sa) {
     });
 }
 
-function synthesizeGoogleCloud(text, voiceDef) {
+function synthesizeGoogleCloud(text, voiceDef, override) {
     return new Promise(async (resolve, reject) => {
-        const settings = getTTSSettings();
+        const settings = override || getTTSSettings();
         const sa = _getGoogleServiceAccount(settings);
         const apiKey = settings.googleApiKey;
         if (!sa && !apiKey) return reject(new Error('Google Cloud TTS not configured'));
@@ -364,8 +366,8 @@ function synthesizeGoogleCloud(text, voiceDef) {
 }
 
 // ── Amazon Polly ──────────────────────────────────────────────
-function _awsSign({ method, service, region, path: urlPath, body, headers: extraHeaders }) {
-    const settings = getTTSSettings();
+function _awsSign({ method, service, region, path: urlPath, body, headers: extraHeaders, settings: creds }) {
+    const settings = creds || getTTSSettings();
     const accessKey = settings.awsAccessKeyId;
     const secretKey = settings.awsSecretAccessKey;
     if (!accessKey || !secretKey) throw new Error('AWS credentials not configured');
@@ -399,9 +401,9 @@ function _awsSign({ method, service, region, path: urlPath, body, headers: extra
     return { host, headers };
 }
 
-function synthesizePolly(text, voiceDef) {
+function synthesizePolly(text, voiceDef, override) {
     return new Promise((resolve, reject) => {
-        const settings = getTTSSettings();
+        const settings = override || getTTSSettings();
         const pv = voiceDef.pollyVoice;
 
         let bodyObj = {
@@ -418,7 +420,7 @@ function synthesizePolly(text, voiceDef) {
         try {
             signed = _awsSign({
                 method: 'POST', service: 'polly', region: settings.awsRegion,
-                path: '/v1/speech', body,
+                path: '/v1/speech', body, settings,
             });
         } catch (e) { return reject(e); }
 
@@ -696,6 +698,17 @@ function getAvailableVoices() {
     return voices;
 }
 
+// Synthesize one short line for the owner-settings test (server/settings.js): explicit credentials, no cache.
+async function testSynthesize(provider, creds = {}) {
+    if (provider === 'amazon-polly') {
+        return await synthesizePolly('OpenVibe voice test', VOICE_CATALOG.pl_joanna_std, creds);
+    }
+    if (provider === 'google-cloud') {
+        return await synthesizeGoogleCloud('OpenVibe voice test', VOICE_CATALOG.gc_smooth_operator, creds);
+    }
+    throw new Error(`no such voice provider: ${provider}`);
+}
+
 // ── Exports ───────────────────────────────────────────────────
 // Synthesize an arbitrary espeak param set (admin voice preview).
 async function synthesizeWithParams(text, params) {
@@ -710,6 +723,7 @@ module.exports = {
     synthesize,
     synthesizeUserVoice,
     synthesizeWithParams,
+    testSynthesize,
     deriveUserVoiceParams,
     autoUserVoiceParams,
     clampVoiceParams: _clampVoiceParams,
