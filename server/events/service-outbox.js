@@ -13,6 +13,7 @@ const USER_SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const EVENT_TYPES = [
     'chat.message.created', 'chat.message.deleted', 'chat.dm.created',
     'chat.moderation.action', 'chat.room.message.created', 'chat.room.message.deleted',
+    'agent.step.started', 'agent.step.updated', 'agent.step.ended',
 ];
 let instance = null;
 
@@ -50,4 +51,4 @@ async function emit({ event_type, subject, payload, visibility = 'internal', pri
 
 function reset() { instance = null; }
 
-module.exports = { configure, current, emit, reset, actorFor };
+module.exports = { configure, current, emit, reset, actorFor, EVENT_TYPES };

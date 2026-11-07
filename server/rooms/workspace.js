@@ -83,6 +83,18 @@ async function get(room, user, id) {
     return shape(t, room);
 }
 
+/** The agent's step for this task (design 2026-11-07): a title, an outcome and a link, never the person's words. */
+async function announceStep(room, task, { topic = null, status = null, ...rest } = {}) {
+    if (!task) return null;
+    try {
+        return await require('../events/agent-step').emitAgentStep(task, room, { baseUrl: config.web.baseUrl, topic, status, ...rest });
+    } catch (err) {
+        // A step that could not be queued never fails the task it describes; the outbox says why.
+        console.warn('[Workspace] agent step:', err && err.message);
+        return null;
+    }
+}
+
 /** Tell every open page of the room that the queue changed (the panel refreshes itself). */
 function changed(room, task) {
     try { require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_task', room: room.slug, task: task ? { id: task.id, status: task.status } : null }); } catch { /* sockets are optional */ }
@@ -105,6 +117,7 @@ async function add(room, user, { title, details = '', kind = 'research', via = '
     const id = Number(r.lastInsertRowid);
     if (QUICK.has(k)) await startOnActor(room, await row(room, id), deps);
     const task = shape(await row(room, id), room);
+    await announceStep(room, await row(room, id), { status: task.status });
     changed(room, task);
     return task;
 }
@@ -126,6 +139,7 @@ async function cancel(room, user, id, deps = {}) {
     if (t.actor_task) await actorCall('POST', `/api/v1/tasks/${encodeURIComponent(t.actor_task)}/cancel`, t.requested_subject, null, deps).catch(() => null);
     await setStatus(room, t.id, { status: 'cancelled', finished_at: nowText(), error: `Cancelled by ${user.display_name || user.username || 'someone'}` });
     const task = shape(await row(room, t.id), room);
+    await announceStep(room, await row(room, t.id), { status: 'cancelled', reason: task.error });
     changed(room, task);
     return task;
 }
@@ -162,6 +176,7 @@ async function claim(room, user, id, { runner = null } = {}) {
     const r = await db.run("UPDATE room_tasks SET status = 'running', runner = ?, started_at = ov_now(), updated_at = ov_now() WHERE id = ? AND room_id = ? AND status = 'queued'", [who, t.id, room.id]);
     if (!r.changes) fail(409, 'work.taken', 'Someone took it a moment ago');
     const task = shape(await row(room, t.id), room);
+    await announceStep(room, await row(room, t.id), { status: 'running' });
     changed(room, task);
     return task;
 }
@@ -181,6 +196,7 @@ async function report(room, user, id, { status, result = '', result_url = null, 
         if (!url) fail(422, 'work.url', 'result_url is an https address');
     }
     await setStatus(room, t.id, { status, result: clean(result, LIMITS.result) || null, result_url: url, error: status === 'failed' ? (oneLine(error, LIMITS.error) || 'It did not work out') : null, finished_at: nowText() });
+    await announceStep(room, await row(room, t.id), { status, reason: status === 'failed' ? (oneLine(error, LIMITS.error) || 'It did not work out') : null });
     await announce(room, await row(room, t.id), deps);
     return shape(await row(room, t.id), room);
 }
@@ -227,8 +243,10 @@ async function startOnActor(room, t, deps = {}) {
         const task = await actorCall('POST', '/api/v1/tasks', t.requested_subject, { task: actorText(t), idempotency_key: `chat-room-task-${t.id}` }, deps);
         // A task a worker could take stays taken while Actor holds it, so nobody claims it twice.
         await setStatus(room, t.id, { actor_task: String(task.id), runner: 'actor', status: task.state === 'running' || !QUICK.has(t.kind) ? 'running' : 'queued', started_at: nowText() });
+        await announceStep(room, await row(room, t.id), { status: task.state === 'running' || !QUICK.has(t.kind) ? 'running' : 'queued' });
     } catch (err) {
         await setStatus(room, t.id, { status: 'failed', runner: 'actor', error: oneLine(err.message, LIMITS.error), finished_at: nowText() });
+        await announceStep(room, await row(room, t.id), { status: 'failed', reason: oneLine(err.message, LIMITS.error) });
         await announce(room, await row(room, t.id), deps).catch(() => {});
     }
 }
@@ -241,11 +259,11 @@ async function poll(deps = {}) {
         if (!room) continue;
         let task;
         try { task = await actorCall('GET', `/api/v1/tasks/${encodeURIComponent(t.actor_task)}`, t.requested_subject, null, deps); } catch (err) {
-            if (err.status === 404) { await setStatus(room, t.id, { status: 'failed', error: 'OpenVibe.Actor no longer has this task', finished_at: nowText() }); await announce(room, await row(room, t.id), deps).catch(() => {}); }
+            if (err.status === 404) { await setStatus(room, t.id, { status: 'failed', error: 'OpenVibe.Actor no longer has this task', finished_at: nowText() }); await announceStep(room, await row(room, t.id), { status: 'failed', reason: 'OpenVibe.Actor no longer has this task' }); await announce(room, await row(room, t.id), deps).catch(() => {}); }
             continue;
         }
         const state = task && task.state;
-        if (state === 'running' && t.status !== 'running') { await setStatus(room, t.id, { status: 'running' }); changed(room, { id: Number(t.id), status: 'running' }); }
+        if (state === 'running' && t.status !== 'running') { await setStatus(room, t.id, { status: 'running' }); await announceStep(room, await row(room, t.id), { status: 'running' }); changed(room, { id: Number(t.id), status: 'running' }); }
         // The agent handed its person a step on its desk (Desks plan D4): Vibe asks them here, once per hand-off.
         if (state === 'running' && task.needs_you && task.needs_you.url) await askPerson(room, t, task.needs_you, deps).catch(() => {});
         // The agent works on a desk of its own (Desks plan): in a Vibe chat, Vibe offers to watch it and take it over, once.
@@ -261,6 +279,7 @@ async function poll(deps = {}) {
             status: state, result: state === 'succeeded' ? clean(r.answer, LIMITS.result) || null : null, sources: JSON.stringify(sources), how,
             error: state === 'succeeded' ? null : oneLine((task.error && (task.error.detail || task.error.code)) || state, LIMITS.error), cost_usd: cost, finished_at: nowText(),
         });
+        await announceStep(room, await row(room, t.id), { status: state, costUsd: cost, reason: state === 'succeeded' ? null : oneLine((task.error && (task.error.detail || task.error.code)) || state, LIMITS.error) });
         await announce(room, await row(room, t.id), deps).catch(() => {});
     }
 }
