@@ -1,9 +1,13 @@
 'use strict';
 /**
- * Watch parties (Agent Streams S7, design 2026-11-06 §4): a Chat room of kind 'party' where friends watch a public
- * agent stream or its VOD in sync, with their own chat beside the stream's.
+ * Watch parties (Agent Streams S7, design 2026-11-06 §4; media parties, plan R1 2026-11-07): a Chat room of kind
+ * 'party' where friends watch something in sync, with their own chat beside it.
  *
- *   - Sync: on a VOD the position follows the host's; on a live stream it follows the live edge (no position).
+ *   - An agent-stream party watches a public agent stream or its VOD: on a VOD the position follows the host's; on a
+ *     live stream it follows the live edge (no position).
+ *   - A media party watches a Media ref or an https URL on an OpenVibe host, exactly as a room's shared clock accepts
+ *     media (server/rooms/sync-clock.js). Its timeline is the room's clock (paused at 0 when it starts) and its remote
+ *     is the room's control lease, granted to the person who started it.
  *   - Joining is by the party's link. The link carries a secret, the row stores its sha256 only, and a stranger
  *     without it sees the same 404 as a missing room.
  *   - Private by default: rooms.visibility is 'private', the party is never in the directory, and `listed` only lets
@@ -12,13 +16,17 @@
  * The room itself is rooms.js's (name, members, messages, moderation); this module owns only the party facts.
  */
 const crypto = require('crypto');
+const config = require('../config');
 const db = require('../db/database');
 const rooms = require('./rooms');
+const syncClock = require('./sync-clock');
+const controlLease = require('./control-lease');
 
 const AGENT_STREAM_RE = /^ags_[0-9A-HJKMNP-TV-Z]{26}$/;
 const VOD_RE = /^\d{1,16}$/;
 const MAX_TITLE = 200;
 const BASE_URL = () => String(process.env.OV_CHAT_PUBLIC_URL || 'https://openvibe.chat').replace(/\/+$/, '');
+const PARTY_BASE_URL = () => String(config.party.baseUrl || 'https://openvibe.party').replace(/\/+$/, '');
 
 class PartyError extends Error {
     constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -42,6 +50,35 @@ function vodOf(value) {
 
 function modeOf(vodId) { return vodId == null ? 'live' : 'vod'; }
 
+/**
+ * A media party's media: a Media ref or an https URL on an OpenVibe host, validated by the shared clock's own rules
+ * (server/rooms/sync-clock.js). A refusal is the party API's 422, not the clock's.
+ */
+function mediaOf(value) {
+    try {
+        return syncClock._mediaOf(value);
+    } catch (err) {
+        if (err instanceof syncClock.SyncError) fail(422, 'party.media', err.message);
+        throw err;
+    }
+}
+
+/** The OpenVibe page a party was started from: an https page on an OpenVibe host, or null. */
+function sourceUrlOf(value) {
+    if (value == null || value === '') return null;
+    if (typeof value !== 'string' || !syncClock.onOpenVibe(value)) fail(422, 'party.source_url', 'source_url is an https page on an OpenVibe site');
+    return value;
+}
+
+/** The party row's media, as stored (jsonb comes back as an object; older drivers may give text). */
+function mediaFromRow(value) {
+    if (value == null) return null;
+    if (typeof value !== 'string') return value;
+    try { return JSON.parse(value); } catch { return null; }
+}
+
+const kindOfParty = (party) => (party && party.party_kind === 'media' ? 'media' : 'agent_stream');
+
 /** The party's position now: on a VOD, a playing one moves with the clock; a live one is the live edge. */
 function syncOf(party, now = Date.now()) {
     if (!party || party.mode === 'live') return { mode: 'live', playing: true };
@@ -55,32 +92,70 @@ function syncOf(party, now = Date.now()) {
     };
 }
 
-function joinUrl(row, rawSecret = null) {
-    const base = `${BASE_URL()}/rooms/${encodeURIComponent(row.slug)}`;
+function joinUrl(row, kind, rawSecret = null) {
+    const slug = encodeURIComponent(row.slug);
+    const base = kind === 'media' ? `${PARTY_BASE_URL()}/p/${slug}` : `${BASE_URL()}/rooms/${slug}`;
     return rawSecret ? `${base}?k=${encodeURIComponent(rawSecret)}` : base;
 }
 
 function view(row, party, { rawSecret = null, now = Date.now() } = {}) {
+    const kind = kindOfParty(party);
     return {
         id: row.slug,
-        agent_stream_id: party.agent_stream_id,
+        kind,
+        agent_stream_id: party.agent_stream_id || null,
         vod_id: party.vod_id == null ? null : String(party.vod_id),
+        ...(kind === 'media' ? { media: mediaFromRow(party.media), source_url: party.source_url || null } : {}),
         host: party.host_subject,
         title: row.name,
-        sync: syncOf(party, now),
+        ...(kind === 'agent_stream' ? { sync: syncOf(party, now) } : {}),
         visibility: 'private',
         listed: !!party.listed,
-        join_url: joinUrl(row, rawSecret),
+        join_url: joinUrl(row, kind, rawSecret),
         created_at: new Date(party.created_at instanceof Date ? party.created_at.getTime() : Date.parse(String(party.created_at).includes('T') ? party.created_at : `${String(party.created_at).replace(' ', 'T')}Z`)).toISOString(),
         ...(party.ended_at ? { ended_at: new Date(party.ended_at).toISOString() } : {}),
     };
 }
 
 /**
+ * What a viewer sees of a party: the view, the host's name, and — for a media party — the room's clock. A member also
+ * gets the members (their subjects and names) and the remote's state; someone holding only the link's secret gets
+ * neither, because the lease's watchers are live presence and the members are the room's people.
+ * → null when the caller may not view it at all (the caller answers the missing-room 404).
+ */
+async function detail(row, party, { user = null, key = null, now = Date.now() } = {}) {
+    const access = await rooms.access(row, user || null);
+    const member = !!access.read;
+    if (!member && !keyMatches(party, key)) return null;
+    const host = await db.get('SELECT username, display_name FROM ctx_users WHERE subject_id = ? LIMIT 1', [party.host_subject]);
+    const out = {
+        ...view(row, party, { now }),
+        host_name: host ? (host.display_name || host.username) : null,
+        member,
+    };
+    if (kindOfParty(party) === 'media') {
+        const room = { id: row.id, slug: row.slug };
+        out.clock = await syncClock.get(room);
+        if (member) {
+            out.lease = await controlLease.state(room);
+            out.members = (await rooms.members(row, { subjects: true }))
+                .filter((m) => m.role !== 'blocked')
+                .map((m) => ({ subject: m.subject_id || null, name: m.display_name || m.username, role: m.role }));
+        }
+    }
+    return out;
+}
+
+/**
  * Start a party on a public agent stream or its VOD. The room is private; only the link (with its secret) opens it.
  * Returns the party and the one time its raw join secret exists.
  */
-async function create(user, { agent_stream_id: agentStreamId, vod_id: vodId = null, title, listed = false } = {}) {
+async function create(user, input = {}) {
+    if (input && input.media !== undefined && input.media !== null && input.media !== '') return await createMedia(user, input);
+    return await createAgentStream(user, input);
+}
+
+async function createAgentStream(user, { agent_stream_id: agentStreamId, vod_id: vodId = null, title, listed = false } = {}) {
     if (!user) fail(401, 'party.sign_in', 'Sign in to start a watch party');
     if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(user.subject_id || ''))) fail(409, 'party.no_subject', 'This account has no OpenVibe subject yet; sign in again');
     const streamId = String(agentStreamId || '');
@@ -103,8 +178,37 @@ async function create(user, { agent_stream_id: agentStreamId, vod_id: vodId = nu
     return { party: view(row, party, { rawSecret: raw }), roomId: id, join_secret: raw };
 }
 
+/**
+ * Start a party on OpenVibe media: the room, the party row, the room's clock seeded paused at 0 with that media, and
+ * the remote granted to the person who started it. The join link is openvibe.party/p/<slug>?k=…, and the secret is
+ * in this answer only.
+ */
+async function createMedia(user, { media, source_url: sourceUrl = null, title, listed = false } = {}) {
+    if (!user) fail(401, 'party.sign_in', 'Sign in to start a watch party');
+    if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(user.subject_id || ''))) fail(409, 'party.no_subject', 'This account has no OpenVibe subject yet; sign in again');
+    const chosen = mediaOf(media);
+    const source = sourceUrlOf(sourceUrl);
+    const name = titleOf(title);
+    const raw = secret();
+    const roomName = (name.length < 3 ? `Party: ${name}` : name).slice(0, 40);
+    const slug = `party-${crypto.randomBytes(4).toString('hex')}`;
+    const room = await rooms.create(user, { name: roomName, slug, kind: 'party', visibility: 'private', topic: name, party: true });
+    const id = room.id;
+    await db.run(
+        `INSERT INTO room_parties (room_id, agent_stream_id, vod_id, host_user_id, host_subject, mode, playing, listed, join_secret_hash, party_kind, media, source_url)
+         VALUES (?, NULL, NULL, ?, ?, 'vod', false, ?, ?, 'media', ?, ?)`,
+        [id, user.id, user.subject_id || '', !!listed, sha256(raw), JSON.stringify(chosen), source]
+    );
+    const shared = { id, slug: room.slug };
+    await syncClock.set(shared, user.subject_id, { media: chosen, position_ms: 0, rate: 1, paused: true });
+    await controlLease.take(shared, user.subject_id, { watchers: [] });
+    const row = await db.get('SELECT * FROM rooms WHERE id = ?', [id]);
+    const party = await db.get('SELECT * FROM room_parties WHERE room_id = ?', [id]);
+    return { party: view(row, party, { rawSecret: raw }), roomId: id, join_secret: raw };
+}
+
 async function bySlug(slug) {
-    const row = await db.get('SELECT r.*, p.room_id AS party_room_id, p.agent_stream_id, p.vod_id, p.host_user_id, p.host_subject, p.mode, p.position_s, p.playing, p.position_at, p.listed, p.join_secret_hash, p.ended_at, p.created_at AS party_created_at FROM rooms r JOIN room_parties p ON p.room_id = r.id WHERE r.slug = ?', [String(slug || '').toLowerCase()]);
+    const row = await db.get('SELECT r.*, p.room_id AS party_room_id, p.agent_stream_id, p.vod_id, p.host_user_id, p.host_subject, p.mode, p.position_s, p.playing, p.position_at, p.listed, p.join_secret_hash, p.ended_at, p.created_at AS party_created_at, p.party_kind, p.media, p.source_url FROM rooms r JOIN room_parties p ON p.room_id = r.id WHERE r.slug = ?', [String(slug || '').toLowerCase()]);
     return row || null;
 }
 
@@ -114,6 +218,7 @@ function partyOf(row) {
         host_user_id: row.host_user_id, host_subject: row.host_subject, mode: row.mode,
         position_s: row.position_s, playing: row.playing, position_at: row.position_at, listed: row.listed,
         join_secret_hash: row.join_secret_hash, ended_at: row.ended_at, created_at: row.party_created_at,
+        party_kind: row.party_kind || 'agent_stream', media: row.media, source_url: row.source_url,
     } : null;
 }
 
@@ -145,6 +250,7 @@ async function joinWithLink(row, party, user, key) {
 /** The host moves the VOD (or pauses it). Live parties follow the live edge and take no position. */
 async function setSync(row, party, user, { position_s: position, playing } = {}) {
     if (!user || Number(user.id) !== Number(party.host_user_id)) fail(403, 'party.not_host', 'Only the host moves the party');
+    if (kindOfParty(party) === 'media') fail(409, 'party.clock', 'A media party follows the room\'s shared clock; the remote moves it');
     if (party.mode === 'live') fail(409, 'party.live_edge', 'A live party follows the live edge; there is no position to set');
     let pos = party.position_s;
     if (position !== undefined) {
@@ -174,5 +280,5 @@ async function end(row, party, user) {
 
 module.exports = {
     AGENT_STREAM_RE, MAX_TITLE, PartyError,
-    create, bySlug, partyOf, view, syncOf, mayView, joinWithLink, setSync, count, end, keyMatches,
+    create, createMedia, createAgentStream, bySlug, partyOf, view, detail, syncOf, mayView, joinWithLink, setSync, count, end, keyMatches,
 };

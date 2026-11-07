@@ -141,8 +141,9 @@ router.get('/:slug/party', optionalAuth, async (req, res) => {
         const row = await parties.bySlug(req.params.slug);
         const party = parties.partyOf(row);
         if (!row || !party) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
-        if (!(await parties.mayView(row, party, req.user || null, req.query.k))) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
-        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ party: parties.view(row, party) });
+        const out = await parties.detail(row, party, { user: req.user || null, key: req.query.k });
+        if (!out) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
+        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ party: out });
     } catch (err) { send(res, err); }
 });
 

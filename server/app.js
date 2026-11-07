@@ -53,6 +53,8 @@ function getAllowedOrigins() {
     }
     allowed.add(normalizeOrigin(config.networkUrl) || 'https://openvibe.network');
     allowed.add(normalizeOrigin(config.web.baseUrl) || 'https://openvibe.chat');
+    // openvibe.party is Chat's other host (Watch Together): its page's socket is an upgrade from this origin.
+    allowed.add(normalizeOrigin(config.party && config.party.baseUrl) || 'https://openvibe.party');
     allowed.add('https://openvibe.games');
     allowed.add('https://openvibe.tools');
     if (!config.isProduction) {
@@ -339,6 +341,8 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // The chat plays queue of a room (Agent Streams S6): the votes and the moderators' hand.
     app.use('/api/chat/rooms', require('./chat/play-queue-routes').member);
     app.use('/api/chat/rooms', require('./rooms/routes'));
+    // Watch parties' own API (server/rooms/party-routes.js): start a media party, read one a viewer may see.
+    app.use('/api/chat/parties', require('./rooms/party-routes'));
     app.use('/api/chat/vibe', require('./rooms/vibe-routes'));
     // Support inboxes (server/inbox/): the widget's visitor API, and the inbox's people.
     app.use('/api/chat/widget/inbox/:id', require('./inbox/routes').widget);
@@ -374,6 +378,11 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
         if (!config.calls.enabled) return next();
         limits.identify(req, res, () => callReads(req, res, () => callRoutes(req, res, next)));
     });
+
+    // openvibe.party, Watch Together's host: its pages, sign-in and assets (server/web/party-pages.js). Its own host
+    // only; every other request falls through to openvibe.chat's site below.
+    const party = require('./web/party-pages').createPartyRoutes({ config });
+    app.use((req, res, next) => (party.isPartyHost(req) ? party.router(req, res, next) : next()));
 
     // openvibe.chat, the site: pages, sign-in, the Frame's /shared/ files (server/web/).
     const webRoutes = require('./web/pages').createWebRoutes({ config });

@@ -204,6 +204,6 @@ function close() { _cache.clear(); _queues.clear(); }
 
 module.exports = {
     MAX_POSITION_MS, MAX_RATE, SyncError, set, get, evict, close,
-    // Exposed for the WS layer and its tests; the validation stays here.
-    _mediaOf: mediaOf, _positionOf: positionOf, _rateOf: rateOf, _pausedOf: pausedOf,
+    // Exposed for the WS layer, the party row and their tests; the validation stays here.
+    onOpenVibe, _mediaOf: mediaOf, _positionOf: positionOf, _rateOf: rateOf, _pausedOf: pausedOf,
 };

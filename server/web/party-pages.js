@@ -1,0 +1,197 @@
+'use strict';
+/**
+ * openvibe.party, Watch Together's host (Party watch v1, plan R1): Chat serves it beside openvibe.chat, so a party is
+ * a Chat room and its chat, socket, clock and remote already exist (server/rooms/parties.js, sync-clock.js,
+ * control-lease.js).
+ *
+ *   GET  /                    "Start a party": one field, paste any OpenVibe link (signed in; sign-in otherwise)
+ *   GET  /new?media=&title=   signed in: starts the party and 303s to /p/<slug>?k=<secret>; signed out: sign-in and
+ *                             back here. `source_url` (the page it was started from) is optional, as the API's is.
+ *   GET  /p/:slug?k=          the party page shell: the Shared Frame, a <main data-party="<slug>"> and the empty
+ *                             regions the page's own script fills (server/rooms/parties.js keeps the data), with the
+ *                             party view as JSON in #party-data. The link's secret joins the person and is never
+ *                             echoed into the page.
+ *   /auth/*                   sign-in with OpenVibe.Network: its own host-only session and its own redirect URI on
+ *                             Chat's OAuth client (<party base>/auth/callback, in Network's seed)
+ *   /shared/*, /web/*         the Frame's scripts and the site's stylesheet, the same files openvibe.chat serves
+ *
+ * A stranger without the link (or with a wrong secret) gets the missing-room 404, exactly as on openvibe.chat.
+ */
+const crypto = require('crypto');
+const express = require('express');
+const path = require('path');
+const cache = require('openvibe-shared/cache-policy');
+const ovServe = require('openvibe-shared/serve');
+const { renderPage, contentSecurityPolicy, esc } = require('./layout');
+const { createSessionRoutes } = require('./session');
+const { viewerOf } = require('./pages');
+const parties = require('../rooms/parties');
+
+const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public', 'web');
+const SITE = Object.freeze({ name: 'OpenVibe.Party', service: 'party', links: [{ key: 'start', label: 'Start a party', href: '/' }] });
+const DESCRIPTION = 'Watch together: start a party on any OpenVibe video and everyone watches in step, with the chat beside it.';
+
+const escJson = (value) => JSON.stringify(value).replace(/</g, '\\u003c');
+
+/** A title out of the link someone pasted: the last path segment, or the host's name. */
+function titleFromMedia(media) {
+    try {
+        const u = new URL(media);
+        const last = decodeURIComponent((u.pathname.split('/').filter(Boolean).pop() || ''));
+        const words = last.replace(/[-_]+/g, ' ').replace(/\.(mp4|webm|m3u8|mov|mkv|m4v)$/i, '').replace(/\s+/g, ' ').trim();
+        return (words || `${u.hostname} party`).slice(0, 80);
+    } catch { return 'Watch party'; }
+}
+
+function createPartyRoutes({ config }) {
+    const router = express.Router();
+    const base = String(config.party.baseUrl).replace(/\/+$/, '');
+    const wsOrigin = base.replace(/^http/, 'ws');
+    const partyConfig = {
+        ...config,
+        baseUrl: base,
+        web: { ...config.web, baseUrl: base },
+        oauth: { ...config.oauth, redirectUri: config.party.redirectUri, scope: config.party.scope },
+    };
+    const viewers = { resolve: async (req) => await viewerOf(req) };
+
+    const hostOf = (req) => String((req.headers && req.headers.host) || '').toLowerCase().replace(/:\d+$/, '');
+    const isPartyHost = (req) => hostOf(req) === config.party.host || hostOf(req) === `www.${config.party.host}`;
+
+    const page = async (req, res, status, o) => {
+        const actor = o.actor || await viewerOf(req);
+        const nonce = crypto.randomBytes(16).toString('base64');
+        res.status(status)
+            .set('Cache-Control', cache.htmlHeaders({ private: true }))
+            .set('Content-Security-Policy', contentSecurityPolicy(nonce, wsOrigin))
+            .type('html')
+            .send(renderPage({ config: partyConfig, actor, nonce, site: SITE, ...o }));
+    };
+
+    router.use('/auth', createSessionRoutes({ config: partyConfig, viewers }));
+    router.use('/shared', ovServe.handler());
+    router.use('/web', express.static(PUBLIC_DIR, { index: false, setHeaders(res) { res.setHeader('Cache-Control', 'public, max-age=300'); } }));
+
+    const notice = (kind, text) => `<p class="oc-notice oc-${kind}" role="${kind === 'error' ? 'alert' : 'status'}">${esc(text)}</p>`;
+
+    router.get('/', async (req, res) => {
+        const actor = await viewerOf(req);
+        const signedIn = actor.kind === 'user';
+        const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
+        const form = signedIn
+            ? `<form class="oc-party-start" method="get" action="/new">
+<label for="party-media">Paste an OpenVibe link</label>
+<input id="party-media" name="media" type="url" inputmode="url" autocomplete="off" required placeholder="https://openvibe.live/v/…">
+<button type="submit" class="oc-button">Start a party</button>
+</form>`
+            : `<p class="oc-party-signin"><a class="oc-button" href="/auth/login?next=%2F">Sign in with OpenVibe</a> to start a party.</p>`;
+        await page(req, res, 200, {
+            actor, title: 'Watch together', path: '/', robots: 'index, follow', footer: 'full',
+            description: DESCRIPTION,
+            body: `<header class="oc-party-hero">
+<h1>Watch together</h1>
+<p class="oc-lede">Start a party on any OpenVibe video: everyone watches the same moment, and the conversation is right there.</p>
+</header>
+${error}
+${form}`,
+        });
+    });
+
+    // GET /new asks before it starts anything: a link (Watch together on a video page, or one pasted anywhere) must never
+    // start a party in a signed-in person's name on its own. The page names what will play; Start is a same-origin POST.
+    router.get('/new', async (req, res) => {
+        const actor = await viewerOf(req);
+        if (actor.kind !== 'user') return res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+        const media = String(req.query.media || '').trim();
+        if (!media) return res.redirect(303, `/?error=${encodeURIComponent('Paste an OpenVibe link to start a party')}`);
+        const title = String(req.query.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || titleFromMedia(media);
+        const source = req.query.source_url ? String(req.query.source_url).slice(0, 2048) : '';
+        let host = '';
+        try { host = new URL(media).hostname; } catch { host = ''; }
+        await page(req, res, 200, {
+            actor, title: 'Start a party', path: '/new', robots: 'noindex, nofollow', footer: 'compact',
+            body: `<section class="oc-party-confirm">
+<h1>Start a watch party?</h1>
+<p class="oc-lede"><strong>${esc(title)}</strong>${host ? ` <span class="oc-muted">from ${esc(host)}</span>` : ''}</p>
+<p class="oc-muted">Everyone you invite watches the same moment, with a chat beside it. You hold the remote, and you can pass it on.</p>
+<form method="post" action="/new">
+<input type="hidden" name="media" value="${esc(media)}">
+<input type="hidden" name="title" value="${esc(title)}">
+${source ? `<input type="hidden" name="source_url" value="${esc(source)}">` : ''}
+<button type="submit" class="oc-button">Start the party</button> <a href="/" class="oc-muted">Not now</a>
+</form>
+</section>`,
+        });
+    });
+
+    router.post('/new', express.urlencoded({ extended: false, limit: '8kb' }), async (req, res) => {
+        const actor = await viewerOf(req);
+        if (actor.kind !== 'user') return res.redirect(303, '/auth/login?next=%2F');
+        // Started from this site only: a cookie-carrying POST from anywhere else is refused.
+        const origin = String(req.get('origin') || '');
+        const fetchSite = String(req.get('sec-fetch-site') || '');
+        if ((origin && origin !== base) || (fetchSite && fetchSite !== 'same-origin')) return res.status(403).type('text/plain').send('Start a party from openvibe.party itself.');
+        const media = String((req.body && req.body.media) || '').trim();
+        if (!media) return res.redirect(303, `/?error=${encodeURIComponent('Paste an OpenVibe link to start a party')}`);
+        const title = String((req.body && req.body.title) || '').replace(/\s+/g, ' ').trim().slice(0, 200) || titleFromMedia(media);
+        try {
+            const out = await parties.create(actor.user, { media, source_url: (req.body && req.body.source_url) || null, title });
+            return res.redirect(303, `/p/${encodeURIComponent(out.party.id)}?k=${encodeURIComponent(out.join_secret)}`);
+        } catch (err) {
+            const message = err instanceof parties.PartyError ? err.message : 'That party could not be started';
+            return res.redirect(303, `/?error=${encodeURIComponent(message)}`);
+        }
+    });
+
+    const notFound = async (req, res) => page(req, res, 404, {
+        title: 'Page not found', path: req.path, robots: 'noindex, nofollow', footer: 'compact',
+        body: `<h1>This party is not here</h1><p class="oc-muted">The link may be wrong, or the party may have ended.</p><p><a class="oc-button" href="/">Start a party</a></p>`,
+    });
+
+    router.get('/p/:slug', async (req, res, next) => {
+        try {
+            const actor = await viewerOf(req);
+            const user = actor.kind === 'user' ? actor.user : null;
+            const row = await parties.bySlug(req.params.slug);
+            const party = parties.partyOf(row);
+            const key = req.query.k;
+            // The link's secret is the invitation: joining it here is the same path the API's join uses. A person who
+            // is already a member is simply let in. An ended party (or a banned account) still shows its page.
+            if (row && party && user && parties.keyMatches(party, key)) {
+                try { await parties.joinWithLink(row, party, user, key); } catch (err) {
+                    if (!(err instanceof parties.PartyError)) throw err;
+                    if (err.status === 404) return await notFound(req, res);
+                }
+            }
+            const out = row && party ? await parties.detail(row, party, { user, key }) : null;
+            if (!out) return await notFound(req, res);
+            await page(req, res, 200, {
+                actor, title: out.title, path: `/p/${out.id}`, robots: 'noindex, nofollow', footer: 'compact',
+                description: 'Watch together on OpenVibe.',
+                mainAttrs: `data-party="${esc(out.id)}"`, party: true, wide: true,
+                body: `<article class="oc-party">
+<header class="oc-party-head"><h1>${esc(out.title)}</h1><p class="oc-muted">Started by ${esc(out.host_name || 'someone')}</p></header>
+<div class="oc-party-stage" data-party-stage aria-label="The video"></div>
+<div class="oc-party-people" data-party-people aria-label="People here"></div>
+<div class="oc-party-chat" data-party-chat aria-label="Chat"></div>
+<div class="oc-party-remote" data-party-remote aria-label="The remote"></div>
+<div class="oc-party-invite" data-party-invite aria-label="Invite"></div>
+</article>
+<script type="application/json" id="party-data">${escJson({ party: out })}</script>`,
+            });
+        } catch (err) { next(err); }
+    });
+
+    // The party host's own 404 for a browser (the same words as Chat's), and the JSON 404 for anything else.
+    router.use((req, res, next) => {
+        if ((req.method !== 'GET' && req.method !== 'HEAD') || /^\/(api|internal|ws|auth|shared|web)(\/|$)/.test(req.path)) return next();
+        return page(req, res, 404, {
+            title: 'Page not found', path: req.path, robots: 'noindex, nofollow', footer: 'compact',
+            body: `<h1>Page not found</h1><p><a href="/">Start a party</a></p>`,
+        }).catch(next);
+    });
+
+    return { router, isPartyHost };
+}
+
+module.exports = { createPartyRoutes, titleFromMedia, SITE };

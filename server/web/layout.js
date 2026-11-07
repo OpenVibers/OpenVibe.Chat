@@ -57,12 +57,12 @@ function links(o) {
     return LINKS.map((l) => ({ key: l.key, href: l.href, icon: l.icon, more: l.more, label: counts[l.key] > 0 ? `${l.label} (${counts[l.key] > 99 ? '99+' : counts[l.key]})` : l.label }));
 }
 
-function navConfig(o, config) {
+function navConfig(o, config, site = {}, siteLinks = null) {
     return {
-        service: 'chat',
+        service: site.service || 'chat',
         apiBase: NETWORK_URL,
-        links: links(o).map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: o.active === l.key })),
-        history: { type: 'page', title: o.title || SITE_NAME },
+        links: (siteLinks || site.links || links(o)).map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: o.active === l.key })),
+        history: { type: 'page', title: o.title || site.name || SITE_NAME },
         silentLogin: `${config.web.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
         loginUrl: `/auth/login?next=${encodeURIComponent(o.path || '/')}`,
@@ -78,7 +78,7 @@ function navConfig(o, config) {
  * pictures, avatars), and connections go to this site, Network (sign-in, the Frame) and Events (release and
  * notification streams). Checked on production pages with the policy attached before shipping (2026-10-17).
  */
-function contentSecurityPolicy(nonce) {
+function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat') {
     return [
         "default-src 'self'",
         // 'inline-speculation-rules': the shared navbar's prefetch rules (Shared 4.70) run under the nonce policy too.
@@ -87,7 +87,7 @@ function contentSecurityPolicy(nonce) {
         "img-src 'self' data: blob: https:",
         "media-src 'self' blob: https:",
         "font-src 'self' data:",
-        "connect-src 'self' wss://openvibe.chat https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com",
+        `connect-src 'self' ${wsOrigin} https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com`,
         // A workspace room's shared screen: a screen share page from OpenVibe.Bot (rooms.screen_url).
         "frame-src 'self' https://openvibe.bot",
         "frame-ancestors 'self'",
@@ -110,18 +110,25 @@ function contentSecurityPolicy(nonce) {
  * public/web's scripts by name, e.g. support.js), footer ('full', the default, on front pages, directories and docs;
  * 'compact', one quiet line, on pages people work in: a room, a channel, a conversation, a task, settings),
  * inlineStyles (CSS the page needs and the site's stylesheet cannot hold: the rule that shows the picked block of a
- * pick block is written for the page, because there is one per block)
+ * pick block is written for the page, because there is one per block), site ({ name, service, links }: a page served
+ * on another of Chat's hosts, openvibe.party, in the same Frame under its own name), mainAttrs (attributes for the
+ * <main>, e.g. openvibe.party's data-party="<slug>"), party (a watch party's page: Shared's player.css/player.js and
+ * ov-sync.js, then public/web/party.css and party.js, Opus's design).
  */
 function renderPage(o) {
     const { config } = o;
     if (!o.robots) throw new TypeError('renderPage needs explicit robots');
+    const site = o.site || {};
+    const siteName = site.name || SITE_NAME;
+    const siteService = site.service || 'chat';
+    const siteLinks = site.links || links(o);
     // fullTitle: a page that names the site itself (the front page) takes no suffix.
-    const title = o.fullTitle || (o.title ? `${o.title} · ${SITE_NAME}` : SITE_NAME);
+    const title = o.fullTitle || (o.title ? `${o.title} · ${siteName}` : siteName);
     let head = sharedSeo.headTags({
         title, description: o.description || DEFAULT_DESCRIPTION, canonical: `${config.web.baseUrl}${o.path || '/'}`,
-        robots: o.robots, siteName: SITE_NAME, type: 'website', jsonLd: o.jsonLd,
+        robots: o.robots, siteName, type: 'website', jsonLd: o.jsonLd,
         // Indexable pages share the site's card (openvibe-shared/social); private ones advertise nothing.
-        image: /^index/.test(o.robots) ? social.url('chat') : undefined, imageAlt: /^index/.test(o.robots) ? SITE_NAME : undefined,
+        image: /^index/.test(o.robots) ? social.url('chat') : undefined, imageAlt: /^index/.test(o.robots) ? siteName : undefined,
     });
     // A public page names its Markdown twin and the site's llms.txt (openvibe-shared/agent-layer); gated and
     // private pages have no twin and advertise none.
@@ -149,6 +156,7 @@ ${(o.inlineStyles || []).map((css) => `<style>${css}</style>`).join('\n')}
 ${o.kit ? `<link rel="stylesheet" href="${ovServe.url('kit.css')}">\n<link rel="stylesheet" href="${ovServe.url('thread.css')}">` : ''}
 ${o.app ? `<link rel="stylesheet" href="${asset(o.appStyle || 'vibe.css')}">` : ''}
 ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
+${o.party ? `<link rel="stylesheet" href="${ovServe.url('player.css')}">\n<link rel="stylesheet" href="${asset('party.css')}">\n<script src="${ovServe.url('player.js')}" defer></script>\n<script src="${ovServe.url('ov-sync.js')}" defer></script>\n<script src="${asset('party.js')}" defer></script>` : ''}
 ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join('\n')}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>
@@ -162,14 +170,14 @@ ${o.app ? `<script src="${asset('vibe-md.js')}" defer></script>\n<script src="${
 <body class="${[cls, o.app ? 'oc-app-body' : ''].filter(Boolean).join(' ')}"${scale}>
 <a class="oc-skip" href="#main">Skip to content</a>
 <div id="navbar-mount"></div>
-${frame.noscriptNav({ name: SITE_NAME, home: '/', links: links(o).map(({ label, href }) => ({ label, href })) })}
-<main id="main" class="${o.app ? 'vb-wrap' : `oc-main${o.wide ? ' oc-main--wide' : ''}`}">
+${frame.noscriptNav({ name: siteName, home: '/', links: siteLinks.map(({ label, href }) => ({ label, href })) })}
+<main id="main" class="${o.app ? 'vb-wrap' : `oc-main${o.wide ? ' oc-main--wide' : ''}`}"${o.mainAttrs ? ` ${o.mainAttrs}` : ''}>
 <noscript><p class="oc-account">${who}</p></noscript>
 ${o.body || ''}
 </main>
-${o.app ? '' : frame.footer({ service: 'chat', variant: footerVariant, updates: '/updates' })}
+${o.app ? '' : frame.footer({ service: siteService, variant: footerVariant, updates: '/updates' })}
 <script>
-window.__OV_PAGE = ${JSON.stringify({ navbar: navConfig(o, config), footer: { service: 'chat', variant: footerVariant, mount: '#ov-footer', brandName: SITE_NAME, updates: '/updates' }, chat: o.page || null }).replace(/</g, '\\u003c')};
+window.__OV_PAGE = ${JSON.stringify({ navbar: navConfig(o, config, site, siteLinks), footer: { service: siteService, variant: footerVariant, mount: '#ov-footer', brandName: siteName, updates: '/updates' }, chat: o.page || null }).replace(/</g, '\\u003c')};
 document.addEventListener('DOMContentLoaded', function () {
   try { if (window.OpenVibeNavbar) OpenVibeNavbar.init(window.__OV_PAGE.navbar); } catch (e) { /* the Frame is optional */ }
   try { if (window.OpenVibeFooter) OpenVibeFooter.init(window.__OV_PAGE.footer); } catch (e) { /* */ }
