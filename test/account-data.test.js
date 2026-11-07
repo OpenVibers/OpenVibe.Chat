@@ -40,9 +40,17 @@ t('export, then erase and confirm', async () => {
             exempt: {
                 account_data_events: 'the ledger of requests itself: which export and deletion Chat applied',
                 hidden_relay_users: 'a moderation record of a relay account hidden from a channel, kept for accountability',
+<<<<<<< HEAD
                 room_member_timeouts: 'a moderation record of a room timeout, kept for accountability like moderation_actions',
                 agent_play_requests: "a chat plays request of a room: it belongs to the person who asked and to the room's queue, and the room's messages are exported",
                 agent_play_votes: "a vote in a chat plays queue: it belongs to the person who voted and to the room",
+=======
+                agent_play_requests: "a chat plays request of a room: it belongs to the person who asked and to the room's queue, and the room's messages are exported",
+                agent_play_votes: "a vote in a chat plays queue: it belongs to the person who voted and to the room",
+                agent_room_poll_votes: 'a vote in a room poll: it belongs to the person who voted and to the room',
+                room_member_timeouts: 'a timeout of a room member: it belongs to the person and to the room',
+                room_message_reactions: 'a reaction on a message: it belongs to the person who reacted and to the room',
+>>>>>>> 108e62a (Agent Streams S6: the play queue tables, the exempt lists and the phone grid)
             },
         });
         assert.deepStrictEqual(missing, [], `a table with a person column is neither covered nor exempted: ${missing.join(', ')}`);
