@@ -42,7 +42,7 @@ const SCHEMA = Object.freeze({
             type: 'string', title: 'Amazon Polly access key ID', 'x-group': GROUP,
             description: 'The access key ID of an AWS user that may call Polly. Together with its secret it turns on the Polly voices in chat; the ID alone does nothing.',
             'x-owner-input': {
-                group: GROUP,
+                group: 'voices',
                 unlocks: 'The Amazon Polly voices can speak in chat (Joanna, Matthew, the neural and long-form voices).',
                 get_it_at: 'https://console.aws.amazon.com/iam/home#/security_credentials',
                 get_it_how: 'Open an IAM user that may call Polly, create an access key, and paste the ID and its secret here.',
@@ -54,7 +54,7 @@ const SCHEMA = Object.freeze({
             type: 'string', title: 'Amazon Polly secret access key', 'x-group': GROUP,
             description: 'The secret that goes with the access key ID. Entered here it is locked and never shown again; enter it again if you make a new key in AWS.',
             'x-owner-input': {
-                group: GROUP,
+                group: 'voices',
                 unlocks: 'The Amazon Polly voices can speak; without the secret the access key ID cannot sign a request.',
                 get_it_at: 'https://console.aws.amazon.com/iam/home#/security_credentials',
                 get_it_how: 'It is shown once when the access key is created. Copy it then; AWS cannot show it again.',
@@ -67,7 +67,7 @@ const SCHEMA = Object.freeze({
             default: 'us-east-1',
             description: 'The AWS region the Polly requests are signed for. Pick the region nearest the people listening; voices are the same everywhere, the latency is not.',
             'x-owner-input': {
-                group: GROUP,
+                group: 'voices',
                 unlocks: 'Amazon Polly requests go to the region you choose instead of the default.',
                 get_it_at: 'https://console.aws.amazon.com/polly/home',
                 get_it_how: 'The region picker at the top right of the AWS console shows the region ID, such as us-east-1.',
@@ -80,7 +80,7 @@ const SCHEMA = Object.freeze({
             type: 'string', title: 'Google Cloud service account key', 'x-group': GROUP,
             description: 'The JSON key of a Google Cloud service account with the text-to-speech permission. Entered here it is locked; it turns on the Google Cloud voices (Standard, WaveNet, Neural2, Studio and Journey).',
             'x-owner-input': {
-                group: GROUP,
+                group: 'voices',
                 unlocks: 'The Google Cloud voices can speak in chat, including WaveNet, Neural2, Studio and Journey.',
                 get_it_at: 'https://console.cloud.google.com/iam-admin/serviceaccounts',
                 get_it_how: 'Create a service account, give it the Cloud Text-to-Speech User role, add a JSON key, and paste the downloaded JSON here.',
