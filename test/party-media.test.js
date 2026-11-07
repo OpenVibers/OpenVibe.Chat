@@ -199,6 +199,9 @@ t('openvibe.party: the start form, sign-in, and /new', async () => {
     assert.strictEqual(data.party.clock.paused, true);
     assert.strictEqual(data.party.lease.holder.subject, ann.subject_id);
     assert.ok(!shell.text.includes(madeKey), 'the link\'s secret is not echoed into the page');
+    // The navbar's Messages count calls Chat's DM API from this host: the page's CSP lets it.
+    const csp = String(shell.headers['content-security-policy'] || '');
+    assert.match(csp, /connect-src[^;]*https:\/\/openvibe\.chat(\s|;|$)/, 'connect-src names https://openvibe.chat');
     // The page loads Opus's page and Shared's player and clock.
     for (const file of ['/web/party.js', '/web/party.css', '/shared/ov-sync.js', '/shared/player.js', '/shared/player.css']) {
         assert.ok(shell.text.includes(file), `${file} is on the page`);

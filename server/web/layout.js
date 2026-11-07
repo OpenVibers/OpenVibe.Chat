@@ -87,7 +87,9 @@ function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat') {
         "img-src 'self' data: blob: https:",
         "media-src 'self' blob: https:",
         "font-src 'self' data:",
-        `connect-src 'self' ${wsOrigin} https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com`,
+        // https://openvibe.chat: on Chat's other host (openvibe.party) the shared navbar's Messages count and the Dock
+        // still call Chat's DM API there (openvibe.party is on the credentialed CORS list, server/app.js).
+        `connect-src 'self' ${wsOrigin} https://openvibe.chat https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com`,
         // A workspace room's shared screen: a screen share page from OpenVibe.Bot (rooms.screen_url).
         "frame-src 'self' https://openvibe.bot",
         "frame-ancestors 'self'",
