@@ -11,6 +11,7 @@
 'use strict';
 
 const express = require('express');
+const CONFIG_CAPABILITY = 'chat.config.manage';
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -135,7 +136,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // or x-danger change needs X-OV-Fresh: 1, and the test route synthesizes one short line without echoing a key.
     if (settings) {
         app.use('/internal/config', express.json({ limit: '64kb' }));
-        settings.mount(app, { guard: serviceAuth.guard('chat.config.manage') });
+        settings.mount(app, { guard: serviceAuth.guard(CONFIG_CAPABILITY) });
     }
 
     // OpenVibe.Services reads Chat's room summaries on loopback (ADR-048); the service guard

@@ -41,7 +41,7 @@ t('the namespace publishes every voice field with owner words', async () => {
     for (const [key, p] of Object.entries(props)) {
         assert.ok(p.title && p.title.length >= 3, `${key} has a plain title`);
         assert.ok(p.description && p.description.length >= 30, `${key} has a 30+ character description`);
-        assert.ok(p['x-owner-input'] && p['x-owner-input'].group === 'Voices', `${key} has an owner group`);
+        assert.ok(p['x-owner-input'] && p['x-owner-input'].group === 'voices', `${key} has an owner group`);
         assert.ok(typeof p['x-owner-input'].unlocks === 'string' && p['x-owner-input'].unlocks.length > 20, `${key} says what it unlocks`);
         assert.ok(/^https:\/\//.test(p['x-owner-input'].get_it_at), `${key} says where to get it`);
         assert.ok(p['x-required-for'], `${key} names the feature that waits on it`);
