@@ -112,7 +112,8 @@ function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat') {
  * inlineStyles (CSS the page needs and the site's stylesheet cannot hold: the rule that shows the picked block of a
  * pick block is written for the page, because there is one per block), site ({ name, service, links }: a page served
  * on another of Chat's hosts, openvibe.party, in the same Frame under its own name), mainAttrs (attributes for the
- * <main>, e.g. openvibe.party's data-party="<slug>").
+ * <main>, e.g. openvibe.party's data-party="<slug>"), party (a watch party's page: Shared's player.css/player.js and
+ * ov-sync.js, then public/web/party.css and party.js, Opus's design).
  */
 function renderPage(o) {
     const { config } = o;
@@ -155,6 +156,7 @@ ${(o.inlineStyles || []).map((css) => `<style>${css}</style>`).join('\n')}
 ${o.kit ? `<link rel="stylesheet" href="${ovServe.url('kit.css')}">\n<link rel="stylesheet" href="${ovServe.url('thread.css')}">` : ''}
 ${o.app ? `<link rel="stylesheet" href="${asset(o.appStyle || 'vibe.css')}">` : ''}
 ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
+${o.party ? `<link rel="stylesheet" href="${ovServe.url('player.css')}">\n<link rel="stylesheet" href="${asset('party.css')}">\n<script src="${ovServe.url('player.js')}" defer></script>\n<script src="${ovServe.url('ov-sync.js')}" defer></script>\n<script src="${asset('party.js')}" defer></script>` : ''}
 ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join('\n')}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>

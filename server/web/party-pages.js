@@ -97,14 +97,45 @@ ${form}`,
         });
     });
 
+    // GET /new asks before it starts anything: a link (Watch together on a video page, or one pasted anywhere) must never
+    // start a party in a signed-in person's name on its own. The page names what will play; Start is a same-origin POST.
     router.get('/new', async (req, res) => {
         const actor = await viewerOf(req);
         if (actor.kind !== 'user') return res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
         const media = String(req.query.media || '').trim();
         if (!media) return res.redirect(303, `/?error=${encodeURIComponent('Paste an OpenVibe link to start a party')}`);
         const title = String(req.query.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || titleFromMedia(media);
+        const source = req.query.source_url ? String(req.query.source_url).slice(0, 2048) : '';
+        let host = '';
+        try { host = new URL(media).hostname; } catch { host = ''; }
+        await page(req, res, 200, {
+            actor, title: 'Start a party', path: '/new', robots: 'noindex, nofollow', footer: 'compact',
+            body: `<section class="oc-party-confirm">
+<h1>Start a watch party?</h1>
+<p class="oc-lede"><strong>${esc(title)}</strong>${host ? ` <span class="oc-muted">from ${esc(host)}</span>` : ''}</p>
+<p class="oc-muted">Everyone you invite watches the same moment, with a chat beside it. You hold the remote, and you can pass it on.</p>
+<form method="post" action="/new">
+<input type="hidden" name="media" value="${esc(media)}">
+<input type="hidden" name="title" value="${esc(title)}">
+${source ? `<input type="hidden" name="source_url" value="${esc(source)}">` : ''}
+<button type="submit" class="oc-button">Start the party</button> <a href="/" class="oc-muted">Not now</a>
+</form>
+</section>`,
+        });
+    });
+
+    router.post('/new', express.urlencoded({ extended: false, limit: '8kb' }), async (req, res) => {
+        const actor = await viewerOf(req);
+        if (actor.kind !== 'user') return res.redirect(303, '/auth/login?next=%2F');
+        // Started from this site only: a cookie-carrying POST from anywhere else is refused.
+        const origin = String(req.get('origin') || '');
+        const fetchSite = String(req.get('sec-fetch-site') || '');
+        if ((origin && origin !== base) || (fetchSite && fetchSite !== 'same-origin')) return res.status(403).type('text/plain').send('Start a party from openvibe.party itself.');
+        const media = String((req.body && req.body.media) || '').trim();
+        if (!media) return res.redirect(303, `/?error=${encodeURIComponent('Paste an OpenVibe link to start a party')}`);
+        const title = String((req.body && req.body.title) || '').replace(/\s+/g, ' ').trim().slice(0, 200) || titleFromMedia(media);
         try {
-            const out = await parties.create(actor.user, { media, source_url: req.query.source_url || null, title });
+            const out = await parties.create(actor.user, { media, source_url: (req.body && req.body.source_url) || null, title });
             return res.redirect(303, `/p/${encodeURIComponent(out.party.id)}?k=${encodeURIComponent(out.join_secret)}`);
         } catch (err) {
             const message = err instanceof parties.PartyError ? err.message : 'That party could not be started';
@@ -137,7 +168,7 @@ ${form}`,
             await page(req, res, 200, {
                 actor, title: out.title, path: `/p/${out.id}`, robots: 'noindex, nofollow', footer: 'compact',
                 description: 'Watch together on OpenVibe.',
-                mainAttrs: `data-party="${esc(out.id)}"`,
+                mainAttrs: `data-party="${esc(out.id)}"`, party: true, wide: true,
                 body: `<article class="oc-party">
 <header class="oc-party-head"><h1>${esc(out.title)}</h1><p class="oc-muted">Started by ${esc(out.host_name || 'someone')}</p></header>
 <div class="oc-party-stage" data-party-stage aria-label="The video"></div>

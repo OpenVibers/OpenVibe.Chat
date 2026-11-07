@@ -19,6 +19,18 @@
   if (!root || !dataEl) return;
   var data;
   try { data = JSON.parse(dataEl.textContent || '{}'); } catch (e) { return; }
+  // The shell (server/web/party-pages.js) sends { party: view }: the slug is its id, the host its subject.
+  if (data && data.party) {
+    var v = data.party;
+    data = {
+      slug: v.id, title: v.title, media: v.media, source_url: v.source_url, member: v.member,
+      host: { subject: v.host, name: v.host_name || null },
+      members: (v.members || []).map(function (m) { return { subject: m.subject, name: m.name }; }),
+      // The shell's join_url never carries the key (the secret is not echoed into a page): only a URL that has one
+      // is an invitation; otherwise the key kept from the link the person came by makes it (inviteUrl).
+      clock: v.clock || null, lease: v.lease || null, invite_url: v.join_url && /[?&]k=/.test(v.join_url) ? v.join_url : null,
+    };
+  }
 
   var slug = root.getAttribute('data-party') || data.slug;
   var region = function (name) { return root.querySelector('[data-party-' + name + ']'); };
@@ -74,16 +86,21 @@
   var floats = el('div', 'pt-floats');      // reactions rising over the picture
   floats.setAttribute('aria-hidden', 'true');
   frame.appendChild(veil); frame.appendChild(drift); frame.appendChild(floats);
-  var head = el('div', 'pt-head');
-  var title = el('h1', 'pt-title', data.title || 'Watch party');
-  head.appendChild(title);
+  // The shell's own header (the title and who started it) leads; without one, the page writes its own.
+  var shellHead = root.querySelector('.oc-party-head');
+  var head = shellHead || el('div', 'pt-head');
+  if (shellHead) head.classList.add('pt-head');
+  else head.appendChild(el('h1', 'pt-title', data.title || 'Watch party'));
   if (data.source_url) {
     var from = el('a', 'pt-from', 'Open on its page ↗');
     from.href = data.source_url; from.target = '_blank'; from.rel = 'noopener';
-    head.appendChild(from);
+    // Beside "Started by …" when the shell has that line; otherwise in the header.
+    var by = shellHead && shellHead.querySelector('p');
+    if (by) { by.appendChild(document.createTextNode(' · ')); by.appendChild(from); } else head.appendChild(from);
   }
   var bar = el('div', 'pt-bar');            // the remote pill and the reactions, under the picture
-  if (invite) head.appendChild(invite);
+  // Invite sits right after the title, on its line.
+  if (invite) { var h1 = head.querySelector('h1'); if (h1 && h1.nextSibling) head.insertBefore(invite, h1.nextSibling); else head.appendChild(invite); }
   stage.appendChild(head);
   stage.appendChild(frame);
   stage.appendChild(bar);

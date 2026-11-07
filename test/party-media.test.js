@@ -23,18 +23,19 @@ const MEDIA_URL = 'https://openvibe.media/vod/friday.webm';
 const api = (method, path, u, body) => h.http(method, `/api/chat${path}`, { token: u && u.token, body });
 
 /** A request with its own Host header (the party host is chosen by it, not by the port we reached). */
-function raw(method, path, { host = 'openvibe.party', cookie = null } = {}) {
+function raw(method, path, { host = 'openvibe.party', cookie = null, form = null, headers = {} } = {}) {
     return new Promise((resolve, reject) => {
+        const body = form ? new URLSearchParams(form).toString() : null;
         const req = http.request({
             host: '127.0.0.1', port: h.port, path, method,
-            headers: { host, ...(cookie ? { cookie } : {}) },
+            headers: { host, ...(cookie ? { cookie } : {}), ...(body ? { 'content-type': 'application/x-www-form-urlencoded', 'content-length': Buffer.byteLength(body) } : {}), ...headers },
         }, (res) => {
             let text = '';
             res.on('data', (c) => { text += c; });
             res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text }));
         });
         req.on('error', reject);
-        req.end();
+        req.end(body || undefined);
     });
 }
 const cookieOf = (u) => `ov_token=${u.token}`;
@@ -156,7 +157,15 @@ t('openvibe.party: the start form, sign-in, and /new', async () => {
     assert.strictEqual(signIn.status, 303);
     assert.match(String(signIn.headers.location), /^\/auth\/login\?next=%2Fnew%3Fmedia%3D/);
 
-    const made = await raw('GET', `/new?media=${encodeURIComponent(MEDIA_URL)}&title=${encodeURIComponent('Movie night')}`, { cookie: cookieOf(ann) });
+    // A link never starts a party by itself: GET /new asks, and only the page's own POST starts it.
+    const asks = await raw('GET', `/new?media=${encodeURIComponent(MEDIA_URL)}&title=${encodeURIComponent('Movie night')}`, { cookie: cookieOf(ann) });
+    assert.strictEqual(asks.status, 200, asks.text.slice(0, 200));
+    assert.match(asks.text, /Start a watch party\?/);
+    assert.match(asks.text, /<form method="post" action="\/new">/);
+    assert.match(asks.text, /name="media" value="https:\/\/openvibe\.media\/vod\/friday\.webm"/);
+    const crossSite = await raw('POST', '/new', { cookie: cookieOf(ann), form: { media: MEDIA_URL, title: 'Evil' }, headers: { origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' } });
+    assert.strictEqual(crossSite.status, 403, 'a cross-site POST starts nothing');
+    const made = await raw('POST', '/new', { cookie: cookieOf(ann), form: { media: MEDIA_URL, title: 'Movie night' }, headers: { origin: 'https://openvibe.party', 'sec-fetch-site': 'same-origin' } });
     assert.strictEqual(made.status, 303, made.text.slice(0, 200));
     const loc = String(made.headers.location);
     assert.match(loc, /^\/p\/party-[0-9a-f]{8}\?k=/);
@@ -188,6 +197,10 @@ t('openvibe.party: the start form, sign-in, and /new', async () => {
     assert.strictEqual(data.party.clock.paused, true);
     assert.strictEqual(data.party.lease.holder.subject, ann.subject_id);
     assert.ok(!shell.text.includes(madeKey), 'the link\'s secret is not echoed into the page');
+    // The page loads Opus's page and Shared's player and clock.
+    for (const file of ['/web/party.js', '/web/party.css', '/shared/ov-sync.js', '/shared/player.js', '/shared/player.css']) {
+        assert.ok(shell.text.includes(file), `${file} is on the page`);
+    }
 
     // A member who joined through the API without k sees the shell and still gets no key.
     const joined = await api('POST', `/rooms/${slug}/party/join`, cat, { k: madeKey });

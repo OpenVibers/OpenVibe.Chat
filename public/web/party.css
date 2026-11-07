@@ -1,7 +1,8 @@
 /* openvibe.party (Party watch v1, Opus's design). Desktop: the stage at 16:9 on the left, a rail on the right with the
    people over the room's chat. Phone: the stage full width, one row of faces, the chat filling the rest. No tabs.
    Colours follow the network theme (theme-loader.js) through Chat's tokens, with dark defaults. */
-main[data-party] {
+main[data-party] { max-width: none; padding: 0; }
+main[data-party] .oc-party {
   --pt-bg: var(--oc-bg, var(--bg-primary, #0a0f1c));
   --pt-panel: var(--oc-panel, var(--bg-secondary, #111a2c));
   --pt-panel-2: var(--oc-panel-2, var(--bg-tertiary, #16213a));
@@ -27,6 +28,9 @@ main[data-party] * { box-sizing: border-box; }
 main[data-party] [hidden] { display: none !important; }
 
 /* ── The stage ── */
+.oc-party .oc-party-head h1 { margin: 0; font-size: 1.15rem; font-weight: 800; letter-spacing: -.01em; line-height: 1.25; overflow-wrap: anywhere; flex: 1 1 auto; min-width: 0; }
+.oc-party .oc-party-head p { margin: 0; flex-basis: 100%; order: 3; font-size: 13px; }
+.oc-party .oc-party-head p .pt-from { font-size: inherit; }
 [data-party-stage] { grid-area: stage; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
 .pt-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
 .pt-title { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 1.15rem; font-weight: 800; letter-spacing: -.01em; line-height: 1.25; overflow-wrap: anywhere; text-wrap: balance; }
@@ -118,7 +122,7 @@ main[data-party] [hidden] { display: none !important; }
 
 /* ── Phones and narrow windows: one column, no tabs ── */
 @media (max-width: 900px) {
-  main[data-party] {
+  main[data-party] .oc-party {
     display: flex; flex-direction: column; gap: 10px; height: auto; min-height: calc(100dvh - var(--pt-nav));
     padding: 0 0 max(12px, env(safe-area-inset-bottom, 0px));
   }
