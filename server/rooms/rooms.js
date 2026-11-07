@@ -50,7 +50,7 @@ const permissions = require('../auth/permissions');
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$/;
 const RESERVED = new Set(['global', 'new', 'rooms', 'settings', 'messages', 'updates', 'auth', 'api', 'admin', 'staff', 'help', 'system', 'ice-servers']);
-const KINDS = ['community', 'call', 'system', 'agent_stream'];
+const KINDS = ['community', 'call', 'system', 'agent_stream', 'party'];
 const ROLES = ['owner', 'mod', 'speaker', 'participant', 'member', 'viewer', 'blocked'];
 /** The roles each kind has (owner is never assigned: a room has one, its creator). */
 const KIND_ROLES = Object.freeze({
@@ -58,15 +58,17 @@ const KIND_ROLES = Object.freeze({
     call: ['owner', 'mod', 'speaker', 'participant', 'viewer', 'blocked'],
     system: ['owner', 'mod', 'viewer', 'blocked'],
     agent_stream: ['owner', 'mod', 'member', 'viewer', 'blocked'],
+    party: ['owner', 'mod', 'member', 'viewer', 'blocked'],
 });
 /** What joining a public room makes you (a call room's owner picks one of JOIN_ROLES_CALL). */
-const JOIN_ROLE = Object.freeze({ community: 'member', call: 'participant', system: 'viewer', agent_stream: 'member' });
+const JOIN_ROLE = Object.freeze({ community: 'member', call: 'participant', system: 'viewer', agent_stream: 'member', party: 'member' });
 const JOIN_ROLES_CALL = ['speaker', 'participant', 'viewer'];
 const POSTERS = Object.freeze({
     community: new Set(['owner', 'mod', 'member']),
     call: new Set(['owner', 'mod', 'speaker', 'participant']),
     system: new Set(['owner', 'mod']),
     agent_stream: new Set(['owner', 'mod', 'member']),
+    party: new Set(['owner', 'mod', 'member']),
 });
 const TALKERS = new Set(['owner', 'mod', 'speaker']);
 const ROLE_ORDER = { owner: 0, mod: 1, speaker: 2, participant: 3, member: 4, viewer: 5, blocked: 6 };
@@ -144,7 +146,7 @@ async function access(room, user) {
     return { role, kind, read, post, join, talk, moderate, manage: !!user && !blocked && (role === 'owner' || staff) };
 }
 
-async function create(user, { name, slug, topic, visibility = 'public', kind = 'community', join_role = null } = {}) {
+async function create(user, { name, slug, topic, visibility = 'public', kind = 'community', join_role = null, party = false } = {}) {
     await ensureSchema();
     if (!user) fail(401, 'rooms.sign_in', 'Sign in to create a room');
     if (siteBanned(user)) fail(403, 'rooms.banned', 'Your account is banned from chat');
@@ -153,7 +155,8 @@ async function create(user, { name, slug, topic, visibility = 'public', kind = '
     const s = slug ? String(slug).toLowerCase().trim() : slugify(n);
     if (!SLUG_RE.test(s) || RESERVED.has(s)) fail(422, 'rooms.slug', 'Room addresses are 3 to 32 lowercase letters, numbers and dashes (and not a reserved word)');
     if (!['public', 'private'].includes(visibility)) fail(422, 'rooms.visibility', 'Visibility is public or private');
-    if (!KINDS.includes(kind)) fail(422, 'rooms.kind', 'A room is a community, call or system room');
+    if (!KINDS.includes(kind)) fail(422, 'rooms.kind', 'A room is a community, call, system, agent stream or party room');
+    if (kind === 'party' && !party) fail(422, 'rooms.kind', 'A party room is made by starting a watch party');
     if (kind === 'system' && !isStaff(user)) fail(403, 'rooms.kind', 'Only chat staff create system rooms');
     if (join_role != null && join_role !== '' && (kind !== 'call' || !JOIN_ROLES_CALL.includes(join_role))) fail(422, 'rooms.join_role', 'People join a call room as speakers, participants or viewers');
     if (wordFilter.check(n).safe === false) fail(422, 'rooms.name_filtered', 'That room name is not allowed');

@@ -30,7 +30,7 @@ const TABLES = [
     'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'room_ai_members', 'room_ai_usage', 'room_tasks', 'room_hooks', 'vibe_usage', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_asks', 'vibe_deliveries', 'inboxes', 'inbox_members', 'inbox_conversations', 'inbox_messages', 'inbox_ai_usage', 'inbox_saved_replies', 'inbox_webhooks', 'inbox_actions', 'inbox_translations', 'feeds', 'feed_sessions', 'feed_events', 'chat_servers', 'chat_server_members', 'chat_server_invites', 'token_revocations', 'chat_control_log',
     'network_blocks', 'account_data_events', 'ticket_conversations', 'ticket_messages', 'telemetry_samples',
     'chat_app_link_tokens', 'chat_app_settings', 'chat_app_callbacks', 'chat_app_deliveries', 'chat_app_rates',
-    'agent_room_reads', 'agent_room_polls', 'agent_room_poll_votes', 'agent_room_identities', 'agent_room_controls',
+    'agent_room_reads', 'agent_room_polls', 'agent_room_poll_votes', 'agent_room_identities', 'agent_room_controls', 'room_parties',
     'room_message_reactions', 'room_member_timeouts',
     'agent_play_requests', 'agent_play_votes', 'agent_play_log',
 ];

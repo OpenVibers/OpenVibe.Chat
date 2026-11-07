@@ -305,6 +305,15 @@ async function ttsOverride(req) {
     };
 }
 
+/** S7: how many listed watch parties a public agent stream has. A count only: no host, member or name. */
+async function partyCount(req) {
+    const q = query(req, { agent_stream: 40 });
+    const streamId = String(q.agent_stream || '');
+    if (!/^ags_[0-9A-HJKMNP-TV-Z]{26}$/.test(streamId)) bad('Invalid agent_stream');
+    const row = await db.get('SELECT COUNT(*) AS n FROM room_parties p JOIN rooms r ON r.id = p.room_id WHERE p.agent_stream_id = ? AND p.listed IS TRUE AND p.ended_at IS NULL AND r.archived_at IS NULL', [streamId]);
+    return { ok: true, count: Number(row && row.n) || 0 };
+}
+
 // ── N5: channel sounds ──
 function soundRow(r) {
     return {
@@ -371,6 +380,7 @@ router.get('/moderation/pending-ip', queue, route('pending-ip', pendingIp));
 router.get('/moderation/relay-users', queue, route('relay-users', relayUsers));
 router.get('/moderation/relay-users/:id', queue, route('relay-user', relayUser));
 router.get('/moderation/tts-override', queue, route('tts-override', ttsOverride));
+router.get('/parties/count', serviceAuth.guard('chat.messages.read'), route('party-count', partyCount));
 router.get('/sounds', serviceAuth.guard('chat.sounds.read'), route('sounds', sounds));
 router.get('/sounds/count', serviceAuth.guard('chat.sounds.read'), route('sound-count', soundCount));
 router.get('/sounds/by-command', serviceAuth.guard('chat.sounds.read'), route('sound-by-command', soundByCommand));
