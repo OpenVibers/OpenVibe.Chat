@@ -42,6 +42,8 @@ t('export, then erase and confirm', async () => {
                 config_snapshots: 'D11 owner settings: created_by/activated_by is the acting administrator (usr_...) for the config audit trail; the values are network configuration, not the person\'s account data, and are kept for rollback/history',
                 hidden_relay_users: 'a moderation record of a relay account hidden from a channel, kept for accountability',
                 room_member_timeouts: 'a moderation record of a room timeout, kept for accountability like moderation_actions',
+                agent_play_requests: "a chat plays request of a room: it belongs to the person who asked and to the room's queue, and the room's messages are exported",
+                agent_play_votes: "a vote in a chat plays queue: it belongs to the person who voted and to the room",
             },
         });
         assert.deepStrictEqual(missing, [], `a table with a person column is neither covered nor exempted: ${missing.join(', ')}`);

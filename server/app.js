@@ -146,6 +146,9 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // What a task's service may read of a Co-pilot room: the digest, the polls and the answer line
     // (Agent Streams S5). A service token only; the room is the owner's.
     app.use('/api/v1/rooms', require('./chat/agent-routes'));
+    // The chat plays queue of an agent stream's room (Agent Streams S6): what the desk may read of it and
+    // how it records that a request ran (the capabilities chat.play_queue.read and chat.play_queue.write).
+    app.use('/api/v1/rooms', require('./chat/play-queue-routes').service);
     app.get('/health', (req, res) => res.json({ ok: true, service: 'chat' }));
     // Readiness in the openvibe-shared/ready shape (status ready/degraded/not_ready, named checks):
     // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
@@ -303,6 +306,8 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
     // The people of a Co-pilot room vote on the agent's poll (Agent Streams S5).
     app.use('/api/chat/rooms', require('./chat/agent-poll-routes'));
+    // The chat plays queue of a room (Agent Streams S6): the votes and the moderators' hand.
+    app.use('/api/chat/rooms', require('./chat/play-queue-routes').member);
     app.use('/api/chat/rooms', require('./rooms/routes'));
     app.use('/api/chat/vibe', require('./rooms/vibe-routes'));
     // Support inboxes (server/inbox/): the widget's visitor API, and the inbox's people.

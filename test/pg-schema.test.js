@@ -32,6 +32,7 @@ const TABLES = [
     'chat_app_link_tokens', 'chat_app_settings', 'chat_app_callbacks', 'chat_app_deliveries', 'chat_app_rates',
     'agent_room_reads', 'agent_room_polls', 'agent_room_poll_votes', 'agent_room_identities', 'agent_room_controls',
     'room_message_reactions', 'room_member_timeouts', 'config_snapshots', 'config_keys',
+    'agent_play_requests', 'agent_play_votes', 'agent_play_log',
 ];
 const INDEXES = [
     'idx_chat_ts_deleted', 'idx_chat_page_live', 'idx_chat_channel_user_ts', 'idx_chat_stream_ts', 'idx_emotes_channel_code', 'idx_chat_tl_dedup',
