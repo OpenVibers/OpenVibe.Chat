@@ -186,19 +186,10 @@ function createSettings({ db, env = process.env, log = console, probes = null } 
     }
 
     /** Mount the admin routes and the test route; `guard` is the service-token capability middleware. */
-    function mount(app, { guard, log: appLog = log } = {}) {
+    function mount(app, { guard, log: appLog = log, also = [] } = {}) {
         if (!store) throw new Error('createSettings: await ready before mount()');
-        const routes = adminRoutes([store], {
-            basePath: BASE_PATH,
-            requireAdmin: guard,
-            actor: (req) => {
-                const id = String(req.get('x-ov-subject') || '').trim();
-                return /^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(id) ? { type: 'user', id } : null;
-            },
-            requireFresh: (req) => String(req.get('x-ov-fresh') || '') === '1',
-            log: appLog,
-        });
-        app.use(routes.handle);
+        // `also`: other namespaces served by the same routes (chat.apps, server/chat-apps/owner-settings.js).
+        const routes = mountStores(app, { guard, stores: [store, ...also], log: appLog });
         app.post(`${BASE_PATH}/:namespace/test/:key`, guard, async (req, res) => {
             if (req.params.namespace !== NAMESPACE) return res.status(404).json({ error: 'no such configuration namespace' });
             let key = String(req.params.key || '');
@@ -218,7 +209,23 @@ function createSettings({ db, env = process.env, log = console, probes = null } 
     return { namespace: NAMESPACE, schema: SCHEMA, ready, value: valueOf, get: values, test, mount };
 }
 
+/** The admin routes for these stores at /internal/config, guarded; the actor is Network's X-OV-Subject. */
+function mountStores(app, { guard, stores, log = console }) {
+    const routes = adminRoutes(stores, {
+        basePath: BASE_PATH,
+        requireAdmin: guard,
+        actor: (req) => {
+            const id = String(req.get('x-ov-subject') || '').trim();
+            return /^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(id) ? { type: 'user', id } : null;
+        },
+        requireFresh: (req) => String(req.get('x-ov-fresh') || '') === '1',
+        log,
+    });
+    app.use(routes.handle);
+    return routes;
+}
+
 /** Install the process's settings, so the read path sees the owner's values. */
 function activate(settings) { ACTIVE.settings = settings; return settings; }
 
-module.exports = { SERVICE, NAMESPACE, SCHEMA, SECRETS, createSettings, activate, current, value, ownerValue: value };
+module.exports = { SERVICE, NAMESPACE, SCHEMA, SECRETS, createSettings, activate, current, value, ownerValue: value, mountStores };

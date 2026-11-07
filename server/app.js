@@ -63,7 +63,7 @@ function getAllowedOrigins() {
     return allowed;
 }
 
-function createApp({ chatServer, relay, events = null, callServer = null, settings = null }) {
+function createApp({ chatServer, relay, events = null, callServer = null, settings = null, chatAppSettings = null }) {
     const allowedOrigins = getAllowedOrigins();
     const app = express();
     // GET /openapi.json (SEO-3): this service's public API as OpenAPI 3.1, generated from the contracts
@@ -133,9 +133,15 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // D11 owner settings (openvibe-shared/config): Network's admin proxy, acting for the owner, reads and writes
     // chat.voices (the Polly and Google Cloud voice keys). Loopback only, guarded by chat.config.manage; a secret
     // or x-danger change needs X-OV-Fresh: 1, and the test route synthesizes one short line without echoing a key.
-    if (settings) {
+    // chat.apps (the Telegram, Discord and Slack bots) is served by the same routes; its Test button is mounted first,
+    // because the voices' test route answers 404 for every other namespace.
+    if (settings || chatAppSettings) {
+        const guard = serviceAuth.guard('chat.config.manage');
         app.use('/internal/config', express.json({ limit: '64kb' }));
-        settings.mount(app, { guard: serviceAuth.guard('chat.config.manage') });
+        if (chatAppSettings) app.post(`/internal/config/${chatAppSettings.namespace}/test/:key`, guard, require('./chat-apps/owner-settings').testRoute(chatAppSettings));
+        const also = chatAppSettings ? [chatAppSettings.store] : [];
+        if (settings) settings.mount(app, { guard, also });
+        else require('./settings').mountStores(app, { guard, stores: also });
     }
 
     // OpenVibe.Services reads Chat's room summaries on loopback (ADR-048); the service guard

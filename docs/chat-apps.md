@@ -20,6 +20,12 @@ gateway. Nothing here creates a bot account.
 
 ## Settings
 
+The owner enters the bot details in the admin panel's Setup tab (Chat apps): they are the `chat.apps`
+namespace on openvibe-shared/config, sealed and write-only, each with a Test button (Telegram getMe,
+Discord users/@me, Slack auth.test). A value entered there wins; the variables below stay the fallback,
+read every time they are used. `CHAT_APPS_CALLBACK_SECRET` and `CHAT_TELEGRAM_SECRET_TOKEN` need not be set:
+when neither the environment nor `chat.apps` has one, Chat makes it once and keeps it sealed.
+
 | Variable | What it is |
 |---|---|
 | `CHAT_APPS_CALLBACK_SECRET` | signs every approval button; a long random string of its own |
@@ -38,7 +44,7 @@ gateway. Nothing here creates a bot account.
 | `CHAT_APPS_RATE_PER_HOUR` | answers an hour a group gets (default 20) |
 | `CHAT_APPS_PER_USER_RATE_PER_HOUR` | messages an hour one person gets (default 10) |
 
-Secrets are read from the environment only, used only against the provider's fixed origin and
+Secrets are read from `chat.apps` or the environment, used only against the provider's fixed origin and
 never printed or put into an error.
 
 ## Endpoints and what to set where
