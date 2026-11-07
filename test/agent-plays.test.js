@@ -134,6 +134,31 @@ t('the moderators skip, remove and pin', async () => {
     assert.strictEqual((await requestOf(removed.request_id)).state, 'removed');
 });
 
+t('a request is queued and voted, and never dispatched', async () => {
+    // While the chat plays mode is off (Live refuses it until a sandbox worker is registered and healthy),
+    // a request waits in the queue: it is voted for, it is never handed to a desk, and it never runs.
+    const zoe = h.addUser('zoe', { subject: ids.newId('user') });
+    await h.ctx.upsertUser(h.live.users.get(zoe.id));
+    const asked = await ask(zoe, 'draw a house with a cat');
+    assert.strictEqual(asked.kind, 'request', JSON.stringify(asked));
+    const row = await requestOf(asked.request_id);
+    assert.strictEqual(row.state, 'queued');
+    await queue.vote(row, { id: zoe.id, username: 'zoe' });
+    const open = await queue.openRequests(room);
+    assert.ok(open.length >= 1, 'the queue holds the request');
+    for (const r of open) assert.strictEqual(r.row.state, 'queued', 'nothing is running: no desk takes a request');
+    // The queue has no way to dispatch: there is nothing to call.
+    assert.strictEqual(queue.dispatch, undefined, 'the queue never hands a request to a desk');
+    assert.strictEqual(queue.run, undefined);
+    assert.strictEqual(queue.start, undefined);
+    // And no request ever left the queue for a desk.
+    const rows = await db.all('SELECT state FROM agent_play_requests WHERE room_id = ?', [room.id]);
+    for (const r of rows) {
+        assert.ok(['queued', 'skipped', 'removed', 'refused'].includes(r.state),
+            'a request is only ever queued here while the mode is off: ' + r.state);
+    }
+});
+
 t('the log holds every request, vote and moderation', async () => {
     const rows = await queue.logOf(room);
     const actions = new Set(rows.map((r) => r.action));
