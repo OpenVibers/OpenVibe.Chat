@@ -19,6 +19,7 @@ const req = async (method, path, { headers = {}, raw } = {}) => {
     return { status: r.status, headers: r.headers, text: await r.text() };
 };
 const form = (u, fields, extra = {}) => ({ headers: { ...cookie(u), 'content-type': 'application/x-www-form-urlencoded', origin: SITE, ...extra }, raw: new URLSearchParams(fields).toString() });
+const view = (subject, state, extra = {}) => ({ subject, state, status_text: extra.status_text || null, emoji: null, live: !!extra.live, updated_at: '2026-11-07T09:00:00.000Z' });
 
 t('boot', async () => {
     h = await boot({ env: { CHAT_WEB_URL: SITE } });
@@ -171,6 +172,27 @@ t('rooms: start one, post and join without JavaScript, private rooms stay privat
 
     const sitemap = (await req('GET', '/sitemap.xml')).text;
     assert.ok(sitemap.includes('/r/coffee-talk') && !sitemap.includes('inner-circle'), 'public rooms only');
+});
+
+t('a room member list draws presence: online first, then away, a count line and no dot for offline', async () => {
+    const presence = require('../server/presence');
+    let r = await req('POST', '/r/coffee-talk/members', form(alice, { username: 'carol', role: 'member' }));
+    assert.strictEqual(r.headers.get('location'), '/r/coffee-talk/settings?saved=1');
+    h.netPresence.rows.set(bob.subject_id, view(bob.subject_id, 'online'));
+    h.netPresence.rows.set(carol.subject_id, view(carol.subject_id, 'away'));
+    presence.clearCache();
+    const settings = await req('GET', '/r/coffee-talk/settings', { headers: cookie(alice) });
+    assert.strictEqual(settings.status, 200);
+    assert.match(settings.text, /<p class="oc-muted oc-members-online">1 online<\/p>/);
+    const list = (/<ul class="oc-list oc-list-flush">([\s\S]*?)<\/ul>/.exec(settings.text) || [])[1] || '';
+    const order = ['Bob', 'Carol', 'Alice'].map((name) => list.indexOf(`<strong>${name}</strong>`));
+    assert.ok(order.every((i) => i > 0) && order[0] < order[1] && order[1] < order[2], `online, then away, then offline: ${order}`);
+    assert.match(list, /aria-label="Bob, online"/);
+    assert.match(list, /aria-label="Carol, away"/);
+    assert.match(list, /<span class="oc-pdot" data-state="online"/);
+    assert.match(list, /<span class="oc-pdot" data-state="away"/);
+    assert.doesNotMatch(list, /aria-label="Alice, /, 'offline is the absence of a dot');
+    assert.doesNotMatch(list, /data-state="(offline|invisible)"/);
 });
 
 t('the session probe: a guest is signed out (200 { user: null }), a bad credential is 401', async () => {

@@ -730,7 +730,8 @@ class ChatServer {
 
     /**
      * Build a deduplicated list of users in a given stream (or global if null).
-     * Returns { logged: [{username, display_name, avatar_url, role}], anonCount: N }
+     * Returns { logged: [{username, display_name, avatar_url, role, presence}], anonCount: N,
+     *           hiddenCount: N, online: N } (online counts the named people who are online or live).
      */
     async getUserList(streamId, viewerSubject = null) {
         const seen = new Set();
@@ -758,14 +759,19 @@ class ChatServer {
                 anonCount++;
             }
         }
-        // Sort: admins first, then mods, then alphabetical
-        const rolePriority = { admin: 0, global_mod: 1, streamer: 2, user: 3 };
-        logged.sort((a, b) => (rolePriority[a.role] ?? 9) - (rolePriority[b.role] ?? 9) || a.display_name.localeCompare(b.display_name));
         // The Network answers each viewer separately (a stranger's state is never disclosed), so a member
         // list is built for the person who asked; the read is cached 30 s per viewer and member set.
         const seenPresence = await presence.forViewer(viewerSubject, [...subjects.values()]);
         for (const u of logged) u.presence = seenPresence.get(subjects.get(u.username)) || null;
-        return { logged, anonCount, hiddenCount };
+        // Online and live first, then away/dnd, then everyone else; roles and names keep the order inside a group.
+        const stateRank = (u) => {
+            const state = u.presence ? (u.presence.live ? 'live' : u.presence.state) : null;
+            return state === 'online' || state === 'live' ? 0 : state === 'away' || state === 'dnd' ? 1 : 2;
+        };
+        const rolePriority = { admin: 0, global_mod: 1, streamer: 2, user: 3 };
+        logged.sort((a, b) => stateRank(a) - stateRank(b) || (rolePriority[a.role] ?? 9) - (rolePriority[b.role] ?? 9) || a.display_name.localeCompare(b.display_name));
+        const online = logged.filter((u) => stateRank(u) === 0).length;
+        return { logged, anonCount, hiddenCount, online };
     }
 
     /**

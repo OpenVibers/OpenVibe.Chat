@@ -301,9 +301,9 @@ async function setRole(server, actor, targetUserId, role) {
 }
 
 /** The server's people by rank (blocked last, only for moderators). */
-async function members(server, { blocked = false, limit = 1000 } = {}) {
+async function members(server, { blocked = false, limit = 1000, subjects = false } = {}) {
     const order = `CASE m.role ${Object.entries(RANK).map(([r, n]) => `WHEN '${r}' THEN ${n}`).join(' ')} ELSE 9 END`;
-    return await db.all(`SELECT m.user_id, m.role, m.joined_at, u.username, u.display_name, u.profile_color FROM chat_server_members m
+    return await db.all(`SELECT m.user_id${subjects ? ', u.subject_id' : ''}, m.role, m.joined_at, u.username, u.display_name, u.profile_color FROM chat_server_members m
         LEFT JOIN ctx_users u ON u.id = m.user_id WHERE m.server_id = ? ${blocked ? '' : "AND m.role != 'blocked'"}
         ORDER BY ${order}, lower(u.username) LIMIT ?`, [server.id, Math.min(5000, Math.max(1, Number(limit) || 1000))]);
 }

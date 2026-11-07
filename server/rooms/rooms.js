@@ -458,16 +458,16 @@ async function update(room, actor, { name, topic, visibility, slow_seconds, join
 }
 
 /** The room's people, by role. `seen` adds last_seen_at (moderators only: it is presence). */
-async function members(room, { seen = false } = {}) {
+async function members(room, { seen = false, subjects = false } = {}) {
     // A server's channel: the server's people, with the role each has in the channel.
     if (room.server_id) {
         const server = await require('./servers').byId(room.server_id);
         if (!server) return [];
         const as = (r) => (r === 'owner' ? 'owner' : r === 'admin' || r === 'mod' ? 'mod' : kindOf(room) === 'call' ? joinRoleOf(room) : 'member');
-        return (await require('./servers').members(server)).map((m) => ({ user_id: m.user_id, role: as(m.role), server_role: m.role, username: m.username, display_name: m.display_name }));
+        return (await require('./servers').members(server, { subjects })).map((m) => ({ user_id: m.user_id, subject_id: m.subject_id, role: as(m.role), server_role: m.role, username: m.username, display_name: m.display_name }));
     }
     const order = `CASE m.role ${Object.entries(ROLE_ORDER).map(([r, n]) => `WHEN '${r}' THEN ${n}`).join(' ')} ELSE 9 END`;
-    return await db.all(`SELECT m.user_id, m.role, u.username, u.display_name${seen ? ', m.last_seen_at' : ''} FROM room_members m LEFT JOIN ctx_users u ON u.id = m.user_id
+    return await db.all(`SELECT m.user_id${subjects ? ', u.subject_id' : ''}, m.role, u.username, u.display_name${seen ? ', m.last_seen_at' : ''} FROM room_members m LEFT JOIN ctx_users u ON u.id = m.user_id
         WHERE m.room_id = ? ORDER BY ${order}, lower(u.username) LIMIT 500`, [room.id]);
 }
 

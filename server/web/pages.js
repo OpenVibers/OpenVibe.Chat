@@ -49,6 +49,7 @@ const prefs = require('../prefs/chat-preferences');
 const prefStores = require('../prefs/stores');
 const ctx = require('../live-context');
 const permissions = require('../auth/permissions');
+const presence = require('../presence');
 const db = require('../db/database');
 
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public', 'web');
@@ -347,20 +348,25 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
     const ui = require('./ui');
     const { ICONS: IC } = require('./icons');
     /** One conversation in a list: initials, name and time on one line, the last message under it, unread marked. */
-    const convRow = ({ href, title, preview, at, unread = 0, badge = '' }) => {
+    const convRow = ({ href, title, preview, at, unread = 0, badge = '', personPresence = null }) => {
         const t = ui.when(at);
-        return `<li class="oc-row${unread ? ' oc-unread' : ''}"><a href="${esc(href)}">${ui.initials(title)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(title)}</strong>${badge}${t.text ? `<time datetime="${t.iso}">${esc(t.text)}</time>` : ''}</span>`
+        return `<li class="oc-row${unread ? ' oc-unread' : ''}"><a href="${esc(href)}">${ui.initials(title, personPresence)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(title)}</strong>${badge}${t.text ? `<time datetime="${t.iso}">${esc(t.text)}</time>` : ''}</span>`
             + `<span class="oc-row-sub">${esc(preview)}${unread ? `<span class="oc-dot" aria-label="${unread} new">${unread > 9 ? '9+' : unread}</span>` : ''}</span></span></a></li>`;
     };
     router.get('/messages', async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         const me = actor.user;
         const convs = await dm.getConversations(me.id);
-        const rows = (await Promise.all(convs.map(async (c) => {
-            const others = (await dm.getParticipants(c.id)).filter((p) => p.id !== me.id);
+        // One Network read for every person in the list (cached 30 s, as the viewer). A group's mark is the
+        // conversation's, not a person's, so only a one-to-one chat takes a dot.
+        const participants = await Promise.all(convs.map((c) => dm.getParticipants(c.id)));
+        await presence.attachTo(me.subject_id, participants.flat());
+        const rows = convs.map((c, i) => {
+            const others = participants[i].filter((p) => p.id !== me.id);
             const title = c.name || others.map((p) => p.display_name || p.username).join(', ') || 'Just you';
-            return convRow({ href: `/messages/${c.id}`, title, preview: c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet', at: c.last_message_at, unread: Number(c.unread_count) || 0 });
-        })));
+            const personPresence = others.length === 1 ? others[0].presence : null;
+            return convRow({ href: `/messages/${c.id}`, title, preview: c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet', at: c.last_message_at, unread: Number(c.unread_count) || 0, personPresence });
+        });
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const done = req.query.unblocked ? notice('ok', 'Unblocked. They can message you again, and you them.') : '';
         const blocked = await dm.getBlockedUsers(me.id);
@@ -409,6 +415,7 @@ ${blockedList}`,
         const id = parseInt(req.params.id, 10);
         if (!Number.isInteger(id) || !await dm.isParticipant(id, me.id)) return await page(req, res, 404, { actor, title: 'Not found', path: req.path, robots: 'noindex', body: '<h1>No such conversation</h1><p><a href="/messages">Back to your messages</a></p>' });
         const others = (await dm.getParticipants(id)).filter((p) => p.id !== me.id);
+        await presence.attachTo(me.subject_id, others);
         const conv = await dm.getConversation(id);
         const title = (conv && conv.name) || others.map((p) => p.display_name || p.username).join(', ') || 'Conversation';
         const msgs = (await dm.getMessages(id, 60)).slice().sort((a, b) => a.id - b.id);
@@ -419,6 +426,12 @@ ${blockedList}`,
         const iBlocked = other ? await dm.hasBlocked(me.id, other.id) : false;
         const closed = other ? await dm.isBlockedEither(me.id, other.id) : false;
         const otherName = other ? esc(other.display_name || other.username) : '';
+        // A 1:1 header: their picture with their dot, and one muted line with their state. Offline is the
+        // absence of a state: the line falls back to @username, never to "last seen". Groups keep the count.
+        const otherPresence = other ? other.presence : null;
+        const liveHref = otherPresence && (otherPresence.channel_url || otherPresence.url);
+        const subLine = other ? (ui.presenceLine(otherPresence, { liveHref }) || `@${esc(other.username || '')}`) : `${others.length + 1} people`;
+        const avatar = other ? ui.initials(other.display_name || other.username || '?', otherPresence, { large: true, id: 'oc-dm-avatar' }) : '';
         let composer = `<div class="oc-dock"><form class="oc-compose" method="post" action="/messages/${id}" id="oc-compose"><label for="oc-input" class="oc-sr">Reply</label><textarea id="oc-input" name="message" maxlength="2000" rows="1" required placeholder="Write a message"></textarea><button type="submit" class="oc-send" aria-label="Send" title="Send">${IC.send}</button></form></div>`;
         if (iBlocked) composer = `${notice('error', `You blocked ${other.display_name || other.username}. Neither of you can message the other.`)}<form class="oc-inline" method="post" action="/messages/unblock/${Number(other.id)}"><input type="hidden" name="back" value="/messages/${id}"><button type="submit">Unblock ${otherName}</button></form>`;
         else if (closed) composer = notice('error', 'You cannot message this person.');
@@ -429,8 +442,8 @@ ${blockedList}`,
             ? `<form class="oc-inline oc-dm-call" method="post" action="/messages/${id}/call"><button type="submit" class="oc-icon-btn" aria-label="Call ${otherName}" title="Call ${otherName}">${IC.phone}</button></form>` : '';
         await page(req, res, 200, {
             actor, title, path: `/messages/${id}`, active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'compact',
-            page: { view: 'dm', conversation: id, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me.id },
-            body: `${ui.head({ title: esc(title), sub: other ? `@${esc(other.username || '')}` : `${others.length + 1} people`, back: { href: '/messages', label: 'All messages' }, actions: [callForm, tools].filter(Boolean) })}${error}
+            page: { view: 'dm', conversation: id, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me.id, other: other ? { id: other.id, username: other.username || '' } : null },
+            body: `${ui.head({ title: esc(title), sub: `<span id="oc-dm-status">${subLine}</span>`, avatar, back: { href: '/messages', label: 'All messages' }, actions: [callForm, tools].filter(Boolean) })}${error}
 <ol class="oc-feed oc-room-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => dmMessage(m, me)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
 ${composer}`,
         });
@@ -960,7 +973,11 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         if (!can.moderate) return res.redirect(303, `/r/${room.slug}`);
         const saved = req.query.saved ? notice('ok', 'Saved.') : '';
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
-        const members = await rooms.members(room, { seen: true });
+        const members = await rooms.members(room, { seen: true, subjects: true });
+        await presence.attachTo(actor.user.subject_id, members);
+        // Online and live first, then away/dnd, then everyone else; the stable sort keeps roles in order inside a group.
+        members.sort((a, b) => ui.presenceOrder(a.presence) - ui.presenceOrder(b.presence));
+        const online = members.filter((m) => ui.presenceOrder(m.presence) === 0).length;
         const kindRoles = rooms.KIND_ROLES[room.kind] || rooms.KIND_ROLES.community;
         const choices = [...kindRoles.filter((r) => r !== 'owner' && (r !== 'mod' || can.manage)), 'none'];
         const roleOption = (r, current) => `<option value="${r}"${r === current ? ' selected' : ''}>${r === 'none' ? 'remove' : ROLE_LABEL[r] || r}</option>`;
@@ -968,7 +985,7 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         const roleForm = (m) => m.role === 'owner' ? '<span class="oc-muted oc-role">owner</span>'
             : (m.role === 'mod' && !can.manage) ? '<span class="oc-muted oc-role">moderator</span>'
                 : `<form class="oc-role-form" method="post" action="/r/${esc(room.slug)}/members"><input type="hidden" name="username" value="${esc(m.username || '')}"><select name="role" aria-label="Role for ${esc(m.username || '')}">${choices.map((r) => roleOption(r, m.role)).join('')}</select><button type="submit" class="oc-icon-btn" aria-label="Set the role of ${esc(m.username || '')}" title="Set">${IC.check}</button></form>`;
-        const memberRow = (m) => `<li class="oc-row oc-row-static">${ui.initials(m.display_name || m.username || '?')}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(m.display_name || m.username || '?')}</strong></span><span class="oc-row-sub">@${esc(m.username || '')}${seen(m)}</span></span>${roleForm(m)}</li>`;
+        const memberRow = (m) => `<li class="oc-row oc-row-static">${ui.initials(m.display_name || m.username || '?', m.presence)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(m.display_name || m.username || '?')}</strong></span><span class="oc-row-sub">@${esc(m.username || '')}${seen(m)}</span></span>${roleForm(m)}</li>`;
         const addRole = rooms.joinRoleOf(room);
         const attachments = can.manage ? await rooms.attachments(room) : [];
         const ais = can.manage && room.kind !== 'system' ? await aiMembers.list(room) : [];
@@ -1026,6 +1043,7 @@ ${rooms.isWorkspace(room) ? `<label>Shared screen <input name="screen_url" type=
 <section class="oc-set" aria-labelledby="oc-members-h"><h2 id="oc-members-h">Members <span class="oc-count">${members.length}</span></h2>
 <p class="oc-muted oc-set-note">${esc(roleHelp(room.kind))}</p>
 <form class="oc-find oc-find-inset" method="post" action="/r/${esc(room.slug)}/members">${IC.plus}<label for="oc-invite" class="oc-sr">Add someone by their username</label><input id="oc-invite" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="Add by username" autocomplete="off"><select name="role" aria-label="Their role">${choices.filter((r) => r !== 'none' && r !== 'blocked').map((r) => roleOption(r, addRole)).join('')}</select><button type="submit" class="oc-send" aria-label="Add" title="Add">${IC.send}</button></form>
+<p class="oc-muted oc-members-online">${online} online</p>
 <ul class="oc-list oc-list-flush">${members.map(memberRow).join('')}</ul>
 </section>
 ${hookSection}
