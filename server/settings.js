@@ -188,8 +188,9 @@ function createSettings({ db, env = process.env, log = console, probes = null } 
     /** Mount the admin routes and the test route; `guard` is the service-token capability middleware. */
     function mount(app, { guard, log: appLog = log, also = [] } = {}) {
         if (!store) throw new Error('createSettings: await ready before mount()');
-        // `also`: other namespaces served by the same routes (chat.apps, server/chat-apps/owner-settings.js).
-        const routes = mountStores(app, { guard, stores: [store, ...also], log: appLog });
+        // The owner's test route is mounted in front of the store's dispatcher: openvibe-shared 4.125.0 gave
+        // adminRoutes a test route of its own, and the dispatcher answers it first (it wants an acting subject,
+        // this one the service-token capability). 2026-11-07, the openvibe-shared v4.126.0 pin round.
         app.post(`${BASE_PATH}/:namespace/test/:key`, guard, async (req, res) => {
             if (req.params.namespace !== NAMESPACE) return res.status(404).json({ error: 'no such configuration namespace' });
             let key = String(req.params.key || '');
@@ -203,6 +204,8 @@ function createSettings({ db, env = process.env, log = console, probes = null } 
                 return res.status(200).json({ ok: false, detail: 'failed — the test did not finish. The service log has the reason.' });
             }
         });
+        // `also`: other namespaces served by the same routes (chat.apps, server/chat-apps/owner-settings.js).
+        const routes = mountStores(app, { guard, stores: [store, ...also], log: appLog });
         return routes;
     }
 
