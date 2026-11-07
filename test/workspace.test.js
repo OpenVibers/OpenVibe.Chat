@@ -109,6 +109,17 @@ t('code work waits for a worker: claim, report, the room hears it', async () => 
     assert.strictEqual(r.body.task.status, 'succeeded');
     const msgs = (await api('GET', '/rooms/staff/messages', staff)).body.messages;
     assert.match(msgs[msgs.length - 1].message, /^✅ Done: "Add a dark favicon to Tools"[\s\S]*https:\/\/github\.com\/OpenVibers\/OpenVibe\.Tools\/pull\/1/);
+    // The agent's step (design 2026-11-07): claim and report are its two changes, one row each. The payload is a
+    // generated title, an outcome and a link: never the task's title (the person's words) or its result.
+    const steps = (await h.db.getDb().prepare('SELECT envelope FROM service_outbox ORDER BY id').all())
+        .map((r) => typeof r.envelope === 'string' ? JSON.parse(r.envelope) : r.envelope)
+        .filter((e) => String(e.event_type || '').startsWith('agent.step.') && e.payload && e.payload.step_id === String(id));
+    assert.deepStrictEqual(steps.map((e) => e.event_type), ['agent.step.started', 'agent.step.started', 'agent.step.ended']);
+    assert.deepStrictEqual(steps.map((e) => e.payload.status), ['waiting', 'running', 'done']);
+    assert.deepStrictEqual(steps[0].subject, { type: 'user', id: staff.subject_id }, 'the person who asked is the step\'s subject, not whoever claimed it');
+    const raw = JSON.stringify(steps);
+    assert.ok(!raw.includes('Add a dark favicon to Tools'), 'the person\'s words never travel');
+    assert.ok(!raw.includes('Added favicon-dark.svg'), 'the result never travels');
 });
 
 t('run on my computer: the asker hands their code task to Actor, which runs it on their own machine', async () => {
