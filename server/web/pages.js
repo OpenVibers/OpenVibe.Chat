@@ -1200,4 +1200,4 @@ ${notice('ok', 'Copy the secret now: it is not shown again. Anyone with the addr
     return router;
 }
 
-module.exports = { createWebRoutes, apiBridge, globalMessage, linkify, nameFxClass, hatHtml };
+module.exports = { createWebRoutes, apiBridge, globalMessage, linkify, nameFxClass, hatHtml, viewerOf };

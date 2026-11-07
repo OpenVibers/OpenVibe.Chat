@@ -90,6 +90,14 @@ module.exports = {
         // Where a room's Community attachments link (a space is <communityUrl>/forum/<slug>).
         communityUrl: strip(process.env.OV_COMMUNITY_URL || 'https://openvibe.community'),
     },
+    // openvibe.party, Watch Together's host (Party watch v1, plan R1): Chat serves it too (server/web/party-pages.js),
+    // with its own host-only session. Its sign-in is a second redirect URI on Chat's OAuth client (a Network seed).
+    party: {
+        host: String(process.env.CHAT_PARTY_HOST || 'openvibe.party').toLowerCase(),
+        baseUrl: strip(process.env.CHAT_PARTY_URL || (isProduction ? 'https://openvibe.party' : `http://localhost:${port}`)),
+        redirectUri: process.env.CHAT_PARTY_OAUTH_REDIRECT_URI || `${strip(process.env.CHAT_PARTY_URL || (isProduction ? 'https://openvibe.party' : `http://localhost:${port}`))}/auth/callback`,
+        scope: 'profile theme',
+    },
     // Pictures in rooms and channels (server/rooms/pictures.js): uploaded to OpenVibe.Pics as the person (their own
     // Network token) through MediaHub on this host, and shown inline. Off without CHAT_PICS_INTERNAL_URL.
     pics: {
