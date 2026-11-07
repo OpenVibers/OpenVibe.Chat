@@ -11,7 +11,6 @@
 'use strict';
 
 const express = require('express');
-const CONFIG_CAPABILITY = 'chat.config.manage';
 const cookieParser = require('cookie-parser');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -137,7 +136,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // chat.apps (the Telegram, Discord and Slack bots) is served by the same routes; its Test button is mounted first,
     // because the voices' test route answers 404 for every other namespace.
     if (settings || chatAppSettings) {
-        const guard = serviceAuth.guard(CONFIG_CAPABILITY);
+        const guard = serviceAuth.guard('chat.config.manage');
         app.use('/internal/config', express.json({ limit: '64kb' }));
         if (chatAppSettings) app.post(`/internal/config/${chatAppSettings.namespace}/test/:key`, guard, require('./chat-apps/owner-settings').testRoute(chatAppSettings));
         const also = chatAppSettings ? [chatAppSettings.store] : [];
