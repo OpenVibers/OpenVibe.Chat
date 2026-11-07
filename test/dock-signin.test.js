@@ -70,4 +70,21 @@ t('an extension origin gets no CORS grant and never authenticates with a cookie'
     assert.strictEqual(moz.headers.get('access-control-allow-origin'), null);
 });
 
+t('an OpenVibe site outside the credentialed list reads DMs with its Bearer, and gets no credentials', async () => {
+    const tok = dock(alice);
+    const origin = 'https://openvibe.video';
+    const pre = await h.http('OPTIONS', '/api/dm/unread', { headers: { origin, 'access-control-request-method': 'GET', 'access-control-request-headers': 'authorization' } });
+    assert.ok(pre.status === 204 || pre.status === 200, `preflight ${pre.status}`);
+    assert.strictEqual(pre.headers.get('access-control-allow-origin'), origin);
+    assert.strictEqual(pre.headers.get('access-control-allow-credentials'), null, 'never a credentialed grant');
+    const r = await h.http('GET', '/api/dm/unread', { token: tok, headers: { origin } });
+    assert.strictEqual(r.status, 200, r.text);
+    assert.strictEqual(r.headers.get('access-control-allow-origin'), origin);
+    assert.strictEqual(r.headers.get('access-control-allow-credentials'), null);
+    assert.strictEqual((await h.http('GET', '/api/chat/search?q=hello', { token: normal(alice), headers: { origin } })).status, 403, 'only the DM paths, not the rest of the API');
+    assert.strictEqual((await h.http('GET', '/api/dm/unread', { token: tok, headers: { origin: 'https://evil.example' } })).status, 403, 'a foreign web origin is still refused');
+    const live = await h.http('GET', '/api/dm/unread', { token: tok, headers: { origin: 'https://openvibe.network' } });
+    assert.strictEqual(live.headers.get('access-control-allow-credentials'), 'true', 'the credentialed list keeps its grant');
+});
+
 t.run(async () => { await h.shutdown(); });
