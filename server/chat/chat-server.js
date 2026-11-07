@@ -36,6 +36,8 @@ const dm = require('./dm');
 const networkBlocks = require('./network-blocks');
 const presence = require('../presence');
 const vipBadges = require('../vip/badges');
+const syncClock = require('../rooms/sync-clock');
+const controlLease = require('../rooms/control-lease');
 // Cosmetics and tags are Live's (monetization/cosmetics, game/tags); read through live-context.
 const cosmetics = { getCosmeticProfile: (userId) => ctx.getCosmeticProfile(userId) };
 const tags = { getTagProfile: (userId) => ctx.getTagProfile(userId) };
@@ -204,6 +206,11 @@ class ChatServer {
      */
     async init(server) {
         this.wss = new WebSocket.Server({ noServer: true, maxPayload: 64 * 1024, perMessageDeflate: false });
+
+        // A room's control lease that runs out announces itself even if nobody is typing.
+        controlLease.setExpiryHandler(({ room, state }) => {
+            if (room && room.slug) this.broadcastToRoom(room.id, { type: 'lease', room: room.slug, state, reason: 'expired' });
+        });
 
         // Word filter
         wordFilter.load();
@@ -407,15 +414,19 @@ class ChatServer {
 
         ws.on('close', () => {
             release();
+            const room = clientInfo.roomId ? { id: clientInfo.roomId, slug: clientInfo.roomSlug } : null;
             this.clients.delete(ws);
             this.broadcastUserCount(streamId);
             this.broadcastUsersList(streamId);
+            if (room) this._afterPresence(room.id, room.slug).catch(() => {});
         });
 
         ws.on('error', (err) => {
             console.warn('[Chat] WebSocket error for', ws._clientIp || 'unknown', ':', err.message);
             release();
+            const room = clientInfo.roomId ? { id: clientInfo.roomId, slug: clientInfo.roomSlug } : null;
             this.clients.delete(ws);
+            if (room) this._afterPresence(room.id, room.slug).catch(() => {});
         });
     }
 
@@ -563,6 +574,7 @@ class ChatServer {
                     newcomer: this._isNewcomer(client),
                     username: displayName,
                     core_username: client.user?.username || null,
+                    subject: client.user?.subject_id || null,
                     role: client.user ? client.user.role : 'anon',
                     user_id: client.user?.id || null,
                     slowmode_seconds: streamSlowSec,
@@ -603,15 +615,100 @@ class ChatServer {
                 const room = await rooms.bySlug(msg.room);
                 const a = room ? await rooms.access(room, client.user) : null;
                 if (!room || !a.read) { this.sendTo(ws, { type: 'room_error', room: msg.room || null, code: 'rooms.not_found', message: 'No such room' }); break; }
+                const previous = client.roomId && Number(client.roomId) !== Number(room.id) ? { id: client.roomId, slug: client.roomSlug } : null;
                 client.roomId = room.id;
                 client.roomSlug = room.slug;
-                this.sendTo(ws, { type: 'room_joined', room: room.slug, kind: a.kind, role: a.role, can: { post: a.post, moderate: a.moderate, manage: a.manage, join: a.join, talk: a.talk } });
+                if (previous) await this._afterPresence(previous.id, previous.slug);
+                this.sendTo(ws, { type: 'room_joined', room: room.slug, kind: a.kind, role: a.role, subject: client.user?.subject_id || null, can: { post: a.post, moderate: a.moderate, manage: a.manage, join: a.join, talk: a.talk } });
+                // The shared clock and the control lease are the room's, not the socket's: a member joining
+                // gets the current timeline and the current holder (common.sync-clock@1, common.control-lease@1).
+                await this.sendRoomState(room, ws);
                 break;
             }
-            case 'leave_room':
+            case 'leave_room': {
+                const left = client.roomId ? { id: client.roomId, slug: client.roomSlug } : null;
                 client.roomId = null;
                 client.roomSlug = null;
+                if (left) await this._afterPresence(left.id, left.slug);
                 break;
+            }
+            // ── The shared clock (B4) ───────────────────────────────────────
+            // Only the current B3 holder may set it. Chat stamps at_ms and seq, keeps the state in
+            // server/rooms/sync-clock.js (memory + room_sync_clocks) and fans it out to the room.
+            case 'sync': {
+                if (!this._withinRate(client, 'sync', 20, 1000)) { this.sendTo(ws, { type: 'sync_error', room: client.roomSlug || null, code: 'rate', message: 'Too many clock changes; slow down.' }); break; }
+                const room = await this._joinedRoom(client);
+                if (!room) { this.sendTo(ws, { type: 'sync_error', room: client.roomSlug || null, code: 'sync.not_joined', message: 'Open a room first' }); break; }
+                if (!client.user) { this.sendTo(ws, { type: 'sync_error', room: room.slug, code: 'sync.sign_in', message: 'Sign in to change the room\'s clock' }); break; }
+                const rooms = require('../rooms/rooms');
+                const access = await rooms.access(room, client.user);
+                const subject = client.user.subject_id;
+                if (!access.read || !subject) { this.sendTo(ws, { type: 'sync_error', room: room.slug, code: 'sync.sign_in', message: 'Sign in to change the room\'s clock' }); break; }
+                let holder;
+                try { holder = (await controlLease.state(room, this.roomWatchers(room.id))).holder; } catch (err) { this.sendTo(ws, { type: 'sync_error', room: room.slug, code: 'sync.lease', message: 'The room\'s remote could not be read' }); break; }
+                if (holder.kind !== 'person' || holder.subject !== subject) {
+                    this.sendTo(ws, { type: 'sync_error', room: room.slug, code: 'sync.not_holder', message: 'Only the person with the remote can move the room' });
+                    break;
+                }
+                try {
+                    const state = await syncClock.set(room, subject, msg);
+                    this.broadcastToRoom(room.id, { type: 'sync', room: room.slug, state });
+                } catch (err) {
+                    this.sendTo(ws, { type: 'sync_error', room: room.slug, code: err.code || 'sync.error', message: err.code ? err.message : 'The room\'s clock did not change' });
+                }
+                break;
+            }
+            // NTP-style clock measurement on the same socket: the client sends t0, Chat answers with its
+            // own clock at the same instant. Five samples and the smallest round trip give the offset.
+            case 'time': {
+                if (!this._withinRate(client, 'time', 60, 1000)) break;
+                const id = typeof msg.id === 'string' ? msg.id.slice(0, 80) : (Number.isFinite(Number(msg.id)) ? Number(msg.id) : null);
+                const t0 = Number.isFinite(Number(msg.t0)) ? Number(msg.t0) : null;
+                this.sendTo(ws, { type: 'time', id, t0, t_server: Date.now() });
+                break;
+            }
+            // ── The control lease (B3) ──────────────────────────────────────
+            case 'lease.request':
+            case 'lease.grant':
+            case 'lease.release':
+            case 'lease.take':
+            case 'lease.take_back':
+            case 'lease.revoke': {
+                if (!this._withinRate(client, 'lease', 10, 1000)) { this.sendTo(ws, { type: 'lease_error', room: client.roomSlug || null, code: 'rate', message: 'Too many remote changes; slow down.' }); break; }
+                const room = await this._joinedRoom(client);
+                if (!room) { this.sendTo(ws, { type: 'lease_error', room: client.roomSlug || null, code: 'lease.not_joined', message: 'Open a room first' }); break; }
+                if (!client.user) { this.sendTo(ws, { type: 'lease_error', room: room.slug, code: 'lease.sign_in', message: 'Sign in to use the room\'s remote' }); break; }
+                const rooms = require('../rooms/rooms');
+                const access = await rooms.access(room, client.user);
+                const subject = client.user.subject_id;
+                if (!access.read || !subject) { this.sendTo(ws, { type: 'lease_error', room: room.slug, code: 'lease.sign_in', message: 'Sign in to use the room\'s remote' }); break; }
+                const watchers = this.roomWatchers(room.id);
+                try {
+                    if (msg.type === 'lease.request') {
+                        const result = await controlLease.request(room, subject, { watchers, expires_ms: msg.expires_ms });
+                        if (result.granted && result.already) this.sendTo(ws, { type: 'lease', room: room.slug, state: result.state });
+                        else if (result.granted) this.broadcastToRoom(room.id, { type: 'lease', room: room.slug, state: result.state, granted: true });
+                        else this.broadcastToRoom(room.id, { type: 'lease.request', room: room.slug, request: result.request });
+                    } else if (msg.type === 'lease.grant') {
+                        const to = msg.to || msg.holder;
+                        // An AI holder acts with the room's authority, so only the owner (or chat staff) hands it the remote.
+                        if (to && to.kind === 'ai' && !access.manage) { this.sendTo(ws, { type: 'lease_error', room: room.slug, code: 'lease.not_owner', message: 'Only the room\'s owner can hand the remote to an AI' }); break; }
+                        const result = await controlLease.grant(room, subject, to, { watchers, expires_ms: msg.expires_ms });
+                        this.broadcastToRoom(room.id, { type: 'lease', room: room.slug, state: result.state, granted: true });
+                    } else if (msg.type === 'lease.release') {
+                        const result = await controlLease.release(room, subject, { watchers });
+                        this.broadcastToRoom(room.id, { type: 'lease', room: room.slug, state: result.state, granted: true });
+                    } else {
+                        // Take-back always wins: the room's owner (or chat staff) needs no holder's consent.
+                        if (!access.manage) { this.sendTo(ws, { type: 'lease_error', room: room.slug, code: 'lease.not_owner', message: 'Only the room\'s owner can take the remote back' }); break; }
+                        const result = await controlLease.take(room, subject, { watchers, expires_ms: msg.expires_ms });
+                        this.broadcastToRoom(room.id, { type: 'lease', room: room.slug, state: result.state, taken: true });
+                    }
+                } catch (err) {
+                    this.sendTo(ws, { type: 'lease_error', room: room.slug, code: err.code || 'lease.error', message: err.code ? err.message : 'The remote did not change' });
+                }
+                break;
+            }
             // Support inboxes (server/inbox/inbox.js): a visitor follows their own conversation (its id and their visitor
             // token), one of the inbox's people follows the whole inbox.
             case 'inbox_watch': {
@@ -2717,6 +2814,68 @@ class ChatServer {
         }
     }
 
+    /** A socket's room, re-read so a vanished room or a changed slug is not trusted from the client. */
+    async _joinedRoom(client) {
+        if (!client.roomId || !client.roomSlug) return null;
+        const room = await require('../rooms/rooms').bySlug(client.roomSlug);
+        return room && Number(room.id) === Number(client.roomId) ? room : null;
+    }
+
+    /** The signed-in subjects in a room now: the control lease's watchers, read from the sockets, not stored. */
+    roomWatchers(roomId) {
+        const subjects = new Set();
+        for (const [, client] of this.clients) {
+            if (client.roomId === roomId && client.user && typeof client.user.subject_id === 'string' && client.user.subject_id) subjects.add(client.user.subject_id);
+        }
+        return [...subjects].sort();
+    }
+
+    /** Per-socket token bucket for the room clock, clock pings and remote messages. */
+    _withinRate(client, key, max, windowMs, now = Date.now()) {
+        if (!client._rateBuckets) client._rateBuckets = new Map();
+        const bucket = client._rateBuckets.get(key);
+        if (!bucket || now - bucket.start >= windowMs) {
+            client._rateBuckets.set(key, { start: now, count: 1 });
+            return true;
+        }
+        bucket.count++;
+        return bucket.count <= max;
+    }
+
+    /** The room's current lease state, with current presence, to everyone following it. */
+    async _broadcastLease(room) {
+        try {
+            const state = await controlLease.state(room, this.roomWatchers(room.id));
+            this.broadcastToRoom(room.id, { type: 'lease', room: room.slug, state });
+        } catch (err) {
+            console.warn('[Lease] state:', err && err.message);
+        }
+    }
+
+    /** A member joined: their socket gets the current clock, the room gets the current lease with them in it. */
+    async sendRoomState(room, ws) {
+        try {
+            const state = await syncClock.get(room);
+            if (state) this.sendTo(ws, { type: 'sync', room: room.slug, state });
+        } catch (err) {
+            console.warn('[Sync] state:', err && err.message);
+        }
+        await this._broadcastLease(room);
+    }
+
+    /** Presence changed (a join, a leave, a removal): refresh the watchers and release a holder who left. */
+    async _afterPresence(roomId, roomSlug = null) {
+        let room = roomSlug ? { id: roomId, slug: roomSlug } : null;
+        if (!room) {
+            const row = await db.get('SELECT id, slug FROM rooms WHERE id = ?', [roomId]);
+            if (!row) return;
+            room = row;
+        }
+        const watchers = this.roomWatchers(room.id);
+        try { await controlLease.reconcile(room, watchers); } catch (err) { console.warn('[Lease] presence:', err && err.message); return; }
+        await this._broadcastLease(room);
+    }
+
     /**
      * A room's roles or visibility changed: every socket following it learns what it may do now
      * (`room_access`), and one that may no longer read it leaves (`room_left`). → sockets told
@@ -2731,6 +2890,7 @@ class ChatServer {
             if (!a.read) { client.roomId = null; client.roomSlug = null; this.sendTo(ws, { type: 'room_left', reason: 'removed' }); continue; }
             this.sendTo(ws, { type: 'room_access', room: room.slug, kind: a.kind, role: a.role, can: { post: a.post, moderate: a.moderate, manage: a.manage, join: a.join, talk: a.talk } });
         }
+        await this._afterPresence(room.id, room.slug);
         return n;
     }
 
@@ -2743,6 +2903,7 @@ class ChatServer {
                 this.sendTo(ws, { type: 'room_left', reason: 'removed' });
             }
         }
+        if (n) this._afterPresence(roomId).catch(() => {});
         return n;
     }
 
@@ -3077,6 +3238,8 @@ class ChatServer {
             this.wss.clients.forEach(ws => ws.close());
             this.wss.close();
         }
+        controlLease.close();
+        syncClock.close();
     }
 
     /**
