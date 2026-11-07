@@ -116,6 +116,7 @@ t('ratchet: every file that makes an outbound request itself is reviewed', () =>
         'server/net/service-auth.js': 'Network JWKS (configured)',
         'server/chat/account-data.js': 'Network internal API (configured), fixed paths: export parts and deletion confirmations',
         'server/prefs/network-modules.js': 'Network user modules (configured)',
+        'server/presence.js': 'Network internal presence (configured internal URL), fixed /internal/presence path, the subject list in the query, a service token, 1.5 s, held 30 s',
         'server/chat/routes.js': 'GIF providers (fixed hosts)',
         'server/chat/emotes-routes.js': 'FFZ / BTTV / 7TV emote providers (fixed hosts, hardcoded URLs)',
         'server/chat/soundboard-service.js': '101soundboards (host allowlist; audio via safeLookup)',

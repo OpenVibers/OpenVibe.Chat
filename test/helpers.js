@@ -96,9 +96,23 @@ async function boot({ env = {} } = {}) {
         netModules.set(ns, subject, data, `svc:${String(v.claims.sub).replace(/^svc:/, '')}`);
         return send(cur ? 200 : 201, moduleRecord(ns, subject, netModules.records.get(k)));
     }
+    // Presence for the Network endpoint Chat reads (network.presence.read). Tests set rows here; the
+    // visibility rule itself is Network's and is tested there, so the stub answers the subjects asked for.
+    const netPresence = { rows: new Map(), calls: [] };
     const network = http.createServer(async (req, res) => {
         const raw = await new Promise((r) => { let s = ''; req.on('data', (c) => { s += c; }); req.on('end', () => r(s)); });
         res.setHeader('Content-Type', 'application/json');
+        if (req.url.startsWith('/internal/presence')) {
+            const url = new URL(req.url, ISS);
+            const auth = String(req.headers.authorization || '');
+            const v = auth.startsWith('Bearer ') ? serviceAuth.verifyServiceToken(auth.slice(7), { publicKey: keys.publicKey, issuer: ISS, audience: 'openvibe.network' }) : { ok: false, code: 'token.missing' };
+            if (!v.ok) { res.statusCode = 401; return res.end(JSON.stringify({ error: v.code })); }
+            if (!(v.claims.cap || []).includes('network.presence.read')) { res.statusCode = 403; return res.end(JSON.stringify({ error: 'capability.denied' })); }
+            const forSubject = url.searchParams.get('for');
+            const subjects = String(url.searchParams.get('subjects') || '').split(',').filter(Boolean);
+            netPresence.calls.push({ for: forSubject, subjects });
+            return res.end(JSON.stringify({ presence: subjects.map((s) => netPresence.rows.get(s)).filter(Boolean) }));
+        }
         const mm = /^\/internal\/modules\/([^/?]+)\/([^/?]+)$/.exec(req.url);
         if (mm) return modulesRoute(req, res, raw, decodeURIComponent(mm[1]), decodeURIComponent(mm[2]));
         if (req.url === '/oauth/token') {
@@ -298,7 +312,7 @@ async function boot({ env = {} } = {}) {
     });
 
     const h = {
-        tmp, keys, live, network, liveServer, tokenRequests, serviceToken, ISS, netModules,
+        tmp, keys, live, network, liveServer, tokenRequests, serviceToken, ISS, netModules, netPresence,
         userSeq: 0,
         /** Add a Live user (projection row) with a browser token; returns { id, token, ...row }. */
         addUser(username, { role = 'user', subject = null, created_at = sqliteNow(-30 * 86400e3), apiScopes = null, is_owner = 0, display_name = null } = {}) {
