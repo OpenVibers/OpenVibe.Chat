@@ -77,7 +77,7 @@ router.get('/:roomId/digest', room.guard('chat.agent_digest.read'), async (req, 
 /** The options the agent wrote, cleaned: two to four, each with its number and its text. */
 function cleanOptions(value) {
     if (!Array.isArray(value)) return null;
-    if (value.length < room.POLL_MIN_SECONDS / 30 || value.length > 4) return null;
+    if (value.length < 2 || value.length > 4) return null;
     const out = [];
     for (let i = 0; i < value.length; i++) {
         const raw = value[i];

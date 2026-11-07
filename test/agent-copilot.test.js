@@ -87,7 +87,9 @@ t('the digest caps hold at ten items and 1,500 characters', async () => {
 t('polls: one vote each, one at a time, the gap, close and veto', async () => {
     const token = bearer(['chat.agent_poll.write', 'chat.agent_digest.read'], ann.subject_id);
     const roomPath = `/api/v1/rooms/${room.slug}`;
-    let r = await h.http('POST', `${roomPath}/poll`, { token, body: { question: 'Which name?', options: ['parseRows', 'readTable'], duration_seconds: 30 } });
+    let r = await h.http('POST', `${roomPath}/poll`, { token, body: { question: 'Only one?', options: ['parseRows'] } });
+    assert.strictEqual(r.status, 422, 'a poll has two to four options');
+    r = await h.http('POST', `${roomPath}/poll`, { token, body: { question: 'Which name?', options: ['parseRows', 'readTable'], duration_seconds: 30 } });
     assert.strictEqual(r.status, 201, r.text);
     const first = r.body.poll_id;
     assert.strictEqual(r.body.state, 'open');
