@@ -256,7 +256,7 @@ async function optedOut(row) {
         const pref = (data && data.preferences) || {};
         return pref.agents_read_messages === false;
     } catch {
-        return false;                                    // an outage never locks a person in or out of a room
+        return true;                                     // a privacy setting fails closed: an outage reads nobody
     }
 }
 
