@@ -113,6 +113,24 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
         return allowedOrigins.has(origin);
     }
 
+    // Every OpenVibe site, by the exact https origins the pinned Contracts service manifests name. The navbar's Messages
+    // count and the Dock's DMs call Chat from each of them with a Bearer and credentials 'omit' (openvibe-shared
+    // navbar.js, dock.js); only five sites were in the credentialed list, so the count was refused everywhere else.
+    const FIRST_PARTY = (() => {
+        const out = new Set();
+        try {
+            const m = require('openvibe-contracts').services.manifests;
+            for (const svc of Array.isArray(m) ? m : Object.values(m || {})) {
+                for (const host of (svc && Array.isArray(svc.domains) ? svc.domains : [])) {
+                    if (typeof host === 'string' && /^[a-z0-9.-]+$/.test(host)) out.add(`https://${host}`);
+                }
+            }
+        } catch { /* no manifests: the credentialed list alone */ }
+        return out;
+    })();
+    /** The Bearer-only DM reads and writes the shared navbar and Dock make from any OpenVibe site. */
+    const bearerDmPath = (p) => p === '/api/dm/unread' || p === '/api/dm/conversations' || p.startsWith('/api/dm/conversations/');
+
     // ── Internal (loopback; never routed by nginx) ─────────────
     app.use('/internal/chat', express.json({ limit: '64kb' }), createInternalIngress({ chatServer }));
     // Live's reads of the chat tables Chat owns, in place of its mirrored copy (plan T3 J4b, server/chat/internal-reads.js).
@@ -251,7 +269,13 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     };
     app.use((req, res, next) => {
         if (isExtensionOrigin(req.headers.origin)) return extensionCors(req, res, next);
-        return (openPath(req.path) ? openCors : allowlistedCors)(req, res, next);
+        if (openPath(req.path)) return openCors(req, res, next);
+        // An OpenVibe site outside the credentialed list gets the non-credentialed grant on the DM paths: the origin is
+        // echoed with no Allow-Credentials, so the Bearer is the whole key, a browser refuses a credentialed read or
+        // preflight, and a foreign web origin is still refused.
+        const origin = req.headers.origin;
+        if (origin && bearerDmPath(req.path) && !isAllowedOrigin(origin) && FIRST_PARTY.has(origin)) return openCors(req, res, next);
+        return allowlistedCors(req, res, next);
     });
     // A workspace room's incoming hooks check a signature over the raw body, so they read it before the JSON parser does.
     app.post('/api/chat/hooks/:id', express.raw({ type: () => true, limit: '64kb' }), require('./rooms/hooks').ingress);
