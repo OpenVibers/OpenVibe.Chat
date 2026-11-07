@@ -305,6 +305,16 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
         return Number(r.lastInsertRowid);
     });
     const row = await messageById(id);
+    // The chat plays commands of an agent stream's room (Agent Streams S6): '!do', '!vote', and the
+    // moderators' '!skip', '!remove' and '!pin'. They are handled after the message is out, so a request is
+    // a message of the room and a thumbs up on it is a vote.
+    if (kindOf(room) === 'agent_stream' && body.startsWith('!')) {
+        try {
+            await require('../chat/play-queue').handleCommand(room, user, body, { access: a, now, messageId: row.id });
+        } catch (err) {
+            console.error('[Chat] the play command failed:', err.message);
+        }
+    }
     // A message naming one of the room's AI members (@handle) gets its answer after this one is out. `ai: false` posts
     // without one (a Vibe chat's Research, Agent or Code request: the answer comes from the task instead).
     if (ai) setImmediate(() => { require('./ai-members').afterPost(room, row, user, { timezone }).catch(() => {}); });
