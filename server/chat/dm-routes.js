@@ -20,6 +20,7 @@ const { limits } = require('../net/actor-limits');
 const dm = require('./dm');
 const ctx = require('../live-context');
 const prefStores = require('../prefs/stores');
+const presence = require('../presence');
 const { idParam } = require('./route-params');
 
 /**
@@ -35,6 +36,12 @@ async function dmSettingsOf(target) {
 function publicMessage(m) {
     if (m) delete m.sender_subject_id;
     return m;
+}
+
+/** Attach the Network presence view to every person in these conversations (one read, cached 30 s). */
+async function withPresence(viewerSubject, conversations) {
+    await presence.attachTo(viewerSubject, conversations.flatMap((c) => (Array.isArray(c && c.participants) ? c.participants : [])));
+    return conversations;
 }
 
 // All DM routes require authentication
@@ -91,6 +98,7 @@ router.get('/conversations', async (req, res) => {
         for (const conv of conversations) {
             conv.participants = await dm.getParticipants(conv.id);
         }
+        await withPresence(req.user.subject_id, conversations);
         res.json({ conversations });
     } catch (err) {
         console.error('[DM] List conversations error:', err.message);
@@ -155,6 +163,7 @@ router.post('/conversations', startLimit, async (req, res) => {
 
         const conversation = await dm.getConversation(conversationId);
         conversation.participants = await dm.getParticipants(conversationId);
+        await withPresence(req.user.subject_id, [conversation]);
         res.json({ conversation });
     } catch (err) {
         console.error('[DM] Create conversation error:', err.message);
@@ -172,6 +181,7 @@ router.get('/conversations/:id', async (req, res) => {
         const conversation = await dm.getConversation(convId);
         if (!conversation) return res.status(404).json({ error: 'Not found' });
         conversation.participants = await dm.getParticipants(convId);
+        await withPresence(req.user.subject_id, [conversation]);
         res.json({ conversation });
     } catch (err) {
         console.error('[DM] Get conversation error:', err.message);
@@ -235,27 +245,28 @@ router.post('/conversations/:id/messages', sendLimit, async (req, res) => {
         msg.avatar_url = sender?.avatar_url;
         msg.profile_color = sender?.profile_color;
 
-        // Real-time delivery via chat WebSocket
+        // Real-time delivery via chat WebSocket. A recipient in DND (Network presence) gets the message
+        // with `silent: true` and no Network push: Chat's own ping respects their chosen state.
         try {
             const chatServer = require('./chat-server');
             const participants = await dm.getParticipants(convId);
-            for (const p of participants) {
-                if (p.id === req.user.id) continue; // skip sender
+            const others = participants.filter(p => p.id !== req.user.id);
+            // One Network read per recipient, in parallel; cached 30 s each. A group is at most 20 people.
+            const own = await Promise.all(others.map((p) => (p.subject_id ? presence.self(p.subject_id) : null)));
+            const dnd = new Set(others.filter((p, i) => own[i] && own[i].state === 'dnd').map((p) => p.id));
+            for (const p of others) {
                 await chatServer.sendDm(p.id, {
                     type: 'dm',
                     conversation_id: convId,
                     message: msg,
+                    ...(dnd.has(p.id) ? { silent: true } : {}),
                 });
             }
-        } catch { /* non-critical */ }
-
-        // Push notifications to other participants (for when they're offline) — Live's
-        // utils/notify pushes them to the Network; the preview stays generic there.
-        try {
-            const participants = await dm.getParticipants(convId);
-            const otherIds = participants.filter(p => p.id !== req.user.id).map(p => p.id);
-            if (otherIds.length) {
-                ctx.effects.notifyDm({ recipient_ids: otherIds, sender_id: req.user.id, conversation_id: convId });
+            // Push notifications to other participants (for when they're offline) — Live's
+            // utils/notify pushes them to the Network; the preview stays generic there.
+            const notifyIds = others.filter(p => !dnd.has(p.id)).map(p => p.id);
+            if (notifyIds.length) {
+                ctx.effects.notifyDm({ recipient_ids: notifyIds, sender_id: req.user.id, conversation_id: convId });
             }
         } catch { /* non-critical */ }
 

@@ -7,6 +7,8 @@
  *                                                                                   kind site-daily → chat.site-daily-result@1 { days }
  *   GET  /internal/chat/messages                      chat.messages.read          → chat.messages-page@1
  *   GET  /internal/chat/dm/block-state                chat.messages.read          → { blocked }
+ *   POST /internal/chat/dm/peers                      chat.dm.peers.read          chat.dm-peers-result@1
+ *                                                                                   { subject, candidates } → { subject, peers }
  *   GET  /internal/chat/timeline                      chat.analysis.read          → chat.timeline-result@1
  *   GET  /internal/chat/first-chat                    chat.analysis.read          → chat.first-chat-result@1 { first }
  *   GET  /internal/chat/moderation/pending-ip         chat.moderation.queue.read  → chat.moderation-queue-result@1 { pending_ip }
@@ -209,6 +211,24 @@ async function dmBlockState(req) {
     return { blocked: await dm.isBlockedEither(q.a, q.b) };
 }
 
+/** Network's presence privacy rule: which candidates share a conversation with `subject`. */
+async function dmPeers(req) {
+    const b = req.body;
+    if (!b || typeof b !== 'object' || Array.isArray(b) || Object.keys(b).some((k) => !['subject', 'candidates'].includes(k))) bad('Invalid fields');
+    if (typeof b.subject !== 'string' || !/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(b.subject)) bad('Invalid subject');
+    if (!Array.isArray(b.candidates) || b.candidates.length > 100) bad('candidates must be an array of at most 100 subjects');
+    const candidates = [...new Set(b.candidates)];
+    if (!candidates.every((c) => typeof c === 'string' && /^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(c))) bad('Invalid candidates');
+    if (candidates.includes(b.subject)) bad('a person is not their own peer');
+    if (!candidates.length) return { subject: b.subject, peers: [] };
+    // A shared conversation is a DM relationship, direct or group (a group is at most 20 people).
+    const rows = await db.all(`SELECT DISTINCT p2.subject_id AS peer
+        FROM dm_participants p1
+        JOIN dm_participants p2 ON p2.conversation_id = p1.conversation_id
+        WHERE p1.subject_id = ? AND p2.subject_id <> ? AND p2.subject_id = ANY(?)`, [b.subject, b.subject, candidates]);
+    return { subject: b.subject, peers: rows.map((r) => r.peer).filter(Boolean) };
+}
+
 // ── N3: timeline ──
 // People's chat only: Live's AI viewers (source_platform 'ai') are left out, so their chatter never makes a "spike" the
 // AI then clips (item 151, C07: AI clips are excluded from human signals).
@@ -373,6 +393,14 @@ const router = express.Router();
 router.post('/stats', serviceAuth.guard('chat.stats.read'), route('stats', stats));
 router.get('/messages', serviceAuth.guard('chat.messages.read'), route('messages', messages));
 router.get('/dm/block-state', serviceAuth.guard('chat.messages.read'), route('dm-block-state', dmBlockState));
+router.post('/dm/peers', serviceAuth.guard('chat.dm.peers.read'), async (req, res) => {
+    try { res.json(await dmPeers(req)); }
+    catch (err) {
+        if (err.status) return res.status(err.status).json({ error: err.message });
+        console.error('[ChatReads] dm-peers:', err);
+        res.status(503).json({ error: 'Chat read unavailable' });
+    }
+});
 router.get('/timeline', serviceAuth.guard('chat.analysis.read'), route('timeline', timeline));
 router.get('/first-chat', serviceAuth.guard('chat.analysis.read'), route('first-chat', firstChat));
 const queue = serviceAuth.guard('chat.moderation.queue.read');

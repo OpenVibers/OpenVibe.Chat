@@ -142,7 +142,7 @@ async function getConversations(userId) {
  */
 async function getParticipants(conversationId) {
     return await db.all(`
-        SELECT u.id, u.username, u.display_name, u.avatar_url, u.profile_color
+        SELECT u.id, COALESCE(p.subject_id, u.subject_id) AS subject_id, u.username, u.display_name, u.avatar_url, u.profile_color
         FROM dm_participants p
         JOIN ctx_users u ON u.id = p.user_id
         WHERE p.conversation_id = ?

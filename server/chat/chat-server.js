@@ -34,6 +34,7 @@ const soundboard = require('./soundboard-service');
 const audioQueue = require('./audio-queue');
 const dm = require('./dm');
 const networkBlocks = require('./network-blocks');
+const presence = require('../presence');
 const vipBadges = require('../vip/badges');
 // Cosmetics and tags are Live's (monetization/cosmetics, game/tags); read through live-context.
 const cosmetics = { getCosmeticProfile: (userId) => ctx.getCosmeticProfile(userId) };
@@ -660,7 +661,7 @@ class ChatServer {
                 break;
             }
             case 'get-users':
-                this.sendTo(ws, { type: 'users-list', users: await this.getUserList(client.streamId) });
+                this.sendTo(ws, { type: 'users-list', users: await this.getUserList(client.streamId, client.user && client.user.subject_id) });
                 break;
             default:
                 break;
@@ -731,9 +732,10 @@ class ChatServer {
      * Build a deduplicated list of users in a given stream (or global if null).
      * Returns { logged: [{username, display_name, avatar_url, role}], anonCount: N }
      */
-    async getUserList(streamId) {
+    async getUserList(streamId, viewerSubject = null) {
         const seen = new Set();
         const logged = [];
+        const subjects = new Map();
         let anonCount = 0, hiddenCount = 0;
         for (const [, c] of this.clients) {
             if (c.streamId !== streamId) continue;
@@ -742,12 +744,14 @@ class ChatServer {
                 seen.add(c.user.id);
                 // chat.presence_prefs: someone who turned off "show my name in user lists" is counted, not named.
                 if (await this._hiddenFromUserList(c.user)) { hiddenCount++; continue; }
+                const subject = c.user.subject_id || await db.subjectFor(c.user.id);
                 logged.push({
                     username: c.user.username,
                     display_name: c.user.display_name || c.user.username,
                     avatar_url: c.user.avatar_url || null,
                     role: c.user.role,
                 });
+                if (subject) subjects.set(c.user.username, subject);
             } else if (c.anonId) {
                 if (seen.has(c.anonId)) continue;
                 seen.add(c.anonId);
@@ -757,6 +761,10 @@ class ChatServer {
         // Sort: admins first, then mods, then alphabetical
         const rolePriority = { admin: 0, global_mod: 1, streamer: 2, user: 3 };
         logged.sort((a, b) => (rolePriority[a.role] ?? 9) - (rolePriority[b.role] ?? 9) || a.display_name.localeCompare(b.display_name));
+        // The Network answers each viewer separately (a stranger's state is never disclosed), so a member
+        // list is built for the person who asked; the read is cached 30 s per viewer and member set.
+        const seenPresence = await presence.forViewer(viewerSubject, [...subjects.values()]);
+        for (const u of logged) u.presence = seenPresence.get(subjects.get(u.username)) || null;
         return { logged, anonCount, hiddenCount };
     }
 
@@ -2911,12 +2919,14 @@ class ChatServer {
         if (!this._usersListTimers) this._usersListTimers = new Map();
         this._usersListTimers.set(key, setTimeout(async () => {
             this._usersListTimers.delete(key);
-            const users = await this.getUserList(streamId);
-            const data = JSON.stringify({ type: 'users-list', users });
+            // Presence is per viewer (the Network decides what this person may see), so the list is built
+            // once per signed-in viewer subject and shared by that viewer's tabs.
+            const byViewer = new Map();
             for (const [ws, client] of this.clients) {
-                if (client.streamId === streamId && ws.readyState === WebSocket.OPEN) {
-                    try { ws.send(data); } catch {}
-                }
+                if (client.streamId !== streamId || ws.readyState !== WebSocket.OPEN) continue;
+                const viewer = (client.user && client.user.subject_id) || null;
+                if (!byViewer.has(viewer)) byViewer.set(viewer, await this.getUserList(streamId, viewer));
+                try { ws.send(JSON.stringify({ type: 'users-list', users: byViewer.get(viewer) })); } catch {}
             }
         }, 500));
     }
