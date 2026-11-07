@@ -522,7 +522,15 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-unread .oc-row-sub { color: var(--oc-text); }
 .oc-dot { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, var(--oc-on-accent)); font-size: .72rem; font-weight: 800; }
 .oc-row-empty { padding: 16px 14px; }
-.oc-av { flex: none; display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; font-size: .85rem; font-weight: 800; letter-spacing: .02em; color: #fff; background: hsl(var(--av, 210) 45% 38%); }
+.oc-av { flex: none; position: relative; display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; font-size: .85rem; font-weight: 800; letter-spacing: .02em; color: #fff; background: hsl(var(--av, 210) 45% 38%); }
+/* The Network presence dot: openvibe-shared/presence.js .ovp-dot's look (11 px, 2.5 px surface ring, bottom-right;
+   14 px beside a page header). Offline and invisible draw nothing. */
+.oc-pdot { position: absolute; right: -1px; bottom: -1px; width: 11px; height: 11px; border-radius: 50%; box-sizing: border-box; pointer-events: none; background: var(--ovp, #22c55e); border: 2.5px solid var(--oc-pdot-ring, var(--oc-panel)); }
+.oc-pdot[data-state="dnd"]::after { content: ""; position: absolute; left: 1.5px; right: 1.5px; top: 50%; height: 1.5px; margin-top: -.75px; border-radius: 2px; background: var(--oc-pdot-ring, var(--oc-panel)); }
+.oc-pdot[data-state="away"] { background: radial-gradient(circle at 70% 30%, var(--oc-pdot-ring, var(--oc-panel)) 0 2.2px, var(--ovp) 2.6px); }
+.oc-av-lg .oc-pdot { width: 14px; height: 14px; }
+.oc-page-head .oc-av { --oc-pdot-ring: var(--oc-bg); }
+.oc-members-online { margin: 0 0 6px; font-size: .86rem; }
 .oc-av-feed { background: var(--oc-panel-2); color: var(--oc-muted); border: 1px solid var(--oc-line); }
 .oc-av-feed.is-on { color: var(--oc-ok); border-color: color-mix(in srgb, var(--oc-ok) 45%, transparent); }
 .oc-find { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; padding: 4px 4px 4px 14px; border: 1px solid var(--oc-line); border-radius: 999px; background: var(--oc-panel); }

@@ -97,6 +97,8 @@ t('room member lists carry presence, built for the viewer', async () => {
         const listed = list.users.logged.find((u) => u.username === 'bob');
         assert.strictEqual(listed.presence.state, 'away');
         assert.strictEqual(listed.presence.live, true);
+        assert.strictEqual(list.users.online, 1, 'live counts as online');
+        assert.strictEqual(list.users.logged[0].username, 'bob', 'online and live sort first');
         assert.strictEqual(h.netPresence.calls.at(-1).for, ANN, 'the list was built for Ann');
     } finally { a.close(); b.close(); }
 });

@@ -21,6 +21,7 @@ const req = async (method, path, { headers = {}, raw } = {}) => {
 };
 const form = (u, fields, extra = {}) => ({ headers: { ...cookie(u), 'content-type': 'application/x-www-form-urlencoded', origin: SITE, ...extra }, raw: new URLSearchParams(fields).toString() });
 const dmApi = (method, path, u, body) => h.http(method, `/api/dm${path}`, { token: u && u.token, body });
+const view = (subject, state, extra = {}) => ({ subject, state, status_text: extra.status_text || null, emoji: null, live: !!extra.live, updated_at: '2026-11-07T09:00:00.000Z' });
 const navLabel = (page, key) => {
     const cfg = JSON.parse(page.match(/window\.__OV_PAGE = (.*);\n/)[1]);
     return cfg.navbar.links.find((l) => l.href === key).label;
@@ -113,6 +114,40 @@ t('block: the conversation closes both ways; the inbox lists who you blocked; un
     assert.strictEqual(r.headers.get('location'), '/messages?unblocked=1', 'back goes to a conversation or the inbox, nowhere else');
     assert.strictEqual((await dmApi('POST', `/conversations/${conv}/messages`, alice, { message: 'back again' })).status, 200);
     assert.match((await req('GET', `/messages/${conv}`, { headers: cookie(bob) })).text, /back again/);
+});
+
+t('presence: a dot on the DM picture, the state under the name, and no dot when there is nothing to show', async () => {
+    const presence = require('../server/presence');
+    h.netPresence.rows.set(bob.subject_id, view(bob.subject_id, 'online', { status_text: 'Around' }));
+    presence.clearCache();
+    let inbox = await req('GET', '/messages', { headers: cookie(alice) });
+    assert.match(inbox.text, /aria-label="Bob, online"/);
+    assert.match(inbox.text, /<span class="oc-pdot" data-state="online"/);
+    let page = await req('GET', `/messages/${conv}`, { headers: cookie(alice) });
+    assert.match(page.text, /id="oc-dm-avatar"[^>]*aria-label="Bob, online"/);
+    assert.match(page.text, /id="oc-dm-status">Online · Around</);
+
+    const cases = [['away', 'Away', false], ['dnd', 'Do not disturb', false], ['online', 'Live now', true]];
+    for (const [state, label, live] of cases) {
+        h.netPresence.rows.set(bob.subject_id, view(bob.subject_id, state, { live }));
+        presence.clearCache();
+        inbox = await req('GET', '/messages', { headers: cookie(alice) });
+        assert.match(inbox.text, new RegExp(`<span class="oc-pdot" data-state="${live ? 'live' : state}"`));
+        page = await req('GET', `/messages/${conv}`, { headers: cookie(alice) });
+        assert.match(page.text, new RegExp(`id="oc-dm-status">${label}<`));
+    }
+
+    // Offline and invisible draw no dot at all, and the line falls back to the username (never "last seen").
+    for (const state of ['offline', 'invisible']) {
+        h.netPresence.rows.set(bob.subject_id, view(bob.subject_id, state));
+        presence.clearCache();
+        inbox = await req('GET', '/messages', { headers: cookie(alice) });
+        assert.doesNotMatch(inbox.text, /class="oc-pdot"/);
+        page = await req('GET', `/messages/${conv}`, { headers: cookie(alice) });
+        assert.doesNotMatch(page.text, /class="oc-pdot"/);
+        assert.match(page.text, /id="oc-dm-status">@bob</);
+        assert.doesNotMatch(page.text, /last seen/i);
+    }
 });
 
 t('groups have no one to block', async () => {

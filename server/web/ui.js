@@ -4,18 +4,19 @@
  * alignment's kind of bad … not a focus on the real content"): one compact page header with its actions as icons, times
  * people read at a glance, and a person's initials when there is no picture.
  *
- *   head({ title, sub, back, actions })   <header class="oc-page-head">: back icon, title and one muted line, icon actions
+ *   head({ title, sub, back, actions, avatar })  <header class="oc-page-head">: back icon, avatar, title and one muted line, icon actions
  *   when(ts, now)                          { iso, text }: 14:05 today, Yesterday, Mon this week, Oct 20 this year, else 2025-10-20
- *   initials(name)                         a round mark with up to two letters, its colour from the name
+ *   initials(name, presence)               a round mark with up to two letters, its colour from the name, and the
+ *                                          Network presence dot (Shared's .ovp-dot look) when there is a visible state
  *   hueOf(slug) / serverMark(server)       a server's steady hue, and its rounded-square mark in a list row (the same
  *                                          colour as in the server rail, wherever the server is listed)
  */
 const { esc } = require('./layout');
 const { ICONS } = require('./icons');
 
-function head({ title, sub = '', back = null, actions = [] }) {
+function head({ title, sub = '', back = null, actions = [], avatar = '' }) {
     return `<header class="oc-page-head">
-${back ? `<a class="oc-icon-btn oc-back" href="${esc(back.href)}" aria-label="${esc(back.label)}" title="${esc(back.label)}">${ICONS.back}</a>` : ''}<div class="oc-page-id"><h1>${title}</h1>${sub ? `<p class="oc-page-sub">${sub}</p>` : ''}</div>
+${back ? `<a class="oc-icon-btn oc-back" href="${esc(back.href)}" aria-label="${esc(back.label)}" title="${esc(back.label)}">${ICONS.back}</a>` : ''}${avatar}<div class="oc-page-id"><h1>${title}</h1>${sub ? `<p class="oc-page-sub">${sub}</p>` : ''}</div>
 ${actions.length ? `<div class="oc-page-tools">${actions.join('')}</div>` : ''}
 </header>`;
 }
@@ -38,16 +39,57 @@ function when(ts, now = Date.now()) {
     return { iso: d.toISOString(), text };
 }
 
-function initials(name) {
+// ── Presence (network.presence@1) ──
+// The same look as openvibe-shared/presence.js .ovp-dot: 11 px (14 px in a page header), bottom-right, a 2.5 px
+// ring in the surface behind it; online solid, away a crescent, dnd a bar, live solid red. Offline and invisible
+// are the absence of a dot: never a grey one on someone else's picture.
+const PRESENCE = {
+    online: { label: 'Online', a11y: 'online', color: '#22c55e' },
+    away: { label: 'Away', a11y: 'away', color: '#f59e0b' },
+    dnd: { label: 'Do not disturb', a11y: 'do not disturb', color: '#ef4444' },
+    live: { label: 'Live now', a11y: 'live', color: '#ef4444' },
+};
+/** The state the dot draws, or null when the person is offline/invisible/unknown. */
+function presenceState(presence) {
+    if (!presence) return null;
+    const state = presence.live ? 'live' : String(presence.state || '');
+    return PRESENCE[state] ? state : null;
+}
+/** The dot itself (aria-hidden; the avatar carries the accessible state). */
+function presenceDot(presence) {
+    const state = presenceState(presence);
+    if (!state) return '';
+    return `<span class="oc-pdot" data-state="${state}" style="--ovp:${PRESENCE[state].color}" aria-hidden="true"></span>`;
+}
+/** A member list's order: online and live first, then away/dnd, then everyone else. */
+function presenceOrder(presence) {
+    const state = presenceState(presence);
+    return state === 'online' || state === 'live' ? 0 : state === 'away' || state === 'dnd' ? 1 : 2;
+}
+/** "Online", "Live now" and — when there is one — " · their status line". Nothing for offline. */
+function presenceLine(presence, { liveHref = null } = {}) {
+    const state = presenceState(presence);
+    if (!state) return '';
+    const label = esc(PRESENCE[state].label);
+    const href = typeof liveHref === 'string' && (/^https:\/\//i.test(liveHref) || /^\/(?!\/)/.test(liveHref)) ? liveHref : null;
+    const shown = state === 'live' && href ? `<a href="${esc(href)}">${label}</a>` : label;
+    return `${shown}${presence.status_text ? ` · ${esc(String(presence.status_text).slice(0, 80))}` : ''}`;
+}
+
+function initials(name, presence = null, { large = false, id = '' } = {}) {
     const words = String(name || '?').replace(/[^\p{L}\p{N} ]/gu, ' ').trim().split(/\s+/).filter(Boolean);
     const letters = (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2)).toUpperCase();
     let h = 0;
     for (const ch of String(name || '')) h = (h * 31 + ch.codePointAt(0)) % 360;
-    return `<span class="oc-av" style="--av:${h}" aria-hidden="true">${esc(letters)}</span>`;
+    const cls = `oc-av${large ? ' oc-av-lg' : ''}`;
+    const idAttr = id ? ` id="${esc(id)}"` : '';
+    const state = presenceState(presence);
+    if (!state) return `<span class="${cls}" style="--av:${h}"${idAttr} aria-hidden="true">${esc(letters)}</span>`;
+    return `<span class="${cls}" style="--av:${h}"${idAttr} role="img" aria-label="${esc(`${String(name || '?')}, ${PRESENCE[state].a11y}`)}">${esc(letters)}${presenceDot(presence)}</span>`;
 }
 
 const hueOf = (slug) => { let h = 0; for (const c of String(slug)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 const serverLetters = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 const serverMark = (s) => `<span class="oc-srv-icon oc-srv-icon--row" style="--oc-hue:${hueOf(s.slug)}" aria-hidden="true">${esc(serverLetters(s.name))}</span>`;
 
-module.exports = { head, when, initials, hueOf, serverLetters, serverMark };
+module.exports = { head, when, initials, presenceState, presenceDot, presenceOrder, presenceLine, hueOf, serverLetters, serverMark };

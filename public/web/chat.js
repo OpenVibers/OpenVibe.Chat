@@ -23,6 +23,38 @@
   function nearBottom() { return !feed || feed.scrollHeight - feed.scrollTop - feed.clientHeight < 120; }
   function toBottom() { if (feed) feed.scrollTop = feed.scrollHeight; }
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+  // The presence dot (openvibe-shared/presence.js .ovp-dot's look). The avatar's accessible name carries the state;
+  // the dot is aria-hidden. Offline and invisible have no dot at all.
+  var PRESENCE = {
+    online: { label: 'Online', a11y: 'online', color: '#22c55e' },
+    away: { label: 'Away', a11y: 'away', color: '#f59e0b' },
+    dnd: { label: 'Do not disturb', a11y: 'do not disturb', color: '#ef4444' },
+    live: { label: 'Live now', a11y: 'live', color: '#ef4444' }
+  };
+  function presenceState(p) { if (!p) return null; var s = p.live ? 'live' : String(p.state || ''); return PRESENCE[s] ? s : null; }
+  function presenceLine(p) { var s = presenceState(p); return s ? PRESENCE[s].label + (p.status_text ? ' \u00b7 ' + String(p.status_text).slice(0, 80) : '') : ''; }
+  function presenceHref(p) {
+    var href = p && (p.channel_url || p.url);
+    return typeof href === 'string' && (/^https:\/\//i.test(href) || /^\/(?!\/)/.test(href)) ? href : null;
+  }
+  function setPresenceLine(box, p, username) {
+    if (!box) return;
+    var s = presenceState(p);
+    if (!s) { box.textContent = username ? '@' + username : ''; return; }
+    var href = s === 'live' ? presenceHref(p) : null;
+    if (!href) { box.textContent = presenceLine(p); return; }
+    box.textContent = '';
+    var a = el('a', null, PRESENCE[s].label); a.href = href; box.appendChild(a);
+    if (p.status_text) box.appendChild(document.createTextNode(' \u00b7 ' + String(p.status_text).slice(0, 80)));
+  }
+  function paintPresence(av, name, p) {
+    if (!av) return;
+    var old = av.querySelector('.oc-pdot'); if (old) old.remove();
+    var s = presenceState(p);
+    if (!s) { av.removeAttribute('role'); av.removeAttribute('aria-label'); av.setAttribute('aria-hidden', 'true'); return; }
+    av.removeAttribute('aria-hidden'); av.setAttribute('role', 'img'); av.setAttribute('aria-label', String(name || '?') + ', ' + PRESENCE[s].a11y);
+    var dot = el('span', 'oc-pdot'); dot.dataset.state = s; dot.style.setProperty('--ovp', PRESENCE[s].color); dot.setAttribute('aria-hidden', 'true'); av.appendChild(dot);
+  }
   function clock(ts) {
     var d = new Date(ts && String(ts).indexOf('T') < 0 ? String(ts).replace(' ', 'T') + 'Z' : ts);
     var t = el('time', 'oc-time', isNaN(d) ? '' : d.toISOString().slice(11, 16));
@@ -212,6 +244,25 @@
     }
     setInterval(poll, 4000);
     document.addEventListener('visibilitychange', poll);
+    // The header's dot and state line refresh every 60 s while the tab is visible (Network's read is cached 30 s).
+    if (cfg.other) {
+      var refreshPresence = function () {
+        if (document.hidden) return;
+        fetch(base, { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (d) {
+            var others = d && d.conversation && Array.isArray(d.conversation.participants) ? d.conversation.participants.filter(function (p) { return p.id !== cfg.me; }) : [];
+            var p = others.length === 1 ? others[0] : null;
+            if (!p) return;
+            var name = p.display_name || p.username || '?';
+            paintPresence(document.getElementById('oc-dm-avatar'), name, p.presence);
+            var status = document.getElementById('oc-dm-status');
+            setPresenceLine(status, p.presence, p.username);
+          }).catch(function () {});
+      };
+      setInterval(refreshPresence, 60000);
+      document.addEventListener('visibilitychange', function () { if (!document.hidden) refreshPresence(); });
+    }
     if (form && input) {
       form.addEventListener('submit', function (e) {
         var text = input.value.trim();
@@ -383,12 +434,12 @@
     return d.toISOString().slice(0, 10);
   }
   // A person's initials in a round mark, its colour from the name (server/web/ui.js initials()).
-  function initialsMark(name) {
+  function initialsMark(name, personPresence) {
     var words = String(name || '?').replace(/[^\p{L}\p{N} ]/gu, ' ').trim().split(/\s+/).filter(Boolean);
     var letters = (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2)).toUpperCase();
     var h = 0;
     for (var ch of String(name || '')) h = (h * 31 + ch.codePointAt(0)) % 360;
-    var m = el('span', 'oc-av', letters); m.style.setProperty('--av', String(h)); m.setAttribute('aria-hidden', 'true');
+    var m = el('span', 'oc-av', letters); m.style.setProperty('--av', String(h)); paintPresence(m, name, personPresence);
     return m;
   }
   function convItem(c, me) {
@@ -397,7 +448,8 @@
     var a = el('a'); a.href = '/messages/' + encodeURIComponent(c.id);
     var others = (c.participants || []).filter(function (p) { return p.id !== me; });
     var title = c.name || others.map(function (p) { return p.display_name || p.username; }).join(', ') || 'Just you';
-    a.appendChild(initialsMark(title));
+    var person = others.length === 1 ? others[0] : null;
+    a.appendChild(initialsMark(title, person && person.presence));
     var main = el('span', 'oc-row-main'), top = el('span', 'oc-row-top'), sub = el('span', 'oc-row-sub', c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet');
     top.appendChild(el('strong', null, title));
     if (c.last_message_at) {
