@@ -20,7 +20,7 @@ t('the front page leads to Vibe: the first action, an Ask Vibe box, the question
     assert.match(page, /<summary>What is Vibe\?<\/summary>/);
     assert.match(page, /"name":"What is Vibe\?"/, 'in the FAQ JSON-LD');
     assert.match(page, /<summary>Can Vibe use my own model\?<\/summary>/, 'your own key or computer (AI on your own machines)');
-    assert.ok(page.includes('a model on your own computer (Ollama, LM Studio or llama.cpp through the OpenVibe Node'));
+    assert.ok(page.includes('a model on your own computer (Ollama, LM Studio or llama.cpp through the OpenVibe Link'));
 });
 
 t('the box opens Vibe with the question in it, signed out too', async () => {

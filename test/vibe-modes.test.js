@@ -92,7 +92,7 @@ t('Code in an existing chat: Codes on their own computer; Agent too; Chat mode a
     await new Promise((res) => setTimeout(res, 150));
     const vibeLines = (await messagesOf(slug)).filter((m) => m.ai_member_id).map((m) => m.message);
     assert.ok(vibeLines.some((l) => /^On it: I sent this to OpenVibe\.Codes on your own computer/.test(l)));
-    assert.ok(vibeLines.some((l) => /^On it: I am doing this on your own computer, through OpenVibe\.Node/.test(l)));
+    assert.ok(vibeLines.some((l) => /^On it: I am doing this on your own computer, through OpenVibe Link/.test(l)));
     assert.strictEqual(turns.length, 1, 'no instant answers to the tasks');
 });
 
