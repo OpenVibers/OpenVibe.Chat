@@ -212,6 +212,7 @@ t('openvibe.party: the start form, sign-in, and /new', async () => {
     assert.match(csp, /script-src[^;]*https:\/\/embed\.twitch\.tv/);
     assert.match(csp, /frame-src[^;]*https:\/\/www\.youtube-nocookie\.com/);
     assert.match(csp, /frame-src[^;]*https:\/\/player\.twitch\.tv/);
+    assert.match(csp, /frame-src[^;]*https:\/\/embed\.twitch\.tv/, 'Twitch.Embed draws its player in an embed.twitch.tv frame');
     // The page loads Opus's page and Shared's player and clock.
     for (const file of ['/web/party.js', '/web/party.css', '/web/party-providers.js', '/web/party-provider-sync.js', '/shared/ov-sync.js', '/shared/player.js', '/shared/player.css']) {
         assert.ok(shell.text.includes(file), `${file} is on the page`);
