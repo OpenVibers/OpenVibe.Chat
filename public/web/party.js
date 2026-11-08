@@ -102,6 +102,10 @@
   floats.setAttribute('aria-hidden', 'true');
   frame.appendChild(veil); frame.appendChild(drift); frame.appendChild(floats);
   if (isRadio) frame.classList.add('is-radio');
+  // A listening party has no picture: the stage is the now-playing card (cover, title, artist, the licence), then
+  // the player, then the status line.
+  var np = null;
+  if (isRadio) { np = el('div', 'pt-np'); frame.insertBefore(np, video); }
   // The shell's own header (the title and who started it) leads; without one, the page writes its own.
   var shellHead = root.querySelector('.oc-party-head');
   var head = shellHead || el('div', 'pt-head');
@@ -187,52 +191,86 @@
     if (clock.paused) video.pause();
     else video.play().catch(function () { /* browser gesture required */ });
   }
-  function sourceLabel(value) { return { creator: 'Creator upload', creative_commons: 'Creative Commons', public_domain: 'Public domain', ai: 'AI-made music' }[value] || value; }
-  function licenceLabel(value) { return value === 'creator_grant' ? 'Creator’s permission to stream' : value === 'public_domain' ? 'Public domain mark' : value; }
+  function licenceLabel(value) {
+    return { creator_grant: 'Streamed with the artist’s permission', public_domain: 'Public domain', 'CC0-1.0': 'CC0 1.0',
+      'CC-BY-4.0': 'CC BY 4.0', 'CC-BY-SA-4.0': 'CC BY-SA 4.0' }[value] || value;
+  }
+  function safeHref(u) { return typeof u === 'string' && /^https:\/\//i.test(u) ? u : null; }
+  function outLink(text, href) {
+    var url = safeHref(href), a = el(url ? 'a' : 'span', null, text);
+    if (url) { a.href = url; a.target = '_blank'; a.rel = 'noopener'; }
+    return a;
+  }
+  function mayChangeQueue() { return !guest && self && (self.subject === owner || (radio && radio.allow_everyone)); }
+  function paintNowPlaying() {
+    if (!np) return;
+    np.textContent = '';
+    var current = radio && radio.current;
+    frame.classList.toggle('is-empty', !current);   // no track: no dead player, no second "nothing to play" line
+    var cover = el('div', 'pt-np-cover', current ? (String(current.title || '').trim().charAt(0) || '♪').toUpperCase() : '♪');
+    cover.setAttribute('aria-hidden', 'true');
+    var seed = String(current ? current.id || current.title : 'radio'), hue = 0;
+    for (var i = 0; i < seed.length; i++) hue = (hue * 31 + seed.charCodeAt(i)) % 360;
+    cover.style.setProperty('--np-h', String(hue));
+    np.appendChild(cover);
+    var text = el('div', 'pt-np-text');
+    text.appendChild(el('p', 'pt-h', current ? 'Now playing' : 'OpenVibe Radio'));
+    text.appendChild(el('strong', 'pt-np-title', current ? current.title : 'Nothing is playing yet'));
+    if (current) {
+      text.appendChild(el('p', 'pt-np-artist', current.artist + (current.ai_made ? ' · AI-made music' : '')));
+      var proof = el('p', 'pt-np-proof');
+      proof.appendChild(outLink(licenceLabel(current.licence), current.licence_url));
+      if (safeHref(current.source_url)) { proof.appendChild(document.createTextNode(' · ')); proof.appendChild(outLink('Original source', current.source_url)); }
+      if (current.changes_note) proof.appendChild(document.createTextNode(' · Changes: ' + current.changes_note));
+      text.appendChild(proof);
+    } else {
+      text.appendChild(el('p', 'pt-np-artist', mayChangeQueue() ? 'Pick a track below to start the music.' : 'The music starts when the host picks a track.'));
+    }
+    np.appendChild(text);
+  }
 
   function paintRadio() {
     if (!isRadio || !radioBox) return;
+    paintNowPlaying();
     radioBox.textContent = '';
-    var current = radio && radio.current;
-    radioBox.appendChild(el('h2', 'pt-h', 'Now playing'));
-    radioBox.appendChild(el('strong', 'pt-radio-title', current ? current.title : 'The queue is empty'));
-    if (current) {
-      radioBox.appendChild(el('p', 'pt-radio-meta', current.artist + (current.ai_made ? ' · AI-made music' : '')));
-      var proof = el('p', 'pt-radio-meta', 'Source: ' + sourceLabel(current.source) + ' · Licence or status: ');
-      var licence = el('a', null, licenceLabel(current.licence)); licence.href = current.licence_url; proof.appendChild(licence);
-      if (current.source_url) { proof.appendChild(document.createTextNode(' · ')); var source = el('a', null, 'Original source'); source.href = current.source_url; proof.appendChild(source); }
-      radioBox.appendChild(proof);
-      if (current.changes_note) radioBox.appendChild(el('p', 'pt-radio-meta', 'Changes: ' + current.changes_note));
+    var queue = (radio && radio.queue) || [];
+    radioBox.appendChild(el('h2', 'pt-h', queue.length ? 'Up next · ' + queue.length : 'Up next'));
+    if (queue.length) {
+      var list = el('ol', 'pt-radio-queue');
+      queue.forEach(function (t) {
+        var item = el('li', null);
+        item.appendChild(el('span', 'pt-radio-track', t.title));
+        item.appendChild(el('span', 'pt-radio-by', ' · ' + t.artist + (t.ai_made ? ' · AI-made music' : '') + ' · '));
+        var lic = outLink(t.licence === 'creator_grant' ? 'Artist’s permission' : licenceLabel(t.licence), t.licence_url); lic.className = 'pt-radio-lic'; item.appendChild(lic);
+        list.appendChild(item);
+      });
+      radioBox.appendChild(list);
+    } else {
+      radioBox.appendChild(el('p', 'pt-radio-empty', mayChangeQueue() ? 'Nothing queued yet. Pick a track below.' : 'Nothing queued yet.'));
     }
-    radioBox.appendChild(el('h2', 'pt-h', 'Up next'));
-    var list = el('ol', 'pt-radio-queue');
-    (radio && radio.queue || []).forEach(function (t) {
-      var item = el('li', null, t.title + ' — ' + t.artist + (t.ai_made ? ' · AI-made music' : '') + ' · Source: ' + sourceLabel(t.source) + ' · ');
-      var a = el('a', null, licenceLabel(t.licence)); a.href = t.licence_url; item.appendChild(a); list.appendChild(item);
-    });
-    if (!list.children.length) list.appendChild(el('li', null, 'Nothing queued yet.'));
-    radioBox.appendChild(list);
-    var mayChange = !guest && self && (self.subject === owner || (radio && radio.allow_everyone));
-    if (mayChange) {
-      var controls = el('div', 'pt-radio-actions');
-      var skip = el('button', 'pt-remote-btn', 'Skip track'); skip.type = 'button';
-      skip.addEventListener('click', function () { radioAction('skip', { expected_id: radio && radio.current && radio.current.id }); }); controls.appendChild(skip);
+    if (mayChangeQueue()) {
       var add = el('form', 'pt-radio-add');
       var id = el('select'); id.name = 'track_id'; id.required = true; id.setAttribute('aria-label', 'Choose a Radio track');
-      var placeholder = el('option', null, 'Choose a Radio track'); placeholder.value = ''; id.appendChild(placeholder);
-      catalogue.forEach(function (t) { var option = el('option', null, t.title + ' — ' + t.artist); option.value = t.id; id.appendChild(option); });
+      var placeholder = el('option', null, catalogue.length ? 'Choose a Radio track' : 'No Radio tracks yet'); placeholder.value = ''; id.appendChild(placeholder);
+      catalogue.forEach(function (t) { var option = el('option', null, t.title + ' · ' + t.artist); option.value = t.id; id.appendChild(option); });
       var submit = el('button', 'pt-remote-btn', 'Add to queue'); submit.type = 'submit'; add.appendChild(id); add.appendChild(submit);
       add.addEventListener('submit', function (event) { event.preventDefault(); radioAction('queue', { track_id: id.value }); id.value = ''; });
-      controls.appendChild(add); radioBox.appendChild(controls);
+      radioBox.appendChild(add);
+      var row = el('div', 'pt-radio-actions');
+      if (radio && radio.current) {
+        var skip = el('button', 'pt-ghost', 'Skip this track'); skip.type = 'button';
+        skip.addEventListener('click', function () { radioAction('skip', { expected_id: radio && radio.current && radio.current.id }); });
+        row.appendChild(skip);
+      }
+      if (self && self.subject === owner) {
+        var allow = el('label', 'pt-radio-permission');
+        var box = el('input'); box.type = 'checkbox'; box.checked = !!(radio && radio.allow_everyone);
+        box.addEventListener('change', function () { radioAction('allow', { allow_everyone: box.checked }); });
+        allow.appendChild(box); allow.appendChild(document.createTextNode(' Let everyone add and skip tracks'));
+        row.appendChild(allow);
+      }
+      if (row.children.length) radioBox.appendChild(row);
     }
-    if (!guest && self && self.subject === owner) {
-      var allow = el('label', 'pt-radio-permission');
-      var box = el('input'); box.type = 'checkbox'; box.checked = !!(radio && radio.allow_everyone);
-      box.addEventListener('change', function () { radioAction('allow', { allow_everyone: box.checked }); });
-      allow.appendChild(box); allow.appendChild(document.createTextNode(' Let everyone add and skip tracks'));
-      radioBox.appendChild(allow);
-    }
-    radioBox.appendChild(el('p', 'pt-radio-meta', 'Spotify, Apple Music and YouTube Music listening is coming after their approvals.'));
   }
   function radioAction(action, body) {
     var headers = { 'Content-Type': 'application/json' }, t = token();
@@ -302,7 +340,7 @@
     if (!people) return;
     people.textContent = '';
     if (guest) {
-      people.appendChild(el('h2', 'pt-h', 'Watching'));
+      people.appendChild(el('h2', 'pt-h', isRadio ? 'Listening' : 'Watching'));
       people.appendChild(el('p', 'pt-guest-note', 'Sign in to see who is here.'));
       return;
     }
@@ -312,7 +350,8 @@
     // Here first, then the ones whose seat waits, then the members who are not here.
     var rank = function (s) { return watching.indexOf(s) >= 0 ? 0 : away[s] ? 1 : 2; };
     all.sort(function (a, b) { return rank(a) - rank(b) || nameOf(a).localeCompare(nameOf(b)); });
-    var h = people.appendChild(el('h2', 'pt-h', watching.length === 1 ? '1 watching' : watching.length + ' watching'));
+    var verb = isRadio ? ' listening' : ' watching';
+    var h = people.appendChild(el('h2', 'pt-h', watching.length + verb));
     h.id = 'pt-people-h';
     var list = el('ul', 'pt-faces');
     list.setAttribute('aria-labelledby', 'pt-people-h');

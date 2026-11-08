@@ -46,19 +46,48 @@ main[data-party] [hidden] { display: none !important; }
   box-shadow: 0 18px 50px rgba(0, 0, 0, .35);
 }
 .pt-frame video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
-.pt-frame.is-radio { aspect-ratio: auto; min-height: 230px; width: 100%; display: flex; align-items: end; padding: 24px; background: radial-gradient(circle at 30% 20%, #2b4e82, #101a32 65%, #080e1a); }
-.pt-frame.is-radio audio { display: block; width: 100%; position: relative; z-index: 1; }
-.pt-frame.is-radio .pt-veil { z-index: 2; }
+.pt-frame.is-radio {
+  aspect-ratio: auto; width: 100%; display: grid; gap: 14px; padding: 18px;
+  background: var(--pt-panel); border: 1px solid var(--pt-line); box-shadow: none;
+}
+.pt-frame.is-radio audio { display: block; width: 100%; height: 44px; }
+.pt-frame.is-radio .pt-veil, .pt-frame.is-radio.is-guest .pt-veil {
+  position: static; inset: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 0;
+  background: none; color: var(--pt-muted); font-size: 14px; font-weight: 650; text-align: left; pointer-events: auto;
+}
+.pt-frame.is-radio.is-guest .pt-veil { flex-direction: row; justify-content: space-between; }
+.pt-frame.is-radio .pt-veil:empty, .pt-frame.is-radio .pt-veil[hidden],
+.pt-frame.is-radio.is-empty audio, .pt-frame.is-radio.is-empty .pt-veil { display: none; }
+.pt-frame.is-radio .pt-veil-line { max-width: none; }
+.pt-frame.is-radio .pt-drift { left: auto; right: 12px; }
+.pt-np { display: flex; gap: 16px; align-items: center; min-width: 0; }
+.pt-np-cover {
+  flex: none; width: 104px; height: 104px; border-radius: 14px; display: grid; place-items: center;
+  font-size: 44px; font-weight: 800; color: #fff; text-shadow: 0 1px 2px rgba(0, 0, 0, .25);
+  background: linear-gradient(135deg, hsl(var(--np-h, 260) 68% 56%), hsl(calc(var(--np-h, 260) + 48) 64% 34%));
+}
+.pt-np-text { min-width: 0; }
+.pt-np-text .pt-h { margin-bottom: 4px; }
+.pt-np-title { display: block; font-size: clamp(20px, 2.4vw, 30px); line-height: 1.15; overflow-wrap: anywhere; }
+.pt-np-artist { margin: 4px 0 0; font-size: 15px; }
+.pt-np-proof { margin: 6px 0 0; font-size: 13px; color: var(--pt-muted); }
+.pt-np-proof a { color: var(--pt-accent); }
 .pt-radio { padding: 18px; border-radius: 16px; border: 1px solid var(--pt-line); background: var(--pt-panel); }
 .pt-radio .pt-h:not(:first-child) { margin-top: 18px; }
 .pt-radio-title { font-size: clamp(20px, 2vw, 28px); }
 .pt-radio-meta { margin: 6px 0; font-size: 14px; color: var(--pt-muted); }
 .pt-radio a { color: var(--pt-accent); }
 .pt-radio-queue { margin: 0; padding-left: 22px; font-size: 14px; line-height: 1.7; }
+.pt-radio-track { font-weight: 700; }
+.pt-radio-by, .pt-radio-lic { color: var(--pt-muted); font-size: 13px; }
+.pt-radio-empty { margin: 0; font-size: 14px; color: var(--pt-muted); }
+.pt-radio-add { margin-top: 14px; }
+.pt-ghost { min-height: 40px; padding: 0 16px; border: 1px solid var(--pt-line); border-radius: 999px; background: none; color: var(--pt-text); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
+.pt-ghost:hover { border-color: var(--pt-accent); }
 .pt-radio-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
 .pt-radio-add { display: flex; gap: 8px; flex: 1 1 280px; }
 .pt-radio-add select { min-width: 0; flex: 1; min-height: 44px; border-radius: 9px; padding: 0 10px; background: var(--pt-bg); color: var(--pt-text); border: 1px solid var(--pt-line); }
-.pt-radio-permission { display: block; margin-top: 16px; font-size: 14px; }
+.pt-radio-permission { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; }
 .pt-radio-permission input { width: 18px; height: 18px; vertical-align: middle; }
 /* Honest states over the picture: waiting for the host, joining, reconnecting. */
 .pt-veil {
@@ -151,7 +180,11 @@ main[data-party].is-guest [data-party-chat] { min-height: 0; flex: 0 0 auto; ali
   [data-party-stage] { gap: 8px; }
   .pt-head { order: 3; padding: 0 max(14px, env(safe-area-inset-left, 0px)); }
   .pt-frame { order: 1; width: 100%; border-radius: 0; box-shadow: none; position: sticky; top: var(--pt-nav); z-index: 2; }
-  .pt-frame.is-radio { min-height: 140px; padding: 16px; }
+  .pt-frame.is-radio { padding: 12px 14px; gap: 10px; border-radius: 0; border-left: 0; border-right: 0; }
+  .pt-np { gap: 12px; }
+  .pt-np-cover { width: 64px; height: 64px; font-size: 28px; border-radius: 12px; }
+  .pt-np-title { font-size: 19px; }
+  .pt-np-artist { font-size: 14px; }
   .pt-radio { order: 4; margin: 0 12px; }
   .pt-bar { order: 2; padding: 0 max(12px, env(safe-area-inset-left, 0px)); }
   .pt-flash { order: 4; margin: 0 14px; }
