@@ -645,6 +645,13 @@ class ChatServer {
                 const access = await rooms.access(room, client.user);
                 const subject = client.user.subject_id;
                 if (!access.read || !subject) { this.sendTo(ws, { type: 'sync_error', room: room.slug, code: 'sync.sign_in', message: 'Sign in to change the room\'s clock' }); break; }
+                const radioParty = await db.get("SELECT party_kind, radio_track FROM room_parties WHERE room_id = ? AND party_kind = 'radio'", [room.id]);
+                if (radioParty) {
+                    const track = typeof radioParty.radio_track === 'string' ? JSON.parse(radioParty.radio_track) : radioParty.radio_track;
+                    if (!track || (msg.media !== undefined && msg.media !== track.audio_url)) {
+                        this.sendTo(ws, { type: 'sync_error', room: room.slug, code: 'radio.licence', message: 'Choose a licensed Radio track from the queue' }); break;
+                    }
+                }
                 let holder;
                 try { holder = (await controlLease.state(room, this.roomWatchers(room.id))).holder; } catch (err) { this.sendTo(ws, { type: 'sync_error', room: room.slug, code: 'sync.lease', message: 'The room\'s remote could not be read' }); break; }
                 if (holder.kind !== 'person' || holder.subject !== subject) {

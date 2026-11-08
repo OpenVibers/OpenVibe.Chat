@@ -26,6 +26,9 @@ const { renderPage, contentSecurityPolicy, esc } = require('./layout');
 const { createSessionRoutes } = require('./session');
 const { viewerOf } = require('./pages');
 const parties = require('../rooms/parties');
+const radio = require('../rooms/radio');
+const radioSource = (v) => ({ creator: 'Creator upload', creative_commons: 'Creative Commons', public_domain: 'Public domain', ai: 'AI-made music' })[v] || v;
+const radioLicence = (v) => v === 'creator_grant' ? 'Creator’s permission to stream' : v === 'public_domain' ? 'Public domain mark' : v;
 
 const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public', 'web');
 const SITE = Object.freeze({ name: 'OpenVibe.Party', service: 'party', links: [{ key: 'start', label: 'Start a party', href: '/' }] });
@@ -138,7 +141,7 @@ function createPartyRoutes({ config }) {
         const actor = await viewerOf(req);
         const signedIn = actor.kind === 'user';
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
-        const picks = await latestWatchable();
+        const [picks, tracks] = await Promise.all([latestWatchable(), radio.catalogue()]);
         const mine = signedIn ? await parties.mine(actor.user, { limit: 6 }).catch(() => []) : [];
         const since = (iso) => {
             const days = Math.floor((Date.now() - Date.parse(iso)) / 86400_000);
@@ -176,6 +179,9 @@ ${error}
 ${start}
 </header>
 ${yours}
+<section class="pty-radio" aria-labelledby="pty-radio-h"><h2 id="pty-radio-h">OpenVibe Radio</h2><p>Listen together using music its creator has shared for streaming. Every track shows its source and licence.</p>
+${tracks.length ? `<ul class="pty-radio-list">${tracks.slice(0, 12).map((t) => `<li><div><strong>${esc(t.title)}</strong><span>${esc(t.artist)}${t.ai_made ? ' · AI-made music' : ''}</span><small>Source: ${esc(radioSource(t.source))} · <a href="${esc(t.licence_url)}">${esc(radioLicence(t.licence))}</a>${t.source_url ? ` · <a href="${esc(t.source_url)}">Original source</a>` : ''}</small></div><a class="oc-button" href="/new?radio=${encodeURIComponent(t.id)}">Listen together</a></li>`).join('')}</ul>` : '<p>No Radio tracks are published yet. Creators can mark their own audio uploads as music on OpenVibe.Download.</p>'}
+<p>Spotify, Apple Music and YouTube Music listening is coming after those services approve it.</p></section>
 ${grid}
 <section class="pty-how" aria-labelledby="pty-how-h">
 <h2 id="pty-how-h">How it works</h2>
@@ -193,6 +199,12 @@ ${grid}
     router.get('/new', async (req, res) => {
         const actor = await viewerOf(req);
         if (actor.kind !== 'user') return res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+        if (req.query.radio) {
+            let chosen;
+            try { chosen = await radio.track(String(req.query.radio)); } catch { return res.redirect(303, '/?error=That%20Radio%20track%20is%20not%20available'); }
+            return page(req, res, 200, { actor, title: 'Start a listening party', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
+                body: `<section class="oc-party-confirm pty-confirm"><h1>Start a listening party?</h1><p class="oc-lede"><strong>${esc(chosen.title)}</strong> by ${esc(chosen.artist)}</p><p>Source: ${esc(radioSource(chosen.source))} · <a href="${esc(chosen.licence_url)}">${esc(radioLicence(chosen.licence))}</a>${chosen.ai_made ? ' · AI-made music' : ''}</p><p>Everyone hears the track at the party’s position. You control the queue and can allow everyone to add and skip.</p><form method="post" action="/new"><input type="hidden" name="radio_track_id" value="${esc(chosen.id)}"><button class="oc-button" type="submit">Start listening</button></form></section>` });
+        }
         const asked = String(req.query.media || '').trim();
         if (!asked) return res.redirect(303, `/?error=${encodeURIComponent('Paste an OpenVibe link to start a party')}`);
         const want = await playable({ media: asked, title: String(req.query.title || '').replace(/\s+/g, ' ').trim().slice(0, 200), source: req.query.source_url ? String(req.query.source_url).slice(0, 2048) : '' });
@@ -227,6 +239,14 @@ ${source ? `<input type="hidden" name="source_url" value="${esc(source)}">` : ''
         const origin = String(req.get('origin') || '');
         const fetchSite = String(req.get('sec-fetch-site') || '');
         if ((origin && origin !== base) || (fetchSite && fetchSite !== 'same-origin')) return res.status(403).type('text/plain').send('Start a party from openvibe.party itself.');
+        if (req.body && req.body.radio_track_id) {
+            try {
+                const out = await radio.start(actor.user, { radio_track_id: String(req.body.radio_track_id) });
+                return res.redirect(303, `/p/${encodeURIComponent(out.party.id)}?k=${encodeURIComponent(out.join_secret)}`);
+            } catch (err) {
+                return res.redirect(303, `/?error=${encodeURIComponent(err instanceof parties.PartyError ? err.message : 'That listening party could not be started')}`);
+            }
+        }
         const asked = String((req.body && req.body.media) || '').trim();
         if (!asked) return res.redirect(303, `/?error=${encodeURIComponent('Paste an OpenVibe link to start a party')}`);
         // A watch page posted here directly (not through the confirmation) is made playable the same way.
@@ -269,15 +289,15 @@ ${source ? `<input type="hidden" name="source_url" value="${esc(source)}">` : ''
                 actor, title: out.title, path: `/p/${out.id}`, robots: 'noindex, nofollow', footer: 'compact',
                 description: 'Watch together on OpenVibe.',
                 mainAttrs: `data-party="${esc(out.id)}"`, party: true, wide: true,
-                body: `<article class="oc-party">
+                body: `<article class="oc-party${out.kind === 'radio' ? ' is-radio' : ''}">
 <header class="oc-party-head"><h1>${esc(out.title)}</h1><p class="oc-muted">Started by ${esc(out.host_name || 'someone')}</p></header>
-<div class="oc-party-stage" data-party-stage aria-label="The video"></div>
+<div class="oc-party-stage" data-party-stage aria-label="${out.kind === 'radio' ? 'The music stage' : 'The video'}"></div>
 <div class="oc-party-people" data-party-people aria-label="People here"></div>
 <div class="oc-party-chat" data-party-chat aria-label="Chat"></div>
 <div class="oc-party-remote" data-party-remote aria-label="The remote"></div>
 <div class="oc-party-invite" data-party-invite aria-label="Invite"></div>
 </article>
-<script type="application/json" id="party-data">${escJson({ party: out })}</script>`,
+<script type="application/json" id="party-data">${escJson({ party: out, server_time_ms: Date.now() })}</script>`,
             });
         } catch (err) { next(err); }
     });

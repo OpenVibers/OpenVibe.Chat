@@ -23,7 +23,8 @@
   if (data && data.party) {
     var v = data.party;
     data = {
-      slug: v.id, title: v.title, media: v.media, source_url: v.source_url, member: v.member,
+      slug: v.id, title: v.title, kind: v.kind, radio: v.radio || null, media: v.media, source_url: v.source_url, member: v.member,
+      server_time_ms: data.server_time_ms,
       host: { subject: v.host, name: v.host_name || null },
       members: (v.members || []).map(function (m) { return { subject: m.subject, name: m.name }; }),
       // The shell's join_url never carries the key (the secret is not echoed into a page): only a URL that has one
@@ -43,6 +44,10 @@
   (data.members || []).forEach(function (m) { if (m && m.subject) names[m.subject] = m.name || 'Someone'; });
   if (data.host && data.host.subject) names[data.host.subject] = data.host.name || names[data.host.subject] || 'The host';
   if (self && self.subject) names[self.subject] = self.name || names[self.subject] || 'You';
+  var isRadio = data.kind === 'radio', radio = data.radio || null, guestListening = false;
+  var serverOffset = Number(data.server_time_ms) ? Number(data.server_time_ms) - Date.now() : 0;
+  var bestClockRtt = Infinity;
+  var catalogue = [];
   var lease = data.lease || null, clock = data.clock || null, asked = null, everPlayed = !!(clock && (!clock.paused || clock.position_ms > 0));
   var away = {};                                    // subject -> when they left (their seat waits a minute)
   var ws = null, sync = null, delay = 1000, latest = 0, joined = false;
@@ -80,15 +85,16 @@
 
   // ── the stage ────────────────────────────────────────────────────────────────
   var src = typeof (clock && clock.media) === 'string' ? clock.media : (typeof data.media === 'string' ? data.media : null);
-  var providerInfo = src && window.PartyProviders ? window.PartyProviders.parse(src) : null;
-  var video = providerInfo ? null : el('video');
+  if (isRadio && radio && !radio.current) src = null;
+  var providerInfo = !isRadio && src && window.PartyProviders ? window.PartyProviders.parse(src) : null;
+  var video = providerInfo ? null : el(isRadio ? 'audio' : 'video');
   var providerTarget = providerInfo ? el('div', 'pt-provider') : null;
   var provider = null, providerApplying = false, providerFailure = false;
   if (video) {
-    video.setAttribute('data-ov-player', '');
+    if (!isRadio) video.setAttribute('data-ov-player', '');
     video.setAttribute('playsinline', '');
     video.preload = 'auto';
-    video.controls = !guest;   // a guest's player would not follow the party: the invitation stands over it
+    video.controls = !guest || isRadio;
     if (src) video.src = src;
   }
   var frame = el('div', 'pt-frame');
@@ -108,6 +114,11 @@
     external.href = providerInfo.url; external.target = '_blank'; external.rel = 'noopener';
     refusal.appendChild(external);
   }
+  if (isRadio) frame.classList.add('is-radio');
+  // A listening party has no picture: the stage is the now-playing card (cover, title, artist, the licence), then
+  // the player, then the status line.
+  var np = null;
+  if (isRadio) { np = el('div', 'pt-np'); frame.insertBefore(np, video); }
   // The shell's own header (the title and who started it) leads; without one, the page writes its own.
   var shellHead = root.querySelector('.oc-party-head');
   var head = shellHead || el('div', 'pt-head');
@@ -127,6 +138,11 @@
   stage.appendChild(frame);
   if (providerInfo) stage.appendChild(refusal);
   if (!guest) stage.appendChild(bar);
+  if (isRadio) {
+    var radioBox = el('section', 'pt-radio');
+    radioBox.setAttribute('aria-label', 'OpenVibe Radio queue');
+    stage.appendChild(radioBox);
+  }
   if (remote && !guest) bar.appendChild(remote);
   var react = el('div', 'pt-react');
   react.setAttribute('aria-label', 'React');
@@ -149,6 +165,20 @@
   function holder() { return lease && lease.holder ? lease.holder : { kind: 'nobody', subject: null }; }
   function iHold() { var h = holder(); return !!(self && h.kind === 'person' && h.subject === self.subject); }
   function paintVeil() {
+    if (isRadio && guest) {
+      frame.classList.add('is-guest');
+      veil.textContent = '';
+      if (!guestListening) {
+        veil.appendChild(el('span', 'pt-veil-line', 'Listen at the party’s position, no account needed'));
+        var start = el('button', 'pt-join', 'Start listening');
+        start.type = 'button';
+        start.addEventListener('click', function () { guestListening = true; applyGuestClock(); paintVeil(); });
+        veil.appendChild(start);
+      }
+      veil.hidden = guestListening;
+      frame.classList.toggle('is-waiting', !guestListening);
+      return;
+    }
     if (guest) {
       veil.textContent = '';
       var host = data.host && data.host.name ? data.host.name : null;
@@ -171,7 +201,7 @@
   function providerClock(state, userAction) {
     if (!provider || !state || !providerReady) return;
     providerApplying = true;
-    try { window.PartyProviderSync.follow(provider, state, Date.now(), DRIFT_SHOWN_MS / 1000); } catch (e) { /* a provider may reject autoplay */ }
+    try { window.PartyProviderSync.follow(provider, state, Date.now() + serverOffset, DRIFT_SHOWN_MS / 1000); } catch (e) { /* a provider may reject autoplay */ }
     setTimeout(function () { providerApplying = false; }, 150);
     if (userAction && iHold()) {
       var pos = provider.live ? 0 : Math.max(0, Math.round((Number(provider.time()) || 0) * 1000));
@@ -201,6 +231,103 @@
       providerReady = true; if (clock) providerClock(clock, false);
       if (provider.live && iHold()) send({ type: 'sync', media: src, position_ms: 0, rate: 1, paused: !!(clock && clock.paused) });
     }).catch(function () { providerFailure = true; refusal.hidden = false; paintVeil(); });
+  }
+  function applyGuestClock() {
+    if (!video || !isRadio || !guest || !guestListening || !clock) return;
+    var serverNow = Date.now() + serverOffset;
+    var target = Math.max(0, Number(clock.position_ms || 0) + (!clock.paused ? Math.max(0, serverNow - Number(clock.at_ms || serverNow)) * Number(clock.rate || 1) : 0)) / 1000;
+    if (Math.abs(video.currentTime - target) > 1) { try { video.currentTime = target; } catch (e) { /* metadata loading */ } }
+    if (clock.paused) video.pause();
+    else video.play().catch(function () { /* browser gesture required */ });
+  }
+  function licenceLabel(value) {
+    return { creator_grant: 'Streamed with the artist’s permission', public_domain: 'Public domain', 'CC0-1.0': 'CC0 1.0',
+      'CC-BY-4.0': 'CC BY 4.0', 'CC-BY-SA-4.0': 'CC BY-SA 4.0' }[value] || value;
+  }
+  function safeHref(u) { return typeof u === 'string' && /^https:\/\//i.test(u) ? u : null; }
+  function outLink(text, href) {
+    var url = safeHref(href), a = el(url ? 'a' : 'span', null, text);
+    if (url) { a.href = url; a.target = '_blank'; a.rel = 'noopener'; }
+    return a;
+  }
+  function mayChangeQueue() { return !guest && self && (self.subject === owner || (radio && radio.allow_everyone)); }
+  function paintNowPlaying() {
+    if (!np) return;
+    np.textContent = '';
+    var current = radio && radio.current;
+    frame.classList.toggle('is-empty', !current);   // no track: no dead player, no second "nothing to play" line
+    var cover = el('div', 'pt-np-cover', current ? (String(current.title || '').trim().charAt(0) || '♪').toUpperCase() : '♪');
+    cover.setAttribute('aria-hidden', 'true');
+    var seed = String(current ? current.id || current.title : 'radio'), hue = 0;
+    for (var i = 0; i < seed.length; i++) hue = (hue * 31 + seed.charCodeAt(i)) % 360;
+    cover.style.setProperty('--np-h', String(hue));
+    np.appendChild(cover);
+    var text = el('div', 'pt-np-text');
+    text.appendChild(el('p', 'pt-h', current ? 'Now playing' : 'OpenVibe Radio'));
+    text.appendChild(el('strong', 'pt-np-title', current ? current.title : 'Nothing is playing yet'));
+    if (current) {
+      text.appendChild(el('p', 'pt-np-artist', current.artist + (current.ai_made ? ' · AI-made music' : '')));
+      var proof = el('p', 'pt-np-proof');
+      proof.appendChild(outLink(licenceLabel(current.licence), current.licence_url));
+      if (safeHref(current.source_url)) { proof.appendChild(document.createTextNode(' · ')); proof.appendChild(outLink('Original source', current.source_url)); }
+      if (current.changes_note) proof.appendChild(document.createTextNode(' · Changes: ' + current.changes_note));
+      text.appendChild(proof);
+    } else {
+      text.appendChild(el('p', 'pt-np-artist', mayChangeQueue() ? 'Pick a track below to start the music.' : 'The music starts when the host picks a track.'));
+    }
+    np.appendChild(text);
+  }
+
+  function paintRadio() {
+    if (!isRadio || !radioBox) return;
+    paintNowPlaying();
+    radioBox.textContent = '';
+    var queue = (radio && radio.queue) || [];
+    radioBox.appendChild(el('h2', 'pt-h', queue.length ? 'Up next · ' + queue.length : 'Up next'));
+    if (queue.length) {
+      var list = el('ol', 'pt-radio-queue');
+      queue.forEach(function (t) {
+        var item = el('li', null);
+        item.appendChild(el('span', 'pt-radio-track', t.title));
+        item.appendChild(el('span', 'pt-radio-by', ' · ' + t.artist + (t.ai_made ? ' · AI-made music' : '') + ' · '));
+        var lic = outLink(t.licence === 'creator_grant' ? 'Artist’s permission' : licenceLabel(t.licence), t.licence_url); lic.className = 'pt-radio-lic'; item.appendChild(lic);
+        list.appendChild(item);
+      });
+      radioBox.appendChild(list);
+    } else {
+      radioBox.appendChild(el('p', 'pt-radio-empty', mayChangeQueue() ? 'Nothing queued yet. Pick a track below.' : 'Nothing queued yet.'));
+    }
+    if (mayChangeQueue()) {
+      var add = el('form', 'pt-radio-add');
+      var id = el('select'); id.name = 'track_id'; id.required = true; id.setAttribute('aria-label', 'Choose a Radio track');
+      var placeholder = el('option', null, catalogue.length ? 'Choose a Radio track' : 'No Radio tracks yet'); placeholder.value = ''; id.appendChild(placeholder);
+      catalogue.forEach(function (t) { var option = el('option', null, t.title + ' · ' + t.artist); option.value = t.id; id.appendChild(option); });
+      var submit = el('button', 'pt-remote-btn', 'Add to queue'); submit.type = 'submit'; add.appendChild(id); add.appendChild(submit);
+      add.addEventListener('submit', function (event) { event.preventDefault(); radioAction('queue', { track_id: id.value }); id.value = ''; });
+      radioBox.appendChild(add);
+      var row = el('div', 'pt-radio-actions');
+      if (radio && radio.current) {
+        var skip = el('button', 'pt-ghost', 'Skip this track'); skip.type = 'button';
+        skip.addEventListener('click', function () { radioAction('skip', { expected_id: radio && radio.current && radio.current.id }); });
+        row.appendChild(skip);
+      }
+      if (self && self.subject === owner) {
+        var allow = el('label', 'pt-radio-permission');
+        var box = el('input'); box.type = 'checkbox'; box.checked = !!(radio && radio.allow_everyone);
+        box.addEventListener('change', function () { radioAction('allow', { allow_everyone: box.checked }); });
+        allow.appendChild(box); allow.appendChild(document.createTextNode(' Let everyone add and skip tracks'));
+        row.appendChild(allow);
+      }
+      if (row.children.length) radioBox.appendChild(row);
+    }
+  }
+  function radioAction(action, body) {
+    var headers = { 'Content-Type': 'application/json' }, t = token();
+    if (t) headers.Authorization = 'Bearer ' + t;
+    fetch('/api/chat/parties/' + encodeURIComponent(slug) + '/radio/' + action, { method: 'POST', headers: headers, credentials: 'same-origin', body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (v) { if (!r.ok) throw new Error(v.error || v.code || 'Queue change failed'); return v; }); })
+      .then(function (v) { radio = v.radio; paintRadio(); })
+      .catch(function (e) { flash(e.message); });
   }
 
   // ── the remote ───────────────────────────────────────────────────────────────
@@ -262,7 +389,7 @@
     if (!people) return;
     people.textContent = '';
     if (guest) {
-      people.appendChild(el('h2', 'pt-h', 'Watching'));
+      people.appendChild(el('h2', 'pt-h', isRadio ? 'Listening' : 'Watching'));
       people.appendChild(el('p', 'pt-guest-note', 'Sign in to see who is here.'));
       return;
     }
@@ -272,7 +399,8 @@
     // Here first, then the ones whose seat waits, then the members who are not here.
     var rank = function (s) { return watching.indexOf(s) >= 0 ? 0 : away[s] ? 1 : 2; };
     all.sort(function (a, b) { return rank(a) - rank(b) || nameOf(a).localeCompare(nameOf(b)); });
-    var h = people.appendChild(el('h2', 'pt-h', watching.length === 1 ? '1 watching' : watching.length + ' watching'));
+    var verb = isRadio ? ' listening' : ' watching';
+    var h = people.appendChild(el('h2', 'pt-h', watching.length + verb));
     h.id = 'pt-people-h';
     var list = el('ul', 'pt-faces');
     list.setAttribute('aria-labelledby', 'pt-people-h');
@@ -370,11 +498,18 @@
         if (m.subject && !self) self = { subject: m.subject, name: names[m.subject] || 'You' };
         if (!sync && window.OVSync && video) sync = window.OVSync.attach(video, { room: slug, socket: ws, self: self && self.subject });
         catchUp();
+        paintRadio();
       } else if (m.type === 'sync' && m.state) {
         clock = m.state;
         if (!clock.paused || clock.position_ms > 0) everPlayed = true;
-        if (!src && typeof clock.media === 'string' && video) { src = clock.media; video.src = src; }
+        if (video && (!isRadio || radio && radio.current) && typeof clock.media === 'string' && src !== clock.media) { src = clock.media; video.src = src; }
         if (provider) providerClock(clock, false);
+        if (isRadio && guest) applyGuestClock();
+      } else if (m.type === 'radio' && m.state) {
+        radio = m.state;
+        if (!radio.current && video) { video.pause(); video.removeAttribute('src'); src = null; }
+        else if (radio.current && video && clock && typeof clock.media === 'string' && src !== clock.media) { src = clock.media; video.src = src; }
+        paintRadio();
       } else if (m.type === 'lease' && m.state) {
         var before = lease && lease.watchers ? lease.watchers : [];
         lease = m.state;
@@ -420,6 +555,31 @@
     if (changed) { paintPeople(); paintRemote(); }
   }, 500);
   if (video) video.addEventListener('play', function () { everPlayed = true; paintVeil(); });
+  if (video) video.addEventListener('ended', function () {
+    if (isRadio && !guest && self && radio && radio.current && (self.subject === owner || radio.allow_everyone))
+      radioAction('skip', { expected_id: radio.current.id });
+  });
+  if (video) video.addEventListener('loadedmetadata', applyGuestClock);
+  if (isRadio && guest) {
+    setInterval(function () {
+      var key = null;
+      try { key = new URLSearchParams(location.search).get('k') || localStorage.getItem('ov-party-key:' + slug); } catch (e) { /* storage blocked */ }
+      var sentAt = Date.now();
+      fetch('/api/chat/parties/' + encodeURIComponent(slug) + (key ? '?k=' + encodeURIComponent(key) : ''), { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (v) {
+          if (!v || !v.party) return;
+          var rtt = Date.now() - sentAt;
+          if (Number(v.server_time_ms) && rtt < bestClockRtt) { bestClockRtt = rtt; serverOffset = Number(v.server_time_ms) - (sentAt + Date.now()) / 2; }
+          clock = v.party.clock; radio = v.party.radio;
+          if (radio && !radio.current && video) { video.pause(); video.removeAttribute('src'); src = null; }
+          else if (radio && radio.current && clock && typeof clock.media === 'string' && src !== clock.media && video) { src = clock.media; video.src = src; }
+          paintRadio(); applyGuestClock();
+        }).catch(function () { /* retry next poll */ });
+    }, 3000);
+  }
+  if (isRadio && !guest) fetch('/api/chat/parties/radio/tracks').then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (v) { catalogue = v && v.tracks || []; paintRadio(); }).catch(function () { /* retry on refresh */ });
 
   // ── invite ───────────────────────────────────────────────────────────────────
   if (invite && !guest) {
@@ -441,6 +601,6 @@
     invite.appendChild(ib);
   }
 
-  paintVeil(); paintRemote(); paintPeople();
+  paintVeil(); paintRemote(); paintPeople(); paintRadio();
   connect();
 })();
