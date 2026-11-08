@@ -212,7 +212,7 @@
       else if (!data.desktop || !data.desktop.url) {
         veil.appendChild(el('span', 'pt-veil-line', self && self.subject === owner ? 'Run openvibe-link party host ' + slug + ' on your computer to bring the desktop online.' : 'The host is bringing the shared computer online.'));
       }
-      veil.hidden = !guest && !!desktopTicketFor && !data.ended_at;
+      veil.hidden = !guest && !!desktopTicketFor && !data.ended_at && data.desktop && data.desktop.state === 'ready';
       frame.classList.toggle('is-waiting', !veil.hidden);
       if (desktopFrame && !guest && data.desktop && data.desktop.url && desktopTicketFor !== data.desktop.url) {
         desktopTicketFor = data.desktop.url;
