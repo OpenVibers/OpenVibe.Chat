@@ -36,9 +36,9 @@ function turnConfig(env = process.env) {
     };
 }
 
-function turnCredentials(tag = 'anon', cfg = turnConfig(), now = Date.now()) {
+function turnCredentials(tag = 'anon', cfg = turnConfig(), now = Date.now(), ttlSeconds = TTL_SECONDS) {
     if (cfg.secret) {
-        const username = `${Math.floor(now / 1000) + TTL_SECONDS}:${String(tag).replace(/[^A-Za-z0-9_-]/g, '')}`;
+        const username = `${Math.floor(now / 1000) + ttlSeconds}:${String(tag).replace(/[^A-Za-z0-9_-]/g, '')}`;
         return { username, credential: crypto.createHmac('sha1', cfg.secret).update(username).digest('base64'), ephemeral: true };
     }
     if (cfg.username && cfg.credential) return { username: cfg.username, credential: cfg.credential, ephemeral: false };
@@ -46,11 +46,11 @@ function turnCredentials(tag = 'anon', cfg = turnConfig(), now = Date.now()) {
 }
 
 /** The list for a viewer (tag: u<id> or anon). */
-function iceServers(tag = 'anon', cfg = turnConfig(), now = Date.now()) {
+function iceServers(tag = 'anon', cfg = turnConfig(), now = Date.now(), ttlSeconds = TTL_SECONDS) {
     const servers = [STUN];
     let ephemeral = false;
     if (cfg.url) {
-        const c = turnCredentials(tag, cfg, now);
+        const c = turnCredentials(tag, cfg, now, ttlSeconds);
         if (c) {
             const tcp = cfg.url.includes('?') ? `${cfg.url}&transport=tcp` : `${cfg.url}?transport=tcp`;
             servers.push({ urls: cfg.url, username: c.username, credential: c.credential }, { urls: tcp, username: c.username, credential: c.credential });

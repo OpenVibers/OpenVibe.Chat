@@ -47,7 +47,9 @@ async function claim({ node, row, party }, port) {
     if (party.ended_at || party.desktop_state === 'stopped') throw new parties.PartyError(410, 'party.ended', 'This party has ended');
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new parties.PartyError(422, 'party.port', 'Name a local port');
     if (party.desktop_hosting === 'openvibe') throw new parties.PartyError(503, 'party.no_openvibe_machine', 'No OpenVibe machine is free now');
-    const turn = iceServers(`p${row.id}`);
+    // neko reads ICE credentials at container start. Match the Connect share's
+    // 24-hour expiry; ordinary call rooms retain their one-hour credentials.
+    const turn = iceServers(`p${row.id}`, undefined, Date.now(), 24 * 3600);
     const ice = turn.iceServers;
     if (!turn.ephemeral) throw new parties.PartyError(503, 'party.turn_unavailable', 'The party TURN relay needs short-lived credentials');
     if (!ice.some((x) => String(x.urls).startsWith('turns:') && String(x.urls).includes(':443'))) {

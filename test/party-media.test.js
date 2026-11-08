@@ -172,6 +172,8 @@ t('a desktop party gates members, claims one Link machine, and issues member tic
     assert.strictEqual(claim.status, 200, claim.text);
     assert.ok(claim.body.share_grant);
     assert.ok(claim.body.ice_servers.some((s) => String(s.urls).startsWith('turns:')));
+    const relay = claim.body.ice_servers.find((s) => String(s.urls).startsWith('turns:'));
+    assert.ok(Number(relay.username.split(':')[0]) >= now + 23 * 3600);
     const access = await h.http('GET', `/api/chat/parties/${slug}/desktop/access?subject=${bob.subject_id}`, { token: nodeToken(bob.subject_id) });
     assert.strictEqual(access.status, 200, access.text);
     assert.strictEqual(access.body.member, true);
