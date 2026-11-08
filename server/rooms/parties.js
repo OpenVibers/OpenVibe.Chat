@@ -77,7 +77,7 @@ function mediaFromRow(value) {
     try { return JSON.parse(value); } catch { return value.startsWith('https://') ? value : null; }
 }
 
-const kindOfParty = (party) => (party && ['media', 'radio'].includes(party.party_kind) ? party.party_kind : 'agent_stream');
+const kindOfParty = (party) => (party && ['media', 'radio', 'desktop'].includes(party.party_kind) ? party.party_kind : 'agent_stream');
 
 /** The party's position now: on a VOD, a playing one moves with the clock; a live one is the live edge. */
 function syncOf(party, now = Date.now()) {
@@ -94,7 +94,7 @@ function syncOf(party, now = Date.now()) {
 
 function joinUrl(row, kind, rawSecret = null) {
     const slug = encodeURIComponent(row.slug);
-    const base = kind === 'media' || kind === 'radio' ? `${PARTY_BASE_URL()}/p/${slug}` : `${BASE_URL()}/rooms/${slug}`;
+    const base = kind === 'media' || kind === 'radio' || kind === 'desktop' ? `${PARTY_BASE_URL()}/p/${slug}` : `${BASE_URL()}/rooms/${slug}`;
     return rawSecret ? `${base}?k=${encodeURIComponent(rawSecret)}` : base;
 }
 
@@ -107,6 +107,10 @@ function view(row, party, { rawSecret = null, now = Date.now() } = {}) {
         vod_id: party.vod_id == null ? null : String(party.vod_id),
         ...(kind === 'media' || kind === 'radio' ? { media: mediaFromRow(party.media), source_url: party.source_url || null } : {}),
         ...(kind === 'radio' ? { radio_track: mediaFromRow(party.radio_track) } : {}),
+        ...(kind === 'desktop' ? { desktop: {
+            hosting: party.desktop_hosting, state: party.desktop_state, layout: party.desktop_layout || 'watch',
+            url: party.desktop_state === 'ready' ? party.desktop_share_url : null,
+        } } : {}),
         host: party.host_subject,
         title: row.name,
         ...(kind === 'agent_stream' ? { sync: syncOf(party, now) } : {}),
@@ -134,9 +138,9 @@ async function detail(row, party, { user = null, key = null, now = Date.now() } 
         host_name: host ? (host.display_name || host.username) : null,
         member,
     };
-    if (kindOfParty(party) === 'media' || kindOfParty(party) === 'radio') {
+    if (kindOfParty(party) === 'media' || kindOfParty(party) === 'radio' || kindOfParty(party) === 'desktop') {
         const room = { id: row.id, slug: row.slug };
-        out.clock = await syncClock.get(room);
+        if (kindOfParty(party) !== 'desktop') out.clock = await syncClock.get(room);
         if (member) {
             out.lease = await controlLease.state(room);
             out.members = (await rooms.members(row, { subjects: true }))
@@ -153,9 +157,27 @@ async function detail(row, party, { user = null, key = null, now = Date.now() } 
  * Returns the party and the one time its raw join secret exists.
  */
 async function create(user, input = {}) {
+    if (input && input.desktop_hosting) return await createDesktop(user, input);
     if (input && input.radio_track_id) return await require('./radio').start(user, input);
     if (input && input.media !== undefined && input.media !== null && input.media !== '') return await createMedia(user, input);
     return await createAgentStream(user, input);
+}
+
+async function createDesktop(user, { title = 'Shared computer', desktop_hosting: hosting } = {}) {
+    if (!user) fail(401, 'party.sign_in', 'Sign in to start a shared computer');
+    if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(user.subject_id || ''))) fail(409, 'party.no_subject', 'This account has no OpenVibe subject yet; sign in again');
+    if (hosting !== 'link' && hosting !== 'openvibe') fail(422, 'party.hosting', 'Choose your computer or an OpenVibe computer');
+    if (hosting === 'openvibe') fail(503, 'party.no_openvibe_machine', 'No OpenVibe machine is free right now');
+    const name = titleOf(title);
+    const raw = secret();
+    const slug = `party-${crypto.randomBytes(4).toString('hex')}`;
+    const room = await rooms.create(user, { name: name.slice(0, 40), slug, kind: 'party', visibility: 'private', topic: name, party: true });
+    await db.run(`INSERT INTO room_parties (room_id, agent_stream_id, vod_id, host_user_id, host_subject, mode, playing, listed, join_secret_hash, party_kind, desktop_hosting, desktop_state)
+        VALUES (?, NULL, NULL, ?, ?, 'live', false, false, ?, 'desktop', ?, 'waiting')`,
+        [room.id, user.id, user.subject_id, sha256(raw), hosting]);
+    await controlLease.take({ id: room.id, slug }, user.subject_id, { watchers: [] });
+    const row = await bySlug(slug);
+    return { party: view(row, partyOf(row), { rawSecret: raw }), roomId: room.id, join_secret: raw };
 }
 
 async function createAgentStream(user, { agent_stream_id: agentStreamId, vod_id: vodId = null, title, listed = false } = {}) {
@@ -211,7 +233,7 @@ async function createMedia(user, { media, source_url: sourceUrl = null, title, l
 }
 
 async function bySlug(slug) {
-    const row = await db.get('SELECT r.*, p.room_id AS party_room_id, p.agent_stream_id, p.vod_id, p.host_user_id, p.host_subject, p.mode, p.position_s, p.playing, p.position_at, p.listed, p.join_secret_hash, p.ended_at, p.created_at AS party_created_at, p.party_kind, p.media, p.source_url, p.radio_track FROM rooms r JOIN room_parties p ON p.room_id = r.id WHERE r.slug = ?', [String(slug || '').toLowerCase()]);
+    const row = await db.get('SELECT r.*, p.room_id AS party_room_id, p.agent_stream_id, p.vod_id, p.host_user_id, p.host_subject, p.mode, p.position_s, p.playing, p.position_at, p.listed, p.join_secret_hash, p.ended_at, p.created_at AS party_created_at, p.party_kind, p.media, p.source_url, p.radio_track, p.desktop_hosting, p.desktop_state, p.desktop_layout, p.desktop_node_id, p.desktop_share_id, p.desktop_share_url FROM rooms r JOIN room_parties p ON p.room_id = r.id WHERE r.slug = ?', [String(slug || '').toLowerCase()]);
     return row || null;
 }
 
@@ -222,6 +244,8 @@ function partyOf(row) {
         position_s: row.position_s, playing: row.playing, position_at: row.position_at, listed: row.listed,
         join_secret_hash: row.join_secret_hash, ended_at: row.ended_at, created_at: row.party_created_at,
         party_kind: row.party_kind || 'agent_stream', media: row.media, source_url: row.source_url, radio_track: row.radio_track,
+        desktop_hosting: row.desktop_hosting, desktop_state: row.desktop_state, desktop_layout: row.desktop_layout, desktop_node_id: row.desktop_node_id,
+        desktop_share_id: row.desktop_share_id, desktop_share_url: row.desktop_share_url,
     } : null;
 }
 
@@ -241,7 +265,7 @@ async function mine(user, { limit = 6 } = {}) {
     const since = new Date(Date.now() - 14 * 86400_000).toISOString();
     const rows = await db.all(`SELECT r.slug, r.name, p.host_user_id, p.created_at
         FROM room_members m JOIN rooms r ON r.id = m.room_id JOIN room_parties p ON p.room_id = r.id
-        WHERE m.user_id = ? AND p.party_kind IN ('media', 'radio') AND p.ended_at IS NULL AND r.archived_at IS NULL AND p.created_at > ?
+        WHERE m.user_id = ? AND p.party_kind IN ('media', 'radio', 'desktop') AND p.ended_at IS NULL AND r.archived_at IS NULL AND p.created_at > ?
         ORDER BY p.created_at DESC LIMIT ?`, [user.id, since, Math.max(1, Math.min(12, Number(limit) || 6))]);
     return (rows || []).map((x) => ({
         id: x.slug, title: x.name, hosting: Number(x.host_user_id) === Number(user.id),
@@ -293,12 +317,21 @@ async function count(agentStreamId) {
 
 async function end(row, party, user) {
     if (!user || Number(user.id) !== Number(party.host_user_id)) fail(403, 'party.not_host', 'Only the host ends the party');
-    await db.run('UPDATE room_parties SET ended_at = now(), playing = false WHERE room_id = ? AND ended_at IS NULL', [party.room_id]);
+    await db.run("UPDATE room_parties SET ended_at = now(), playing = false, desktop_state = CASE WHEN party_kind = 'desktop' THEN 'stopped' ELSE desktop_state END WHERE room_id = ? AND ended_at IS NULL", [party.room_id]);
+    const fresh = await bySlug(row.slug);
+    return view(fresh, partyOf(fresh));
+}
+
+async function setDesktopLayout(row, party, user, layout) {
+    if (!row || !party || party.party_kind !== 'desktop' || party.ended_at) fail(404, 'rooms.not_found', 'No such room');
+    if (!user || user.subject_id !== party.host_subject) fail(403, 'party.not_host', 'Only the host changes the party layout');
+    if (layout !== 'watch' && layout !== 'listen') fail(422, 'party.layout', 'Choose Watch or Listen');
+    await db.run('UPDATE room_parties SET desktop_layout = ? WHERE room_id = ? AND ended_at IS NULL', [layout, party.room_id]);
     const fresh = await bySlug(row.slug);
     return view(fresh, partyOf(fresh));
 }
 
 module.exports = {
     AGENT_STREAM_RE, MAX_TITLE, PartyError,
-    create, createMedia, createAgentStream, bySlug, partyOf, view, detail, syncOf, mayView, joinWithLink, setSync, count, end, keyMatches, mine,
+    create, createMedia, createDesktop, createAgentStream, bySlug, partyOf, view, detail, syncOf, mayView, joinWithLink, setSync, setDesktopLayout, count, end, keyMatches, mine,
 };

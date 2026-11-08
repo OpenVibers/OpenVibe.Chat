@@ -23,7 +23,7 @@
   if (data && data.party) {
     var v = data.party;
     data = {
-      slug: v.id, title: v.title, kind: v.kind, radio: v.radio || null, media: v.media, source_url: v.source_url, member: v.member,
+      slug: v.id, title: v.title, kind: v.kind, radio: v.radio || null, desktop: v.desktop || null, ended_at: v.ended_at || null, media: v.media, source_url: v.source_url, member: v.member,
       server_time_ms: data.server_time_ms,
       host: { subject: v.host, name: v.host_name || null },
       members: (v.members || []).map(function (m) { return { subject: m.subject, name: m.name }; }),
@@ -44,7 +44,7 @@
   (data.members || []).forEach(function (m) { if (m && m.subject) names[m.subject] = m.name || 'Someone'; });
   if (data.host && data.host.subject) names[data.host.subject] = data.host.name || names[data.host.subject] || 'The host';
   if (self && self.subject) names[self.subject] = self.name || names[self.subject] || 'You';
-  var isRadio = data.kind === 'radio', radio = data.radio || null, guestListening = false;
+  var isRadio = data.kind === 'radio', isDesktop = data.kind === 'desktop', radio = data.radio || null, guestListening = false;
   var serverOffset = Number(data.server_time_ms) ? Number(data.server_time_ms) - Date.now() : 0;
   var bestClockRtt = Infinity;
   var catalogue = [];
@@ -106,6 +106,16 @@
   var floats = el('div', 'pt-floats');      // reactions rising over the picture
   floats.setAttribute('aria-hidden', 'true');
   frame.appendChild(veil); frame.appendChild(drift); frame.appendChild(floats);
+  var desktopFrame = null, desktopTicketFor = null;
+  if (isDesktop) {
+    if (video) video.hidden = true;
+    frame.classList.add('is-desktop');
+    desktopFrame = el('iframe', 'pt-desktop');
+    desktopFrame.title = 'Shared party computer';
+    desktopFrame.setAttribute('allow', 'autoplay; fullscreen; clipboard-read; clipboard-write');
+    desktopFrame.setAttribute('referrerpolicy', 'no-referrer');
+    frame.insertBefore(desktopFrame, veil);
+  }
   var refusal = el('p', 'pt-provider-refusal'); refusal.hidden = true;
   if (providerInfo) {
     refusal.appendChild(el('span', '', 'This player could not play the link.'));
@@ -136,6 +146,35 @@
   if (invite) { var h1 = head.querySelector('h1'); if (h1 && h1.nextSibling) head.insertBefore(invite, h1.nextSibling); else head.appendChild(invite); }
   stage.appendChild(head);
   stage.appendChild(frame);
+  var desktopMode = null;
+  if (isDesktop) {
+    desktopMode = el('div', 'pt-desktop-mode');
+    stage.insertBefore(desktopMode, frame);
+    if (!guest && self && self.subject === owner) {
+      var layoutButton = el('button', 'pt-desktop-layout');
+      layoutButton.type = 'button';
+      layoutButton.addEventListener('click', function () {
+        var next = data.desktop && data.desktop.layout === 'listen' ? 'watch' : 'listen';
+        var headers = { 'Content-Type': 'application/json' }, t = token();
+        if (t) headers.Authorization = 'Bearer ' + t;
+        layoutButton.disabled = true;
+        fetch('/api/chat/parties/' + encodeURIComponent(slug) + '/desktop/layout', {
+          method: 'POST', headers: headers, credentials: 'same-origin', body: JSON.stringify({ layout: next })
+        }).then(function (r) { return r.ok ? r.json() : null; }).then(function (v) {
+          if (v && v.party) { data.desktop = v.party.desktop; paintDesktopLayout(); }
+        }).catch(function () { /* keep the current layout */ }).finally(function () { layoutButton.disabled = false; });
+      });
+      desktopMode.appendChild(layoutButton);
+    }
+  }
+  function paintDesktopLayout() {
+    if (!desktopMode) return;
+    var listening = !!(data.desktop && data.desktop.layout === 'listen');
+    frame.classList.toggle('is-listening', listening);
+    if (desktopMode.firstChild) desktopMode.firstChild.textContent = listening ? 'Watch together' : 'Listen together';
+    else desktopMode.textContent = listening ? 'Listening together' : 'Watching together';
+  }
+  paintDesktopLayout();
   if (providerInfo) stage.appendChild(refusal);
   if (!guest) stage.appendChild(bar);
   if (isRadio) {
@@ -165,6 +204,27 @@
   function holder() { return lease && lease.holder ? lease.holder : { kind: 'nobody', subject: null }; }
   function iHold() { var h = holder(); return !!(self && h.kind === 'person' && h.subject === self.subject); }
   function paintVeil() {
+    if (isDesktop) {
+      frame.classList.toggle('is-guest', guest);
+      veil.textContent = '';
+      if (guest) { veil.appendChild(el('span', 'pt-veil-line', 'Sign in to join the shared computer.')); veil.appendChild(joinLink('pt-join', 'Sign in to join')); }
+      else if (data.ended_at || data.desktop && data.desktop.state === 'stopped') veil.appendChild(el('span', 'pt-veil-line', 'This shared computer has stopped.'));
+      else if (!data.desktop || !data.desktop.url) {
+        veil.appendChild(el('span', 'pt-veil-line', self && self.subject === owner ? 'Run openvibe-link party host ' + slug + ' on your computer to bring the desktop online.' : 'The host is bringing the shared computer online.'));
+      }
+      veil.hidden = !guest && !!desktopTicketFor && !data.ended_at && data.desktop && data.desktop.state === 'ready';
+      frame.classList.toggle('is-waiting', !veil.hidden);
+      if (desktopFrame && !guest && data.desktop && data.desktop.url && desktopTicketFor !== data.desktop.url) {
+        desktopTicketFor = data.desktop.url;
+        var headers = {}, t = token();
+        if (t) headers.Authorization = 'Bearer ' + t;
+        fetch('/api/chat/parties/' + encodeURIComponent(slug) + '/desktop/ticket', { headers: headers, credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (v) { if (v && v.url) desktopFrame.src = v.url; else desktopTicketFor = null; })
+          .catch(function () { desktopTicketFor = null; });
+      }
+      return;
+    }
     if (isRadio && guest) {
       frame.classList.add('is-guest');
       veil.textContent = '';
@@ -496,16 +556,16 @@
       if (m.type === 'room_joined') {
         joined = true;
         if (m.subject && !self) self = { subject: m.subject, name: names[m.subject] || 'You' };
-        if (!sync && window.OVSync && video) sync = window.OVSync.attach(video, { room: slug, socket: ws, self: self && self.subject });
+        if (!isDesktop && !sync && window.OVSync && video) sync = window.OVSync.attach(video, { room: slug, socket: ws, self: self && self.subject });
         catchUp();
         paintRadio();
-      } else if (m.type === 'sync' && m.state) {
+      } else if (!isDesktop && m.type === 'sync' && m.state) {
         clock = m.state;
         if (!clock.paused || clock.position_ms > 0) everPlayed = true;
         if (video && (!isRadio || radio && radio.current) && typeof clock.media === 'string' && src !== clock.media) { src = clock.media; video.src = src; }
         if (provider) providerClock(clock, false);
         if (isRadio && guest) applyGuestClock();
-      } else if (m.type === 'radio' && m.state) {
+      } else if (!isDesktop && m.type === 'radio' && m.state) {
         radio = m.state;
         if (!radio.current && video) { video.pause(); video.removeAttribute('src'); src = null; }
         else if (radio.current && video && clock && typeof clock.media === 'string' && src !== clock.media) { src = clock.media; video.src = src; }
@@ -560,6 +620,14 @@
       radioAction('skip', { expected_id: radio.current.id });
   });
   if (video) video.addEventListener('loadedmetadata', applyGuestClock);
+  if (isDesktop && !guest) setInterval(function () {
+    var headers = {}, t = token();
+    if (t) headers.Authorization = 'Bearer ' + t;
+    fetch('/api/chat/parties/' + encodeURIComponent(slug), { headers: headers, credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (v) { if (v && v.party) { data.desktop = v.party.desktop; data.ended_at = v.party.ended_at; paintDesktopLayout(); paintVeil(); } })
+      .catch(function () { /* the page keeps its last known state */ });
+  }, 4000);
   if (isRadio && guest) {
     setInterval(function () {
       var key = null;

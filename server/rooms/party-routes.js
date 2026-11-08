@@ -17,6 +17,7 @@ const { requireAuth, optionalAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const parties = require('../rooms/parties');
 const radio = require('../rooms/radio');
+const desktop = require('../rooms/party-desktop');
 
 const router = express.Router();
 
@@ -38,6 +39,56 @@ router.post('/', requireAuth, createLimit, async (req, res) => {
 
 router.get('/radio/tracks', async (_req, res) => {
     res.set('Cache-Control', 'public, max-age=30').json({ tracks: await radio.catalogue() });
+});
+
+// Link presents its Network node token for Chat, acting for the party owner.
+// These routes never accept the invite secret or a browser's session as machine authority.
+router.post('/:slug/desktop/claim', express.json({ limit: '2kb' }), async (req, res) => {
+    try {
+        const hosted = await desktop.authorized(req);
+        if (!hosted) return res.status(404).json({ code: 'rooms.not_found' });
+        res.set('Cache-Control', 'no-store').json(await desktop.claim(hosted, Number(req.body && req.body.port)));
+    } catch (err) { send(res, err); }
+});
+
+router.get('/:slug/desktop/access', async (req, res) => {
+    try {
+        const hosted = await desktop.authorized(req);
+        if (!hosted) return res.status(404).json({ code: 'rooms.not_found' });
+        res.set('Cache-Control', 'no-store').json(await desktop.access(hosted, String(req.query.subject || '')));
+    } catch (err) { send(res, err); }
+});
+
+router.post('/:slug/desktop/ready', express.json({ limit: '2kb' }), async (req, res) => {
+    try {
+        const hosted = await desktop.authorized(req);
+        if (!hosted) return res.status(404).json({ code: 'rooms.not_found' });
+        res.set('Cache-Control', 'no-store').json({ party: await desktop.ready(hosted, req.body || {}) });
+    } catch (err) { send(res, err); }
+});
+
+router.post('/:slug/desktop/stopped', async (req, res) => {
+    try {
+        const hosted = await desktop.authorized(req);
+        if (!hosted) return res.status(404).json({ code: 'rooms.not_found' });
+        await desktop.stopped(hosted);
+        res.status(204).end();
+    } catch (err) { send(res, err); }
+});
+
+router.get('/:slug/desktop/ticket', requireAuth, async (req, res) => {
+    try {
+        const row = await parties.bySlug(req.params.slug);
+        const party = parties.partyOf(row);
+        res.set('Cache-Control', 'no-store').json(await desktop.ticket(row, party, req.user));
+    } catch (err) { send(res, err); }
+});
+
+router.post('/:slug/desktop/layout', requireAuth, express.json({ limit: '1kb' }), async (req, res) => {
+    try {
+        const row = await parties.bySlug(req.params.slug), party = parties.partyOf(row);
+        res.set('Cache-Control', 'no-store').json({ party: await parties.setDesktopLayout(row, party, req.user, req.body && req.body.layout) });
+    } catch (err) { send(res, err); }
 });
 
 router.get('/:slug/radio', optionalAuth, async (req, res) => {

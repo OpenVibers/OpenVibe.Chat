@@ -46,6 +46,12 @@ main[data-party] [hidden] { display: none !important; }
   box-shadow: 0 18px 50px rgba(0, 0, 0, .35);
 }
 .pt-frame video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.pt-frame.is-desktop { width: 100%; aspect-ratio: 16 / 9; }
+.pt-frame.is-desktop.is-listening { aspect-ratio: auto; height: min(44vh, 360px); min-height: 230px; }
+.pt-desktop-mode { display: flex; justify-content: flex-end; align-items: center; min-height: 32px; color: var(--pt-muted); font-size: .85rem; }
+.pt-desktop-layout { border: 1px solid var(--pt-line); border-radius: 999px; color: inherit; background: var(--pt-panel); padding: 5px 12px; cursor: pointer; }
+.pt-frame.is-desktop .pt-desktop { display: block; width: 100%; height: 100%; border: 0; background: #000; }
+.pt-frame.is-desktop .pt-veil { z-index: 1; }
 .pt-provider { position: absolute; inset: 0; width: 100%; height: 100%; }
 .pt-provider iframe { width: 100%; height: 100%; border: 0; }
 .pt-provider-refusal { margin: 0; padding: 10px 14px; color: var(--pt-muted); }

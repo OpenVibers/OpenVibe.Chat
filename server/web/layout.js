@@ -93,7 +93,7 @@ function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat', partyPro
         // GETs and only with the person's own Bearer (the Actor API's CORS route).
         `connect-src 'self' ${wsOrigin} https://openvibe.chat https://openvibe.actor https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com`,
         // A workspace room's shared screen: a screen share page from OpenVibe.Bot (rooms.screen_url).
-        `frame-src 'self' https://openvibe.bot${partyProviders ? ' https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv' : ''}`,
+        `frame-src 'self' https://openvibe.bot https://*.openvibe.link${partyProviders ? ' https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv' : ''}`,
         "frame-ancestors 'self'",
         "base-uri 'self'",
         "object-src 'none'",

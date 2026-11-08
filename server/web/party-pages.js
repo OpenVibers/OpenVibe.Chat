@@ -152,13 +152,22 @@ function createPartyRoutes({ config }) {
 <ul class="pty-mine-list">${mine.map((x) => `<li><a href="/p/${encodeURIComponent(x.id)}"><strong>${esc(x.title)}</strong><span>${x.hosting ? 'You started it' : 'You joined'} · ${esc(since(x.started_at))}</span></a></li>`).join('')}</ul>
 </section>` : '';
         const startHref = (x) => `/new?media=${encodeURIComponent(x.page_url)}&title=${encodeURIComponent(x.title)}`;
+        // Two plain choices, not a dropdown (Opus's design pass): where the shared computer runs.
+        const desktopStart = signedIn ? `<form class="pty-desktop-start" method="get" action="/new">
+<h2 class="pty-start-h">Start a shared computer</h2>
+<div class="pty-host-choice">
+<button type="submit" name="desktop" value="link" class="pty-host"><strong>On my computer</strong><span>Free. Runs in the Link app on your computer.</span></button>
+<button type="submit" name="desktop" value="openvibe" class="pty-host"><strong>On OpenVibe</strong><span id="pty-openvibe-availability">No OpenVibe machine is free right now.</span></button>
+</div>
+<p class="pty-hint">Open a browser or a music service together. One person has the remote.</p>
+</form>` : `<p class="pty-cta"><a class="oc-button" href="/auth/login?next=%2F">Sign in to start a shared computer</a></p>`;
         const start = signedIn
             ? `<form class="pty-paste" method="get" action="/new">
 <label for="party-media">Paste a video link</label>
 <div class="pty-paste-row"><input id="party-media" name="media" type="url" inputmode="url" autocomplete="off" required placeholder="https://openvibe.video/watch?v=…"><button type="submit" class="oc-button">Start a party</button></div>
 <p class="pty-hint">A recording, a clip or an upload on OpenVibe.Video, or a video file on OpenVibe.</p>
 </form>`
-            : `<p class="pty-cta"><a class="oc-button" href="/auth/login?next=%2F">Sign in to start a party</a><span class="pty-hint">Free with your OpenVibe account.</span></p>`;
+            : '';
         const grid = picks.length ? `<section class="pty-pick" aria-labelledby="pty-pick-h">
 <h2 id="pty-pick-h">Pick something to watch</h2>
 <ul class="pty-grid">${picks.map((x) => `<li class="pty-card"><a href="${esc(startHref(x))}">
@@ -173,15 +182,16 @@ ${x.channel ? `<span class="pty-by">@${esc(String(x.channel).slice(0, 40))}</spa
             description: DESCRIPTION,
             body: `<header class="pty-hero">
 <p class="pty-eyebrow">OpenVibe.Party</p>
-<h1>Watch together</h1>
-<p class="oc-lede">Everyone sees the same moment, with the chat beside it. One person holds the remote, and can pass it on.</p>
+<h1>Share a computer with friends</h1>
+<p class="oc-lede">Open a browser or music service together. Everyone sees and hears the same desktop, with one remote and a chat.</p>
 ${error}
-${start}
+${desktopStart}
 </header>
 ${yours}
+<section class="pty-other" aria-labelledby="pty-other-h"><h2 id="pty-other-h">Other ways to watch</h2>${start}</section>
 <section class="pty-radio" aria-labelledby="pty-radio-h"><h2 id="pty-radio-h">OpenVibe Radio</h2><p>Listen together using music its creator has shared for streaming. Every track shows its source and licence.</p>
 ${tracks.length ? `<ul class="pty-radio-list">${tracks.slice(0, 12).map((t) => `<li><div><strong>${esc(t.title)}</strong><span>${esc(t.artist)}${t.ai_made ? ' · AI-made music' : ''}</span><small>Source: ${esc(radioSource(t.source))} · <a href="${esc(t.licence_url)}">${esc(radioLicence(t.licence))}</a>${t.source_url ? ` · <a href="${esc(t.source_url)}">Original source</a>` : ''}</small></div><a class="oc-button" href="/new?radio=${encodeURIComponent(t.id)}">Listen together</a></li>`).join('')}</ul>` : '<p>No Radio tracks are published yet. Creators can mark their own audio uploads as music on OpenVibe.Download.</p>'}
-<p>Spotify, Apple Music and YouTube Music listening is coming after those services approve it.</p></section>
+<p>To listen to Spotify or YouTube Music together, start a shared computer and open the service inside it.</p></section>
 ${grid}
 <section class="pty-how" aria-labelledby="pty-how-h">
 <h2 id="pty-how-h">How it works</h2>
@@ -199,6 +209,14 @@ ${grid}
     router.get('/new', async (req, res) => {
         const actor = await viewerOf(req);
         if (actor.kind !== 'user') return res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
+        if (req.query.desktop) {
+            const hosting = String(req.query.desktop);
+            if (hosting !== 'link' && hosting !== 'openvibe') return res.redirect(303, '/');
+            if (hosting === 'openvibe') return page(req, res, 503, { actor, title: 'No OpenVibe computer is free', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
+                body: '<section class="oc-party-confirm pty-confirm"><h1>No OpenVibe machine is free right now</h1><p>You can host this party on your own computer with Link.</p><p><a class="oc-button" href="/new?desktop=link">Host it on my computer</a></p></section>' });
+            return page(req, res, 200, { actor, title: 'Start a shared computer', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
+                body: `<section class="oc-party-confirm pty-confirm"><h1>Start a shared computer?</h1><p>Link runs a temporary browser in a container on your computer. People you invite can watch, and you can pass the remote.</p><form method="post" action="/new"><input type="hidden" name="desktop_hosting" value="link"><button class="oc-button" type="submit">Start the party</button></form></section>` });
+        }
         if (req.query.radio) {
             let chosen;
             try { chosen = await radio.track(String(req.query.radio)); } catch { return res.redirect(303, '/?error=That%20Radio%20track%20is%20not%20available'); }
@@ -239,6 +257,14 @@ ${source ? `<input type="hidden" name="source_url" value="${esc(source)}">` : ''
         const origin = String(req.get('origin') || '');
         const fetchSite = String(req.get('sec-fetch-site') || '');
         if ((origin && origin !== base) || (fetchSite && fetchSite !== 'same-origin')) return res.status(403).type('text/plain').send('Start a party from openvibe.party itself.');
+        if (req.body && req.body.desktop_hosting) {
+            try {
+                const out = await parties.createDesktop(actor.user, { desktop_hosting: String(req.body.desktop_hosting), title: 'Shared computer' });
+                return res.redirect(303, `/p/${encodeURIComponent(out.party.id)}?k=${encodeURIComponent(out.join_secret)}`);
+            } catch (err) {
+                return res.redirect(303, `/?error=${encodeURIComponent(err instanceof parties.PartyError ? err.message : 'The shared computer could not be started')}`);
+            }
+        }
         if (req.body && req.body.radio_track_id) {
             try {
                 const out = await radio.start(actor.user, { radio_track_id: String(req.body.radio_track_id) });
