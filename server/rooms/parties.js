@@ -167,7 +167,7 @@ async function createDesktop(user, { title = 'Shared computer', desktop_hosting:
     if (!user) fail(401, 'party.sign_in', 'Sign in to start a shared computer');
     if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(user.subject_id || ''))) fail(409, 'party.no_subject', 'This account has no OpenVibe subject yet; sign in again');
     if (hosting !== 'link' && hosting !== 'openvibe') fail(422, 'party.hosting', 'Choose your computer or an OpenVibe computer');
-    if (hosting === 'openvibe') fail(503, 'party.no_openvibe_machine', 'No OpenVibe machine is free now');
+    if (hosting === 'openvibe') fail(503, 'party.no_openvibe_machine', 'No OpenVibe machine is free right now');
     const name = titleOf(title);
     const raw = secret();
     const slug = `party-${crypto.randomBytes(4).toString('hex')}`;

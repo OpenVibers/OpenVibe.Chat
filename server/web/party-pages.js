@@ -156,6 +156,7 @@ function createPartyRoutes({ config }) {
 <label for="party-desktop-hosting">Start a shared computer</label>
 <div class="pty-paste-row"><select id="party-desktop-hosting" name="desktop" required><option value="link">On my computer (needs Link)</option><option value="openvibe">On OpenVibe</option></select><button type="submit" class="oc-button">Start a shared computer</button></div>
 <p class="pty-hint">Open a browser or music service together. One person has the remote.</p>
+<p class="pty-hint" id="pty-openvibe-availability">No OpenVibe machine is free right now. <a href="/new?desktop=link">Host it on my computer</a>.</p>
 </form>` : `<p class="pty-cta"><a class="oc-button" href="/auth/login?next=%2F">Sign in to start a shared computer</a></p>`;
         const start = signedIn
             ? `<form class="pty-paste" method="get" action="/new">
@@ -209,7 +210,7 @@ ${grid}
             const hosting = String(req.query.desktop);
             if (hosting !== 'link' && hosting !== 'openvibe') return res.redirect(303, '/');
             if (hosting === 'openvibe') return page(req, res, 503, { actor, title: 'No OpenVibe computer is free', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
-                body: '<section class="oc-party-confirm pty-confirm"><h1>No OpenVibe machine is free now</h1><p>You can host this party on your own computer with Link.</p><p><a class="oc-button" href="/new?desktop=link">Host it on my computer</a></p></section>' });
+                body: '<section class="oc-party-confirm pty-confirm"><h1>No OpenVibe machine is free right now</h1><p>You can host this party on your own computer with Link.</p><p><a class="oc-button" href="/new?desktop=link">Host it on my computer</a></p></section>' });
             return page(req, res, 200, { actor, title: 'Start a shared computer', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
                 body: `<section class="oc-party-confirm pty-confirm"><h1>Start a shared computer?</h1><p>Link runs a temporary browser in a container on your computer. People you invite can watch, and you can pass the remote.</p><form method="post" action="/new"><input type="hidden" name="desktop_hosting" value="link"><button class="oc-button" type="submit">Start the party</button></form></section>` });
         }

@@ -314,6 +314,8 @@ t('the home offers OpenVibe.Video\'s latest, and a pasted watch page plays its f
         assert.ok(!home.text.includes('evil.example'), 'a page on another site is never offered');
         assert.match(home.text, /\/web\/party-home\.css/, 'the home\'s styles');
         assert.match(home.text, /How it works/);
+        assert.match(home.text, /No OpenVibe machine is free right now/);
+        assert.match(home.text, /Host it on my computer/);
 
         // A pasted watch page: the confirmation names it, and the party plays its file with the page as its source.
         const asks = await raw('GET', `/new?media=${encodeURIComponent(PAGE)}`, { cookie: cookieOf(ann) });
