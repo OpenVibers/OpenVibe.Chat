@@ -69,12 +69,21 @@
     return data.invite_url || ('https://openvibe.party/p/' + encodeURIComponent(slug) + (k ? '?k=' + encodeURIComponent(k) : ''));
   }
 
+  // ── a guest: the link's holder who has not signed in ─────────────────────────
+  // A party is a private room: its socket and its chat need a person. A guest sees the picture and one move, Sign in to
+  // join, which comes straight back to this link (its key included). Nothing that would only fail is drawn: no remote,
+  // no reactions, no composer, no count of who is watching, no socket (it answered "No such room").
+  var guest = !token();
+  var joinHref = '/auth/login?next=' + encodeURIComponent(location.pathname + location.search);
+  function joinLink(cls, text) { var a = el('a', cls, text); a.href = joinHref; return a; }
+  if (guest) root.classList.add('is-guest');
+
   // ── the stage ────────────────────────────────────────────────────────────────
   var video = el('video');
   video.setAttribute('data-ov-player', '');
   video.setAttribute('playsinline', '');
   video.preload = 'auto';
-  video.controls = true;
+  video.controls = !guest;   // a guest's player would not follow the party: the invitation stands over it
   var src = typeof (clock && clock.media) === 'string' ? clock.media : (typeof data.media === 'string' ? data.media : null);
   if (src) video.src = src;
   var frame = el('div', 'pt-frame');
@@ -103,8 +112,8 @@
   if (invite) { var h1 = head.querySelector('h1'); if (h1 && h1.nextSibling) head.insertBefore(invite, h1.nextSibling); else head.appendChild(invite); }
   stage.appendChild(head);
   stage.appendChild(frame);
-  stage.appendChild(bar);
-  if (remote) bar.appendChild(remote);
+  if (!guest) stage.appendChild(bar);
+  if (remote && !guest) bar.appendChild(remote);
   var react = el('div', 'pt-react');
   react.setAttribute('aria-label', 'React');
   REACTIONS.forEach(function (r) {
@@ -126,6 +135,15 @@
   function holder() { return lease && lease.holder ? lease.holder : { kind: 'nobody', subject: null }; }
   function iHold() { var h = holder(); return !!(self && h.kind === 'person' && h.subject === self.subject); }
   function paintVeil() {
+    if (guest) {
+      veil.textContent = '';
+      var host = data.host && data.host.name ? data.host.name : null;
+      veil.appendChild(el('span', 'pt-veil-line', host ? host + ' invited you to watch together' : 'You are invited to watch together'));
+      veil.appendChild(joinLink('pt-join', 'Sign in to join'));
+      veil.hidden = false;
+      frame.classList.add('is-waiting', 'is-guest');
+      return;
+    }
     var text = '';
     if (!ws || ws.readyState !== 1) text = joined ? 'Reconnecting…' : 'Joining the party…';
     else if (!src) text = 'This party has nothing to play yet.';
@@ -170,7 +188,7 @@
     remote.appendChild(p);
   }
   function paintRemote() {
-    if (!remote) return;
+    if (!remote || guest) return;
     var h = holder(), mine = iHold(), isOwner = !!(self && self.subject === owner);
     var takeBack = { label: 'Take it back', run: function () { send({ type: 'lease.take' }); } };
     if (!self) return pill(h.kind === 'person' ? nameOf(h.subject) + ' has the remote' : 'Sign in to share the remote', []);
@@ -193,6 +211,11 @@
   function paintPeople() {
     if (!people) return;
     people.textContent = '';
+    if (guest) {
+      people.appendChild(el('h2', 'pt-h', 'Watching'));
+      people.appendChild(el('p', 'pt-guest-note', 'Sign in to see who is here.'));
+      return;
+    }
     var watching = (lease && lease.watchers) || [];
     var all = Object.keys(names);
     watching.forEach(function (s) { if (all.indexOf(s) < 0) all.push(s); });
@@ -229,7 +252,12 @@
   var go = el('button', 'pt-say-btn', 'Send');
   go.type = 'submit';
   form.appendChild(input); form.appendChild(go);
-  if (chat) {
+  if (chat && guest) {
+    chat.appendChild(el('h2', 'pt-h', 'Chat'));
+    var note = el('p', 'pt-guest-note', 'The chat is for the people in the party. ');
+    note.appendChild(joinLink(null, 'Sign in to join'));
+    chat.appendChild(note);
+  } else if (chat) {
     chat.appendChild(el('h2', 'pt-h', 'Chat'));
     chat.appendChild(thread);
     chat.appendChild(form);
@@ -279,6 +307,7 @@
 
   // ── the socket ───────────────────────────────────────────────────────────────
   function connect() {
+    if (guest) { paintVeil(); return; }
     if (!window.WebSocket) { paintVeil(); return; }
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
     ws.onopen = function () { delay = 1000; send({ type: 'join_room', room: slug, token: token() }); paintVeil(); };
@@ -337,7 +366,7 @@
   video.addEventListener('play', function () { everPlayed = true; paintVeil(); });
 
   // ── invite ───────────────────────────────────────────────────────────────────
-  if (invite) {
+  if (invite && !guest) {
     var ib = el('button', 'pt-invite', 'Invite');
     ib.type = 'button';
     ib.addEventListener('click', function () {
