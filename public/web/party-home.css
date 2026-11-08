@@ -1,0 +1,48 @@
+/* openvibe.party's home and its start confirmation (Opus's design): a hero that starts a party in one move, a grid of
+   OpenVibe.Video's latest to pick from, and how it works in three steps. Chat's tokens (chat.css), phone first. */
+.pty-hero { padding-block: 28px 8px; display: grid; gap: 12px; max-width: 760px; }
+.pty-eyebrow { margin: 0; font-size: 12px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--oc-accent); }
+.pty-hero h1 { margin: 0; font-size: clamp(2.1rem, 7vw, 3.4rem); line-height: 1.05; letter-spacing: -.025em; font-weight: 850; text-wrap: balance; }
+.pty-hero .oc-lede { font-size: clamp(1.02rem, 2.6vw, 1.2rem); }
+
+.pty-paste { display: grid; gap: 8px; margin-top: 8px; }
+.pty-paste label { font-weight: 700; font-size: 14px; }
+.pty-paste-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.pty-paste input { flex: 1 1 240px; min-width: 0; min-height: 48px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--oc-line); background: var(--oc-panel); color: var(--oc-text); font: inherit; }
+.pty-paste input::placeholder { color: var(--oc-muted); opacity: .8; }
+.pty-paste .oc-button, .pty-cta .oc-button { min-height: 48px; padding: 0 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 12px; }
+.pty-paste .oc-button { flex: 0 0 auto; }
+.pty-hint { margin: 0; font-size: 13px; color: var(--oc-muted); }
+.pty-cta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 8px 0 0; }
+
+.pty-pick, .pty-how { margin-top: 40px; }
+.pty-pick h2, .pty-how h2 { margin: 0 0 14px; font-size: 1.15rem; letter-spacing: -.01em; }
+.pty-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 720px) { .pty-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 22px 18px; } }
+.pty-card a { display: grid; gap: 6px; color: var(--oc-text); text-decoration: none; min-width: 0; }
+.pty-thumb { position: relative; display: block; aspect-ratio: 16 / 9; max-width: 100%; border-radius: 12px; overflow: hidden; background: var(--oc-panel-2); border: 1px solid var(--oc-line); }
+.pty-thumb img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .25s ease; }
+.pty-thumb-none { position: absolute; inset: 0; background: linear-gradient(135deg, color-mix(in srgb, var(--oc-accent) 22%, transparent), transparent 70%); }
+.pty-dur { position: absolute; right: 6px; bottom: 6px; padding: 1px 6px; border-radius: 6px; background: rgba(0, 0, 0, .78); color: #fff; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* The move a card makes, said on the picture on hover and keyboard focus. A touch screen has no hover: the whole card
+   is the link and the heading says what it does, so eight pills over eight pictures would only be noise. */
+.pty-go { position: absolute; left: 8px; top: 8px; padding: 4px 10px; border-radius: 999px; background: var(--accent-strong, var(--oc-accent)); color: var(--on-accent-strong, var(--oc-on-accent)); font-size: 12px; font-weight: 800; opacity: 0; transform: translateY(-4px); transition: opacity .15s ease, transform .15s ease; }
+.pty-card a:hover .pty-go, .pty-card a:focus-visible .pty-go { opacity: 1; transform: none; }
+.pty-card a:hover .pty-thumb img { transform: scale(1.03); }
+.pty-title { font-weight: 700; font-size: 14.5px; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
+.pty-by { font-size: 13px; color: var(--oc-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pty-more { margin: 16px 0 0; font-size: 14px; color: var(--oc-muted); }
+
+.pty-how ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; counter-reset: pty; }
+@media (min-width: 720px) { .pty-how ol { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; } }
+.pty-how li { counter-increment: pty; display: grid; grid-template-columns: auto 1fr; column-gap: 12px; row-gap: 2px; align-items: start; padding: 14px 16px; border-radius: 14px; background: var(--oc-panel); border: 1px solid var(--oc-line); }
+.pty-how li::before { content: counter(pty); grid-row: span 2; width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; font-weight: 850; color: var(--oc-accent); background: color-mix(in srgb, var(--oc-accent) 14%, transparent); }
+.pty-how li strong { font-size: 15px; }
+.pty-how li span { color: var(--oc-muted); font-size: 14px; }
+
+.pty-confirm { max-width: 640px; display: grid; gap: 12px; padding-block: 24px; }
+.pty-confirm p { margin: 0; }
+.pty-confirm h1 { margin: 0; font-size: clamp(1.6rem, 5vw, 2.2rem); letter-spacing: -.02em; }
+.pty-confirm-thumb { width: 100%; max-width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; border: 1px solid var(--oc-line); background: var(--oc-panel-2); }
+.pty-confirm form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 4px; }
+.pty-confirm form .oc-button { min-height: 48px; padding: 0 22px; border-radius: 12px; }

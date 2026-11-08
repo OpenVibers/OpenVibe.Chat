@@ -223,6 +223,70 @@ t('openvibe.party: the start form, sign-in, and /new', async () => {
     assert.strictEqual(bobNow.body.party.member, true, 'opening the link makes the person a member');
 });
 
+t('the home offers OpenVibe.Video\'s latest, and a pasted watch page plays its file', async () => {
+    // A stand-in for OpenVibe.Video's /api/v1/video/watchable (MediaHub): one public recording, one private page.
+    const PAGE = 'https://openvibe.video/watch?v=AbCdEfGhIjK';
+    const PRIVATE = 'https://openvibe.video/watch?v=PrIvAtEpAgE';
+    const FILE = 'https://openvibe.media/v/4242';
+    let up = true;
+    const video = http.createServer((req, res) => {
+        const u = new URL(req.url, 'http://x');
+        if (!up) { res.writeHead(503); return res.end(); }
+        res.setHeader('content-type', 'application/json');
+        if (u.pathname === '/api/v1/video/watchable/latest') {
+            return res.end(JSON.stringify({ items: [
+                { kind: 'vod', title: 'Robots <3 paint', page_url: PAGE, thumbnail_url: 'https://openvibe.media/thumb/4242.jpg', duration_s: 3725, channel: 'ann' },
+                { kind: 'clip', title: 'Elsewhere', page_url: 'https://evil.example/watch?v=x', thumbnail_url: null, duration_s: 9, channel: null },
+            ] }));
+        }
+        if (u.pathname === '/api/v1/video/watchable' && u.searchParams.get('url') === PAGE) {
+            return res.end(JSON.stringify({ kind: 'vod', title: 'Robots <3 paint', page_url: PAGE, file_url: FILE, thumbnail_url: 'https://openvibe.media/thumb/4242.jpg', duration_s: 3725 }));
+        }
+        res.writeHead(404); res.end('{}');
+    });
+    await new Promise((r) => video.listen(0, '127.0.0.1', r));
+    process.env.CHAT_PARTY_VIDEO_URL = `http://127.0.0.1:${video.address().port}`;
+    try {
+        const home = await raw('GET', '/', { cookie: cookieOf(ann) });
+        assert.strictEqual(home.status, 200);
+        assert.match(home.text, /Pick something to watch/);
+        assert.match(home.text, /Robots &lt;3 paint/, 'the title, escaped');
+        assert.match(home.text, /href="\/new\?media=https%3A%2F%2Fopenvibe\.video%2Fwatch%3Fv%3DAbCdEfGhIjK&amp;title=/, 'a card starts a party on its page');
+        assert.match(home.text, /1:02:05/, 'its length');
+        assert.ok(!home.text.includes('evil.example'), 'a page on another site is never offered');
+        assert.match(home.text, /\/web\/party-home\.css/, 'the home\'s styles');
+        assert.match(home.text, /How it works/);
+
+        // A pasted watch page: the confirmation names it, and the party plays its file with the page as its source.
+        const asks = await raw('GET', `/new?media=${encodeURIComponent(PAGE)}`, { cookie: cookieOf(ann) });
+        assert.strictEqual(asks.status, 200, asks.text.slice(0, 300));
+        assert.match(asks.text, /Robots &lt;3 paint/, 'the title from Video');
+        assert.match(asks.text, /name="media" value="https:\/\/openvibe\.media\/v\/4242"/, 'the file, not the page');
+        const made = await raw('POST', '/new', { cookie: cookieOf(ann), form: { media: PAGE }, headers: { origin: 'https://openvibe.party', 'sec-fetch-site': 'same-origin' } });
+        assert.strictEqual(made.status, 303, made.text.slice(0, 200));
+        const slug = String(made.headers.location).match(/\/p\/([^?]+)/)[1];
+        const shell = await raw('GET', made.headers.location, { cookie: cookieOf(ann) });
+        const data = JSON.parse(shell.text.match(/<script type="application\/json" id="party-data">([\s\S]*?)<\/script>/)[1]);
+        assert.strictEqual(data.party.clock.media, FILE, 'the party plays the file');
+        assert.strictEqual(data.party.source_url, PAGE, 'and keeps the page it came from');
+        assert.ok(slug);
+
+        // A private (or unknown) page is not made into a party.
+        const refused = await raw('GET', `/new?media=${encodeURIComponent(PRIVATE)}`, { cookie: cookieOf(ann) });
+        assert.strictEqual(refused.status, 303);
+        assert.match(String(refused.headers.location), /^\/\?error=That%20link%20is%20not%20a%20video/);
+
+        // Video down: the home still answers, without the grid.
+        up = false;
+        await new Promise((r) => setTimeout(r, 10));
+        const quiet = await raw('GET', '/?fresh=1', { cookie: cookieOf(bob) });
+        assert.strictEqual(quiet.status, 200);
+    } finally {
+        delete process.env.CHAT_PARTY_VIDEO_URL;
+        await new Promise((r) => video.close(r));
+    }
+});
+
 t('close', async () => {
     await h.close();
 });

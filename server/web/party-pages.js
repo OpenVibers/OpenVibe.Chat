@@ -74,26 +74,107 @@ function createPartyRoutes({ config }) {
 
     const notice = (kind, text) => `<p class="oc-notice oc-${kind}" role="${kind === 'error' ? 'alert' : 'status'}">${esc(text)}</p>`;
 
+    // ── OpenVibe.Video (MediaHub /api/v1/video/watchable): what a party plays for a watch page, and what to pick ──
+    // A person pastes a watch page (openvibe.video/watch?v=…), not a file: Video says which file plays, its title and its
+    // picture, for anything anyone with the link may watch (public or unlisted, ready, no content label). The home's
+    // grid is Video's latest. Both are read from the server with a short timeout and cached a minute; Video slow or down
+    // leaves the grid out and a pasted page unresolved (the person is told), never a broken party.
+    // A test names its own stand-in; a test that does not never reaches the real site.
+    const videoUrl = () => String(process.env.CHAT_PARTY_VIDEO_URL || (process.env.NODE_ENV === 'test' ? '' : 'https://openvibe.video')).replace(/\/+$/, '');
+    const PAGE_HOSTS = new Set(['openvibe.video', 'www.openvibe.video', 'openvibe.live', 'www.openvibe.live']);
+    const watchCache = new Map();   // key → { at, value }
+    async function fromVideo(what, path) {
+        const at = videoUrl();
+        if (!at) return null;
+        const key = `${at} ${what}`;
+        const hit = watchCache.get(key);
+        if (hit && Date.now() - hit.at < 60_000) return hit.value;
+        let value = null;
+        try {
+            const r = await fetch(`${at}${path}`, { headers: { accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(2500) });
+            value = r.ok ? await r.json() : null;
+        } catch { value = hit ? hit.value : null; }
+        if (watchCache.size > 500) watchCache.clear();
+        watchCache.set(key, { at: Date.now(), value });
+        return value;
+    }
+    const httpsOrNull = (v) => (typeof v === 'string' && /^https:\/\/[^\s"'<>]{1,2048}$/.test(v) ? v : null);
+    /** A watch page's party media: { media, title, source_url, thumbnail_url } — or null when it is not one Video vouches for. */
+    async function watchablePage(url) {
+        let u;
+        try { u = new URL(url); } catch { return null; }
+        if (u.protocol !== 'https:' || !PAGE_HOSTS.has(u.hostname.toLowerCase())) return null;
+        const item = await fromVideo(`one:${url}`, `/api/v1/video/watchable?url=${encodeURIComponent(url)}`);
+        const media = item && httpsOrNull(item.file_url);
+        if (!media) return null;
+        return { media, title: String(item.title || '').slice(0, 200), source_url: httpsOrNull(item.page_url) || url, thumbnail_url: httpsOrNull(item.thumbnail_url) };
+    }
+    const isWatchPage = (url) => { try { const u = new URL(url); return PAGE_HOSTS.has(u.hostname.toLowerCase()); } catch { return false; } };
+    async function latestWatchable() {
+        const doc = await fromVideo('latest', '/api/v1/video/watchable/latest?limit=8');
+        return (doc && Array.isArray(doc.items) ? doc.items : [])
+            .filter((x) => x && httpsOrNull(x.page_url) && isWatchPage(x.page_url) && typeof x.title === 'string')
+            .slice(0, 8);
+    }
+    /** What a person asked to watch, made playable: a watch page becomes its file; a file stays as it is. */
+    async function playable({ media, title, source }) {
+        if (!isWatchPage(media)) return { media, title, source, thumb: null };
+        const page = await watchablePage(media);
+        if (!page) return null;
+        return { media: page.media, title: title || page.title, source: page.source_url, thumb: page.thumbnail_url };
+    }
+    const sized = (thumb, w) => {
+        if (!thumb) return null;
+        try { return new URL(thumb).hostname === 'openvibe.media' ? `${thumb}${thumb.includes('?') ? '&' : '?'}w=${w}&fmt=webp` : thumb; } catch { return null; }
+    };
+    const duration = (sec) => {
+        const n = Number(sec);
+        if (!(n > 0)) return '';
+        const h = Math.floor(n / 3600), m = Math.floor((n % 3600) / 60), x = Math.floor(n % 60);
+        return h ? `${h}:${String(m).padStart(2, '0')}:${String(x).padStart(2, '0')}` : `${m}:${String(x).padStart(2, '0')}`;
+    };
+
     router.get('/', async (req, res) => {
         const actor = await viewerOf(req);
         const signedIn = actor.kind === 'user';
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
-        const form = signedIn
-            ? `<form class="oc-party-start" method="get" action="/new">
-<label for="party-media">Paste an OpenVibe link</label>
-<input id="party-media" name="media" type="url" inputmode="url" autocomplete="off" required placeholder="https://openvibe.live/v/…">
-<button type="submit" class="oc-button">Start a party</button>
+        const picks = await latestWatchable();
+        const startHref = (x) => `/new?media=${encodeURIComponent(x.page_url)}&title=${encodeURIComponent(x.title)}`;
+        const start = signedIn
+            ? `<form class="pty-paste" method="get" action="/new">
+<label for="party-media">Paste a video link</label>
+<div class="pty-paste-row"><input id="party-media" name="media" type="url" inputmode="url" autocomplete="off" required placeholder="https://openvibe.video/watch?v=…"><button type="submit" class="oc-button">Start a party</button></div>
+<p class="pty-hint">A recording, a clip or an upload on OpenVibe.Video, or a video file on OpenVibe.</p>
 </form>`
-            : `<p class="oc-party-signin"><a class="oc-button" href="/auth/login?next=%2F">Sign in with OpenVibe</a> to start a party.</p>`;
+            : `<p class="pty-cta"><a class="oc-button" href="/auth/login?next=%2F">Sign in to start a party</a><span class="pty-hint">Free with your OpenVibe account.</span></p>`;
+        const grid = picks.length ? `<section class="pty-pick" aria-labelledby="pty-pick-h">
+<h2 id="pty-pick-h">Pick something to watch</h2>
+<ul class="pty-grid">${picks.map((x) => `<li class="pty-card"><a href="${esc(startHref(x))}">
+<span class="pty-thumb">${sized(x.thumbnail_url, 480) ? `<img src="${esc(sized(x.thumbnail_url, 480))}" alt="" loading="lazy" decoding="async">` : '<span class="pty-thumb-none" aria-hidden="true"></span>'}${duration(x.duration_s) ? `<span class="pty-dur">${esc(duration(x.duration_s))}</span>` : ''}<span class="pty-go" aria-hidden="true">Watch together</span></span>
+<span class="pty-title">${esc(x.title)}</span>
+${x.channel ? `<span class="pty-by">@${esc(String(x.channel).slice(0, 40))}</span>` : ''}
+</a></li>`).join('')}</ul>
+<p class="pty-more"><a href="https://openvibe.video/">More on OpenVibe.Video</a>: every watch page has a Watch together button.</p>
+</section>` : '';
         await page(req, res, 200, {
-            actor, title: 'Watch together', path: '/', robots: 'index, follow', footer: 'full',
+            actor, title: 'Watch together', path: '/', robots: 'index, follow', footer: 'full', partyHome: true,
             description: DESCRIPTION,
-            body: `<header class="oc-party-hero">
+            body: `<header class="pty-hero">
+<p class="pty-eyebrow">OpenVibe.Party</p>
 <h1>Watch together</h1>
-<p class="oc-lede">Start a party on any OpenVibe video: everyone watches the same moment, and the conversation is right there.</p>
-</header>
+<p class="oc-lede">Everyone sees the same moment, with the chat beside it. One person holds the remote, and can pass it on.</p>
 ${error}
-${form}`,
+${start}
+</header>
+${grid}
+<section class="pty-how" aria-labelledby="pty-how-h">
+<h2 id="pty-how-h">How it works</h2>
+<ol>
+<li><strong>Pick a video</strong><span>Any recording, clip or upload on OpenVibe.Video.</span></li>
+<li><strong>Send the invite</strong><span>The link lets your friends in. Nobody else finds the party.</span></li>
+<li><strong>Watch in step</strong><span>Whoever holds the remote plays, pauses and skips for everyone.</span></li>
+</ol>
+</section>`,
         });
     });
 
@@ -102,16 +183,21 @@ ${form}`,
     router.get('/new', async (req, res) => {
         const actor = await viewerOf(req);
         if (actor.kind !== 'user') return res.redirect(303, `/auth/login?next=${encodeURIComponent(req.originalUrl)}`);
-        const media = String(req.query.media || '').trim();
-        if (!media) return res.redirect(303, `/?error=${encodeURIComponent('Paste an OpenVibe link to start a party')}`);
-        const title = String(req.query.title || '').replace(/\s+/g, ' ').trim().slice(0, 200) || titleFromMedia(media);
-        const source = req.query.source_url ? String(req.query.source_url).slice(0, 2048) : '';
+        const asked = String(req.query.media || '').trim();
+        if (!asked) return res.redirect(303, `/?error=${encodeURIComponent('Paste an OpenVibe link to start a party')}`);
+        const want = await playable({ media: asked, title: String(req.query.title || '').replace(/\s+/g, ' ').trim().slice(0, 200), source: req.query.source_url ? String(req.query.source_url).slice(0, 2048) : '' });
+        if (!want) return res.redirect(303, `/?error=${encodeURIComponent('That link is not a video anyone can watch together: it may be private, still processing, or not on OpenVibe.')}`);
+        const media = want.media;
+        const title = want.title || titleFromMedia(media);
+        const source = want.source || '';
         let host = '';
-        try { host = new URL(media).hostname; } catch { host = ''; }
+        try { host = new URL(source || media).hostname; } catch { host = ''; }
         await page(req, res, 200, {
             actor, title: 'Start a party', path: '/new', robots: 'noindex, nofollow', footer: 'compact',
-            body: `<section class="oc-party-confirm">
+            partyHome: true,
+            body: `<section class="oc-party-confirm pty-confirm">
 <h1>Start a watch party?</h1>
+${want.thumb && sized(want.thumb, 640) ? `<img class="pty-confirm-thumb" src="${esc(sized(want.thumb, 640))}" alt="" decoding="async">` : ''}
 <p class="oc-lede"><strong>${esc(title)}</strong>${host ? ` <span class="oc-muted">from ${esc(host)}</span>` : ''}</p>
 <p class="oc-muted">Everyone you invite watches the same moment, with a chat beside it. You hold the remote, and you can pass it on.</p>
 <form method="post" action="/new">
@@ -131,11 +217,15 @@ ${source ? `<input type="hidden" name="source_url" value="${esc(source)}">` : ''
         const origin = String(req.get('origin') || '');
         const fetchSite = String(req.get('sec-fetch-site') || '');
         if ((origin && origin !== base) || (fetchSite && fetchSite !== 'same-origin')) return res.status(403).type('text/plain').send('Start a party from openvibe.party itself.');
-        const media = String((req.body && req.body.media) || '').trim();
-        if (!media) return res.redirect(303, `/?error=${encodeURIComponent('Paste an OpenVibe link to start a party')}`);
-        const title = String((req.body && req.body.title) || '').replace(/\s+/g, ' ').trim().slice(0, 200) || titleFromMedia(media);
+        const asked = String((req.body && req.body.media) || '').trim();
+        if (!asked) return res.redirect(303, `/?error=${encodeURIComponent('Paste an OpenVibe link to start a party')}`);
+        // A watch page posted here directly (not through the confirmation) is made playable the same way.
+        const want = await playable({ media: asked, title: String((req.body && req.body.title) || '').replace(/\s+/g, ' ').trim().slice(0, 200), source: (req.body && req.body.source_url) || '' });
+        if (!want) return res.redirect(303, `/?error=${encodeURIComponent('That link is not a video anyone can watch together: it may be private, still processing, or not on OpenVibe.')}`);
+        const media = want.media;
+        const title = want.title || titleFromMedia(media);
         try {
-            const out = await parties.create(actor.user, { media, source_url: (req.body && req.body.source_url) || null, title });
+            const out = await parties.create(actor.user, { media, source_url: want.source || null, title });
             return res.redirect(303, `/p/${encodeURIComponent(out.party.id)}?k=${encodeURIComponent(out.join_secret)}`);
         } catch (err) {
             const message = err instanceof parties.PartyError ? err.message : 'That party could not be started';
