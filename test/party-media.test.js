@@ -14,6 +14,7 @@
 const assert = require('assert');
 const http = require('http');
 const { ids } = require('openvibe-contracts');
+const { serviceAuth } = require('openvibe-contracts');
 const { boot, suite } = require('./helpers');
 
 const t = suite('party media');
@@ -46,7 +47,8 @@ const dataOf = (html) => {
 };
 
 t('boot', async () => {
-    h = await boot({ env: { CHAT_PARTY_URL: 'https://openvibe.party', CHAT_PARTY_OAUTH_REDIRECT_URI: 'https://openvibe.party/auth/callback' } });
+    h = await boot({ env: { CHAT_PARTY_URL: 'https://openvibe.party', CHAT_PARTY_OAUTH_REDIRECT_URI: 'https://openvibe.party/auth/callback',
+        CHAT_PARTY_CONNECT_SECRET: 'party-test-shared-secret-01234567890123456789', TURN_URL: 'turns:turn.openvibe.live:443', TURN_AUTH_SECRET: 'party-test-turn-secret' } });
     ann = h.addUser('ann', { subject: ids.newId('user') });
     bob = h.addUser('bob', { subject: ids.newId('user') });
     cat = h.addUser('cat', { subject: ids.newId('user') });
@@ -141,6 +143,49 @@ t('agent-stream parties are unchanged', async () => {
     assert.strictEqual(r.body.party.sync.playing, false);
     assert.ok(!('media' in r.body.party));
     assert.strictEqual((await api('PUT', `/rooms/${party.id}/party`, ann, { position_s: 10 })).body.code, 'party.clock');
+});
+
+t('a desktop party gates members, claims one Link machine, and issues member tickets', async () => {
+    assert.strictEqual((await api('POST', '/parties', bob, { desktop_hosting: 'openvibe' })).status, 503);
+    const made = await api('POST', '/parties', bob, { desktop_hosting: 'link', title: 'Shared computer' });
+    assert.strictEqual(made.status, 201, made.text);
+    const slug = made.body.party.id;
+    assert.strictEqual(made.body.party.kind, 'desktop');
+    assert.strictEqual(made.body.party.desktop.state, 'waiting');
+    assert.strictEqual(made.body.party.desktop.layout, 'watch');
+    const seen = await api('GET', `/parties/${slug}`, bob);
+    assert.strictEqual(seen.body.party.lease.holder.subject, bob.subject_id);
+    assert.strictEqual((await api('GET', `/parties/${slug}/desktop/ticket`, ann)).status, 404);
+    const nodeId = ids.newId('node');
+    const now = Math.floor(Date.now() / 1000);
+    const nodeToken = (owner) => serviceAuth.signServiceToken({ iss: h.ISS, sub: `node:${nodeId}`, actor_type: 'node', on_behalf_of: owner,
+        aud: ['openvibe.chat'], cap: [], iat: now, exp: now + 300, jti: `party_${owner}` }, h.keys.privateKey);
+    const wrong = await h.http('POST', `/api/chat/parties/${slug}/desktop/claim`, { token: nodeToken(ann.subject_id), body: { port: 18180 } });
+    assert.strictEqual(wrong.status, 404);
+    const claim = await h.http('POST', `/api/chat/parties/${slug}/desktop/claim`, { token: nodeToken(bob.subject_id), body: { port: 18180 } });
+    assert.strictEqual(claim.status, 200, claim.text);
+    assert.ok(claim.body.share_grant);
+    assert.ok(claim.body.ice_servers.some((s) => String(s.urls).startsWith('turns:')));
+    const access = await h.http('GET', `/api/chat/parties/${slug}/desktop/access?subject=${bob.subject_id}`, { token: nodeToken(bob.subject_id) });
+    assert.strictEqual(access.status, 200, access.text);
+    assert.strictEqual(access.body.member, true);
+    assert.strictEqual(access.body.holder, bob.subject_id);
+    const share = ids.newId('share');
+    const ready = await h.http('POST', `/api/chat/parties/${slug}/desktop/ready`, { token: nodeToken(bob.subject_id),
+        body: { share_id: share, url: `https://${slug}--bob.openvibe.link` } });
+    assert.strictEqual(ready.status, 200, ready.text);
+    const ticket = await api('GET', `/parties/${slug}/desktop/ticket`, bob);
+    assert.strictEqual(ticket.status, 200, ticket.text);
+    assert.match(ticket.body.url, new RegExp(`^https://${slug}--bob\\.openvibe\\.link/__ovc/party#`));
+    assert.ok(!ticket.body.url.includes(made.body.join_secret));
+    assert.strictEqual((await api('POST', `/parties/${slug}/desktop/layout`, ann, { layout: 'listen' })).status, 403);
+    const listen = await api('POST', `/parties/${slug}/desktop/layout`, bob, { layout: 'listen' });
+    assert.strictEqual(listen.status, 200, listen.text);
+    assert.strictEqual(listen.body.party.desktop.layout, 'listen');
+    assert.strictEqual((await api('GET', `/parties/${slug}`, bob)).body.party.desktop.layout, 'listen');
+    const end = await api('POST', `/rooms/${slug}/party/end`, bob, {});
+    assert.strictEqual(end.status, 200, end.text);
+    assert.strictEqual((await api('GET', `/parties/${slug}/desktop/ticket`, bob)).status, 404);
 });
 
 t('openvibe.party: the start form, sign-in, and /new', async () => {

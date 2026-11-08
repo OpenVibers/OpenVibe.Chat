@@ -5,8 +5,10 @@
 .pty-hero h1 { margin: 0; font-size: clamp(2.1rem, 7vw, 3.4rem); line-height: 1.05; letter-spacing: -.025em; font-weight: 850; text-wrap: balance; }
 .pty-hero .oc-lede { font-size: clamp(1.02rem, 2.6vw, 1.2rem); }
 
-.pty-paste { display: grid; gap: 8px; margin-top: 8px; }
-.pty-paste label { font-weight: 700; font-size: 14px; }
+.pty-paste, .pty-desktop-start { display: grid; gap: 8px; margin-top: 8px; }
+.pty-paste label, .pty-desktop-start label { font-weight: 700; font-size: 14px; }
+.pty-desktop-start select { flex: 1 1 240px; min-width: 0; min-height: 48px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--oc-line); background: var(--oc-panel); color: var(--oc-text); font: inherit; }
+.pty-other { margin-top: 28px; }
 .pty-paste-row { display: flex; flex-wrap: wrap; gap: 8px; }
 .pty-paste input { flex: 1 1 240px; min-width: 0; min-height: 48px; padding: 0 14px; border-radius: 12px; border: 1px solid var(--oc-line); background: var(--oc-panel); color: var(--oc-text); font: inherit; }
 .pty-paste input::placeholder { color: var(--oc-muted); opacity: .8; }
