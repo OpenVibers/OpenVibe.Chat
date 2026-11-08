@@ -74,10 +74,10 @@ function sourceUrlOf(value) {
 function mediaFromRow(value) {
     if (value == null) return null;
     if (typeof value !== 'string') return value;
-    try { return JSON.parse(value); } catch { return null; }
+    try { return JSON.parse(value); } catch { return value.startsWith('https://') ? value : null; }
 }
 
-const kindOfParty = (party) => (party && party.party_kind === 'media' ? 'media' : 'agent_stream');
+const kindOfParty = (party) => (party && ['media', 'radio'].includes(party.party_kind) ? party.party_kind : 'agent_stream');
 
 /** The party's position now: on a VOD, a playing one moves with the clock; a live one is the live edge. */
 function syncOf(party, now = Date.now()) {
@@ -94,7 +94,7 @@ function syncOf(party, now = Date.now()) {
 
 function joinUrl(row, kind, rawSecret = null) {
     const slug = encodeURIComponent(row.slug);
-    const base = kind === 'media' ? `${PARTY_BASE_URL()}/p/${slug}` : `${BASE_URL()}/rooms/${slug}`;
+    const base = kind === 'media' || kind === 'radio' ? `${PARTY_BASE_URL()}/p/${slug}` : `${BASE_URL()}/rooms/${slug}`;
     return rawSecret ? `${base}?k=${encodeURIComponent(rawSecret)}` : base;
 }
 
@@ -105,7 +105,8 @@ function view(row, party, { rawSecret = null, now = Date.now() } = {}) {
         kind,
         agent_stream_id: party.agent_stream_id || null,
         vod_id: party.vod_id == null ? null : String(party.vod_id),
-        ...(kind === 'media' ? { media: mediaFromRow(party.media), source_url: party.source_url || null } : {}),
+        ...(kind === 'media' || kind === 'radio' ? { media: mediaFromRow(party.media), source_url: party.source_url || null } : {}),
+        ...(kind === 'radio' ? { radio_track: mediaFromRow(party.radio_track) } : {}),
         host: party.host_subject,
         title: row.name,
         ...(kind === 'agent_stream' ? { sync: syncOf(party, now) } : {}),
@@ -133,7 +134,7 @@ async function detail(row, party, { user = null, key = null, now = Date.now() } 
         host_name: host ? (host.display_name || host.username) : null,
         member,
     };
-    if (kindOfParty(party) === 'media') {
+    if (kindOfParty(party) === 'media' || kindOfParty(party) === 'radio') {
         const room = { id: row.id, slug: row.slug };
         out.clock = await syncClock.get(room);
         if (member) {
@@ -143,6 +144,7 @@ async function detail(row, party, { user = null, key = null, now = Date.now() } 
                 .map((m) => ({ subject: m.subject_id || null, name: m.display_name || m.username, role: m.role }));
         }
     }
+    if (kindOfParty(party) === 'radio') out.radio = await require('./radio').state(row, party, { user, key });
     return out;
 }
 
@@ -151,6 +153,7 @@ async function detail(row, party, { user = null, key = null, now = Date.now() } 
  * Returns the party and the one time its raw join secret exists.
  */
 async function create(user, input = {}) {
+    if (input && input.radio_track_id) return await require('./radio').start(user, input);
     if (input && input.media !== undefined && input.media !== null && input.media !== '') return await createMedia(user, input);
     return await createAgentStream(user, input);
 }
@@ -183,7 +186,7 @@ async function createAgentStream(user, { agent_stream_id: agentStreamId, vod_id:
  * the remote granted to the person who started it. The join link is openvibe.party/p/<slug>?k=…, and the secret is
  * in this answer only.
  */
-async function createMedia(user, { media, source_url: sourceUrl = null, title, listed = false } = {}) {
+async function createMedia(user, { media, source_url: sourceUrl = null, title, listed = false, partyKind = 'media', radioTrack = null } = {}) {
     if (!user) fail(401, 'party.sign_in', 'Sign in to start a watch party');
     if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(user.subject_id || ''))) fail(409, 'party.no_subject', 'This account has no OpenVibe subject yet; sign in again');
     const chosen = mediaOf(media);
@@ -195,9 +198,9 @@ async function createMedia(user, { media, source_url: sourceUrl = null, title, l
     const room = await rooms.create(user, { name: roomName, slug, kind: 'party', visibility: 'private', topic: name, party: true });
     const id = room.id;
     await db.run(
-        `INSERT INTO room_parties (room_id, agent_stream_id, vod_id, host_user_id, host_subject, mode, playing, listed, join_secret_hash, party_kind, media, source_url)
-         VALUES (?, NULL, NULL, ?, ?, 'vod', false, ?, ?, 'media', ?, ?)`,
-        [id, user.id, user.subject_id || '', !!listed, sha256(raw), JSON.stringify(chosen), source]
+        `INSERT INTO room_parties (room_id, agent_stream_id, vod_id, host_user_id, host_subject, mode, playing, listed, join_secret_hash, party_kind, media, source_url, radio_track)
+         VALUES (?, NULL, NULL, ?, ?, 'vod', false, ?, ?, ?, ?, ?, ?)`,
+        [id, user.id, user.subject_id || '', !!listed, sha256(raw), partyKind, JSON.stringify(chosen), source, radioTrack ? JSON.stringify(radioTrack) : null]
     );
     const shared = { id, slug: room.slug };
     await syncClock.set(shared, user.subject_id, { media: chosen, position_ms: 0, rate: 1, paused: true });
@@ -208,7 +211,7 @@ async function createMedia(user, { media, source_url: sourceUrl = null, title, l
 }
 
 async function bySlug(slug) {
-    const row = await db.get('SELECT r.*, p.room_id AS party_room_id, p.agent_stream_id, p.vod_id, p.host_user_id, p.host_subject, p.mode, p.position_s, p.playing, p.position_at, p.listed, p.join_secret_hash, p.ended_at, p.created_at AS party_created_at, p.party_kind, p.media, p.source_url FROM rooms r JOIN room_parties p ON p.room_id = r.id WHERE r.slug = ?', [String(slug || '').toLowerCase()]);
+    const row = await db.get('SELECT r.*, p.room_id AS party_room_id, p.agent_stream_id, p.vod_id, p.host_user_id, p.host_subject, p.mode, p.position_s, p.playing, p.position_at, p.listed, p.join_secret_hash, p.ended_at, p.created_at AS party_created_at, p.party_kind, p.media, p.source_url, p.radio_track FROM rooms r JOIN room_parties p ON p.room_id = r.id WHERE r.slug = ?', [String(slug || '').toLowerCase()]);
     return row || null;
 }
 
@@ -218,7 +221,7 @@ function partyOf(row) {
         host_user_id: row.host_user_id, host_subject: row.host_subject, mode: row.mode,
         position_s: row.position_s, playing: row.playing, position_at: row.position_at, listed: row.listed,
         join_secret_hash: row.join_secret_hash, ended_at: row.ended_at, created_at: row.party_created_at,
-        party_kind: row.party_kind || 'agent_stream', media: row.media, source_url: row.source_url,
+        party_kind: row.party_kind || 'agent_stream', media: row.media, source_url: row.source_url, radio_track: row.radio_track,
     } : null;
 }
 
@@ -238,7 +241,7 @@ async function mine(user, { limit = 6 } = {}) {
     const since = new Date(Date.now() - 14 * 86400_000).toISOString();
     const rows = await db.all(`SELECT r.slug, r.name, p.host_user_id, p.created_at
         FROM room_members m JOIN rooms r ON r.id = m.room_id JOIN room_parties p ON p.room_id = r.id
-        WHERE m.user_id = ? AND p.party_kind = 'media' AND p.ended_at IS NULL AND r.archived_at IS NULL AND p.created_at > ?
+        WHERE m.user_id = ? AND p.party_kind IN ('media', 'radio') AND p.ended_at IS NULL AND r.archived_at IS NULL AND p.created_at > ?
         ORDER BY p.created_at DESC LIMIT ?`, [user.id, since, Math.max(1, Math.min(12, Number(limit) || 6))]);
     return (rows || []).map((x) => ({
         id: x.slug, title: x.name, hosting: Number(x.host_user_id) === Number(user.id),
@@ -267,7 +270,7 @@ async function joinWithLink(row, party, user, key) {
 /** The host moves the VOD (or pauses it). Live parties follow the live edge and take no position. */
 async function setSync(row, party, user, { position_s: position, playing } = {}) {
     if (!user || Number(user.id) !== Number(party.host_user_id)) fail(403, 'party.not_host', 'Only the host moves the party');
-    if (kindOfParty(party) === 'media') fail(409, 'party.clock', 'A media party follows the room\'s shared clock; the remote moves it');
+    if (kindOfParty(party) === 'media' || kindOfParty(party) === 'radio') fail(409, 'party.clock', 'A media party follows the room\'s shared clock; the remote moves it');
     if (party.mode === 'live') fail(409, 'party.live_edge', 'A live party follows the live edge; there is no position to set');
     let pos = party.position_s;
     if (position !== undefined) {

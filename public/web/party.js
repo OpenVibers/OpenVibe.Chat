@@ -23,7 +23,8 @@
   if (data && data.party) {
     var v = data.party;
     data = {
-      slug: v.id, title: v.title, media: v.media, source_url: v.source_url, member: v.member,
+      slug: v.id, title: v.title, kind: v.kind, radio: v.radio || null, media: v.media, source_url: v.source_url, member: v.member,
+      server_time_ms: data.server_time_ms,
       host: { subject: v.host, name: v.host_name || null },
       members: (v.members || []).map(function (m) { return { subject: m.subject, name: m.name }; }),
       // The shell's join_url never carries the key (the secret is not echoed into a page): only a URL that has one
@@ -43,6 +44,10 @@
   (data.members || []).forEach(function (m) { if (m && m.subject) names[m.subject] = m.name || 'Someone'; });
   if (data.host && data.host.subject) names[data.host.subject] = data.host.name || names[data.host.subject] || 'The host';
   if (self && self.subject) names[self.subject] = self.name || names[self.subject] || 'You';
+  var isRadio = data.kind === 'radio', radio = data.radio || null, guestListening = false;
+  var serverOffset = Number(data.server_time_ms) ? Number(data.server_time_ms) - Date.now() : 0;
+  var bestClockRtt = Infinity;
+  var catalogue = [];
   var lease = data.lease || null, clock = data.clock || null, asked = null, everPlayed = !!(clock && (!clock.paused || clock.position_ms > 0));
   var away = {};                                    // subject -> when they left (their seat waits a minute)
   var ws = null, sync = null, delay = 1000, latest = 0, joined = false;
@@ -79,12 +84,13 @@
   if (guest) root.classList.add('is-guest');
 
   // ── the stage ────────────────────────────────────────────────────────────────
-  var video = el('video');
-  video.setAttribute('data-ov-player', '');
+  var video = el(isRadio ? 'audio' : 'video');
+  if (!isRadio) video.setAttribute('data-ov-player', '');
   video.setAttribute('playsinline', '');
   video.preload = 'auto';
-  video.controls = !guest;   // a guest's player would not follow the party: the invitation stands over it
+  video.controls = !guest || isRadio;
   var src = typeof (clock && clock.media) === 'string' ? clock.media : (typeof data.media === 'string' ? data.media : null);
+  if (isRadio && radio && !radio.current) src = null;
   if (src) video.src = src;
   var frame = el('div', 'pt-frame');
   frame.appendChild(video);
@@ -95,6 +101,7 @@
   var floats = el('div', 'pt-floats');      // reactions rising over the picture
   floats.setAttribute('aria-hidden', 'true');
   frame.appendChild(veil); frame.appendChild(drift); frame.appendChild(floats);
+  if (isRadio) frame.classList.add('is-radio');
   // The shell's own header (the title and who started it) leads; without one, the page writes its own.
   var shellHead = root.querySelector('.oc-party-head');
   var head = shellHead || el('div', 'pt-head');
@@ -113,6 +120,11 @@
   stage.appendChild(head);
   stage.appendChild(frame);
   if (!guest) stage.appendChild(bar);
+  if (isRadio) {
+    var radioBox = el('section', 'pt-radio');
+    radioBox.setAttribute('aria-label', 'OpenVibe Radio queue');
+    stage.appendChild(radioBox);
+  }
   if (remote && !guest) bar.appendChild(remote);
   var react = el('div', 'pt-react');
   react.setAttribute('aria-label', 'React');
@@ -135,6 +147,20 @@
   function holder() { return lease && lease.holder ? lease.holder : { kind: 'nobody', subject: null }; }
   function iHold() { var h = holder(); return !!(self && h.kind === 'person' && h.subject === self.subject); }
   function paintVeil() {
+    if (isRadio && guest) {
+      frame.classList.add('is-guest');
+      veil.textContent = '';
+      if (!guestListening) {
+        veil.appendChild(el('span', 'pt-veil-line', 'Listen at the party’s position, no account needed'));
+        var start = el('button', 'pt-join', 'Start listening');
+        start.type = 'button';
+        start.addEventListener('click', function () { guestListening = true; applyGuestClock(); paintVeil(); });
+        veil.appendChild(start);
+      }
+      veil.hidden = guestListening;
+      frame.classList.toggle('is-waiting', !guestListening);
+      return;
+    }
     if (guest) {
       veil.textContent = '';
       var host = data.host && data.host.name ? data.host.name : null;
@@ -151,6 +177,70 @@
     veil.textContent = text;
     veil.hidden = !text;
     frame.classList.toggle('is-waiting', !!text);
+  }
+
+  function applyGuestClock() {
+    if (!isRadio || !guest || !guestListening || !clock) return;
+    var serverNow = Date.now() + serverOffset;
+    var target = Math.max(0, Number(clock.position_ms || 0) + (!clock.paused ? Math.max(0, serverNow - Number(clock.at_ms || serverNow)) * Number(clock.rate || 1) : 0)) / 1000;
+    if (Math.abs(video.currentTime - target) > 1) { try { video.currentTime = target; } catch (e) { /* metadata loading */ } }
+    if (clock.paused) video.pause();
+    else video.play().catch(function () { /* browser gesture required */ });
+  }
+  function sourceLabel(value) { return { creator: 'Creator upload', creative_commons: 'Creative Commons', public_domain: 'Public domain', ai: 'AI-made music' }[value] || value; }
+  function licenceLabel(value) { return value === 'creator_grant' ? 'Creator’s permission to stream' : value === 'public_domain' ? 'Public domain mark' : value; }
+
+  function paintRadio() {
+    if (!isRadio || !radioBox) return;
+    radioBox.textContent = '';
+    var current = radio && radio.current;
+    radioBox.appendChild(el('h2', 'pt-h', 'Now playing'));
+    radioBox.appendChild(el('strong', 'pt-radio-title', current ? current.title : 'The queue is empty'));
+    if (current) {
+      radioBox.appendChild(el('p', 'pt-radio-meta', current.artist + (current.ai_made ? ' · AI-made music' : '')));
+      var proof = el('p', 'pt-radio-meta', 'Source: ' + sourceLabel(current.source) + ' · Licence or status: ');
+      var licence = el('a', null, licenceLabel(current.licence)); licence.href = current.licence_url; proof.appendChild(licence);
+      if (current.source_url) { proof.appendChild(document.createTextNode(' · ')); var source = el('a', null, 'Original source'); source.href = current.source_url; proof.appendChild(source); }
+      radioBox.appendChild(proof);
+      if (current.changes_note) radioBox.appendChild(el('p', 'pt-radio-meta', 'Changes: ' + current.changes_note));
+    }
+    radioBox.appendChild(el('h2', 'pt-h', 'Up next'));
+    var list = el('ol', 'pt-radio-queue');
+    (radio && radio.queue || []).forEach(function (t) {
+      var item = el('li', null, t.title + ' — ' + t.artist + (t.ai_made ? ' · AI-made music' : '') + ' · Source: ' + sourceLabel(t.source) + ' · ');
+      var a = el('a', null, licenceLabel(t.licence)); a.href = t.licence_url; item.appendChild(a); list.appendChild(item);
+    });
+    if (!list.children.length) list.appendChild(el('li', null, 'Nothing queued yet.'));
+    radioBox.appendChild(list);
+    var mayChange = !guest && self && (self.subject === owner || (radio && radio.allow_everyone));
+    if (mayChange) {
+      var controls = el('div', 'pt-radio-actions');
+      var skip = el('button', 'pt-remote-btn', 'Skip track'); skip.type = 'button';
+      skip.addEventListener('click', function () { radioAction('skip', { expected_id: radio && radio.current && radio.current.id }); }); controls.appendChild(skip);
+      var add = el('form', 'pt-radio-add');
+      var id = el('select'); id.name = 'track_id'; id.required = true; id.setAttribute('aria-label', 'Choose a Radio track');
+      var placeholder = el('option', null, 'Choose a Radio track'); placeholder.value = ''; id.appendChild(placeholder);
+      catalogue.forEach(function (t) { var option = el('option', null, t.title + ' — ' + t.artist); option.value = t.id; id.appendChild(option); });
+      var submit = el('button', 'pt-remote-btn', 'Add to queue'); submit.type = 'submit'; add.appendChild(id); add.appendChild(submit);
+      add.addEventListener('submit', function (event) { event.preventDefault(); radioAction('queue', { track_id: id.value }); id.value = ''; });
+      controls.appendChild(add); radioBox.appendChild(controls);
+    }
+    if (!guest && self && self.subject === owner) {
+      var allow = el('label', 'pt-radio-permission');
+      var box = el('input'); box.type = 'checkbox'; box.checked = !!(radio && radio.allow_everyone);
+      box.addEventListener('change', function () { radioAction('allow', { allow_everyone: box.checked }); });
+      allow.appendChild(box); allow.appendChild(document.createTextNode(' Let everyone add and skip tracks'));
+      radioBox.appendChild(allow);
+    }
+    radioBox.appendChild(el('p', 'pt-radio-meta', 'Spotify, Apple Music and YouTube Music listening is coming after their approvals.'));
+  }
+  function radioAction(action, body) {
+    var headers = { 'Content-Type': 'application/json' }, t = token();
+    if (t) headers.Authorization = 'Bearer ' + t;
+    fetch('/api/chat/parties/' + encodeURIComponent(slug) + '/radio/' + action, { method: 'POST', headers: headers, credentials: 'same-origin', body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (v) { if (!r.ok) throw new Error(v.error || v.code || 'Queue change failed'); return v; }); })
+      .then(function (v) { radio = v.radio; paintRadio(); })
+      .catch(function (e) { flash(e.message); });
   }
 
   // ── the remote ───────────────────────────────────────────────────────────────
@@ -320,10 +410,16 @@
         if (m.subject && !self) self = { subject: m.subject, name: names[m.subject] || 'You' };
         if (!sync && window.OVSync && video) sync = window.OVSync.attach(video, { room: slug, socket: ws, self: self && self.subject });
         catchUp();
+        paintRadio();
       } else if (m.type === 'sync' && m.state) {
         clock = m.state;
         if (!clock.paused || clock.position_ms > 0) everPlayed = true;
-        if (!src && typeof clock.media === 'string') { src = clock.media; video.src = src; }
+        if ((!isRadio || radio && radio.current) && typeof clock.media === 'string' && src !== clock.media) { src = clock.media; video.src = src; }
+        if (guest) applyGuestClock();
+      } else if (m.type === 'radio' && m.state) {
+        radio = m.state;
+        if (!radio.current) { video.pause(); video.removeAttribute('src'); src = null; }
+        paintRadio();
       } else if (m.type === 'lease' && m.state) {
         var before = lease && lease.watchers ? lease.watchers : [];
         lease = m.state;
@@ -364,6 +460,31 @@
     if (changed) { paintPeople(); paintRemote(); }
   }, 500);
   video.addEventListener('play', function () { everPlayed = true; paintVeil(); });
+  video.addEventListener('ended', function () {
+    if (isRadio && !guest && self && radio && radio.current && (self.subject === owner || radio.allow_everyone))
+      radioAction('skip', { expected_id: radio.current.id });
+  });
+  video.addEventListener('loadedmetadata', applyGuestClock);
+  if (isRadio && guest) {
+    setInterval(function () {
+      var key = null;
+      try { key = new URLSearchParams(location.search).get('k') || localStorage.getItem('ov-party-key:' + slug); } catch (e) { /* storage blocked */ }
+      var sentAt = Date.now();
+      fetch('/api/chat/parties/' + encodeURIComponent(slug) + (key ? '?k=' + encodeURIComponent(key) : ''), { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (v) {
+          if (!v || !v.party) return;
+          var rtt = Date.now() - sentAt;
+          if (Number(v.server_time_ms) && rtt < bestClockRtt) { bestClockRtt = rtt; serverOffset = Number(v.server_time_ms) - (sentAt + Date.now()) / 2; }
+          clock = v.party.clock; radio = v.party.radio;
+          if (radio && !radio.current) { video.pause(); video.removeAttribute('src'); src = null; }
+          else if (clock && typeof clock.media === 'string' && src !== clock.media) { src = clock.media; video.src = src; }
+          paintRadio(); applyGuestClock();
+        }).catch(function () { /* retry next poll */ });
+    }, 3000);
+  }
+  if (isRadio && !guest) fetch('/api/chat/parties/radio/tracks').then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (v) { catalogue = v && v.tracks || []; paintRadio(); }).catch(function () { /* retry on refresh */ });
 
   // ── invite ───────────────────────────────────────────────────────────────────
   if (invite && !guest) {
@@ -385,6 +506,6 @@
     invite.appendChild(ib);
   }
 
-  paintVeil(); paintRemote(); paintPeople();
+  paintVeil(); paintRemote(); paintPeople(); paintRadio();
   connect();
 })();

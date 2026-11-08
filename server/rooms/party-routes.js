@@ -16,6 +16,7 @@ const cache = require('openvibe-shared/cache-policy');
 const { requireAuth, optionalAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const parties = require('../rooms/parties');
+const radio = require('../rooms/radio');
 
 const router = express.Router();
 
@@ -35,13 +36,35 @@ router.post('/', requireAuth, createLimit, async (req, res) => {
     } catch (err) { send(res, err); }
 });
 
+router.get('/radio/tracks', async (_req, res) => {
+    res.set('Cache-Control', 'public, max-age=30').json({ tracks: await radio.catalogue() });
+});
+
+router.get('/:slug/radio', optionalAuth, async (req, res) => {
+    try {
+        const row = await parties.bySlug(req.params.slug), party = parties.partyOf(row);
+        const out = await radio.state(row, party, { user: req.user || null, key: req.query.k });
+        if (!out) return res.status(404).json({ code: 'rooms.not_found' });
+        res.set('Cache-Control', 'private, no-store').json({ radio: out });
+    } catch (err) { send(res, err); }
+});
+
+router.post('/:slug/radio/:action', requireAuth, createLimit, async (req, res) => {
+    try {
+        const row = await parties.bySlug(req.params.slug), party = parties.partyOf(row);
+        if (!row || !party || !await parties.mayView(row, party, req.user, null)) return res.status(404).json({ code: 'rooms.not_found' });
+        const out = await radio.change(row, party, req.user, req.params.action, req.body || {});
+        res.set('Cache-Control', 'private, no-store').json({ radio: out });
+    } catch (err) { send(res, err); }
+});
+
 router.get('/:slug', optionalAuth, async (req, res) => {
     try {
         const row = await parties.bySlug(req.params.slug);
         const party = parties.partyOf(row);
         const out = row && party ? await parties.detail(row, party, { user: req.user || null, key: req.query.k }) : null;
         if (!out) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
-        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ party: out });
+        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ party: out, server_time_ms: Date.now() });
     } catch (err) { send(res, err); }
 });
 
