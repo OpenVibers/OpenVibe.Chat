@@ -91,6 +91,39 @@
     }
     if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
   }
+  // A known OpenVibe link's card under its message (server/chat/link-cards.js, server/web/ui.js draws the same):
+  // the picture when there is one, the title, one line and the one move as a button. Every field is data: set with
+  // textContent, and a link or picture only when it is https (openvibe.media for the picture).
+  function httpsHref(v) {
+    try { var u = new URL(String(v)); return u.protocol === 'https:' ? u.href : null; } catch (e) { return null; }
+  }
+  function linkCard(c) {
+    if (!c || typeof c !== 'object' || typeof c.title !== 'string' || !c.title) return null;
+    var url = httpsHref(c.url), action = c.action && httpsHref(c.action.href);
+    var box = el('div', 'oc-card'); box.dataset.kind = typeof c.kind === 'string' ? c.kind : 'link';
+    var img = typeof c.image === 'string' && /^https:\/\/openvibe\.media\/[^\s"'<>]+$/.test(c.image) ? httpsHref(c.image) : null;
+    if (img) {
+      var href = url || img;
+      var a = el('a', 'oc-card-pic'); a.href = href; a.target = '_blank'; a.rel = 'noopener nofollow';
+      var picture = document.createElement('img'); picture.src = img; picture.alt = ''; picture.loading = 'lazy'; picture.decoding = 'async';
+      a.appendChild(picture); box.appendChild(a);
+    }
+    var body = el('div', 'oc-card-body');
+    if (url) {
+      var title = el('a', 'oc-card-title', c.title); title.href = url; title.target = '_blank'; title.rel = 'noopener nofollow';
+      body.appendChild(title);
+    } else body.appendChild(el('span', 'oc-card-title', c.title));
+    if (typeof c.line === 'string' && c.line) body.appendChild(el('p', 'oc-card-line', c.line));
+    if (typeof c.note === 'string' && c.note) body.appendChild(el('p', 'oc-card-note', c.note));
+    if (action && c.action && typeof c.action.label === 'string' && c.action.label) {
+      var go = el('a', 'oc-card-go', c.action.label); go.href = action; go.target = '_blank'; go.rel = 'noopener nofollow';
+      body.appendChild(go);
+    }
+    box.appendChild(body);
+    return box;
+  }
+  function addCard(li, m) { var c = linkCard(m && m.card); if (c) li.appendChild(c); }
+
   // Display only (the server decides who may do what): the same badges the page renders.
   var BADGES = { admin: ['oc-badge oc-badge-staff', 'staff'], global_mod: ['oc-badge oc-badge-mod', 'mod'] };
   function badge(role) { var b = BADGES[role]; return b ? el('span', b[0], b[1]) : null; }
@@ -147,6 +180,7 @@
     var b = badge(m.role); if (b) li.appendChild(b);
     li.appendChild(document.createTextNode(' '));
     var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
+    addCard(li, m);
     return li;
   }
   function removeIds(ids) {
@@ -228,6 +262,7 @@
     li.appendChild(el('span', 'oc-name', m.display_name || m.username));
     li.appendChild(document.createTextNode(' '));
     var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
+    addCard(li, m);
     return li;
   }
   function startDm() {
@@ -307,6 +342,7 @@
     else { t = el('span', 'oc-text'); textWithLinks(t, m.message); }
     li.appendChild(t);
     if (!ai && cfg.pics) { var pw = pictureThumbs(m.message); if (pw) li.appendChild(pw); }
+    addCard(li, m);
     if (cfg.moderate || (cfg.me && !ai && m.user_id === cfg.me)) {
       var f = el('form', 'oc-del'); f.method = 'post'; f.action = '/r/' + encodeURIComponent(cfg.room) + '/delete/' + m.id;
       var x = el('button'); x.type = 'submit'; x.title = 'Delete this message'; x.setAttribute('aria-label', 'Delete this message'); x.innerHTML = TRASH;

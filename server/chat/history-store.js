@@ -19,6 +19,7 @@
  * `readDelta` and calling `invalidate(room)` from the write path — nothing in the routes changes.
  */
 const db = require('../db/database');
+const linkCards = require('./link-cards');
 
 const PAGE_MEMO_MS = 2000;
 const MAX_LIMIT = 500;
@@ -128,6 +129,7 @@ async function page(room, { limit, before, channelUsername, decorate } = {}) {
         if (key) memoSet(key, rows);
     }
     const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows;
+    await linkCards.hydrate(messages);
     return { messages, latest_id: latestIdOf(rows) };
 }
 
@@ -144,6 +146,7 @@ async function delta(room, { afterId, limit, channelUsername, decorate } = {}) {
     const complete = rows.length <= lim;
     if (!complete) rows = rows.slice(0, lim);
     const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows;
+    await linkCards.hydrate(messages);
     return { messages, latest_id: latestIdOf(rows) || after, complete, deleted_ids: await deletedIds(room, after) };
 }
 

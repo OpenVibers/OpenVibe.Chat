@@ -88,8 +88,44 @@ function initials(name, presence = null, { large = false, id = '' } = {}) {
     return `<span class="${cls}" style="--av:${h}"${idAttr} role="img" aria-label="${esc(`${String(name || '?')}, ${PRESENCE[state].a11y}`)}">${esc(letters)}${presenceDot(presence)}</span>`;
 }
 
+/** An https address a card may link to; anything else (javascript:, http:, a relative path) is no link. */
+function cardHref(value) {
+    try {
+        const u = new URL(String(value || ''));
+        return u.protocol === 'https:' ? u.href : null;
+    } catch { return null; }
+}
+/** A card's picture: only https on openvibe.media, as the resolver also enforces. */
+function cardImage(value) {
+    try {
+        const u = new URL(String(value || ''));
+        return u.protocol === 'https:' && !u.port && u.hostname.toLowerCase() === 'openvibe.media' ? u.href : null;
+    } catch { return null; }
+}
+/**
+ * A known OpenVibe link's card under its message (server/chat/link-cards.js): the picture when there is one, the
+ * title, one line, and the one move as a button. Every string is data: escaped here. Null is no markup.
+ */
+function linkCard(card) {
+    if (!card || typeof card !== 'object') return '';
+    const title = typeof card.title === 'string' ? card.title : '';
+    if (!title) return '';
+    const href = cardHref(card.url);
+    const action = card.action && typeof card.action.label === 'string' && card.action.label ? card.action : null;
+    const actionHref = action && cardHref(action.href);
+    const image = cardImage(card.image);
+    const line = typeof card.line === 'string' && card.line ? card.line : '';
+    const note = typeof card.note === 'string' && card.note ? card.note : '';
+    const head = href
+        ? `<a class="oc-card-title" href="${esc(href)}" rel="noopener nofollow" target="_blank">${esc(title)}</a>`
+        : `<span class="oc-card-title">${esc(title)}</span>`;
+    const pic = image ? `<a class="oc-card-pic" href="${esc(href || image)}" rel="noopener nofollow" target="_blank"><img src="${esc(image)}" alt="" loading="lazy" decoding="async"></a>` : '';
+    const go = actionHref ? `<a class="oc-card-go" href="${esc(actionHref)}" rel="noopener nofollow" target="_blank">${esc(action.label)}</a>` : '';
+    return `<div class="oc-card" data-kind="${esc(typeof card.kind === 'string' ? card.kind : 'link')}">${pic}<div class="oc-card-body">${head}${line ? `<p class="oc-card-line">${esc(line)}</p>` : ''}${note ? `<p class="oc-card-note">${esc(note)}</p>` : ''}${go}</div></div>`;
+}
+
 const hueOf = (slug) => { let h = 0; for (const c of String(slug)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 const serverLetters = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 const serverMark = (s) => `<span class="oc-srv-icon oc-srv-icon--row" style="--oc-hue:${hueOf(s.slug)}" aria-hidden="true">${esc(serverLetters(s.name))}</span>`;
 
-module.exports = { head, when, initials, presenceState, presenceDot, presenceOrder, presenceLine, hueOf, serverLetters, serverMark };
+module.exports = { head, when, initials, presenceState, presenceDot, presenceOrder, presenceLine, hueOf, serverLetters, serverMark, linkCard };

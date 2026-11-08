@@ -239,6 +239,18 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-move:hover { border-color: var(--oc-accent); }
 
 /* Pictures in rooms and channels (server/rooms/pictures.js): thumbnails under a message, the "Add a picture" form. */
+/* A known OpenVibe link under its message (server/chat/link-cards.js): a picture at 16:9, the title, one line and
+   the one move as a button. Rounded and quiet: the message stays the thing that was said. */
+.oc-card { display: flex; flex-direction: column; max-width: 380px; margin: 6px 0 2px; border: 1px solid var(--oc-line); border-radius: 10px; overflow: hidden; background: var(--oc-panel-2); }
+.oc-card-pic { display: block; line-height: 0; }
+.oc-card-pic img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.oc-card-body { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; }
+.oc-card-title { font-weight: 600; line-height: 1.35; color: var(--oc-text); text-decoration: none; overflow-wrap: anywhere; }
+.oc-card-title:hover { text-decoration: underline; }
+.oc-card-line, .oc-card-note { margin: 0; color: var(--oc-muted); font-size: .86em; line-height: 1.4; overflow-wrap: anywhere; }
+.oc-card-go { align-self: flex-start; margin-top: 6px; padding: 4px 10px; border-radius: 999px; background: var(--oc-accent); color: var(--oc-on-accent); text-decoration: none; font-weight: 600; font-size: .86em; }
+.oc-card-go:hover { filter: brightness(1.08); }
+.ovt-bubble .oc-card, .ovt-reply .oc-card { margin-top: 8px; }
 .oc-pics { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 2px; }
 .oc-pic { display: block; line-height: 0; border-radius: 10px; }
 .oc-pic img { display: block; width: auto; max-width: min(320px, 100%); max-height: 240px; border-radius: 10px; border: 1px solid var(--oc-line); background: var(--oc-panel-2); object-fit: cover; }

@@ -18,6 +18,7 @@ const ctx = require('../live-context');
 const { optionalAuth, requireAuth } = require('../auth/auth');
 const permissions = require('../auth/permissions');
 const historyStore = require('./history-store');
+const linkCards = require('./link-cards');
 const networkBlocks = require('./network-blocks');
 const { limits } = require('../net/actor-limits');
 const { positiveInt } = require('./route-params');
@@ -354,6 +355,10 @@ router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour
             if (tagProfile) chatMsg.tag = tagProfile;
         } catch { /* non-critical */ }
 
+        // A known OpenVibe link gets its card resolved now, before the line is stored.
+        const card = await linkCards.resolve(filtered);
+        if (card) chatMsg.card = card;
+
         // Save to database
         let savedId = null;
         try {
@@ -367,6 +372,7 @@ router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour
                 is_global: true,
                 reply_to_id: replyToId,
                 auto_delete_at: autoDeleteAt,
+                card,
             });
             savedId = result.lastInsertRowid;
         } catch { /* non-critical */ }

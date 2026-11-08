@@ -177,13 +177,15 @@ function firstChatKey({ message_type, source_platform, user_id, anon_id, usernam
     return anon_id ? `anon:${anon_id}` : null;
 }
 
-async function saveChatMessage({ stream_id, channel_user_id, user_id, anon_id, username, message, message_type, is_global, reply_to_id, source_platform, auto_delete_at, metadata, first_chat_key }) {
+async function saveChatMessage({ stream_id, channel_user_id, user_id, anon_id, username, message, message_type, is_global, reply_to_id, source_platform, auto_delete_at, metadata, card, first_chat_key }) {
     // channel_user_id = the broadcaster's user id — set for all channel/stream
     // messages so a streamer's chat history survives across sessions AND offline
     // periods (independent of the live-session stream row's lifetime).
     let chanUid = channel_user_id || null;
     if (!chanUid && stream_id) { try { chanUid = (await _ctx().getStreamById(stream_id))?.user_id || null; } catch { /* ignore */ } }
     const metaStr = metadata == null ? null : (typeof metadata === 'string' ? metadata : JSON.stringify(metadata));
+    // The link card resolved when the message was sent (server/chat/link-cards.js), as JSON text.
+    const cardStr = card == null ? null : (typeof card === 'string' ? card : JSON.stringify(card));
     const subject = await subjectFor(user_id);
     // Every save path records the chatter's first chat in the resolved channel here, so a
     // channel-only line (a PowerChat or offline room with no stream) counts too. Only chat lines
@@ -191,9 +193,9 @@ async function saveChatMessage({ stream_id, channel_user_id, user_id, anon_id, u
     const chatterKey = firstChatKey({ message_type, source_platform, user_id, anon_id, username, first_chat_key });
     return await transaction(async () => {
         const res = await run(
-            `INSERT INTO chat_messages (stream_id, channel_user_id, user_id, anon_id, username, message, message_type, is_global, reply_to_id, source_platform, auto_delete_at, metadata, subject_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [stream_id, chanUid, user_id || null, anon_id || null, username, message, message_type || 'chat', is_global ? 1 : 0, reply_to_id || null, source_platform || null, auto_delete_at || null, metaStr, subject]
+            `INSERT INTO chat_messages (stream_id, channel_user_id, user_id, anon_id, username, message, message_type, is_global, reply_to_id, source_platform, auto_delete_at, metadata, subject_id, card)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [stream_id, chanUid, user_id || null, anon_id || null, username, message, message_type || 'chat', is_global ? 1 : 0, reply_to_id || null, source_platform || null, auto_delete_at || null, metaStr, subject, cardStr]
         );
         res.first_chat = !!(chatterKey && chanUid) && await recordFirstChat(chatterKey, chanUid);
         await _outbox().emit({

@@ -19,6 +19,35 @@
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function token() { var m = /(?:^|;\s*)ov_token=([^;]+)/.exec(document.cookie || ''); return m ? decodeURIComponent(m[1]) : undefined; }
   function chip(s) { return el('span', 'ib-st ' + (STATUS[s] ? STATUS[s][1] : ''), STATUS[s] ? STATUS[s][0] : s); }
+  // A known OpenVibe link's card (server/chat/link-cards.js; the same markup the server draws): picture, title, one
+  // line and the one move. Every field is data: textContent, and only https addresses become links or pictures.
+  function httpsHref(v) {
+    try { var u = new URL(String(v)); return u.protocol === 'https:' ? u.href : null; } catch (e) { return null; }
+  }
+  function linkCard(c) {
+    if (!c || typeof c !== 'object' || typeof c.title !== 'string' || !c.title) return null;
+    var url = httpsHref(c.url), action = c.action && httpsHref(c.action.href);
+    var box = el('div', 'oc-card'); box.dataset.kind = typeof c.kind === 'string' ? c.kind : 'link';
+    var img = typeof c.image === 'string' && /^https:\/\/openvibe\.media\/[^\s"'<>]+$/.test(c.image) ? httpsHref(c.image) : null;
+    if (img) {
+      var pic = el('a', 'oc-card-pic'); pic.href = url || img; pic.target = '_blank'; pic.rel = 'noopener nofollow';
+      var picture = el('img'); picture.src = img; picture.alt = ''; picture.loading = 'lazy'; picture.decoding = 'async';
+      pic.appendChild(picture); box.appendChild(pic);
+    }
+    var body = el('div', 'oc-card-body');
+    if (url) {
+      var title = el('a', 'oc-card-title', c.title); title.href = url; title.target = '_blank'; title.rel = 'noopener nofollow';
+      body.appendChild(title);
+    } else body.appendChild(el('span', 'oc-card-title', c.title));
+    if (typeof c.line === 'string' && c.line) body.appendChild(el('p', 'oc-card-line', c.line));
+    if (typeof c.note === 'string' && c.note) body.appendChild(el('p', 'oc-card-note', c.note));
+    if (action && c.action && typeof c.action.label === 'string' && c.action.label) {
+      var go = el('a', 'oc-card-go', c.action.label); go.href = action; go.target = '_blank'; go.rel = 'noopener nofollow';
+      body.appendChild(go);
+    }
+    box.appendChild(body);
+    return box;
+  }
   // OpenVibe.Pics direct links in a person's reply, or a signed-in visitor's, show as pictures (only that host, at most four).
   var PICS = /https:\/\/openvibe\.pics\/i\/([2-9a-km-zA-HJ-NP-Z]{8})\.(?:jpg|png|gif|webp|avif)(?![\w\/.-])/g;
   function picsOf(text) {
@@ -50,6 +79,7 @@
       var said = vp ? bare(m.body) : m.body;
       if (said) reply.appendChild(el('div', 'ovt-answer ib-text', said));
       if (vp) reply.appendChild(vp);
+      var vc = linkCard(m.card); if (vc) reply.appendChild(vc);
       bot.appendChild(reply); li.appendChild(bot);
       li.dataset.author = 'visitor';
     } else {
@@ -63,6 +93,7 @@
         bubble.appendChild(el('span', 'ib-text', pics ? bare(m.body) : m.body));
         if (pics) bubble.appendChild(pics);
       }
+      var ac = linkCard(m.card); if (ac) bubble.appendChild(ac);
       you.appendChild(bubble); li.appendChild(you);
       li.dataset.author = ai ? 'ai' : 'agent';
     }

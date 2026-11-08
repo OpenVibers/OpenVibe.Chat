@@ -33,6 +33,7 @@ const ttsEngine = require('./tts-engine');
 const soundboard = require('./soundboard-service');
 const audioQueue = require('./audio-queue');
 const dm = require('./dm');
+const linkCards = require('./link-cards');
 const networkBlocks = require('./network-blocks');
 const presence = require('../presence');
 const vipBadges = require('../vip/badges');
@@ -1156,6 +1157,11 @@ class ChatServer {
             } catch { /* no badge */ }
         }
 
+        // A known OpenVibe link gets its card resolved now, before the line is stored: the card is part of the
+        // message the room, the history and the DM API answer all carry (server/chat/link-cards.js).
+        const card = await linkCards.resolve(text);
+        if (card) chatMsg.card = card;
+
         // Save to database. The save also records the first chat in the resolved channel
         // (channel_user_id, or the stream owner), so a channel-only line counts too.
         let firstChat = false;
@@ -1172,6 +1178,7 @@ class ChatServer {
                 reply_to_id: replyToId,
                 auto_delete_at: autoDeleteAt,
                 metadata: chatMsg.vip_badge ? { vip_badge: chatMsg.vip_badge } : undefined,
+                card,
             });
             if (result.lastInsertRowid) chatMsg.id = Number(result.lastInsertRowid);
             firstChat = !!result.first_chat;
