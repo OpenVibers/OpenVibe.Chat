@@ -14,8 +14,11 @@ function createActorClient({ http = null } = {}) {
     const call = (subject, opts) => (http || client()).json({ service: 'actor', baseUrl: config.actor.internalUrl, audience: 'openvibe.actor',
         headers: { 'X-OV-Subject': subject }, retries: 0, ...opts });
     return {
-        async start({ subject, text, policy, conversation, deliveryId }) {
-            return call(subject, { method: 'POST', path: '/api/v1/chat-apps/tasks', json: { text, policy, conversation, delivery_id: deliveryId } });
+        async start({ subject, text, policy, conversation, deliveryId, account }) {
+            return call(subject, { method: 'POST', path: '/api/v1/chat-apps/tasks', json: { text, policy, conversation, delivery_id: deliveryId, account } });
+        },
+        async registerAccount({ subject, account }) {
+            return call(subject, { method: 'POST', path: '/api/v1/chat-apps/accounts', json: { account } });
         },
         async task(subject, id) { return call(subject, { method: 'GET', path: `/api/v1/tasks/${encodeURIComponent(id)}` }); },
         async approvals(subject, conversation) { const out = await call(subject, { method: 'GET', path: '/api/v1/chat-apps/approvals', query: { conversation } }); return out.items || []; },

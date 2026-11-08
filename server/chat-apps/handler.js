@@ -35,7 +35,11 @@ function createHandler({ config, store, providers, network, actor, now = () => D
             const code = privateChat ? (/^\d{6}$/.test(String(m.command ? m.args : m.text || '').trim()) ? String(m.command ? m.args : m.text).trim() : null) : null;
             if (code) {
                 const out = await network.finish({ app: m.app, serviceUserId: ident, code }).catch(() => null);
-                if (out?.ok) return send(m, 'You are linked. Ask me anything — I am your OpenVibe agent here.');
+                if (out?.ok) {
+                    const linkedSubject = out.subject || await resolve({ app: m.app, serviceUserId: ident });
+                    if (linkedSubject) await actor.registerAccount({ subject: linkedSubject, account: { kind: m.app, id: ident, label: m.userName || `${m.app} account` } }).catch(() => null);
+                    return send(m, 'You are linked. Ask me anything — I am your OpenVibe agent here.');
+                }
                 if (out?.error === 'code') return send(m, out.attemptsLeft ? `That code is not right. ${out.attemptsLeft} ${out.attemptsLeft === 1 ? 'try' : 'tries'} left; after that, send /link again.` : 'That code is not right. Send /link to start again.');
                 if (out?.error === 'expired') return send(m, 'That code expired. Send /link to start again.');
                 if (out?.error === 'conflict') return send(m, 'This chat account is already linked to another OpenVibe account, or that account already has a chat account of this service.');
@@ -64,7 +68,14 @@ function createHandler({ config, store, providers, network, actor, now = () => D
         if (!privateChat && !await store.rate(`${m.app}:group:${group(m)}`, settings.rate_per_hour)) return;
         const text = (m.command === 'ask' ? m.args.replace(/^text=/, '') : m.text).trim();
         if (!text) return;
-        const started = await actor.start({ subject, text, policy: privateChat ? 'dm' : settings.mode, conversation: conversation(m), deliveryId });
+        let started;
+        try {
+            started = await actor.start({ subject, text, policy: privateChat ? 'dm' : settings.mode, conversation: conversation(m), deliveryId,
+                account: { kind: m.app, id: ident, label: m.userName || `${m.app} account` } });
+        } catch (err) {
+            if (err && err.status === 409) return send(m, 'No agent is listening on this account. Bind it on your agent page at openvibe.actor.');
+            throw err;
+        }
         const shown = new Set();
         const until = now() + 11 * 60_000;
         while (now() < until) {

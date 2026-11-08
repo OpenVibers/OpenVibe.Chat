@@ -16,7 +16,7 @@ const { signButton } = require('openvibe-sdk/chat-apps');
         discord: { botToken: 'fixture', applicationId: '222222222222222222', publicKey: keys.publicKey.export({ type: 'spki', format: 'der' }).subarray(-32).toString('hex') },
         slack: { botToken: 'fixture', signingSecret: 'fixture-slack', teamId: 'T123' } } };
     const store = createStore({ db });
-    const sent = [], starts = [], decisions = [], links = [];
+    const sent = [], starts = [], decisions = [], links = [], registrations = [];
     let linked = false, admin = false, pendingCode = null, pendingUser = null;
     const subject = 'usr_01J8Z3Q4R5S6T7V8W9X0Y1Z2T1';
     const providers = Object.fromEntries(['telegram','discord','slack'].map(app => [app, { on: true, botUserId: '999', botUsername: 'our_bot', sendText: async b => sent.push(b), sendButtons: async b => sent.push(b), isAdmin: async () => admin }]));
@@ -32,7 +32,7 @@ const { signButton } = require('openvibe-sdk/chat-apps');
         },
         unlink: async () => { linked = false; return true; },
     };
-    const actor = { start: async b => { starts.push(b); return { id: 'task1' }; }, task: async () => ({ state: 'succeeded', result: { answer: 'The answer.', artifacts: [{ name: 'Report', url: 'https://openvibe.actor/file/1' }] } }), approvals: async () => [], decide: async b => { decisions.push(b); return {}; } };
+    const actor = { start: async b => { starts.push(b); return { id: 'task1' }; }, registerAccount: async b => { registrations.push(b); return { bound: true }; }, task: async () => ({ state: 'succeeded', result: { answer: 'The answer.', artifacts: [{ name: 'Report', url: 'https://openvibe.actor/file/1' }] } }), approvals: async () => [], decide: async b => { decisions.push(b); return {}; } };
     const handler = createHandler({ config: cfg, store, providers, network, actor });
     for (const app of ['telegram','discord','slack']) {
         const fixture = require(`./fixtures/chat-apps/${app}.json`);
@@ -53,7 +53,10 @@ const { signButton } = require('openvibe-sdk/chat-apps');
         // The chat account that started /link finishes with the code.
         await handler.handle({ ...m, text: '123456', command: null, kind: 'message' }, `${app}-code`);
         assert.equal(linked, true); assert.match(sent.at(-1).text, /You are linked/);
+        assert.equal(registrations.at(-1).account.kind, app);
+        assert.equal(registrations.at(-1).account.id, identity(m));
         await handler.handle(m, `${app}-ask`); assert.equal(starts.at(-1).policy, 'dm');
+        assert.equal(starts.at(-1).account.id, identity(m));
         assert.match(sent.at(-1).text, /Report: https/);
         starts.length = 0;
         const g = { ...m, text: 'hello', command: null, args: '', kind: 'message', chatType: 'group', chatId: `g-${app}`, mention: false, replyToBot: false };
