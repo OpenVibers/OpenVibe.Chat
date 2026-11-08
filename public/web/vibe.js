@@ -341,6 +341,141 @@
     if (stick) toBottom();
   }
 
+  // ── The canvas (plan HO9): the agent's data panel beside the chat ─────────────────────────────────────────────
+  // Only the newest task in the chat, and only when OpenVibe.Actor holds it (the task's actor_task is the tsk_…
+  // thread). The document is read in the browser with the person's own Network token — the Actor API allows that one
+  // read from openvibe.chat and refuses cookies — and drawn by openvibe-shared's ov-canvas.js. It is read-only here:
+  // checklist boxes disabled, buttons not drawn, and one link to the Actor thread where the person can tick or press.
+  // The wide third column and the closed fold above the composer share the same document, as on Actor.
+  var ACTOR = 'https://openvibe.actor';
+  var CANVAS_THREAD = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
+  var canvas = cfg.canvas && CANVAS_THREAD.test(String(cfg.canvas.thread || '')) ? cfg.canvas : null;
+  var canvasVersion = 0, canvasTimer = 0, canvasBusy = false, canvasUpdatedTimer = 0;
+  function canvasRoot() { return app.querySelector('.ovt[data-ovt]'); }
+  function canvasIsOpen() { return !!(canvas && (canvas.status === 'queued' || canvas.status === 'running')); }
+  function canvasItems(n) { return n + (n === 1 ? ' item' : ' items'); }
+  function canvasCountSpan() { var span = el('span', 'vbc-count'); span.setAttribute('data-vb-canvas-count', ''); return span; }
+  function canvasLink() {
+    var a = el('a', 'vbc-link', 'Open in Actor to tick or press');
+    a.href = ACTOR + '/chat/' + encodeURIComponent(canvas.thread);
+    a.target = '_blank'; a.rel = 'noopener';
+    return a;
+  }
+  function canvasBody() {
+    var body = el('div', 'vbc-body');
+    var host = el('div', 'vbc-host'); host.setAttribute('data-vb-canvas-host', '');
+    body.appendChild(host); body.appendChild(canvasLink());
+    return body;
+  }
+  function canvasWide() {
+    var root = canvasRoot(); if (!root || !canvas) return null;
+    var box = root.querySelector('.vbc-wide');
+    if (box) return box;
+    box = el('aside', 'ovt-panel vbc vbc-wide');
+    box.setAttribute('aria-label', 'Canvas'); box.setAttribute('data-vb-canvas', ''); box.setAttribute('data-thread', canvas.thread);
+    var head = el('div', 'ovt-panel-head');
+    head.appendChild(el('h2', null, 'Canvas')); head.appendChild(canvasCountSpan());
+    box.appendChild(head); box.appendChild(canvasBody());
+    root.appendChild(box); root.classList.add('has-panel');
+    return box;
+  }
+  function canvasPhone() {
+    var root = canvasRoot(); if (!root || !canvas) return null;
+    var box = root.querySelector('.vbc-phone');
+    if (box) return box;
+    var dock = root.querySelector('.ovt-dock'); if (!dock) return null;
+    box = el('details', 'vbc vbc-phone');
+    box.setAttribute('data-vb-canvas', ''); box.setAttribute('data-thread', canvas.thread);
+    var sum = el('summary');
+    sum.appendChild(el('span', 'vbc-label', 'Canvas'));
+    var sep = el('span', 'vbc-sep', '·'); sep.setAttribute('aria-hidden', 'true'); sum.appendChild(sep);
+    sum.appendChild(canvasCountSpan());
+    var up = el('span', 'vbc-updated', 'updated');
+    up.setAttribute('data-vb-canvas-updated', ''); up.setAttribute('aria-live', 'polite'); up.hidden = true; sum.appendChild(up);
+    var chev = el('span', 'vbc-chev', '▾'); chev.setAttribute('aria-hidden', 'true'); sum.appendChild(chev);
+    box.appendChild(sum); box.appendChild(canvasBody());
+    dock.insertBefore(box, dock.firstChild);
+    // Closed first; the person's choice lasts for this visit, as on Actor.
+    var key = 'ov-canvas-open:' + canvas.thread;
+    try { if (window.sessionStorage && sessionStorage.getItem(key) === '1') box.open = true; } catch (e) { /* private mode */ }
+    box.addEventListener('toggle', function () {
+      try { if (window.sessionStorage) sessionStorage.setItem(key, box.open ? '1' : '0'); } catch (e) { /* private mode */ }
+    });
+    return box;
+  }
+  function canvasPaint(doc) {
+    if (!canvas || !doc || !window.OVCanvas) return;
+    // A canvas never acts here: the buttons live on the Actor thread the link opens. The checklist draws disabled
+    // because no onCheck is given, which is the renderer's own read-only mode.
+    var shown = {
+      canvas: doc.canvas, version: doc.version, title: doc.title, updated_at: doc.updated_at,
+      blocks: (Array.isArray(doc.blocks) ? doc.blocks : []).filter(function (b) { return b && b.type !== 'button'; }),
+    };
+    if (!window.OVCanvas.valid(shown)) return;
+    [canvasWide(), canvasPhone()].forEach(function (box) {
+      var host = box && box.querySelector('[data-vb-canvas-host]');
+      if (host) window.OVCanvas.render(host, shown, {});
+    });
+    [].forEach.call(app.querySelectorAll('[data-vb-canvas-count]'), function (node) { node.textContent = canvasItems(shown.blocks.length); });
+    canvasVersion = Number(doc.version) || canvasVersion;
+  }
+  function canvasClear() {
+    [].forEach.call(app.querySelectorAll('[data-vb-canvas]'), function (box) { box.remove(); });
+    var root = canvasRoot(); if (root) root.classList.remove('has-panel');
+    canvasVersion = 0;
+  }
+  function canvasUpdated() {
+    var node = app.querySelector('.vbc-phone [data-vb-canvas-updated]');
+    if (!node) return;
+    node.hidden = false;
+    if (canvasUpdatedTimer) clearTimeout(canvasUpdatedTimer);
+    canvasUpdatedTimer = setTimeout(function () { node.hidden = true; canvasUpdatedTimer = 0; }, 4000);
+  }
+  function canvasSchedule() {
+    if (canvasTimer) { clearTimeout(canvasTimer); canvasTimer = 0; }
+    if (!canvasIsOpen()) return;
+    canvasTimer = setTimeout(function () { canvasTimer = 0; canvasFetch(); }, 30000);
+  }
+  function canvasFetch() {
+    if (!canvas || !cfg.signedIn || canvasBusy || !CANVAS_THREAD.test(String(canvas.thread || ''))) return;
+    var tok = token(); if (!tok) return;
+    canvasBusy = true;
+    fetch(ACTOR + '/api/v1/me/canvases?thread=' + encodeURIComponent(canvas.thread), {
+      // The person's own Bearer, no credentials mode: Actor refuses a cookie from another site.
+      credentials: 'omit', headers: { authorization: 'Bearer ' + tok, accept: 'application/json' },
+    }).then(function (r) {
+      if (r.status === 401 || r.status === 403) return { stop: true };
+      return r.ok ? r.json() : null;
+    }).then(function (j) {
+      if (j && j.stop) { canvas = null; canvasClear(); return; }
+      var doc = j && Array.isArray(j.canvases) ? j.canvases[0] : null;
+      if (!doc) { canvasClear(); return; }
+      if (canvasVersion && Number(doc.version) > canvasVersion) canvasUpdated();
+      canvasPaint(doc);
+    }).catch(function () { /* offline: the panel stays as it was, and asks again while the task runs */ })
+      .then(function () { canvasBusy = false; canvasSchedule(); });
+  }
+  function canvasRefreshNow() {
+    if (canvasTimer) { clearTimeout(canvasTimer); canvasTimer = 0; }
+    canvasFetch();
+  }
+  function canvasWatch(task) {
+    var thread = task && task.actor_task ? String(task.actor_task) : '';
+    if (!CANVAS_THREAD.test(thread)) return false;
+    canvas = { thread: thread, task: task.id, status: task.status };
+    canvasClear();
+    canvasRefreshNow();
+    return true;
+  }
+  function canvasTaskStatus(task) {
+    if (!canvas || !task || Number(task.id) !== Number(canvas.task)) return;
+    var status = String(task.status || canvas.status);
+    if (status === canvas.status) return;
+    canvas.status = status;
+    canvasRefreshNow();
+  }
+  function canvasInit() { if (canvas) canvasFetch(); }
+
   // ── Live ──
   function catchUp() {
     if (!room) return Promise.resolve();
@@ -365,6 +500,7 @@
       else if (m.type === 'room_ai_typing' && m.room === room) { showWait(); if (nearBottom()) toBottom(); }
       else if (m.type === 'room_ai_delta' && m.room === room) streamText(m.text);
       else if (m.type === 'room_message_deleted' && m.room === room) removeMessage(m.id);
+      else if (m.type === 'room_task' && m.room === room) canvasTaskStatus(m.task);
       else if (m.type === 'auth_revoked') notice('You were signed out. Sign in again to keep chatting.');
     };
     ws.onclose = function () { ws = null; if (room) { setTimeout(connect, delay); delay = Math.min(delay * 2, 30000); } };
@@ -461,6 +597,8 @@
       .then(function (x) {
         if (!x.ok) { putBack((x.d && x.d.error) || 'That did not send. Try again.'); return; }
         if (x.d.message && x.d.message.id) { mine.setAttribute('data-me', String(x.d.message.id)); latest = Math.max(latest, Number(x.d.message.id)); }
+        // A Research, Agent or Code task just became the chat's newest: its canvas is the one to draw from now on.
+        if (x.d && x.d.task && !canvasWatch(x.d.task)) { canvas = null; canvasClear(); }
         if (!room && x.d.room) {
           room = x.d.room.slug;
           history.replaceState(null, '', '/vibe/' + room);
@@ -491,6 +629,7 @@
       .catch(function () { notice('You seem to be offline.'); });
   });
   if (cfg.waiting) showWait();
+  canvasInit();
   connect();
   window.addEventListener('pagehide', function () { var w = ws; room = null; if (w) w.close(); });
 })();

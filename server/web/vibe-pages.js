@@ -20,6 +20,7 @@ const md = require('../../public/web/vibe-md.js');
 const pictures = require('../rooms/pictures');
 const rooms = require('../rooms/rooms');
 const vibe = require('../rooms/vibe');
+const workspace = require('../rooms/workspace');
 const how = require('../rooms/how');
 const memory = require('../rooms/vibe-memory');
 const { esc } = require('./layout');
@@ -254,6 +255,11 @@ function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit,
         const allowance = user ? await allowanceOf(user) : null;
         const messages = room ? await rooms.history(room, { limit: 200 }) : [];
         const hows = room ? await how.forRoom(room) : new Map();   // "How Vibe did this" under agent tasks' answers
+        // The agent's canvas beside the chat (plan HO9): only when the newest task in the chat is Actor's, because
+        // that task's thread is the conversation the panel belongs to. The browser reads the document itself with
+        // the person's own token (OpenVibe.Actor allows that one read from openvibe.chat), so a signed-out or refused
+        // read simply draws nothing.
+        const canvas = room && user ? await workspace.newestActor(room, user) : null;
         const enabled = vibe.enabled();
         const title = room ? room.name : 'Vibe';
         const waiting = room && messages.length && !messages[messages.length - 1].ai_member_id;
@@ -283,7 +289,7 @@ ${MARK}
             center: !room, label: room ? 'Your chat with Vibe' : 'A new chat with Vibe',
         })}</div>`;
         await page(req, res, status, {
-            actor, app: true, kit: true, active: 'vibe', path: room ? `/vibe/${room.slug}` : '/vibe',
+            actor, app: true, kit: true, canvas: !!room, active: 'vibe', path: room ? `/vibe/${room.slug}` : '/vibe',
             title: room ? `${room.name} · Vibe` : 'Vibe, OpenVibe\'s assistant',
             fullTitle: room ? undefined : 'Vibe: chat with OpenVibe\'s assistant · OpenVibe.Chat',
             description: 'Chat with Vibe, OpenVibe\'s free assistant: it searches news, deals, jobs, rentals and videos across OpenVibe, reads pages you link and helps you think.',
@@ -292,6 +298,7 @@ ${MARK}
             page: {
                 view: 'vibe', room: room ? room.slug : null, me: user ? user.id : null, latest: messages.length ? messages[messages.length - 1].id : 0,
                 waiting: !!waiting, enabled, signedIn: !!user,
+                canvas: canvas ? { thread: canvas.thread, task: canvas.id, status: canvas.status } : null,
             },
         });
     }

@@ -89,7 +89,9 @@ function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat') {
         "font-src 'self' data:",
         // https://openvibe.chat: on Chat's other host (openvibe.party) the shared navbar's Messages count and the Dock
         // still call Chat's DM API there (openvibe.party is on the credentialed CORS list, server/app.js).
-        `connect-src 'self' ${wsOrigin} https://openvibe.chat https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com`,
+        // https://openvibe.actor: a Vibe chat draws the agent's canvas beside it (plan HO9), only the two canvas
+        // GETs and only with the person's own Bearer (the Actor API's CORS route).
+        `connect-src 'self' ${wsOrigin} https://openvibe.chat https://openvibe.actor https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com`,
         // A workspace room's shared screen: a screen share page from OpenVibe.Bot (rooms.screen_url).
         "frame-src 'self' https://openvibe.bot",
         "frame-ancestors 'self'",
@@ -106,7 +108,8 @@ function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat') {
  * rooms/messages for the navigation), script / callScript / ringScript (public/web/chat.js, call.js, ring.js: a call
  * coming in, on every page of a signed-in person while calls are on), app (Vibe's full-window app, server/web/vibe-pages.js:
  * vibe.css + vibe-md.js + vibe.js, and no footer), kit (the network's conversation UI, openvibe-shared/thread: kit.css,
- * thread.css, kit-web.js and ov-thread.js; Vibe's pages and the support inbox), appScript and appStyle (the app's own
+ * thread.css, kit-web.js and ov-thread.js; Vibe's pages and the support inbox), canvas (openvibe-shared's ov-canvas.js
+ * on Vibe's chat pages: the agent's panel beside the chat, plan HO9), appScript and appStyle (the app's own
  * script and stylesheet instead of vibe.js and vibe.css: inbox.js and inbox.css), feedView
  * (a feed's card on the page: feed-view.css + feed-view.js, server/feeds/), scripts (more of
  * public/web's scripts by name, e.g. support.js), footer ('full', the default, on front pages, directories and docs;
@@ -168,6 +171,7 @@ ${o.script ? `<script src="${asset('chat.js')}" defer></script>` : ''}
 ${o.callScript ? `<script src="${asset('call.js')}" defer></script>` : ''}
 ${o.ringScript ? `<script src="${asset('ring.js')}" defer></script>` : ''}
 ${o.kit ? `<script src="${ovServe.url('kit-web.js')}" defer></script>\n<script src="${ovServe.url('ov-thread.js')}" defer></script>` : ''}
+${o.canvas ? `<script src="${ovServe.url('ov-canvas.js')}" defer></script>` : ''}
 ${o.app ? `<script src="${asset('vibe-md.js')}" defer></script>\n<script src="${asset(o.appScript || 'vibe.js')}" defer></script>` : ''}
 </head>
 <body class="${[cls, o.app ? 'oc-app-body' : ''].filter(Boolean).join(' ')}"${scale}>

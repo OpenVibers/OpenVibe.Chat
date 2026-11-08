@@ -206,3 +206,24 @@
 .vbk .ovt-answer.vb-streaming { opacity: .92; }
 /* Memory: a plain page in the frame; on a wide screen its head held only New chat, which the chats column has. */
 @media (min-width: 761px) { .vbk .ovt.is-page .ovt-head { display: none; } }
+
+/* ── The canvas (plan HO9, actor.canvas@1) ───────────────────────────────────────────────────────────────────────
+   The agent's data panel beside a Vibe chat: the thread's third column from 1180 px (thread.css's own sticky panel),
+   and a closed, counted fold directly above the composer below that. Both hold the same document, drawn read-only by
+   openvibe-shared's ov-canvas.js; the one link opens the Actor thread where the person can tick or press. */
+.vbk .vbc { min-width: 0; }
+.vbk .vbc-count { flex: none; font-size: 12.5px; color: var(--text-muted, #7386a3); white-space: nowrap; }
+.vbk .vbc-body, .vbk .vbc-host { min-width: 0; }
+.vbk .vbc-body { display: grid; gap: 8px; }
+.vbk .vbc-link { justify-self: start; font-size: 12.5px; font-weight: 650; color: var(--accent-light, var(--ovt-accent, #60a5fa)); text-decoration: none; }
+.vbk .vbc-link:hover, .vbk .vbc-link:focus-visible { text-decoration: underline; }
+.vbk .vbc-phone { max-width: var(--vb-col); margin: 0 auto 8px; border: 1px solid var(--ovt-line); border-radius: 14px; background: var(--bg-card, #131c2e); overflow: hidden; contain: layout paint; }
+.vbk .vbc-phone > summary { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; cursor: pointer; font-size: 14px; font-weight: 650; list-style: none; color: var(--text-primary, #e6edf7); }
+.vbk .vbc-phone > summary::-webkit-details-marker { display: none; }
+.vbk .vbc-phone > summary::marker { content: ''; }
+.vbk .vbc-phone .vbc-updated { flex: none; font-size: 12.5px; font-weight: 650; color: var(--ovt-accent, #60a5fa); }
+.vbk .vbc-phone .vbc-chev { margin-left: auto; color: var(--text-muted, #7386a3); transition: transform .2s; }
+.vbk .vbc-phone[open] .vbc-chev { transform: rotate(180deg); }
+.vbk .vbc-phone .vbc-body { max-height: min(45vh, 420px); overflow: auto; overscroll-behavior: contain; padding: 0 10px 10px; }
+@media (min-width: 1180px) { .vbk .vbc-phone { display: none !important; } }
+@media (max-width: 1179px) { .vbk .vbc-wide { display: none !important; } }
