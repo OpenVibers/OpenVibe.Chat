@@ -57,6 +57,14 @@ main[data-party] [hidden] { display: none !important; }
   background: rgba(0, 0, 0, .66); color: #fff; font-size: 12.5px; font-weight: 700; pointer-events: none;
 }
 .pt-floats { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+/* A guest (the link's holder, not signed in): the invitation and one move over the picture. */
+.pt-frame.is-guest .pt-veil { pointer-events: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 16px; background: rgba(4, 8, 18, .72); }
+.pt-veil-line { max-width: 28ch; }
+.pt-join { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 22px; border-radius: 999px; background: var(--pt-accent); color: var(--pt-on-accent); font-size: 15px; font-weight: 800; text-decoration: none; }
+.pt-join:hover { filter: brightness(1.08); }
+.pt-guest-note { margin: 0; color: var(--pt-muted); font-size: 14px; line-height: 1.5; }
+.pt-guest-note a { font-weight: 700; }
+main[data-party].is-guest [data-party-chat] { min-height: 0; flex: 0 0 auto; align-self: start; }
 .pt-float { position: absolute; bottom: 12px; font-size: 30px; animation: pt-rise 2.4s cubic-bezier(.2, .7, .3, 1) forwards; }
 @keyframes pt-rise { 0% { transform: translateY(0) scale(.7); opacity: 0; } 12% { opacity: 1; transform: translateY(-14px) scale(1.05); } 100% { transform: translateY(-190px) scale(1); opacity: 0; } }
 @media (prefers-reduced-motion: reduce) { .pt-float { animation: pt-fade 1.6s ease forwards; } @keyframes pt-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } } }
