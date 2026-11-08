@@ -189,7 +189,7 @@ function turnsOf(messages, me, hows, { retrySlug = null, slug = null, waiting = 
 const MODES = [
     ['chat', 'Chat', 'Talk it through: Vibe answers here and now', 'Message Vibe'],
     ['research', 'Research', 'An agent researches it and answers here with its sources', 'What should I research?'],
-    ['agent', 'Agent', 'An agent does it on your own computer (OpenVibe.Node), at the level you set there', 'What should I do on your computer?'],
+    ['agent', 'Agent', 'An agent does it on your own computer (OpenVibe Link), at the level you set there', 'What should I do on your computer?'],
     ['code', 'Code', 'OpenVibe.Codes writes it on your computer and opens a pull request', 'What should I build or fix? Name the repository'],
 ];
 

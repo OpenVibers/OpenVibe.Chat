@@ -134,7 +134,7 @@ async function start(user, text, { timezone = null } = {}) {
 const MODES = Object.freeze({ research: 'research', agent: 'computer', code: 'code' });
 const ON_IT = {
     research: 'On it: I am researching this as an agent task, with sources. The answer comes back right here, usually within a few minutes.',
-    computer: 'On it: I am doing this on your own computer, through OpenVibe.Node, at the level you set there. I will say here what I did.',
+    computer: 'On it: I am doing this on your own computer, through OpenVibe Link, at the level you set there. I will say here what I did.',
     code: 'On it: I sent this to OpenVibe.Codes on your own computer (through OpenVibe.Run). The pull request comes back here when it is ready.',
 };
 

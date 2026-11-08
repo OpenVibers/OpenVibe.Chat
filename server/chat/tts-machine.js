@@ -2,7 +2,7 @@
 /**
  * OpenVibe.Chat — the machine TTS route (Agent Streams S4, design 2026-11-06).
  *
- * The desk (OpenVibe.Node) asks Chat for the sound of a line the agent said. The desk holds a node token for
+ * The desk (OpenVibe Link) asks Chat for the sound of a line the agent said. The desk holds a node token for
  * audience openvibe.chat that carries the capability chat.tts.speak and names the person it acts for
  * (`on_behalf_of`, the Network's rule for a node token acting for its owner). Chat speaks in that person's voice and
  * on that person's allowance.
