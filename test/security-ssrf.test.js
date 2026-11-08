@@ -124,6 +124,7 @@ t('ratchet: every file that makes an outbound request itself is reviewed', () =>
         'server/inbox/webhooks.js': "an inbox owner's webhook addresses: https only, assertPublicUrl when saved and safeLookup on every delivery, no redirects followed",
         'server/inbox/actions.js': "an inbox owner's action addresses: https only, assertPublicUrl when saved and safeLookup on every call, no redirects followed, 8 s",
         'server/web/party-pages.js': 'OpenVibe.Video (fixed: https://openvibe.video, or a test\'s CHAT_PARTY_VIDEO_URL), fixed /api/v1/video/watchable paths; a pasted link is only a query parameter, never fetched; redirects refused, 2.5 s, cached a minute',
+        'server/chat/link-cards.js': 'OpenVibe.Video and OpenVibe.Actor (fixed https origins, or a test\'s CHAT_LINK_VIDEO_URL / CHAT_LINK_ACTOR_URL), fixed paths (a watchable lookup, /voices/<id>.json, /skills/<slug>.json); a pasted link is a query parameter or a path segment only, never fetched; redirects refused, 2.5 s, cached a minute',
         'server/web/room-embed-pages.js': 'not the server: the sign-in window\'s own script posts to /embed/bind on this same site',
     };
     const root = path.join(__dirname, '..');

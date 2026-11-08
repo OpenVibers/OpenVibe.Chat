@@ -20,6 +20,7 @@ const crypto = require('crypto');
 const db = require('../db/database');
 const config = require('../config');
 const wordFilter = require('../chat/word-filter');
+const linkCards = require('../chat/link-cards');
 
 class InboxError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
 const fail = (status, code, message) => { throw new InboxError(status, code, message); };
@@ -205,11 +206,15 @@ const convShape = (c) => c && ({
     created_at: c.created_at, last_message_at: c.last_message_at || c.created_at,
 });
 // account: a visitor's message written signed in to OpenVibe, whose OpenVibe.Pics links show as pictures (anyone else's stay links).
-const msgShape = (m) => m && ({ id: Number(m.id), conversation_id: m.conversation_id, author: m.author, author_name: m.author_name || null, body: m.body, created_at: m.created_at, ...(m.author === 'visitor' && m.author_user_id != null ? { account: true } : {}) });
+const msgShape = (m) => m && ({ id: Number(m.id), conversation_id: m.conversation_id, author: m.author, author_name: m.author_name || null, body: m.body, card: linkCards.parse(m.card), created_at: m.created_at, ...(m.author === 'visitor' && m.author_user_id != null ? { account: true } : {}) });
 
 async function addMessage(conv, { author, body, userId = null, name = null }, deps = {}) {
-    const row = await db.get(`INSERT INTO inbox_messages (conversation_id, author, author_user_id, author_name, body) VALUES (?, ?, ?, ?, ?) RETURNING *`,
-        [conv.id, author, userId, name, body]);
+    // A known OpenVibe link's card is resolved when the message is sent, with a second's budget; a system line never
+    // carries one. A slower card is filled into the row afterwards.
+    const { card, pending } = author === 'system' ? { card: null, pending: null } : await linkCards.forSend(body);
+    const row = await db.get(`INSERT INTO inbox_messages (conversation_id, author, author_user_id, author_name, body, card) VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
+        [conv.id, author, userId, name, body, linkCards.toJson(card)]);
+    if (pending) linkCards.fillLater('inbox_messages', Number(row.id), pending);
     await db.run(`UPDATE inbox_conversations SET last_message_at = ov_now()${author === 'visitor' ? ', agent_unread = agent_unread + 1' : ''} WHERE id = ?`, [conv.id]);
     const message = msgShape(row);
     broadcaster(deps)(conv.inbox_id, conv.id, { type: 'inbox_message', inbox: conv.inbox_id, conversation: conv.id, message });
@@ -243,7 +248,9 @@ async function setStatusRow(conv, status, deps = {}, extra = {}) {
 }
 
 async function messages(conv, { after = 0, limit = 200 } = {}) {
-    return (await db.all('SELECT * FROM inbox_messages WHERE conversation_id = ? AND id > ? ORDER BY id LIMIT ?', [conv.id, Number(after) || 0, Math.min(500, Number(limit) || 200)])).map(msgShape);
+    const rows = await db.all('SELECT * FROM inbox_messages WHERE conversation_id = ? AND id > ? ORDER BY id LIMIT ?', [conv.id, Number(after) || 0, Math.min(500, Number(limit) || 200)]);
+    await linkCards.hydrate(rows, 'inbox_messages');
+    return rows.map(msgShape);
 }
 
 async function openConversationFor(inbox, token) {

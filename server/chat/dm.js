@@ -19,6 +19,7 @@
 const db = require('../db/database');
 const outbox = require('../events/service-outbox');
 const networkBlocks = require('./network-blocks');
+const linkCards = require('./link-cards');
 
 // ── Schema & Migrations ──────────────────────────────────────
 
@@ -165,10 +166,12 @@ async function sendMessage(conversationId, senderId, text) {
     if (!text || !text.trim()) return null;
     const trimmed = text.trim().slice(0, 2000); // max 2000 chars
     const senderSubject = await db.subjectFor(senderId);
-    return await db.tx(async () => {
+    // A known OpenVibe link's card is resolved when the message is sent, with a second's budget (link-cards.js).
+    const { card, pending } = await linkCards.forSend(trimmed);
+    const row = await db.tx(async () => {
         const result = await db.run(
-            `INSERT INTO dm_messages (conversation_id, sender_id, message, sender_subject_id) VALUES (?, ?, ?, ?)`,
-            [conversationId, senderId, trimmed, senderSubject]
+            `INSERT INTO dm_messages (conversation_id, sender_id, message, sender_subject_id, card) VALUES (?, ?, ?, ?, ?)`,
+            [conversationId, senderId, trimmed, senderSubject, linkCards.toJson(card)]
         );
         // Touch conversation updated_at
         await db.run(`UPDATE dm_conversations SET updated_at = ov_now() WHERE id = ?`, [conversationId]);
@@ -191,15 +194,21 @@ async function sendMessage(conversationId, senderId, text) {
         });
         return await db.get(`SELECT * FROM dm_messages WHERE id = ?`, [result.lastInsertRowid]);
     });
+    if (row) {
+        row.card = card;
+        if (pending) linkCards.fillLater('dm_messages', row.id, pending);
+    }
+    return row;
 }
 
 /**
  * Get messages in a conversation (paginated, newest first).
  */
 async function getMessages(conversationId, limit = 50, before = null, after = null) {
+    let rows;
     if (after) {
         // Fetch messages newer than `after` id (for live polling)
-        return await db.all(`
+        rows = await db.all(`
             SELECT m.*, u.username, u.display_name, u.avatar_url, u.profile_color
             FROM dm_messages m
             JOIN ctx_users u ON u.id = m.sender_id
@@ -207,9 +216,8 @@ async function getMessages(conversationId, limit = 50, before = null, after = nu
             ORDER BY m.created_at ASC
             LIMIT ?
         `, [conversationId, after, limit]);
-    }
-    if (before) {
-        return await db.all(`
+    } else if (before) {
+        rows = await db.all(`
             SELECT m.*, u.username, u.display_name, u.avatar_url, u.profile_color
             FROM dm_messages m
             JOIN ctx_users u ON u.id = m.sender_id
@@ -217,15 +225,17 @@ async function getMessages(conversationId, limit = 50, before = null, after = nu
             ORDER BY m.created_at DESC
             LIMIT ?
         `, [conversationId, before, limit]);
+    } else {
+        rows = await db.all(`
+            SELECT m.*, u.username, u.display_name, u.avatar_url, u.profile_color
+            FROM dm_messages m
+            JOIN ctx_users u ON u.id = m.sender_id
+            WHERE m.conversation_id = ?
+            ORDER BY m.created_at DESC
+            LIMIT ?
+        `, [conversationId, limit]);
     }
-    return await db.all(`
-        SELECT m.*, u.username, u.display_name, u.avatar_url, u.profile_color
-        FROM dm_messages m
-        JOIN ctx_users u ON u.id = m.sender_id
-        WHERE m.conversation_id = ?
-        ORDER BY m.created_at DESC
-        LIMIT ?
-    `, [conversationId, limit]);
+    return await linkCards.hydrate(rows, 'dm_messages');
 }
 
 /**

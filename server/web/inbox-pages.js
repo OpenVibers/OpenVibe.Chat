@@ -23,6 +23,7 @@ const pictures = require('../rooms/pictures');
 const { embedOf, sendExport } = require('../inbox/routes');
 const records = require('../inbox/records');
 const { esc, asset } = require('./layout');
+const ui = require('./ui');
 const kit = require('openvibe-shared/kit');
 const thread = require('openvibe-shared/thread');
 // A visitor's initial, in a circle, beside their row.
@@ -214,13 +215,13 @@ ${list}
             const name = current.visitor_name || 'Visitor';
             return thread.turn({
                 who: { name, initials: name.slice(0, 1).toUpperCase() },
-                reply: `${shown ? `<div class="ovt-answer ib-text">${esc(shown)}</div>` : ''}${m.account ? pictures.pageHtml(m.body) : ''}`,
+                reply: `${shown ? `<div class="ovt-answer ib-text">${esc(shown)}</div>` : ''}${m.account ? pictures.pageHtml(m.body) : ''}${ui.linkCard(m.card)}`,
                 attrs: { 'data-id': m.id, 'data-author': 'visitor' },
             });
         }
         const ai = m.author === 'ai';
         return thread.turn({
-            you: { caption: ai ? 'Vibe (AI)' : (m.author_name || 'Agent'), html: ai ? `<div class="vb-md">${md.render(m.body)}</div>` : `<span class="ib-text">${esc(shown)}</span>${m.author === 'agent' ? pictures.pageHtml(m.body) : ''}` },
+            you: { caption: ai ? 'Vibe (AI)' : (m.author_name || 'Agent'), html: `${ai ? `<div class="vb-md">${md.render(m.body)}</div>` : `<span class="ib-text">${esc(shown)}</span>${m.author === 'agent' ? pictures.pageHtml(m.body) : ''}`}${ui.linkCard(m.card)}` },
             reply: null, attrs: { 'data-id': m.id, 'data-author': ai ? 'ai' : 'agent' },
         });
     }
@@ -361,7 +362,7 @@ ${saved.length ? `<ul class="oc-members">${saved.map((r) => `<li><b>/${esc(r.sho
         const msgs = await inboxes.messages(conv);
         const who = (m) => (m.author === 'visitor' ? 'You' : m.author === 'ai' ? 'Vibe' : m.author === 'system' ? '' : (m.author_name || inbox.name));
         const line = (m) => (m.author === 'system' ? `<li class="oc-muted sp-sys" data-id="${m.id}">${esc(m.body)}</li>`
-            : `<li class="sp-msg${m.author === 'visitor' ? ' sp-me' : ''}" data-id="${m.id}"><b>${esc(who(m))}</b> <span class="sp-text">${m.author === 'ai' ? md.render(m.body) : esc(m.author === 'agent' || m.account ? pictures.withoutLinks(m.body) : m.body).replace(/\n/g, '<br>')}</span>${m.author === 'agent' || m.account ? pictures.pageHtml(m.body) : ''}</li>`);
+            : `<li class="sp-msg${m.author === 'visitor' ? ' sp-me' : ''}" data-id="${m.id}"><b>${esc(who(m))}</b> <span class="sp-text">${m.author === 'ai' ? md.render(m.body) : esc(m.author === 'agent' || m.account ? pictures.withoutLinks(m.body) : m.body).replace(/\n/g, '<br>')}</span>${m.author === 'agent' || m.account ? pictures.pageHtml(m.body) : ''}${ui.linkCard(m.card)}</li>`);
         await page(req, res, 200, {
             actor, title: `${inbox.name}: support`, path: `/support/${conv.id}`, active: 'messages', robots: 'noindex, nofollow', footer: 'compact',
             page: { view: 'support', inbox: inbox.id, conversation: conv.id, latest: msgs.length ? msgs[msgs.length - 1].id : 0 },
