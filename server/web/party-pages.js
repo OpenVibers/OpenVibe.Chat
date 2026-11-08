@@ -139,6 +139,15 @@ function createPartyRoutes({ config }) {
         const signedIn = actor.kind === 'user';
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const picks = await latestWatchable();
+        const mine = signedIn ? await parties.mine(actor.user, { limit: 6 }).catch(() => []) : [];
+        const since = (iso) => {
+            const days = Math.floor((Date.now() - Date.parse(iso)) / 86400_000);
+            return days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+        };
+        const yours = mine.length ? `<section class="pty-mine" aria-labelledby="pty-mine-h">
+<h2 id="pty-mine-h">Your parties</h2>
+<ul class="pty-mine-list">${mine.map((x) => `<li><a href="/p/${encodeURIComponent(x.id)}"><strong>${esc(x.title)}</strong><span>${x.hosting ? 'You started it' : 'You joined'} · ${esc(since(x.started_at))}</span></a></li>`).join('')}</ul>
+</section>` : '';
         const startHref = (x) => `/new?media=${encodeURIComponent(x.page_url)}&title=${encodeURIComponent(x.title)}`;
         const start = signedIn
             ? `<form class="pty-paste" method="get" action="/new">
@@ -166,6 +175,7 @@ ${x.channel ? `<span class="pty-by">@${esc(String(x.channel).slice(0, 40))}</spa
 ${error}
 ${start}
 </header>
+${yours}
 ${grid}
 <section class="pty-how" aria-labelledby="pty-how-h">
 <h2 id="pty-how-h">How it works</h2>

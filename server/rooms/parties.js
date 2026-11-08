@@ -229,6 +229,23 @@ function keyMatches(party, key) {
     return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
+/**
+ * The media parties a person is in that have not ended (started in the last two weeks), newest first: the party home's
+ * "Your parties", so a person gets back into a party without its link. Membership is what lets them in (rooms.access).
+ */
+async function mine(user, { limit = 6 } = {}) {
+    if (!user || !user.id) return [];
+    const since = new Date(Date.now() - 14 * 86400_000).toISOString();
+    const rows = await db.all(`SELECT r.slug, r.name, p.host_user_id, p.created_at
+        FROM room_members m JOIN rooms r ON r.id = m.room_id JOIN room_parties p ON p.room_id = r.id
+        WHERE m.user_id = ? AND p.party_kind = 'media' AND p.ended_at IS NULL AND r.archived_at IS NULL AND p.created_at > ?
+        ORDER BY p.created_at DESC LIMIT ?`, [user.id, since, Math.max(1, Math.min(12, Number(limit) || 6))]);
+    return (rows || []).map((x) => ({
+        id: x.slug, title: x.name, hosting: Number(x.host_user_id) === Number(user.id),
+        started_at: new Date(x.created_at instanceof Date ? x.created_at : String(x.created_at)).toISOString(),
+    }));
+}
+
 /** Whether this caller may read the party: a member, the host, chat staff, or the holder of the link's secret. */
 async function mayView(row, party, user, key) {
     const access = await rooms.access(row, user || null);
@@ -280,5 +297,5 @@ async function end(row, party, user) {
 
 module.exports = {
     AGENT_STREAM_RE, MAX_TITLE, PartyError,
-    create, createMedia, createAgentStream, bySlug, partyOf, view, detail, syncOf, mayView, joinWithLink, setSync, count, end, keyMatches,
+    create, createMedia, createAgentStream, bySlug, partyOf, view, detail, syncOf, mayView, joinWithLink, setSync, count, end, keyMatches, mine,
 };
