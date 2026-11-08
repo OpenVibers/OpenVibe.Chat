@@ -7,10 +7,9 @@
  * The latest state lives in the module's Map (the live copy) and in room_sync_clocks (the durable copy). The cache is
  * per process, like Chat's other room state; a second process reads the row from the database.
  *
- * Media is a Media ref or an https URL on an OpenVibe host (a domain one of the Contracts service manifests names).
- * Party v1 plays OpenVibe media only: a holder must not be able to point every viewer's player, and so their
- * addresses, at a server outside the platform. A set may leave media out to keep the room's current one, and may
- * leave position_ms out to pause or resume where the timeline is now.
+ * Media is a Media ref, an https URL on an OpenVibe host (a domain one of the Contracts service manifests names),
+ * or an official YouTube/Twitch watch URL. Provider links identify official embeds; they are not media servers. A set
+ * may leave media out to keep the room's current one, and may leave position_ms out to pause or resume the timeline.
  */
 const db = require('../db/database');
 
@@ -47,6 +46,20 @@ function onOpenVibe(url) {
         const u = new URL(url);
         return u.protocol === 'https:' && !u.username && !u.password && !u.port && firstPartyHosts().has(u.hostname.toLowerCase());
     } catch (e) { return false; }
+}
+
+function providerUrl(url) {
+    try {
+        const u = new URL(url);
+        if (u.protocol !== 'https:' || u.username || u.password || u.port || u.hash) return false;
+        const h = u.hostname.toLowerCase();
+        if (h === 'youtu.be') return /^\/[A-Za-z0-9_-]{11}\/?$/.test(u.pathname) && !u.search;
+        if (h === 'youtube.com' || h === 'www.youtube.com' || h === 'm.youtube.com') {
+            return (u.pathname === '/watch' && /^[A-Za-z0-9_-]{11}$/.test(u.searchParams.get('v') || '')) || /^\/(shorts|embed)\/[A-Za-z0-9_-]{11}\/?$/.test(u.pathname);
+        }
+        if (h === 'twitch.tv' || h === 'www.twitch.tv') return /^\/videos\/\d+\/?$/.test(u.pathname) || /^\/[A-Za-z0-9_]{1,25}\/?$/.test(u.pathname);
+        return false;
+    } catch { return false; }
 }
 
 class SyncError extends Error {
@@ -99,7 +112,7 @@ function rowState(row, room) {
 function mediaOf(value) {
     if (typeof value === 'string') {
         if (!HTTP_URL.test(value)) throw new SyncError('sync.media', 'media is an https URL or a Media ref');
-        if (!onOpenVibe(value)) throw new SyncError('sync.media', 'a party plays OpenVibe media: the link must be on an OpenVibe site');
+        if (!onOpenVibe(value) && !providerUrl(value)) throw new SyncError('sync.media', 'media is on an OpenVibe site, YouTube or Twitch');
         return value;
     }
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -205,5 +218,5 @@ function close() { _cache.clear(); _queues.clear(); }
 module.exports = {
     MAX_POSITION_MS, MAX_RATE, SyncError, set, get, evict, close,
     // Exposed for the WS layer, the party row and their tests; the validation stays here.
-    onOpenVibe, _mediaOf: mediaOf, _positionOf: positionOf, _rateOf: rateOf, _pausedOf: pausedOf,
+    onOpenVibe, providerUrl, _mediaOf: mediaOf, _positionOf: positionOf, _rateOf: rateOf, _pausedOf: pausedOf,
 };

@@ -46,6 +46,10 @@ main[data-party] [hidden] { display: none !important; }
   box-shadow: 0 18px 50px rgba(0, 0, 0, .35);
 }
 .pt-frame video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.pt-provider { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pt-provider iframe { width: 100%; height: 100%; border: 0; }
+.pt-provider-refusal { margin: 0; padding: 10px 14px; color: var(--pt-muted); }
+.pt-provider-refusal[hidden] { display: none; }
 .pt-frame.is-radio {
   aspect-ratio: auto; width: 100%; display: grid; gap: 14px; padding: 18px;
   background: var(--pt-panel); border: 1px solid var(--pt-line); box-shadow: none;

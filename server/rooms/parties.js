@@ -5,9 +5,9 @@
  *
  *   - An agent-stream party watches a public agent stream or its VOD: on a VOD the position follows the host's; on a
  *     live stream it follows the live edge (no position).
- *   - A media party watches a Media ref or an https URL on an OpenVibe host, exactly as a room's shared clock accepts
- *     media (server/rooms/sync-clock.js). Its timeline is the room's clock (paused at 0 when it starts) and its remote
- *     is the room's control lease, granted to the person who started it.
+ *   - A media party watches a Media ref, an https URL on an OpenVibe host, or an official YouTube/Twitch watch URL,
+ *     exactly as the room's shared clock accepts media (server/rooms/sync-clock.js). Its timeline is the room's clock
+ *     (paused at 0 when it starts) and its remote is the room's control lease, granted to the person who started it.
  *   - Joining is by the party's link. The link carries a secret, the row stores its sha256 only, and a stranger
  *     without it sees the same 404 as a missing room.
  *   - Private by default: rooms.visibility is 'private', the party is never in the directory, and `listed` only lets
@@ -51,7 +51,7 @@ function vodOf(value) {
 function modeOf(vodId) { return vodId == null ? 'live' : 'vod'; }
 
 /**
- * A media party's media: a Media ref or an https URL on an OpenVibe host, validated by the shared clock's own rules
+ * A media party's media: a Media ref, an OpenVibe URL, or an official YouTube/Twitch URL, validated by the shared clock's own rules
  * (server/rooms/sync-clock.js). A refusal is the party API's 422, not the clock's.
  */
 function mediaOf(value) {
