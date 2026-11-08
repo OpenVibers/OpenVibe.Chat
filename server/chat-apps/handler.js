@@ -37,7 +37,9 @@ function createHandler({ config, store, providers, network, actor, now = () => D
                 const out = await network.finish({ app: m.app, serviceUserId: ident, code }).catch(() => null);
                 if (out?.ok) {
                     const linkedSubject = out.subject || await resolve({ app: m.app, serviceUserId: ident });
-                    if (linkedSubject) await actor.registerAccount({ subject: linkedSubject, account: { kind: m.app, id: ident, label: m.userName || `${m.app} account` } }).catch(() => null);
+                    const binding = linkedSubject ? await actor.registerAccount({ subject: linkedSubject,
+                        account: { kind: m.app, id: ident, label: m.userName || `${m.app} account` } }).catch(() => null) : null;
+                    if (binding && !binding.bound) return send(m, 'You are linked. Bind this account to an agent on openvibe.actor before asking here.');
                     return send(m, 'You are linked. Ask me anything — I am your OpenVibe agent here.');
                 }
                 if (out?.error === 'code') return send(m, out.attemptsLeft ? `That code is not right. ${out.attemptsLeft} ${out.attemptsLeft === 1 ? 'try' : 'tries'} left; after that, send /link again.` : 'That code is not right. Send /link to start again.');
