@@ -103,15 +103,20 @@ const FAQ = [
     { q: 'Who can message me?', a: 'You decide in your settings who may start a conversation with you and whether group conversations may add you. You can block anyone from a conversation.' },
 ];
 
-/** The numbers under the heading: only those that are known and not zero. */
+/**
+ * The numbers under the heading: only those that are known and say something, at most three so they sit in one row on
+ * a phone (a fourth wrapped onto a row of its own). Streams live now lead when there are any; public servers count
+ * from three ("1 public server" undersold the place).
+ */
 function stats(a) {
+    const live = a.streams.filter((s) => s.live).length;
     const items = [
+        live ? [n(live), live === 1 ? 'stream live now' : 'streams live now'] : null,
         a.weekMessages ? [n(a.weekMessages), 'messages this week'] : null,
         a.weekPeople ? [n(a.weekPeople), 'chatting this week'] : null,
         a.totalMessages ? [n(a.totalMessages), 'messages in all'] : null,
-        a.servers.length ? [n(a.servers.length), a.servers.length === 1 ? 'public server' : 'public servers'] : null,
-        a.streams.some((s) => s.live) ? [n(a.streams.filter((s) => s.live).length), 'streams live now'] : null,
-    ].filter(Boolean);
+        a.servers.length >= 3 ? [n(a.servers.length), 'public servers'] : null,
+    ].filter(Boolean).slice(0, 3);
     if (!items.length) return '';
     return `<dl class="oc-stats">${items.map(([v, l]) => `<div><dt>${esc(l)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>`;
 }
