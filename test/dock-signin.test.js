@@ -83,6 +83,11 @@ t('an OpenVibe site outside the credentialed list reads DMs with its Bearer, and
     assert.strictEqual(r.headers.get('access-control-allow-credentials'), null);
     assert.strictEqual((await h.http('GET', '/api/chat/search?q=hello', { token: normal(alice), headers: { origin } })).status, 403, 'only the DM paths, not the rest of the API');
     assert.strictEqual((await h.http('GET', '/api/dm/unread', { token: tok, headers: { origin: 'https://evil.example' } })).status, 403, 'a foreign web origin is still refused');
+    // The share sheet's OpenVibe Chat (Shared 4.144.0) finds a person by name from any OpenVibe site, the same way.
+    const found = await h.http('GET', '/api/dm/users/search?q=bo', { token: normal(alice), headers: { origin } });
+    assert.strictEqual(found.status, 200, found.text);
+    assert.strictEqual(found.headers.get('access-control-allow-origin'), origin);
+    assert.strictEqual(found.headers.get('access-control-allow-credentials'), null);
     const live = await h.http('GET', '/api/dm/unread', { token: tok, headers: { origin: 'https://openvibe.network' } });
     assert.strictEqual(live.headers.get('access-control-allow-credentials'), 'true', 'the credentialed list keeps its grant');
 });

@@ -131,7 +131,8 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
         return out;
     })();
     /** The Bearer-only DM reads and writes the shared navbar and Dock make from any OpenVibe site. */
-    const bearerDmPath = (p) => p === '/api/dm/unread' || p === '/api/dm/conversations' || p.startsWith('/api/dm/conversations/');
+    // /api/dm/users/search: the share sheet's "OpenVibe Chat" (Shared 4.144.0) starts a conversation by a person's name.
+    const bearerDmPath = (p) => p === '/api/dm/unread' || p === '/api/dm/conversations' || p.startsWith('/api/dm/conversations/') || p === '/api/dm/users/search';
 
     // ── Internal (loopback; never routed by nginx) ─────────────
     app.use('/internal/chat', express.json({ limit: '64kb' }), createInternalIngress({ chatServer }));
