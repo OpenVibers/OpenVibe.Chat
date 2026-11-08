@@ -271,6 +271,14 @@ t('the home offers OpenVibe.Video\'s latest, and a pasted watch page plays its f
         assert.strictEqual(data.party.source_url, PAGE, 'and keeps the page it came from');
         assert.ok(slug);
 
+        // Your parties: Ann gets back in from the home without the link; Cat, who is not in it, never sees it.
+        const back = await raw('GET', '/', { cookie: cookieOf(ann) });
+        assert.match(back.text, /Your parties/);
+        assert.ok(back.text.includes(`href="/p/${slug}"`), 'the party, by its page, no key in it');
+        assert.match(back.text, /You started it/);
+        const other = await raw('GET', '/', { cookie: cookieOf(cat) });
+        assert.ok(!other.text.includes(`/p/${slug}`), 'someone who is not in it never sees it');
+
         // A private (or unknown) page is not made into a party.
         const refused = await raw('GET', `/new?media=${encodeURIComponent(PRIVATE)}`, { cookie: cookieOf(ann) });
         assert.strictEqual(refused.status, 303);

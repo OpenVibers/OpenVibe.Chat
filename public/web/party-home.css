@@ -15,8 +15,8 @@
 .pty-hint { margin: 0; font-size: 13px; color: var(--oc-muted); }
 .pty-cta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 8px 0 0; }
 
-.pty-pick, .pty-how { margin-top: 40px; }
-.pty-pick h2, .pty-how h2 { margin: 0 0 14px; font-size: 1.15rem; letter-spacing: -.01em; }
+.pty-mine, .pty-pick, .pty-how { margin-top: 40px; }
+.pty-mine h2, .pty-pick h2, .pty-how h2 { margin: 0 0 14px; font-size: 1.15rem; letter-spacing: -.01em; }
 .pty-grid { list-style: none; margin: 0; padding: 0; display: grid; gap: 18px 14px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (min-width: 720px) { .pty-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 22px 18px; } }
 .pty-card a { display: grid; gap: 6px; color: var(--oc-text); text-decoration: none; min-width: 0; }
@@ -46,3 +46,10 @@
 .pty-confirm-thumb { width: 100%; max-width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: 14px; border: 1px solid var(--oc-line); background: var(--oc-panel-2); }
 .pty-confirm form { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; margin-top: 4px; }
 .pty-confirm form .oc-button { min-height: 48px; padding: 0 22px; border-radius: 12px; }
+
+/* Your parties: the ones you are in, back in one tap (a member needs no link). */
+.pty-mine-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
+.pty-mine-list a { display: grid; gap: 2px; min-height: 56px; padding: 12px 14px; border-radius: 12px; background: var(--oc-panel); border: 1px solid var(--oc-line); color: var(--oc-text); text-decoration: none; min-width: 0; }
+.pty-mine-list a:hover, .pty-mine-list a:focus-visible { border-color: var(--oc-accent); }
+.pty-mine-list strong { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pty-mine-list span { font-size: 13px; color: var(--oc-muted); }
