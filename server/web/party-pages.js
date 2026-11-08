@@ -152,11 +152,14 @@ function createPartyRoutes({ config }) {
 <ul class="pty-mine-list">${mine.map((x) => `<li><a href="/p/${encodeURIComponent(x.id)}"><strong>${esc(x.title)}</strong><span>${x.hosting ? 'You started it' : 'You joined'} · ${esc(since(x.started_at))}</span></a></li>`).join('')}</ul>
 </section>` : '';
         const startHref = (x) => `/new?media=${encodeURIComponent(x.page_url)}&title=${encodeURIComponent(x.title)}`;
+        // Two plain choices, not a dropdown (Opus's design pass): where the shared computer runs.
         const desktopStart = signedIn ? `<form class="pty-desktop-start" method="get" action="/new">
-<label for="party-desktop-hosting">Start a shared computer</label>
-<div class="pty-paste-row"><select id="party-desktop-hosting" name="desktop" required><option value="link">On my computer (needs Link)</option><option value="openvibe">On OpenVibe</option></select><button type="submit" class="oc-button">Start a shared computer</button></div>
-<p class="pty-hint">Open a browser or music service together. One person has the remote.</p>
-<p class="pty-hint" id="pty-openvibe-availability">No OpenVibe machine is free right now. <a href="/new?desktop=link">Host it on my computer</a>.</p>
+<h2 class="pty-start-h">Start a shared computer</h2>
+<div class="pty-host-choice">
+<button type="submit" name="desktop" value="link" class="pty-host"><strong>On my computer</strong><span>Free. Runs in the Link app on your computer.</span></button>
+<button type="submit" name="desktop" value="openvibe" class="pty-host"><strong>On OpenVibe</strong><span id="pty-openvibe-availability">No OpenVibe machine is free right now.</span></button>
+</div>
+<p class="pty-hint">Open a browser or a music service together. One person has the remote.</p>
 </form>` : `<p class="pty-cta"><a class="oc-button" href="/auth/login?next=%2F">Sign in to start a shared computer</a></p>`;
         const start = signedIn
             ? `<form class="pty-paste" method="get" action="/new">

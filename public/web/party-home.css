@@ -64,3 +64,12 @@
 .pty-radio-list li span, .pty-radio-list li small { color: var(--oc-muted); overflow-wrap: anywhere; }
 .pty-radio-list li a.oc-button { flex: none; min-height: 44px; display: inline-flex; align-items: center; padding: 0 16px; }
 @media (max-width: 600px) { .pty-radio { padding: 16px; } .pty-radio-list li { align-items: stretch; flex-direction: column; } .pty-radio-list li a.oc-button { align-self: flex-start; } }
+
+/* Where the shared computer runs: two plain choices (11-08). */
+.pty-start-h { margin: 0 0 10px; font-size: 1.15rem; }
+.pty-host-choice { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.pty-host { display: grid; gap: 4px; text-align: left; padding: 14px 16px; min-height: 72px; border: 1px solid var(--border, rgba(255,255,255,.14)); border-radius: 14px; background: var(--bg-secondary, transparent); color: inherit; font: inherit; cursor: pointer; }
+.pty-host strong { font-size: 1.02rem; }
+.pty-host span { font-size: .86rem; color: var(--text-secondary, #9aa3b2); }
+.pty-host:hover, .pty-host:focus-visible { border-color: var(--accent, #6d5dfc); }
+@media (max-width: 520px) { .pty-host-choice { grid-template-columns: minmax(0, 1fr); } }
