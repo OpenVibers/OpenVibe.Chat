@@ -71,5 +71,11 @@
 .pty-host { display: grid; gap: 4px; text-align: left; padding: 14px 16px; min-height: 72px; border: 1px solid var(--border, rgba(255,255,255,.14)); border-radius: 14px; background: var(--bg-secondary, transparent); color: inherit; font: inherit; cursor: pointer; }
 .pty-host strong { font-size: 1.02rem; }
 .pty-host span { font-size: .86rem; color: var(--text-secondary, #9aa3b2); }
+.pty-host { position: relative; padding-right: 44px; cursor: pointer; color: inherit; font: inherit; }
+.pty-host::after { content: ""; position: absolute; right: 18px; top: 50%; width: 9px; height: 9px; border-top: 2px solid currentColor; border-right: 2px solid currentColor; transform: translateY(-50%) rotate(45deg); opacity: .7; }
 .pty-host:hover, .pty-host:focus-visible { border-color: var(--accent, #6d5dfc); }
+.pty-host:active { transform: scale(.99); }
+.pty-host:disabled { cursor: default; opacity: .6; transform: none; }
+.pty-host:disabled::after { display: none; }
+.pty-host:disabled:hover { border-color: var(--border, rgba(255,255,255,.14)); }
 @media (max-width: 520px) { .pty-host-choice { grid-template-columns: minmax(0, 1fr); } }

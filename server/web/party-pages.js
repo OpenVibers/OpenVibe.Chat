@@ -157,9 +157,8 @@ function createPartyRoutes({ config }) {
 <h2 class="pty-start-h">Start a shared computer</h2>
 <div class="pty-host-choice">
 <button type="submit" name="desktop" value="link" class="pty-host"><strong>On my computer</strong><span>Free. Runs in the Link app on your computer.</span></button>
-<button type="submit" name="desktop" value="openvibe" class="pty-host"><strong>On OpenVibe</strong><span id="pty-openvibe-availability">No OpenVibe machine is free right now.</span></button>
+<button type="submit" name="desktop" value="openvibe" class="pty-host" disabled aria-describedby="pty-openvibe-availability"><strong>On OpenVibe</strong><span id="pty-openvibe-availability">No OpenVibe machine is free right now.</span></button>
 </div>
-<p class="pty-hint">Open a browser or a music service together. One person has the remote.</p>
 </form>` : `<p class="pty-cta"><a class="oc-button" href="/auth/login?next=%2F">Sign in to start a shared computer</a></p>`;
         const start = signedIn
             ? `<form class="pty-paste" method="get" action="/new">
@@ -215,7 +214,7 @@ ${grid}
             if (hosting === 'openvibe') return page(req, res, 503, { actor, title: 'No OpenVibe computer is free', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
                 body: '<section class="oc-party-confirm pty-confirm"><h1>No OpenVibe machine is free right now</h1><p>You can host this party on your own computer with Link.</p><p><a class="oc-button" href="/new?desktop=link">Host it on my computer</a></p></section>' });
             return page(req, res, 200, { actor, title: 'Start a shared computer', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
-                body: `<section class="oc-party-confirm pty-confirm"><h1>Start a shared computer?</h1><p>Link runs a temporary browser in a container on your computer. People you invite can watch, and you can pass the remote.</p><form method="post" action="/new"><input type="hidden" name="desktop_hosting" value="link"><button class="oc-button" type="submit">Start the party</button></form></section>` });
+                body: `<section class="oc-party-confirm pty-confirm"><h1>Start a shared computer?</h1><p>Link runs a temporary browser in a container on your computer. People you invite can watch, and you can pass the remote.</p><p class="oc-muted">It needs the OpenVibe Link app on this computer. <a href="https://openvibe.link">Get Link</a></p><form method="post" action="/new"><input type="hidden" name="desktop_hosting" value="link"><button class="oc-button" type="submit">Start the party</button> <a href="/" class="oc-muted">Not now</a></form></section>` });
         }
         if (req.query.radio) {
             let chosen;
