@@ -46,7 +46,11 @@ function createHandler({ config, store, providers, network, actor, now = () => D
             }
             return send(m, 'Link your account first: send /link in a direct message.');
         }
-        if (m.command === 'unlink') return unlinkCommand({ message: { ...m, userId: ident }, subject, provider: p, network, forget: resolve.forget });
+        if (m.command === 'unlink') {
+            const out = await unlinkCommand({ message: { ...m, userId: ident }, subject, provider: p, network, forget: resolve.forget });
+            if (out.ok) await actor.unregisterAccount({ subject, account: { kind: m.app, id: ident } }).catch(() => null);
+            return out;
+        }
         if (m.command === 'settings') {
             if (privateChat || !await p.isAdmin({ message: m })) return send(m, 'Only a group or workspace administrator can change these settings.');
             const args = m.args.replace(/mode=|rate=/g, '').trim().split(/\s+/);

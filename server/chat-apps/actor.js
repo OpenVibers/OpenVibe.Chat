@@ -20,6 +20,9 @@ function createActorClient({ http = null } = {}) {
         async registerAccount({ subject, account }) {
             return call(subject, { method: 'POST', path: '/api/v1/chat-apps/accounts', json: { account } });
         },
+        async unregisterAccount({ subject, account }) {
+            return call(subject, { method: 'POST', path: '/api/v1/chat-apps/accounts/unlink', json: { account } });
+        },
         async task(subject, id) { return call(subject, { method: 'GET', path: `/api/v1/tasks/${encodeURIComponent(id)}` }); },
         async approvals(subject, conversation) { const out = await call(subject, { method: 'GET', path: '/api/v1/chat-apps/approvals', query: { conversation } }); return out.items || []; },
         async decide({ subject, approvalId, decision }) {
