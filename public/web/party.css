@@ -52,6 +52,10 @@ main[data-party] [hidden] { display: none !important; }
 .pt-desktop-layout { border: 1px solid var(--pt-line); border-radius: 999px; color: inherit; background: var(--pt-panel); padding: 5px 12px; cursor: pointer; }
 .pt-frame.is-desktop .pt-desktop { display: block; width: 100%; height: 100%; border: 0; background: #000; }
 .pt-frame.is-desktop .pt-veil { z-index: 1; }
+.pt-provider { position: absolute; inset: 0; width: 100%; height: 100%; }
+.pt-provider iframe { width: 100%; height: 100%; border: 0; }
+.pt-provider-refusal { margin: 0; padding: 10px 14px; color: var(--pt-muted); }
+.pt-provider-refusal[hidden] { display: none; }
 .pt-frame.is-radio {
   aspect-ratio: auto; width: 100%; display: grid; gap: 14px; padding: 18px;
   background: var(--pt-panel); border: 1px solid var(--pt-line); box-shadow: none;

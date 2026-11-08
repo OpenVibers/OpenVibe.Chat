@@ -86,6 +86,12 @@ t('a media party starts paused at 0, on the media, with the remote to the person
 });
 
 t('the media must be OpenVibe media, and the source page on an OpenVibe host', async () => {
+    for (const media of ['https://youtube.com/watch?v=abcdefghijk', 'https://youtu.be/abcdefghijk', 'https://youtube.com/shorts/abcdefghijk', 'https://twitch.tv/videos/12345', 'https://twitch.tv/some_channel']) {
+        const provider = await api('POST', '/parties', ann, { media, title: 'Provider watch' });
+        assert.strictEqual(provider.status, 201, provider.text);
+        const view = await api('GET', `/parties/${provider.body.party.id}`, ann);
+        assert.strictEqual(view.body.party.clock.media, media);
+    }
     const outside = await api('POST', '/parties', ann, { media: 'https://tracker.example.com/film.webm', title: 'Elsewhere' });
     assert.strictEqual(outside.status, 422, outside.text);
     assert.strictEqual(outside.body.code, 'party.media');
@@ -247,8 +253,13 @@ t('openvibe.party: the start form, sign-in, and /new', async () => {
     // The navbar's Messages count calls Chat's DM API from this host: the page's CSP lets it.
     const csp = String(shell.headers['content-security-policy'] || '');
     assert.match(csp, /connect-src[^;]*https:\/\/openvibe\.chat(\s|;|$)/, 'connect-src names https://openvibe.chat');
+    assert.match(csp, /script-src[^;]*https:\/\/www\.youtube\.com/);
+    assert.match(csp, /script-src[^;]*https:\/\/embed\.twitch\.tv/);
+    assert.match(csp, /frame-src[^;]*https:\/\/www\.youtube-nocookie\.com/);
+    assert.match(csp, /frame-src[^;]*https:\/\/player\.twitch\.tv/);
+    assert.match(csp, /frame-src[^;]*https:\/\/embed\.twitch\.tv/, 'Twitch.Embed draws its player in an embed.twitch.tv frame');
     // The page loads Opus's page and Shared's player and clock.
-    for (const file of ['/web/party.js', '/web/party.css', '/shared/ov-sync.js', '/shared/player.js', '/shared/player.css']) {
+    for (const file of ['/web/party.js', '/web/party.css', '/web/party-providers.js', '/web/party-provider-sync.js', '/shared/ov-sync.js', '/shared/player.js', '/shared/player.css']) {
         assert.ok(shell.text.includes(file), `${file} is on the page`);
     }
 
