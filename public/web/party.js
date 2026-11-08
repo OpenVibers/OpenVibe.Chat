@@ -79,15 +79,20 @@
   if (guest) root.classList.add('is-guest');
 
   // ── the stage ────────────────────────────────────────────────────────────────
-  var video = el('video');
-  video.setAttribute('data-ov-player', '');
-  video.setAttribute('playsinline', '');
-  video.preload = 'auto';
-  video.controls = !guest;   // a guest's player would not follow the party: the invitation stands over it
   var src = typeof (clock && clock.media) === 'string' ? clock.media : (typeof data.media === 'string' ? data.media : null);
-  if (src) video.src = src;
+  var providerInfo = src && window.PartyProviders ? window.PartyProviders.parse(src) : null;
+  var video = providerInfo ? null : el('video');
+  var providerTarget = providerInfo ? el('div', 'pt-provider') : null;
+  var provider = null, providerApplying = false, providerFailure = false;
+  if (video) {
+    video.setAttribute('data-ov-player', '');
+    video.setAttribute('playsinline', '');
+    video.preload = 'auto';
+    video.controls = !guest;   // a guest's player would not follow the party: the invitation stands over it
+    if (src) video.src = src;
+  }
   var frame = el('div', 'pt-frame');
-  frame.appendChild(video);
+  if (video) frame.appendChild(video); else if (providerTarget) frame.appendChild(providerTarget);
   var veil = el('div', 'pt-veil');          // waiting / reconnecting, over the picture
   veil.setAttribute('role', 'status');
   var drift = el('span', 'pt-drift', 'Catching up…');
@@ -95,6 +100,14 @@
   var floats = el('div', 'pt-floats');      // reactions rising over the picture
   floats.setAttribute('aria-hidden', 'true');
   frame.appendChild(veil); frame.appendChild(drift); frame.appendChild(floats);
+  var refusal = el('p', 'pt-provider-refusal'); refusal.hidden = true;
+  if (providerInfo) {
+    refusal.appendChild(el('span', '', 'This player could not play the link.'));
+    refusal.appendChild(document.createTextNode(' '));
+    var external = el('a', '', 'Open on ' + (providerInfo.kind === 'youtube' ? 'YouTube' : 'Twitch'));
+    external.href = providerInfo.url; external.target = '_blank'; external.rel = 'noopener';
+    refusal.appendChild(external);
+  }
   // The shell's own header (the title and who started it) leads; without one, the page writes its own.
   var shellHead = root.querySelector('.oc-party-head');
   var head = shellHead || el('div', 'pt-head');
@@ -112,6 +125,7 @@
   if (invite) { var h1 = head.querySelector('h1'); if (h1 && h1.nextSibling) head.insertBefore(invite, h1.nextSibling); else head.appendChild(invite); }
   stage.appendChild(head);
   stage.appendChild(frame);
+  if (providerInfo) stage.appendChild(refusal);
   if (!guest) stage.appendChild(bar);
   if (remote && !guest) bar.appendChild(remote);
   var react = el('div', 'pt-react');
@@ -146,11 +160,47 @@
     }
     var text = '';
     if (!ws || ws.readyState !== 1) text = joined ? 'Reconnecting…' : 'Joining the party…';
+    else if (providerFailure) text = '';
     else if (!src) text = 'This party has nothing to play yet.';
     else if (!everPlayed && clock && clock.paused) text = iHold() ? 'Press play when everyone is here.' : 'Waiting for ' + (holder().kind === 'person' ? nameOf(holder().subject) : 'the host') + ' to press play';
     veil.textContent = text;
     veil.hidden = !text;
     frame.classList.toggle('is-waiting', !!text);
+  }
+
+  function providerClock(state, userAction) {
+    if (!provider || !state || !providerReady) return;
+    providerApplying = true;
+    try { window.PartyProviderSync.follow(provider, state, Date.now(), DRIFT_SHOWN_MS / 1000); } catch (e) { /* a provider may reject autoplay */ }
+    setTimeout(function () { providerApplying = false; }, 150);
+    if (userAction && iHold()) {
+      var pos = provider.live ? 0 : Math.max(0, Math.round((Number(provider.time()) || 0) * 1000));
+      send({ type: 'sync', media: src, position_ms: pos, rate: Number(state.rate) || 1, paused: !!state.paused });
+    }
+  }
+  var providerReady = false;
+  if (providerInfo && providerTarget && window.PartyProviders) {
+    provider = window.PartyProviders.create(providerTarget, src, function (event, value) {
+      if (event === 'refused') {
+        providerFailure = true; refusal.hidden = false; paintVeil(); return;
+      }
+      if (event === 'playing' || event === 'paused') {
+        if (providerApplying) return;
+        everPlayed = everPlayed || event === 'playing';
+        var state = { paused: event === 'paused', rate: clock && clock.rate || 1, position_ms: Math.round((Number(provider.time()) || 0) * 1000), at_ms: Date.now() };
+        if (!clock || !!clock.paused !== state.paused) providerClock(state, true);
+        paintVeil();
+      } else if (event === 'seek' && !providerApplying && iHold()) {
+        send({ type: 'sync', media: src, position_ms: provider.live ? 0 : Math.round((Number(provider.time()) || 0) * 1000), rate: Number(clock && clock.rate) || 1, paused: !!(clock && clock.paused) });
+      } else if (event === 'rate' && !providerApplying && iHold()) {
+        send({ type: 'sync', media: src, position_ms: Math.round((Number(provider.time()) || 0) * 1000), rate: Number(value) || 1, paused: !!(clock && clock.paused) });
+      }
+    });
+    if (!provider) { providerFailure = true; refusal.hidden = false; }
+    else provider.ready.then(function () {
+      providerReady = true; if (clock) providerClock(clock, false);
+      if (provider.live && iHold()) send({ type: 'sync', media: src, position_ms: 0, rate: 1, paused: !!(clock && clock.paused) });
+    }).catch(function () { providerFailure = true; refusal.hidden = false; paintVeil(); });
   }
 
   // ── the remote ───────────────────────────────────────────────────────────────
@@ -323,7 +373,8 @@
       } else if (m.type === 'sync' && m.state) {
         clock = m.state;
         if (!clock.paused || clock.position_ms > 0) everPlayed = true;
-        if (!src && typeof clock.media === 'string') { src = clock.media; video.src = src; }
+        if (!src && typeof clock.media === 'string' && video) { src = clock.media; video.src = src; }
+        if (provider) providerClock(clock, false);
       } else if (m.type === 'lease' && m.state) {
         var before = lease && lease.watchers ? lease.watchers : [];
         lease = m.state;
@@ -357,13 +408,18 @@
   // Catching up shows only past a second of drift, and only while the room plays.
   setInterval(function () {
     var d = sync && sync.drift ? Math.abs(Number(sync.drift()) || 0) : 0;
+    if (provider && clock && !clock.paused && providerReady && !provider.live) {
+      var expected = window.PartyProviderSync.expected(clock, Date.now());
+      d = Math.abs((Number(provider.time()) || 0) - expected) * 1000;
+      if (d > DRIFT_SHOWN_MS) providerClock(clock, false);
+    }
     drift.hidden = !(clock && !clock.paused && d > DRIFT_SHOWN_MS);
     // A seat waits a minute; after it, the person is simply not here.
     var now = Date.now(), changed = false;
     Object.keys(away).forEach(function (s) { if (now - away[s] > 60000) { delete away[s]; changed = true; } });
     if (changed) { paintPeople(); paintRemote(); }
   }, 500);
-  video.addEventListener('play', function () { everPlayed = true; paintVeil(); });
+  if (video) video.addEventListener('play', function () { everPlayed = true; paintVeil(); });
 
   // ── invite ───────────────────────────────────────────────────────────────────
   if (invite && !guest) {

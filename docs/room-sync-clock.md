@@ -35,8 +35,9 @@ State:
   "set_by": "usr_01JAB2C3D4E5F6G7H8J9K0MNPS", "seq": 7 }
 ```
 
-`media` is a `media.media-ref@1` object or an `https` URL on an OpenVibe host (a domain a Contracts service manifest
-names; Party v1 plays OpenVibe media only, so a holder cannot point every viewer's player at an outside server). A player is at
+`media` is a `media.media-ref@1` object, an `https` URL on an OpenVibe host (a domain a Contracts service manifest
+names), or an official YouTube/Twitch watch URL. Provider URLs are identifiers for the provider's own official embed;
+Chat never proxies or downloads those streams. A player is at
 `position_ms + (serverNow - at_ms) * rate` while `paused` is false, and at `position_ms` while it is true. `at_ms`
 is always Chat's clock when Chat accepted the set; a player measures that clock with `time` (below).
 

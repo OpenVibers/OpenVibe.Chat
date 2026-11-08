@@ -78,11 +78,11 @@ function navConfig(o, config, site = {}, siteLinks = null) {
  * pictures, avatars), and connections go to this site, Network (sign-in, the Frame) and Events (release and
  * notification streams). Checked on production pages with the policy attached before shipping (2026-10-17).
  */
-function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat') {
+function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat', partyProviders = false) {
     return [
         "default-src 'self'",
         // 'inline-speculation-rules': the shared navbar's prefetch rules (Shared 4.70) run under the nonce policy too.
-        `script-src 'self' 'nonce-${nonce}' 'inline-speculation-rules' https://static.cloudflareinsights.com`,
+        `script-src 'self' 'nonce-${nonce}' 'inline-speculation-rules' https://static.cloudflareinsights.com${partyProviders ? ' https://www.youtube.com https://embed.twitch.tv' : ''}`,
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob: https:",
         "media-src 'self' blob: https:",
@@ -93,7 +93,7 @@ function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat') {
         // GETs and only with the person's own Bearer (the Actor API's CORS route).
         `connect-src 'self' ${wsOrigin} https://openvibe.chat https://openvibe.actor https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com`,
         // A workspace room's shared screen: a screen share page from OpenVibe.Bot (rooms.screen_url).
-        "frame-src 'self' https://openvibe.bot",
+        `frame-src 'self' https://openvibe.bot${partyProviders ? ' https://www.youtube-nocookie.com https://player.twitch.tv' : ''}`,
         "frame-ancestors 'self'",
         "base-uri 'self'",
         "object-src 'none'",
@@ -162,7 +162,7 @@ ${o.kit ? `<link rel="stylesheet" href="${ovServe.url('kit.css')}">\n<link rel="
 ${o.app ? `<link rel="stylesheet" href="${asset(o.appStyle || 'vibe.css')}">` : ''}
 ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
 ${o.partyHome ? `<link rel="stylesheet" href="${asset('party-home.css')}">` : ''}
-${o.party ? `<link rel="stylesheet" href="${ovServe.url('player.css')}">\n<link rel="stylesheet" href="${asset('party.css')}">\n<script src="${ovServe.url('player.js')}" defer></script>\n<script src="${ovServe.url('ov-sync.js')}" defer></script>\n<script src="${asset('party.js')}" defer></script>` : ''}
+${o.party ? `<link rel="stylesheet" href="${ovServe.url('player.css')}">\n<link rel="stylesheet" href="${asset('party.css')}">\n<script src="${ovServe.url('player.js')}" defer></script>\n<script src="${ovServe.url('ov-sync.js')}" defer></script>\n<script src="${asset('party-providers.js')}" defer></script>\n<script src="${asset('party-provider-sync.js')}" defer></script>\n<script src="${asset('party.js')}" defer></script>` : ''}
 ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join('\n')}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>

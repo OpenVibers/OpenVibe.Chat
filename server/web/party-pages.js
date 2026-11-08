@@ -63,7 +63,7 @@ function createPartyRoutes({ config }) {
         const nonce = crypto.randomBytes(16).toString('base64');
         res.status(status)
             .set('Cache-Control', cache.htmlHeaders({ private: true }))
-            .set('Content-Security-Policy', contentSecurityPolicy(nonce, wsOrigin))
+            .set('Content-Security-Policy', contentSecurityPolicy(nonce, wsOrigin, !!o.party))
             .type('html')
             .send(renderPage({ config: partyConfig, actor, nonce, site: SITE, ...o }));
     };
