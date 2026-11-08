@@ -128,8 +128,9 @@ async function page(room, { limit, before, channelUsername, decorate } = {}) {
         rows = await readPage(r, { limit: lim, before, channelUsername });
         if (key) memoSet(key, rows);
     }
-    const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows;
-    await linkCards.hydrate(messages);
+    // Copies: the page memo holds the rows, and a refreshed card must not change what the next reader sees.
+    const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows.map((x) => ({ ...x }));
+    await linkCards.hydrate(messages, 'chat_messages');
     return { messages, latest_id: latestIdOf(rows) };
 }
 
@@ -145,8 +146,8 @@ async function delta(room, { afterId, limit, channelUsername, decorate } = {}) {
     let rows = await readDelta(r, { afterId: after, limit: lim, channelUsername });
     const complete = rows.length <= lim;
     if (!complete) rows = rows.slice(0, lim);
-    const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows;
-    await linkCards.hydrate(messages);
+    const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows.map((x) => ({ ...x }));
+    await linkCards.hydrate(messages, 'chat_messages');
     return { messages, latest_id: latestIdOf(rows) || after, complete, deleted_ids: await deletedIds(room, after) };
 }
 

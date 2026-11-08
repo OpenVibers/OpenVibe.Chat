@@ -298,8 +298,9 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
     }
     const filtered = wordFilter.check(body);
     const message = filtered.safe ? body : filtered.filtered;
-    // The message's known OpenVibe link, resolved now: the card is stored on the row and arrives with the broadcast.
-    const card = await linkCards.resolve(message);
+    // The message's known OpenVibe link, with a second's budget: the card is stored on the row and arrives with the
+    // broadcast when it is ready; a slower one fills the row later.
+    const { card, pending } = await linkCards.forSend(message);
     const id = await db.tx(async () => {
         const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, card) VALUES (?, ?, ?, ?, ?)', [room.id, user.id, user.subject_id || null, message, linkCards.toJson(card)]);
         await db.run('UPDATE rooms SET message_count = message_count + 1, last_message_at = ov_now() WHERE id = ?', [room.id]);
@@ -308,6 +309,7 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
         return Number(r.lastInsertRowid);
     });
     const row = await messageById(id);
+    if (pending) linkCards.fillLater('room_messages', id, pending);
     // The chat plays commands of an agent stream's room (Agent Streams S6): '!do', '!vote', and the
     // moderators' '!skip', '!remove' and '!pin'. They are handled after the message is out, so a request is
     // a message of the room and a thumbs up on it is a vote.
@@ -346,7 +348,7 @@ const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.crea
     LEFT JOIN room_ai_members a ON a.id = m.ai_member_id`;
 async function messageById(id) {
     const row = await db.get(`${MSG_SELECT} WHERE m.id = ?`, [id]) || null;
-    if (row) await linkCards.hydrate([row]);
+    if (row) await linkCards.hydrate([row], 'room_messages');
     return row;
 }
 
@@ -358,7 +360,7 @@ async function history(room, { before = null, after = null, limit = 60 } = {}) {
         : before != null
             ? await db.all(`${MSG_SELECT} WHERE m.room_id = ? AND m.id < ? AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT ?`, [room.id, Number(before) || 0, lim])
             : await db.all(`${MSG_SELECT} WHERE m.room_id = ? AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT ?`, [room.id, lim]);
-    await linkCards.hydrate(rows);
+    await linkCards.hydrate(rows, 'room_messages');
     return after != null ? rows : rows.reverse();
 }
 

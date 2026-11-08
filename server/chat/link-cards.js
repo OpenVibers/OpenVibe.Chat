@@ -16,12 +16,21 @@
  *
  * One card per message: the first *known* link. The card's text is data: escaped where HTML is drawn (server/web/ui.js
  * and public/web/chat.js), cut to size here, and a picture is only ever https on openvibe.media. The card is stored on
- * the row as JSON when the message is sent; a read resolves a stored card again only once it is older than a day.
+ * the row as JSON when the message is sent.
+ *
+ * Sending never waits on another site: forSend() gives the resolver a second. A card ready inside it is stored with
+ * the message; a slower one is filled into the row afterwards (fillLater), so later reads have it and the sender's
+ * line goes out at once. A read refreshes a stored card once it is older than a day, at most SIX per page (the rest
+ * keep their stored card until a later read), and writes the refreshed card back (or null when the video, voice or
+ * skill is gone). A network error keeps the stored card: readJson() throws for that, and returns null for a 404.
  */
 const db = require('../db/database');
 
 const CACHE_MS = 60_000;
 const FRESH_MS = 86_400_000;
+const SEND_BUDGET_MS = 1_000;
+const REFRESH_PER_READ = 6;
+const TABLES = new Set(['chat_messages', 'room_messages', 'dm_messages', 'inbox_messages']);
 const MAX_TITLE = 120;
 const MAX_LINE = 200;
 const MAX_NOTE = 160;
@@ -42,20 +51,22 @@ const partyBase = () => String(process.env.CHAT_PARTY_URL || 'https://openvibe.p
 
 const cache = new Map(); // key → { at, value }
 
-/** One lookup, cached a minute. A failed lookup keeps the previous answer if there was one, else null. */
+/** One lookup, cached a minute. A throw (a network error) leaves the cache alone, so the next read tries again. */
 async function cached(key, fn) {
     const hit = cache.get(key);
     if (hit && Date.now() - hit.at < CACHE_MS) return hit.value;
-    let value = null;
-    try { value = await fn(); } catch { value = hit ? hit.value : null; }
+    const value = await fn();
     if (cache.size > 500) cache.clear();
     cache.set(key, { at: Date.now(), value });
     return value;
 }
 
-/** A JSON read from a fixed origin and path: no redirects, 2.5 s, null on anything but a 200. */
+/**
+ * A JSON read from a fixed origin and path: no redirects, 2.5 s. A 404 or another non-200 is null (nothing is
+ * there); a network error or the timeout throws, which is what keeps a stored card on a read.
+ */
 async function readJson(base, path) {
-    if (!base) return null;
+    if (!base) throw new Error('link-cards: no origin for this service');
     return await cached(`${base}${path}`, async () => {
         const r = await fetch(`${base}${path}`, {
             headers: { accept: 'application/json' },
@@ -162,15 +173,13 @@ async function videoCard(link) {
 }
 
 async function partyCard(link) {
-    const found = await cached(`party:${link.slug}:${link.key}`, async () => {
-        const parties = require('../rooms/parties');
-        const row = await parties.bySlug(link.slug);
-        const party = parties.partyOf(row);
-        if (!row || !party || party.ended_at || !parties.keyMatches(party, link.key)) return null;
-        const host = await db.get('SELECT username, display_name FROM ctx_users WHERE subject_id = ? LIMIT 1', [party.host_subject]);
-        return { title: row.name, host: host ? (host.display_name || host.username) : null };
-    });
-    if (!found) return null;
+    // Chat's own row, not an outside call: no minute cache, so an ended party drops its card on the next read.
+    const parties = require('../rooms/parties');
+    const row = await parties.bySlug(link.slug);
+    const party = parties.partyOf(row);
+    if (!row || !party || party.ended_at || !parties.keyMatches(party, link.key)) return null;
+    const host = await db.get('SELECT username, display_name FROM ctx_users WHERE subject_id = ? LIMIT 1', [party.host_subject]);
+    const found = { title: row.name, host: host ? (host.display_name || host.username) : null };
     return {
         kind: 'party',
         url: link.page,
@@ -219,18 +228,43 @@ async function skillCard(link) {
     };
 }
 
-/** The card for a message body: null unless it carries one of the known kinds, stamped with when it was resolved. */
+/**
+ * The card for a message body: null unless it carries one of the known kinds, stamped with when it was resolved.
+ * A service that cannot answer throws (a party that is gone is null, not a throw).
+ */
 async function resolve(text) {
-    try {
-        const link = firstLink(text);
-        if (!link) return null;
-        const card = link.kind === 'video' ? await videoCard(link)
-            : link.kind === 'party' ? await partyCard(link)
-                : link.kind === 'voice' ? await voiceCard(link)
-                    : await skillCard(link);
-        if (!card || !KINDS.includes(card.kind) || !card.title) return null;
-        return { ...card, at: Date.now() };
-    } catch { return null; }
+    const link = firstLink(text);
+    if (!link) return null;
+    const card = link.kind === 'video' ? await videoCard(link)
+        : link.kind === 'party' ? await partyCard(link)
+            : link.kind === 'voice' ? await voiceCard(link)
+                : await skillCard(link);
+    if (!card || !KINDS.includes(card.kind) || !card.title) return null;
+    return { ...card, at: Date.now() };
+}
+
+/**
+ * The card to store at send time, within a second: { card, pending }. A card ready inside the budget comes back as
+ * `card`; a slower resolver keeps running as `pending`, and fillLater() writes what it finds. A service error is no
+ * card (the message still goes).
+ */
+async function forSend(text, budgetMs = SEND_BUDGET_MS) {
+    const job = resolve(text).catch(() => null);
+    const late = Symbol('late');
+    let timer;
+    const timeout = new Promise((done) => { timer = setTimeout(() => done(late), budgetMs); if (timer.unref) timer.unref(); });
+    let card;
+    try { card = await Promise.race([job, timeout]); } finally { clearTimeout(timer); }
+    return card === late ? { card: null, pending: job } : { card, pending: null };
+}
+
+/** Write a card that arrived after its message went out into that row. Never awaited by the request. */
+function fillLater(table, id, pending) {
+    if (!TABLES.has(table) || !id || !pending) return;
+    pending.then((card) => {
+        if (card) return db.run(`UPDATE ${table} SET card = ? WHERE id = ?`, [toJson(card), id]);
+        return null;
+    }).catch(() => {});
 }
 
 /** The stored card as an object. Anything else (null, bad JSON, an old shape) is no card. */
@@ -245,22 +279,39 @@ function parse(value) {
 }
 
 /**
- * The card to show for a row: the stored one while it is under a day old; older than that, the link resolved again
- * (the title may have changed, the party may have ended, the video become private — then there is no card).
+ * The card to show for one row: the stored card while it is fresh; stale, the link resolved again and written back.
+ * A network error keeps the stored card; a 404, a stopped voice, a failed skill or an ended party drops it (null).
  */
-async function onRead(text, stored) {
-    const card = parse(stored);
-    if (!card) return null;
-    if (Date.now() - (Number(card.at) || 0) < FRESH_MS) return card;
-    return await resolve(text);
+async function refresh(row, stored, table) {
+    let fresh;
+    try { fresh = await resolve(row.message != null ? row.message : row.body); }
+    catch { return stored; }
+    const id = row.id;
+    if (fresh) {
+        if (id != null) await db.run(`UPDATE ${table} SET card = ? WHERE id = ?`, [toJson(fresh), id]).catch(() => {});
+        return fresh;
+    }
+    if (id != null) await db.run(`UPDATE ${table} SET card = NULL WHERE id = ?`, [id]).catch(() => {});
+    return null;
 }
 
-/** Fill `row.card` on message rows (chat_messages/dm_messages: message; inbox_messages: body). */
-async function hydrate(rows) {
+/**
+ * Fill `row.card` on message rows from one of the four tables (message: chat/room/dm; body: inbox). One call starts
+ * at most REFRESH_PER_READ stale lookups; the others keep their stored card until a later read. The rows are the
+ * caller's copies (history-store's page memo must not be changed here).
+ */
+async function hydrate(rows, table) {
     if (!Array.isArray(rows)) return rows;
+    if (!TABLES.has(table)) throw new TypeError(`link-cards: hydrate needs one of ${[...TABLES].join(', ')}`);
+    let budget = REFRESH_PER_READ;
     await Promise.all(rows.map(async (row) => {
         if (!row) return;
-        row.card = await onRead(row.message != null ? row.message : row.body, row.card);
+        const card = parse(row.card);
+        if (!card) { row.card = null; return; }
+        if (Date.now() - (Number(card.at) || 0) < FRESH_MS) { row.card = card; return; }
+        if (budget <= 0) { row.card = card; return; }
+        budget--;
+        row.card = await refresh(row, card, table);
     }));
     return rows;
 }
@@ -269,6 +320,6 @@ async function hydrate(rows) {
 const toJson = (card) => (card ? JSON.stringify(card) : null);
 
 module.exports = {
-    resolve, parse, onRead, hydrate, toJson, firstLink, known, imageOf,
-    MAX_TITLE, MAX_LINE, MAX_NOTE, FRESH_MS,
+    resolve, forSend, fillLater, parse, hydrate, toJson, firstLink, known, imageOf,
+    SEND_BUDGET_MS, REFRESH_PER_READ, TABLES, MAX_TITLE, MAX_LINE, MAX_NOTE, FRESH_MS,
 };

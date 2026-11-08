@@ -21,7 +21,7 @@ const { boot, suite } = require('./helpers');
 const t = suite('link cards');
 const SITE = 'https://openvibe.chat';
 const VOICE = 'shv_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3';
-let h, ann, bob, videoServer, actorServer, videoHits = 0, actorHits = 0, conv, room, inbox, visitorToken;
+let h, ann, bob, videoServer, actorServer, videoHits = 0, actorHits = 0, conv, room, staleRoom, inbox, visitorToken, partyJoin, partySlug;
 
 const start = (handler) => new Promise((resolve) => {
     const s = http.createServer(handler);
@@ -34,6 +34,18 @@ const page = async (p, u) => {
 };
 const dmSend = (u, text) => h.http('POST', `/api/dm/conversations/${conv}/messages`, { token: u.token, body: { message: text } });
 const globalSend = (u, text) => h.http('POST', '/api/chat/send', { token: u.token, body: { message: text } });
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const staleCard = (link, title = 'Old film', kind = 'video') => JSON.stringify({
+    kind, url: link, title, line: 'An old line', image: null,
+    action: kind === 'party' ? { label: 'Join the party', href: link } : { label: 'Watch together', href: `https://openvibe.party/new?media=${encodeURIComponent(link)}` },
+    at: Date.now() - 2 * 86_400_000,
+});
+const insertRoomMessage = async (r, text, card, user = ann) => Number((await h.db.run(
+    'INSERT INTO room_messages (room_id, user_id, subject_id, message, card) VALUES (?, ?, ?, ?, ?)',
+    [r.id, user.id, user.subject_id || null, text, card]
+)).lastInsertRowid);
+const roomMessages = (r, u = bob) => h.http('GET', `/api/chat/rooms/${r.slug}/messages?limit=200`, { token: u.token });
+const afterRows = (afterId, limit, u = bob) => h.http('GET', `/api/chat/rooms/${staleRoom.slug}/messages?after=${afterId}&limit=${limit}`, { token: u.token });
 const cardIn = (html) => /<div class="oc-card" data-kind="([a-z]+)">([\s\S]*?)<\/div><\/div>/.exec(html);
 
 t('boot', async () => {
@@ -43,17 +55,21 @@ t('boot', async () => {
         const send = (status, body) => { res.writeHead(status, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
         if (u.pathname !== '/api/v1/video/watchable') return send(404, { error: 'not found' });
         const watched = String(u.searchParams.get('url') || '');
+        if (watched.includes('netfail0001')) { req.socket.destroy(); return; }
         // A private item, and anything that is not a Video page: Video's own 404.
-        if (!/^https:\/\/openvibe\.video\//.test(watched) || /\/v\/777$/.test(watched)) return send(404, { error: 'not watchable' });
+        if (!/^https:\/\/openvibe\.video\//.test(watched) || /\/v\/77[0-9]$/.test(watched)) return send(404, { error: 'not watchable' });
         const escaping = watched.includes('escaping001');
-        send(200, {
+        const answer = () => send(200, {
             kind: 'upload',
-            title: escaping ? `<img src=x onerror=alert(1)>${'x'.repeat(200)}` : 'Friday film',
+            title: escaping ? `<img src=x onerror=alert(1)>${'x'.repeat(200)}` : watched.includes('slow0012345') ? 'Slow film' : 'Friday film',
             page_url: watched,
             thumbnail_url: escaping ? 'https://evil.example/pic.png' : 'https://openvibe.media/vod/friday.jpg',
             duration_s: 3725,
             channel: 'ann',
         });
+        // Two seconds, so a send that waited for it would visibly stall; the one-second budget does not.
+        if (watched.includes('slow0012345')) { setTimeout(answer, 2000); return; }
+        answer();
     });
     actorServer = await start((req, res) => {
         actorHits++;
@@ -122,6 +138,8 @@ t('a party invite shows its title and who started it, only with its k=', async (
     } });
     assert.strictEqual(made.status, 201, made.text);
     const join = made.body.party.join_url;
+    partyJoin = join;
+    partySlug = made.body.party.id;
     const withKey = await dmSend(ann, `Come watch ${join}`);
     assert.strictEqual(withKey.body.message.card.kind, 'party');
     assert.strictEqual(withKey.body.message.card.title, 'Friday film night');
@@ -237,6 +255,75 @@ t('the same URL is fetched once a minute', async () => {
     assert.strictEqual((await dmSend(ann, `one ${link}`)).body.message.card.kind, 'video');
     assert.strictEqual((await dmSend(ann, `two ${link}`)).body.message.card.kind, 'video');
     assert.strictEqual(videoHits - before, 1, `Video was asked ${videoHits - before} times`);
+});
+
+t('a send does not wait for a slow card, and the card lands on the row afterwards', async () => {
+    const started = Date.now();
+    const r = await dmSend(bob, 'https://openvibe.video/watch?v=slow0012345');
+    const took = Date.now() - started;
+    assert.strictEqual(r.status, 200, r.text);
+    assert.ok(took < 1800, `the send took ${took} ms`);
+    assert.strictEqual(r.body.message.card, null, 'the line went out without waiting');
+    let card = null;
+    for (let i = 0; i < 60 && !card; i++) {
+        await sleep(100);
+        const row = await h.db.get('SELECT card FROM dm_messages WHERE id = ?', [r.body.message.id]);
+        card = row && row.card ? JSON.parse(row.card) : null;
+    }
+    assert.ok(card, 'the card is written to the row after it resolves');
+    assert.strictEqual(card.title, 'Slow film');
+    const read = await h.http('GET', `/api/dm/conversations/${conv}/messages`, { token: ann.token });
+    assert.strictEqual(read.body.messages.find((m) => m.id === r.body.message.id).card.title, 'Slow film');
+});
+
+t('a 100-message history refreshes at most six stale cards in one read', async () => {
+    const made = await h.http('POST', '/api/chat/rooms', { token: ann.token, body: { name: 'Stale cards' } });
+    assert.strictEqual(made.status, 201, made.text);
+    staleRoom = made.body.room;
+    for (let i = 0; i < 100; i++) {
+        const link = `https://openvibe.video/watch?v=bulk${String(i).padStart(7, '0')}`;
+        await insertRoomMessage(staleRoom, link, staleCard(link));
+    }
+    const before = videoHits;
+    const r = await roomMessages(staleRoom);
+    assert.strictEqual(r.status, 200, r.text);
+    assert.strictEqual(r.body.messages.length, 100);
+    const wrote = r.body.messages.filter((m) => m.card && Number(m.card.at) > Date.now() - 60_000).length;
+    assert.strictEqual(wrote, 6, `six cards were refreshed (${wrote})`);
+    assert.strictEqual(videoHits - before, 6, `Video was asked ${videoHits - before} times`);
+});
+
+t('a refreshed card is written back, so the next read makes no request', async () => {
+    const link = 'https://openvibe.video/watch?v=writeback01';
+    const id = await insertRoomMessage(staleRoom, link, staleCard(link, 'Written back'));
+    const before = videoHits;
+    const first = await afterRows(id - 1, 1);
+    assert.strictEqual(first.body.messages[0].card.title, 'Friday film', 'the fresh answer replaces the old card');
+    assert.strictEqual(videoHits - before, 1);
+    const stored = await h.db.get('SELECT card FROM room_messages WHERE id = ?', [id]);
+    assert.ok(JSON.parse(stored.card).at > Date.now() - 60_000, 'the refreshed card is on the row');
+    const second = await afterRows(id - 1, 1);
+    assert.strictEqual(videoHits - before, 1, 'the second read did not ask Video again');
+    assert.strictEqual(second.body.messages[0].card.title, 'Friday film');
+});
+
+t('a network error keeps the stored card; a 404, and a party that ended, drop it', async () => {
+    const keptLink = 'https://openvibe.video/watch?v=netfail0001';
+    const kept = await insertRoomMessage(staleRoom, keptLink, staleCard(keptLink, 'Kept film'));
+    const goneLink = 'https://openvibe.video/v/778';
+    const gone = await insertRoomMessage(staleRoom, goneLink, staleCard(goneLink, 'Gone film'));
+
+    const r = await afterRows(kept - 1, 2);
+    assert.strictEqual(r.body.messages.find((m) => m.id === kept).card.title, 'Kept film', 'a network error keeps it');
+    assert.strictEqual(r.body.messages.find((m) => m.id === gone).card, null, 'a 404 drops it');
+    assert.strictEqual((await h.db.get('SELECT card FROM room_messages WHERE id = ?', [gone])).card, null, 'the drop is stored');
+
+    const ended = await h.http('POST', `/api/chat/rooms/${partySlug}/party/end`, { token: ann.token });
+    assert.strictEqual(ended.status, 200, ended.text);
+    const partyRow = await insertRoomMessage(staleRoom, partyJoin, staleCard(partyJoin, 'Party film', 'party'));
+    const after = await afterRows(partyRow - 1, 1);
+    assert.strictEqual(after.body.messages[0].card, null, 'an ended party drops it');
+    assert.strictEqual((await h.db.get('SELECT card FROM room_messages WHERE id = ?', [partyRow])).card, null, 'the drop is stored');
 });
 
 t.run(async () => {

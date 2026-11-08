@@ -209,10 +209,12 @@ const convShape = (c) => c && ({
 const msgShape = (m) => m && ({ id: Number(m.id), conversation_id: m.conversation_id, author: m.author, author_name: m.author_name || null, body: m.body, card: linkCards.parse(m.card), created_at: m.created_at, ...(m.author === 'visitor' && m.author_user_id != null ? { account: true } : {}) });
 
 async function addMessage(conv, { author, body, userId = null, name = null }, deps = {}) {
-    // A known OpenVibe link's card is resolved when the message is sent; a system line never carries one.
-    const card = author === 'system' ? null : await linkCards.resolve(body);
+    // A known OpenVibe link's card is resolved when the message is sent, with a second's budget; a system line never
+    // carries one. A slower card is filled into the row afterwards.
+    const { card, pending } = author === 'system' ? { card: null, pending: null } : await linkCards.forSend(body);
     const row = await db.get(`INSERT INTO inbox_messages (conversation_id, author, author_user_id, author_name, body, card) VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
         [conv.id, author, userId, name, body, linkCards.toJson(card)]);
+    if (pending) linkCards.fillLater('inbox_messages', Number(row.id), pending);
     await db.run(`UPDATE inbox_conversations SET last_message_at = ov_now()${author === 'visitor' ? ', agent_unread = agent_unread + 1' : ''} WHERE id = ?`, [conv.id]);
     const message = msgShape(row);
     broadcaster(deps)(conv.inbox_id, conv.id, { type: 'inbox_message', inbox: conv.inbox_id, conversation: conv.id, message });
@@ -247,7 +249,7 @@ async function setStatusRow(conv, status, deps = {}, extra = {}) {
 
 async function messages(conv, { after = 0, limit = 200 } = {}) {
     const rows = await db.all('SELECT * FROM inbox_messages WHERE conversation_id = ? AND id > ? ORDER BY id LIMIT ?', [conv.id, Number(after) || 0, Math.min(500, Number(limit) || 200)]);
-    await linkCards.hydrate(rows);
+    await linkCards.hydrate(rows, 'inbox_messages');
     return rows.map(msgShape);
 }
 

@@ -166,9 +166,9 @@ async function sendMessage(conversationId, senderId, text) {
     if (!text || !text.trim()) return null;
     const trimmed = text.trim().slice(0, 2000); // max 2000 chars
     const senderSubject = await db.subjectFor(senderId);
-    // A known OpenVibe link's card is resolved when the message is sent (server/chat/link-cards.js).
-    const card = await linkCards.resolve(trimmed);
-    return await db.tx(async () => {
+    // A known OpenVibe link's card is resolved when the message is sent, with a second's budget (link-cards.js).
+    const { card, pending } = await linkCards.forSend(trimmed);
+    const row = await db.tx(async () => {
         const result = await db.run(
             `INSERT INTO dm_messages (conversation_id, sender_id, message, sender_subject_id, card) VALUES (?, ?, ?, ?, ?)`,
             [conversationId, senderId, trimmed, senderSubject, linkCards.toJson(card)]
@@ -192,10 +192,13 @@ async function sendMessage(conversationId, senderId, text) {
                 participants: (await Promise.all(participants.map(async (p) => ({ user_id: p.user_id, subject: p.subject_id || await db.subjectFor(p.user_id) })))),
             },
         });
-        const row = await db.get(`SELECT * FROM dm_messages WHERE id = ?`, [result.lastInsertRowid]);
-        if (row) row.card = card;
-        return row;
+        return await db.get(`SELECT * FROM dm_messages WHERE id = ?`, [result.lastInsertRowid]);
     });
+    if (row) {
+        row.card = card;
+        if (pending) linkCards.fillLater('dm_messages', row.id, pending);
+    }
+    return row;
 }
 
 /**
@@ -232,7 +235,7 @@ async function getMessages(conversationId, limit = 50, before = null, after = nu
             LIMIT ?
         `, [conversationId, limit]);
     }
-    return await linkCards.hydrate(rows);
+    return await linkCards.hydrate(rows, 'dm_messages');
 }
 
 /**

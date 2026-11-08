@@ -1157,9 +1157,9 @@ class ChatServer {
             } catch { /* no badge */ }
         }
 
-        // A known OpenVibe link gets its card resolved now, before the line is stored: the card is part of the
-        // message the room, the history and the DM API answer all carry (server/chat/link-cards.js).
-        const card = await linkCards.resolve(text);
+        // A known OpenVibe link gets its card resolved now, with a second's budget: the line never waits on another
+        // site. A card that arrives later is filled into the saved row (server/chat/link-cards.js).
+        const { card, pending } = await linkCards.forSend(text);
         if (card) chatMsg.card = card;
 
         // Save to database. The save also records the first chat in the resolved channel
@@ -1181,6 +1181,7 @@ class ChatServer {
                 card,
             });
             if (result.lastInsertRowid) chatMsg.id = Number(result.lastInsertRowid);
+            if (pending && result.lastInsertRowid) linkCards.fillLater('chat_messages', Number(result.lastInsertRowid), pending);
             firstChat = !!result.first_chat;
         } catch (err) {
             // Not saved means not sent: a line everyone saw but history, moderation and replays never

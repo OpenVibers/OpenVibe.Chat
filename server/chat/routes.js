@@ -355,8 +355,8 @@ router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour
             if (tagProfile) chatMsg.tag = tagProfile;
         } catch { /* non-critical */ }
 
-        // A known OpenVibe link gets its card resolved now, before the line is stored.
-        const card = await linkCards.resolve(filtered);
+        // A known OpenVibe link gets its card resolved now, with a second's budget; a slower one fills the row later.
+        const { card, pending } = await linkCards.forSend(filtered);
         if (card) chatMsg.card = card;
 
         // Save to database
@@ -375,6 +375,7 @@ router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour
                 card,
             });
             savedId = result.lastInsertRowid;
+            if (pending && savedId) linkCards.fillLater('chat_messages', Number(savedId), pending);
         } catch { /* non-critical */ }
 
         // Attach message ID and reply context to broadcast
