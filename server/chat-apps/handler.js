@@ -35,14 +35,24 @@ function createHandler({ config, store, providers, network, actor, now = () => D
             const code = privateChat ? (/^\d{6}$/.test(String(m.command ? m.args : m.text || '').trim()) ? String(m.command ? m.args : m.text).trim() : null) : null;
             if (code) {
                 const out = await network.finish({ app: m.app, serviceUserId: ident, code }).catch(() => null);
-                if (out?.ok) return send(m, 'You are linked. Ask me anything — I am your OpenVibe agent here.');
+                if (out?.ok) {
+                    const linkedSubject = out.subject || await resolve({ app: m.app, serviceUserId: ident });
+                    const binding = linkedSubject ? await actor.registerAccount({ subject: linkedSubject,
+                        account: { kind: m.app, id: ident, label: m.userName || `${m.app} account` } }).catch(() => null) : null;
+                    if (binding && !binding.bound) return send(m, 'You are linked. Bind this account to an agent on openvibe.actor before asking here.');
+                    return send(m, 'You are linked. Ask me anything — I am your OpenVibe agent here.');
+                }
                 if (out?.error === 'code') return send(m, out.attemptsLeft ? `That code is not right. ${out.attemptsLeft} ${out.attemptsLeft === 1 ? 'try' : 'tries'} left; after that, send /link again.` : 'That code is not right. Send /link to start again.');
                 if (out?.error === 'expired') return send(m, 'That code expired. Send /link to start again.');
                 if (out?.error === 'conflict') return send(m, 'This chat account is already linked to another OpenVibe account, or that account already has a chat account of this service.');
             }
             return send(m, 'Link your account first: send /link in a direct message.');
         }
-        if (m.command === 'unlink') return unlinkCommand({ message: { ...m, userId: ident }, subject, provider: p, network, forget: resolve.forget });
+        if (m.command === 'unlink') {
+            const out = await unlinkCommand({ message: { ...m, userId: ident }, subject, provider: p, network, forget: resolve.forget });
+            if (out.ok) await actor.unregisterAccount({ subject, account: { kind: m.app, id: ident } }).catch(() => null);
+            return out;
+        }
         if (m.command === 'settings') {
             if (privateChat || !await p.isAdmin({ message: m })) return send(m, 'Only a group or workspace administrator can change these settings.');
             const args = m.args.replace(/mode=|rate=/g, '').trim().split(/\s+/);
@@ -64,7 +74,14 @@ function createHandler({ config, store, providers, network, actor, now = () => D
         if (!privateChat && !await store.rate(`${m.app}:group:${group(m)}`, settings.rate_per_hour)) return;
         const text = (m.command === 'ask' ? m.args.replace(/^text=/, '') : m.text).trim();
         if (!text) return;
-        const started = await actor.start({ subject, text, policy: privateChat ? 'dm' : settings.mode, conversation: conversation(m), deliveryId });
+        let started;
+        try {
+            started = await actor.start({ subject, text, policy: privateChat ? 'dm' : settings.mode, conversation: conversation(m), deliveryId,
+                account: { kind: m.app, id: ident, label: m.userName || `${m.app} account` } });
+        } catch (err) {
+            if (err && err.status === 409) return send(m, 'No agent is listening on this account. Bind it on your agent page at openvibe.actor.');
+            throw err;
+        }
         const shown = new Set();
         const until = now() + 11 * 60_000;
         while (now() < until) {
