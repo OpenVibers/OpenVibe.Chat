@@ -30,6 +30,7 @@ const LIMITS = { title: 200, details: 6000, result: 20000, error: 500, url: 2000
 const PER_PERSON_HOUR = 20;
 const PER_ROOM_DAY = 300;
 const POLL_MS = 10_000;
+const ACTOR_TASK = /^tsk_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 class WorkError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
 const fail = (status, code, message) => { throw new WorkError(status, code, message); };
@@ -44,7 +45,7 @@ function shape(t, room) {
     try { sources = JSON.parse(t.sources || '[]'); } catch { sources = []; }
     return {
         id: Number(t.id), title: t.title, details: t.details || '', kind: t.kind, status: t.status, via: t.via,
-        quick: QUICK.has(t.kind),
+        quick: QUICK.has(t.kind), actor_task: t.actor_task || null,
         requested_by: { id: Number(t.requested_by), username: t.requester_username || null, name: t.requester_name || t.requester_username || 'someone' },
         runner: t.runner || null, result: t.result || null, result_url: t.result_url || null, sources: Array.isArray(sources) ? sources : [],
         error: t.error || null, cost_usd: t.cost_usd == null ? null : Number(t.cost_usd), how: t.how || null,
@@ -81,6 +82,18 @@ async function get(room, user, id) {
     const t = await row(room, id);
     if (!t) fail(404, 'work.not_found', 'No such task in this room');
     return shape(t, room);
+}
+
+/**
+ * The newest task in a chat when OpenVibe.Actor holds it: its thread is the conversation whose canvas Chat draws
+ * beside a Vibe chat (plan HO9). A newer task a worker took, or one Actor refused, has no thread, so there is nothing
+ * to draw beside it even when an older Actor task had a canvas.
+ */
+async function newestActor(room, user) {
+    await mustRead(room, user);
+    const t = await db.get(`${TASK_SELECT} WHERE t.room_id = ? ORDER BY t.id DESC LIMIT 1`, [room.id]);
+    if (!t || !t.actor_task || !ACTOR_TASK.test(String(t.actor_task))) return null;
+    return { id: Number(t.id), thread: String(t.actor_task), status: t.status };
 }
 
 /** The agent's step for this task (design 2026-11-07): a title, an outcome and a link, never the person's words. */
@@ -369,4 +382,4 @@ function stop() { if (timer) clearInterval(timer); timer = null; }
 
 function _setTokens(t) { tokens = t; }
 
-module.exports = { KINDS, QUICK, WorkError, list, get, add, cancel, claim, report, runOnComputer, poll, announce, start, stop, shape, _setTokens };
+module.exports = { KINDS, QUICK, WorkError, list, get, newestActor, add, cancel, claim, report, runOnComputer, poll, announce, start, stop, shape, _setTokens };
