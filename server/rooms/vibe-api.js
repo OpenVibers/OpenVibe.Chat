@@ -67,6 +67,13 @@ const wire = (m) => {
         ...(m.vibe_model ? { model: m.vibe_model } : {}), ...(results.length ? { results } : {}) };
 };
 const chatOf = (room) => (room ? { slug: room.slug, name: room.name || 'Vibe', url: `https://openvibe.chat/vibe/${encodeURIComponent(room.slug)}` } : null);
+const siteOf = (req) => {
+    try {
+        const host = new URL(String(req.get('origin') || '')).hostname.toLowerCase();
+        // Any OpenVibe site (the Dock runs on all of them): openvibe.<site>, or a subdomain of one.
+        return /^(?:[a-z0-9-]+\.)?openvibe\.[a-z]{2,15}$/.test(host) ? host : null;
+    } catch { return null; }
+};
 
 async function latest(user) {
     // The chat they last wrote in (vibe.current): an answer arriving later in an older chat does not take its place.
@@ -82,6 +89,11 @@ router.get('/chat', personOnly, async (req, res) => {
     const by = await compare.answers(room, rows.filter((m) => !m.ai_member_id).map((m) => Number(m.id)));
     return res.set('Cache-Control', 'private, no-store').json({ chat: { ...chatOf(room), ...(await compare.settings(room)) },
         messages: rows.filter((m) => !m.is_deleted).map((m) => ({ ...wire(m), ...(by.has(Number(m.id)) ? { answers: by.get(Number(m.id)) } : {}) })) });
+});
+
+router.get('/conversations', personOnly, async (req, res) => {
+    const conversations = await vibe.list(req.user, { limit: req.query.limit });
+    return res.set('Cache-Control', 'private, no-store').json({ conversations, count: await vibe.count(req.user) });
 });
 
 router.get('/models', personOnly, async (_req, res) => {
@@ -188,14 +200,14 @@ router.post('/ask', personOnly, (req, res, next) => (req.body && req.body.models
             if (last && Date.now() - moved < SIX_HOURS) room = last;
         }
         if (!room && b.models) {
-            room = await vibe.createRoom(req.user, message);
+            room = await vibe.createRoom(req.user, message, { site: siteOf(req) });
             try {
                 const posted = await compare.ask(room, req.user, message, b.models, { system_prompt: b.system_prompt, temperature: b.temperature });
                 return res.status(201).json({ chat: chatOf(room), message: wire(posted) });
             } catch (err) { await vibe.erase(room.id); throw err; }
         }
         if (!room) {
-            const out = await vibe.start(req.user, message, { timezone });
+            const out = await vibe.start(req.user, message, { timezone, site: siteOf(req) });
             const full = await vibe.ownChat(out.room.slug, req.user);
             return res.status(201).json({ chat: chatOf(full || out.room), message: wire(out.message) });
         }

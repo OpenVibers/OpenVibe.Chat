@@ -97,7 +97,7 @@ async function setEngine(user, own) {
     return { own: false, label: null };
 }
 
-async function createRoom(user, title) {
+async function createRoom(user, title, { site = null } = {}) {
     if (!user) fail(401, 'vibe.sign_in', 'Sign in to chat with Vibe');
     if (!enabled()) fail(503, 'vibe.off', 'Vibe is resting right now. Try again later.');
     const engine = await engineOf(user);
@@ -105,8 +105,8 @@ async function createRoom(user, title) {
         // The oldest chats beyond the limit go, so starting one never fails on it.
         const extra = await db.all('SELECT id FROM rooms WHERE owner_id = ? AND assistant = 1 ORDER BY COALESCE(last_message_at, created_at) DESC OFFSET ?', [user.id, MAX_CHATS - 1]);
         for (const r of extra) await erase(r.id);
-        const r = await db.run("INSERT INTO rooms (slug, name, kind, visibility, owner_id, owner_subject, assistant) VALUES (?, ?, 'community', 'private', ?, ?, 1)",
-            [newSlug(), titleOf(title), user.id, user.subject_id || null]);
+        const r = await db.run("INSERT INTO rooms (slug, name, kind, visibility, owner_id, owner_subject, assistant, vibe_origin_site) VALUES (?, ?, 'community', 'private', ?, ?, 1, ?)",
+            [newSlug(), titleOf(title), user.id, user.subject_id || null, site]);
         const roomId = Number(r.lastInsertRowid);
         await db.run("INSERT INTO room_members (room_id, user_id, role, last_seen_at) VALUES (?, ?, 'owner', ov_now())", [roomId, user.id]);
         await db.run('INSERT INTO room_ai_members (room_id, name, handle, persona, memory, created_by_subject, engine, engine_subject, engine_label) VALUES (?, ?, ?, \'\', \'\', ?, ?, ?, ?)',
@@ -116,10 +116,10 @@ async function createRoom(user, title) {
     return await db.get('SELECT * FROM rooms WHERE id = ?', [id]);
 }
 
-async function start(user, text, { timezone = null } = {}) {
+async function start(user, text, { timezone = null, site = null } = {}) {
     const body = String(text || '').replace(/\r\n/g, '\n').trim();
     if (user && enabled() && !body) fail(422, 'rooms.empty', 'Write something first');
-    const room = await createRoom(user, body);
+    const room = await createRoom(user, body, { site });
     const id = room.id;
     try {
         const message = await rooms.post(room, user, body, { timezone });
@@ -182,9 +182,20 @@ async function startWork(user, text, mode) {
 async function list(user, { limit = 100 } = {}) {
     if (!user) return [];
     const lim = Math.min(MAX_CHATS, Math.max(1, Number(limit) || 100));
-    const rows = await db.all(`SELECT slug, name, last_message_at, created_at FROM rooms
-        WHERE owner_id = ? AND assistant = 1 AND archived_at IS NULL ORDER BY COALESCE(last_message_at, created_at) DESC LIMIT ?`, [user.id, lim]);
-    return rows.map((r) => ({ slug: r.slug, name: r.name, last_message_at: r.last_message_at || r.created_at, created_at: r.created_at }));
+    const rows = await db.all(`SELECT r.slug, r.name, r.last_message_at, r.created_at, r.vibe_origin_site,
+            (SELECT m.message FROM room_messages m WHERE m.room_id = r.id AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT 1) AS last_line,
+            (SELECT m.created_at FROM room_messages m WHERE m.room_id = r.id AND m.is_deleted = 0 AND m.ai_member_id IS NOT NULL ORDER BY m.id DESC LIMIT 1) AS last_answer_at
+        FROM rooms r
+        WHERE r.owner_id = ? AND r.assistant = 1 AND r.archived_at IS NULL ORDER BY COALESCE(r.last_message_at, r.created_at) DESC LIMIT ?`, [user.id, lim]);
+    return rows.map((r) => ({ slug: r.slug, name: r.name, last_message_at: r.last_message_at || r.created_at, created_at: r.created_at,
+        last_line: r.last_line ? String(r.last_line).replace(/\s+/g, ' ').slice(0, 160) : null,
+        last_answer_at: r.last_answer_at || null, site: r.vibe_origin_site || null }));
+}
+
+async function count(user) {
+    if (!user) return 0;
+    const row = await db.get('SELECT COUNT(*) AS n FROM rooms WHERE owner_id = ? AND assistant = 1 AND archived_at IS NULL', [user.id]);
+    return Number(row && row.n || 0);
 }
 
 /**
@@ -272,4 +283,4 @@ async function countReply(user) {
         ON CONFLICT (user_id, day) DO UPDATE SET replies = vibe_usage.replies + 1`, [user.id, today()]);
 }
 
-module.exports = { VIBE, current, MAX_CHATS, TITLE_MAX, SEARCH_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, search, ownChat, rename, remove, retry, lastExchange, repliesToday, countReply, engineOf: async (user) => { const e = await engineOf(user); return { own: e.own, label: e.label, ...(e.own ? { you: youOf(e.cred) } : {}) }; }, setEngine };
+module.exports = { VIBE, current, MAX_CHATS, TITLE_MAX, SEARCH_MAX, DEFAULT_TITLE, MODES, VibeError, enabled, isVibeRoom, titleOf, start, startWork, work, createRoom, erase: (roomId) => db.tx(() => erase(roomId)), list, count, search, ownChat, rename, remove, retry, lastExchange, repliesToday, countReply, engineOf: async (user) => { const e = await engineOf(user); return { own: e.own, label: e.label, ...(e.own ? { you: youOf(e.cred) } : {}) }; }, setEngine };
