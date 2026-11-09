@@ -125,6 +125,7 @@ function publicServer(s, extra = {}) {
         official: s.slug === OFFICIAL_SLUG, members: Number(s.member_count) || 0, created_at: s.created_at,
         category: s.category || null, picture_url: s.picture_url || null, template: s.template || null, ...extra,
         rules: typeof s.rules === 'string' && s.rules.trim() ? s.rules : null, self_roles: selfRolesOf(s),
+        featured: !!s.featured_at,
     };
 }
 
@@ -326,6 +327,21 @@ async function setRole(server, actor, targetUserId, role) {
     return role === 'none' ? null : role;
 }
 
+/** The public servers staff have featured, newest first (Explore's row above the categories). */
+async function featured({ limit = 12 } = {}) {
+    const lim = Math.min(50, Math.max(1, Number(limit) || 12));
+    return (await db.all(`SELECT * FROM chat_servers WHERE visibility = 'public' AND archived_at IS NULL AND featured_at IS NOT NULL
+        ORDER BY featured_at DESC, member_count DESC, id DESC LIMIT ?`, [lim])).map((s) => publicServer(s));
+}
+
+/** Feature or unfeature a server on Explore. OpenVibe staff only (the plan, 2026-11-09, stage V3). */
+async function setFeatured(server, actor, on) {
+    if (!isStaff(actor)) fail(403, 'servers.staff', 'Only OpenVibe staff feature a server');
+    if (on) await db.run('UPDATE chat_servers SET featured_at = COALESCE(featured_at, ov_now()), updated_at = ov_now() WHERE id = ?', [server.id]);
+    else await db.run('UPDATE chat_servers SET featured_at = NULL, updated_at = ov_now() WHERE id = ?', [server.id]);
+    return await byId(server.id);
+}
+
 /** The server's people by rank (blocked last, only for moderators). A member's picked roles ride along. */
 async function members(server, { blocked = false, limit = 1000, subjects = false } = {}) {
     const order = `CASE m.role ${Object.entries(RANK).map(([r, n]) => `WHEN '${r}' THEN ${n}`).join(' ')} ELSE 9 END`;
@@ -481,5 +497,6 @@ module.exports = {
     create, list, join, leave, setRole, members, update, createChannel, updateChannel, deleteChannel,
     createInvite, invites, revokeInvite, inviteByCode, archive,
     selfRolesOf, hasOnboarding, memberRoles, setMemberRoles,
+    featured, setFeatured,
     SLUG_RE, ROLES, RANK, MAX_SERVERS_PER_OWNER, MAX_CHANNELS, OFFICIAL_SLUG, MAX_RULES, MAX_SELF_ROLES,
 };

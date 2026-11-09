@@ -157,6 +157,10 @@
 .oc-card > .oc-button { text-align: center; }
 .oc-server-card--new { justify-content: center; border-style: dashed; }
 
+/* Explore's featured row, above the categories; with none featured the row is not in the page. */
+.oc-featured { margin: 4px 0 16px; }
+.oc-featured-cards { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+
 /* The sheet: a template, a name and a picture, public or private. */
 .oc-sheet { margin: 18px 0 0; border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel); }
 .oc-sheet > summary { display: block; padding: 14px 18px; cursor: pointer; font-weight: 700; list-style: none; }
