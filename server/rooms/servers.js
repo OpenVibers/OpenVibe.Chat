@@ -104,7 +104,8 @@ function publicServer(s, extra = {}) {
     if (!s) return null;
     return {
         id: Number(s.id), slug: s.slug, name: s.name, description: s.description || null, visibility: s.visibility,
-        official: s.slug === OFFICIAL_SLUG, members: Number(s.member_count) || 0, created_at: s.created_at, ...extra,
+        official: s.slug === OFFICIAL_SLUG, members: Number(s.member_count) || 0, created_at: s.created_at,
+        category: s.category || null, picture_url: s.picture_url || null, template: s.template || null, ...extra,
     };
 }
 
@@ -113,6 +114,7 @@ function publicChannel(r, extra = {}) {
     return {
         slug: r.channel_slug, room: r.slug, name: r.name, topic: r.topic || null, kind: r.kind === 'call' ? 'voice' : 'text',
         position: Number(r.position) || 0, message_count: Number(r.message_count) || 0, last_message_at: r.last_message_at || null,
+        category: r.category || null,
         ...(r.kind === 'call' ? { call_channel: `room-${r.slug}`, join_role: rooms.joinRoleOf(r) } : {}), ...extra,
     };
 }
@@ -158,7 +160,7 @@ async function insertChannel(server, user, { name, kind, topic = null, position 
     return await db.get('SELECT * FROM rooms WHERE id = ?', [r.lastInsertRowid]);
 }
 
-async function create(user, { name, slug, description, visibility = 'public' } = {}) {
+async function create(user, { name, slug, description, visibility = 'public', category = null, picture_url = null, template = null } = {}) {
     if (!user) fail(401, 'servers.sign_in', 'Sign in to create a server');
     if (rooms.siteBanned(user)) fail(403, 'servers.banned', 'Your account is banned from chat');
     const n = cleanName(name, 2, 40);
@@ -172,13 +174,18 @@ async function create(user, { name, slug, description, visibility = 'public' } =
     const owned = Number((await db.get('SELECT COUNT(*) AS n FROM chat_servers WHERE owner_id = ? AND archived_at IS NULL', [user.id]) || {}).n) || 0;
     if (owned >= MAX_SERVERS_PER_OWNER && !isStaff(user)) fail(429, 'servers.too_many', `You can own up to ${MAX_SERVERS_PER_OWNER} servers`);
     if (await db.get('SELECT 1 FROM chat_servers WHERE slug = ?', [s])) fail(409, 'servers.taken', 'That server address is taken');
+    // The template decides the channels a new server starts with (server/rooms/server-templates.js); a blank
+    // server keeps #general and the Lounge.
+    const tpl = require('./server-templates').byId(template);
+    const cat = require('./server-templates').category(category);
+    const pic = picture_url ? String(picture_url).slice(0, 500) : null;
     const id = await db.tx(async () => {
-        const r = await db.run('INSERT INTO chat_servers (slug, name, description, visibility, owner_id, owner_subject, member_count) VALUES (?, ?, ?, ?, ?, ?, 1)',
-            [s, n, d, visibility, user.id, user.subject_id || null]);
+        const r = await db.run('INSERT INTO chat_servers (slug, name, description, visibility, owner_id, owner_subject, member_count, category, picture_url, template) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?)',
+            [s, n, d, visibility, user.id, user.subject_id || null, cat, pic, tpl ? tpl.id : null]);
         const server = await db.get('SELECT * FROM chat_servers WHERE id = ?', [r.lastInsertRowid]);
         await db.run("INSERT INTO chat_server_members (server_id, user_id, role) VALUES (?, ?, 'owner')", [server.id, user.id]);
-        await insertChannel(server, user, { name: 'general', kind: 'text', topic: 'Say hello', position: 0 });
-        await insertChannel(server, user, { name: 'Lounge', kind: 'voice', position: 0 });
+        const channels = (tpl ? tpl.channels : [{ name: 'general', kind: 'text', topic: 'Say hello' }, { name: 'Lounge', kind: 'voice' }]);
+        for (const [i, c] of channels.entries()) await insertChannel(server, user, { name: c.name, kind: c.kind, topic: c.topic || (i === 0 ? 'Say hello' : null), position: i });
         await db.run("INSERT INTO room_members (room_id, user_id, role, last_read_id, last_seen_at) SELECT id, ?, 'member', 0, ov_now() FROM rooms WHERE server_id = ?", [user.id, server.id]);
         return Number(server.id);
     });
@@ -303,7 +310,7 @@ async function setRole(server, actor, targetUserId, role) {
 /** The server's people by rank (blocked last, only for moderators). */
 async function members(server, { blocked = false, limit = 1000, subjects = false } = {}) {
     const order = `CASE m.role ${Object.entries(RANK).map(([r, n]) => `WHEN '${r}' THEN ${n}`).join(' ')} ELSE 9 END`;
-    return await db.all(`SELECT m.user_id${subjects ? ', u.subject_id' : ''}, m.role, m.joined_at, u.username, u.display_name, u.profile_color FROM chat_server_members m
+    return await db.all(`SELECT m.user_id, m.role, m.joined_at, u.username, u.display_name, u.profile_color, u.subject_id, u.avatar_url FROM chat_server_members m
         LEFT JOIN ctx_users u ON u.id = m.user_id WHERE m.server_id = ? ${blocked ? '' : "AND m.role != 'blocked'"}
         ORDER BY ${order}, lower(u.username) LIMIT ?`, [server.id, Math.min(5000, Math.max(1, Number(limit) || 1000))]);
 }

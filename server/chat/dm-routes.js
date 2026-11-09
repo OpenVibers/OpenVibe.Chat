@@ -18,8 +18,10 @@ const router = express.Router();
 const { requireAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const dm = require('./dm');
+const contacts = require('./contacts');
 const ctx = require('../live-context');
 const prefStores = require('../prefs/stores');
+const database = require('../db/database');
 const presence = require('../presence');
 const { idParam } = require('./route-params');
 
@@ -46,6 +48,25 @@ async function withPresence(viewerSubject, conversations) {
 
 // All DM routes require authentication
 router.use(requireAuth);
+
+// A view choice is private to the signed-in participant and this conversation.
+router.get('/conversations/:id/view', async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || !await dm.isParticipant(id, req.user.id)) return res.status(404).json({ error: 'Conversation not found' });
+    const saved = await database.get('SELECT view FROM dm_view_preferences WHERE user_id = ? AND conversation_id = ?', [req.user.id, id]);
+    const participants = await dm.getParticipants(id);
+    const defaults = await prefStores.settingsOf(prefStores.preferences, req.user.subject_id);
+    const kind = participants.length <= 2 ? 'one_to_one' : 'group';
+    const view = saved?.view || (defaults.view_defaults && defaults.view_defaults[kind]) || (kind === 'one_to_one' ? 'bubbles' : 'room');
+    res.set('Cache-Control', 'private, no-store').json({ conversation_id: id, view });
+});
+router.put('/conversations/:id/view', async (req, res) => {
+    const id = Number(req.params.id), view = req.body && req.body.view;
+    if (!Number.isSafeInteger(id) || !await dm.isParticipant(id, req.user.id)) return res.status(404).json({ error: 'Conversation not found' });
+    if (view !== 'bubbles' && view !== 'room') return res.status(400).json({ error: 'view must be bubbles or room' });
+    await database.run('INSERT INTO dm_view_preferences (user_id, conversation_id, view, updated_at) VALUES (?, ?, ?, ov_now()) ON CONFLICT (user_id, conversation_id) DO UPDATE SET view = EXCLUDED.view, updated_at = ov_now()', [req.user.id, id, view]);
+    res.set('Cache-Control', 'private, no-store').json({ conversation_id: id, view });
+});
 
 // Ids are validated before the handler (and its queries) see them, one rule per param name.
 router.param('id', idParam('invalid conversation id'));
@@ -415,6 +436,61 @@ router.get('/users/search', async (req, res) => {
         const users = await dm.searchUsers(q, req.user.id);
         res.json({ users });
     } catch (err) {
+        res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// ── Friends and requests (the side column on Home) ─────────────
+
+// The people you talk to: your friends and the requests that wait for you.
+router.get('/contacts', async (req, res) => {
+    try {
+        const list = await contacts.of(req.user.id);
+        res.set('Cache-Control', 'private, no-store').json(list);
+    } catch (err) {
+        console.error('[Contacts] List error:', err.message);
+        res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// Ask someone to be a friend (or accept them, when they asked first).
+router.post('/contacts', manageLimit, async (req, res) => {
+    try {
+        const username = String((req.body && req.body.username) || '').trim();
+        if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) return res.status(400).json({ error: 'That is not a username' });
+        const target = await ctx.getUserByUsername(username) || await ctx.ensureUserByUsername(username).catch(() => null);
+        if (!target) return res.status(404).json({ error: 'Nobody on OpenVibe goes by that name' });
+        if (Number(target.id) === Number(req.user.id)) return res.status(400).json({ error: 'That is you' });
+        if (await dm.hasBlocked(req.user.id, target.id) || await dm.hasBlocked(target.id, req.user.id)) {
+            return res.status(403).json({ error: 'You cannot add this person' });
+        }
+        const status = await contacts.add(req.user.id, target.id);
+        res.json({ ok: true, status });
+    } catch (err) {
+        console.error('[Contacts] Add error:', err.message);
+        res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// Accept a request.
+router.post('/contacts/:userId/accept', manageLimit, async (req, res) => {
+    try {
+        const ok = await contacts.accept(req.user.id, Number(req.params.userId));
+        if (!ok) return res.status(404).json({ error: 'No request from that person' });
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[Contacts] Accept error:', err.message);
+        res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// Drop a friend or a request.
+router.delete('/contacts/:userId', manageLimit, async (req, res) => {
+    try {
+        await contacts.remove(req.user.id, Number(req.params.userId));
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[Contacts] Remove error:', err.message);
         res.status(500).json({ error: 'Failed' });
     }
 });

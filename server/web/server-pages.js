@@ -17,6 +17,7 @@ const { esc } = require('./layout');
 const ui = require('./ui');
 const { ICONS: IC } = require('./icons');
 const rooms = require('../rooms/rooms');
+const shell = require('./shell');
 const servers = require('../rooms/servers');
 const ctx = require('../live-context');
 
@@ -49,37 +50,117 @@ function mountServerPages(router, h) {
     const serverRow = (s) => `<li class="oc-row${s.unread ? ' oc-unread' : ''}"><a href="/s/${esc(s.slug)}">${ui.serverMark(s)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(s.name)}</strong>${s.official ? '<span class="oc-badge oc-badge-official">official</span>' : ''}${s.visibility === 'private' ? `<span class="oc-row-lock" title="Private">${IC.lock}<span class="oc-sr">private</span></span>` : ''}</span>`
         + `<span class="oc-row-sub">${esc(s.description || `${s.members} member${s.members === 1 ? '' : 's'}`)}${s.unread ? `<span class="oc-dot" aria-label="${s.unread} new">${s.unread > 9 ? '9+' : s.unread}</span>` : ''}</span></span></a></li>`;
 
-    // ── The directory ──
+    // ── Explore: the servers on OpenVibe, and the sheet that starts one ──
     router.get('/servers', async (req, res) => {
         const actor = await viewerOf(req);
         const me = userOf(actor);
         const { public: pub, mine } = await servers.list(me);
-        // Your servers are listed once, in their own list.
+        const templates = require('../rooms/server-templates');
+        const q = String(req.query.q || '').trim().toLowerCase();
+        const cat = String(req.query.category || '');
+        // Every server the person may see: the ones they are in, then the public ones (the official server is
+        // always first). "No other public server yet." is never shown: the official server and Start a server
+        // are always there.
         const yours = new Set(mine.map((s) => s.slug));
-        const others = pub.filter((s) => !yours.has(s.slug));
-        const create = me ? `<form class="oc-form oc-grid-form oc-create" id="oc-new-server" method="post" action="/servers/new">
+        const all = [...mine, ...pub.filter((s) => !yours.has(s.slug))];
+        const listed = all.filter((s) => (!q || `${s.name} ${s.description || ''}`.toLowerCase().includes(q))
+            && (!cat || s.category === cat));
+        // How many of each server's people are here now (Network's presence, one read, cached 30 s).
+        const online = {};
+        if (me && listed.length) {
+            const ids = listed.map((s) => Number(s.id)).filter((n) => Number.isInteger(n));
+            const rows = ids.length ? await require('../db/database').all(`SELECT s.slug AS slug, u.subject_id AS subject FROM chat_servers s
+                JOIN chat_server_members m ON m.server_id = s.id AND m.role != 'blocked'
+                JOIN ctx_users u ON u.id = m.user_id WHERE s.id IN (${ids.map(() => '?').join(',')})`, ids) : [];
+            const people = rows.map((r) => ({ slug: r.slug, subject_id: r.subject }));
+            await require('../presence').attachTo(me.subject_id, people);
+            for (const p of people) if (p.presence) online[p.slug] = (online[p.slug] || 0) + 1;
+        }
+        const chip = (name, href) => `<a class="oc-chip${name === cat ? ' is-active' : ''}" href="${esc(href)}">${esc(name || 'All')}</a>`;
+        // Chat never writes ?q= back into a page (test/security-private.test.js): the chips do not carry it.
+        const chips = `<nav class="oc-chips" aria-label="Categories">${chip('', '/servers')}${templates.CATEGORIES.map((c) => chip(c, `/servers?category=${encodeURIComponent(c)}`)).join('')}</nav>`;
+        // One server as a card: its banner, its icon, its name, one line about it, its people, and a way in.
+        const card = (sv) => {
+            const isMember = yours.has(sv.slug);
+            const join = isMember
+                ? `<a class="oc-button oc-button--quiet" href="/s/${esc(sv.slug)}">Open</a>`
+                : (me ? `<form method="post" action="/s/${esc(sv.slug)}/join"><button type="submit">Join</button></form>`
+                    : `<a class="oc-button" href="/auth/login?next=${encodeURIComponent(`/s/${sv.slug}`)}">Sign in to join</a>`);
+            return `<article class="oc-card oc-server-card">
+<div class="oc-card-banner" style="--oc-hue:${hueOf(sv.slug)}" aria-hidden="true"></div>
+<span class="oc-srv-icon oc-srv-icon--row" style="--oc-hue:${hueOf(sv.slug)}" aria-hidden="true">${esc(initials(sv.name))}</span>
+<h3>${esc(sv.name)}${sv.official ? ' <span class="oc-badge oc-badge-official">official</span>' : ''}${sv.category ? ` <span class="oc-badge">${esc(sv.category)}</span>` : ''}</h3>
+<p class="oc-card-line">${esc(sv.description || 'A server on OpenVibe.Chat.')}</p>
+<p class="oc-muted oc-card-meta">${Number(sv.members) || 0} member${Number(sv.members) === 1 ? '' : 's'}${online[sv.slug] ? ` · ${online[sv.slug]} online` : ''}</p>
+${join}</article>`;
+        };
+        const startCard = `<article class="oc-card oc-server-card oc-server-card--new"><h3>Start a server</h3><p class="oc-card-line">A template, a name and a picture: under ten seconds.</p><a class="oc-button" href="#oc-new-server">Start a server</a></article>`;
+        // The sheet: a template first, then a name and a picture, then public or private.
+        const sheet = me ? `<details class="oc-sheet" id="oc-new-server"><summary class="oc-button">Start a server</summary>
+<form class="oc-form oc-sheet-form" method="post" action="/servers/new" enctype="multipart/form-data">
 <h2>Start a server</h2>
-<p class="oc-muted oc-small">Text channels to write in and voice channels to talk in, with one membership and one set of roles for all of them. It starts with #general and a voice Lounge.</p>
-<label>Name <input name="name" required minlength="2" maxlength="40" placeholder="Saturday Raiders"></label>
-<label>Description <input name="description" maxlength="300" placeholder="What it is for (optional)"></label>
-<label class="oc-check"><input type="checkbox" name="private" value="1"> Private: only people with an invite can find, read or join it</label>
+<fieldset class="oc-sheet-step"><legend>1. What is it for?</legend>
+<div class="oc-templates">${templates.TEMPLATES.map((t, i) => `<label class="oc-template"><input type="radio" name="template" value="${esc(t.id)}"${i === 0 ? ' checked' : ''}><span class="oc-template-body"><strong>${esc(t.name)}</strong><span class="oc-muted">${esc(t.description)}</span><span class="oc-template-channels">${t.channels.map((c) => esc(c.kind === 'voice' ? '🔊 ' : '# ') + esc(c.name)).join(' · ')}</span></span></label>`).join('')}</div>
+</fieldset>
+<fieldset class="oc-sheet-step"><legend>2. Its name and picture</legend>
+<div class="oc-sheet-fields">
+<label class="oc-field"><span>Name</span><input name="name" required minlength="2" maxlength="40" placeholder="Saturday Raiders"></label>
+<label class="oc-field"><span>Category</span><select name="category"><option value="">No category</option>${templates.CATEGORIES.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select></label>
+<label class="oc-field oc-field--wide"><span>Description</span><input name="description" maxlength="300" placeholder="What it is for (optional)"></label>
+<label class="oc-field oc-field--wide"><span>Picture</span><input type="file" name="picture" accept="image/png,image/jpeg,image/webp"><small class="oc-muted">PNG, JPEG or WebP. Without one, its initials on its colour.</small></label>
+</div>
+</fieldset>
+<fieldset class="oc-sheet-step"><legend>3. Who may find it?</legend>
+<div class="oc-seg" role="radiogroup"><label><input type="radio" name="visibility" value="public" checked><span>Public</span></label><label><input type="radio" name="visibility" value="private"><span>Private</span></label></div>
+<p class="oc-muted oc-small">A public server is listed in Explore and anyone may join it. A private one is joined through an invite.</p>
+</fieldset>
 <p><button type="submit">Create server</button></p>
-</form>` : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=%2Fservers">Sign in with OpenVibe</a> to start or join a server.</p>`;
+</form></details>` : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=%2Fservers">Sign in with OpenVibe</a> to start or join a server.</p>`;
+        const side = `<div class="oc-side-top"><a class="oc-side-find" href="#oc-new-server">${IC.plus}<span>Start a server</span></a></div>
+<section class="oc-side-sec"><h2 class="oc-side-group">Your servers</h2>
+${mine.length ? `<ul class="oc-side-list">${mine.map((sv) => `<li class="oc-row"><a href="/s/${esc(sv.slug)}">${ui.serverMark(sv)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(sv.name)}</strong></span><span class="oc-row-sub">${Number(sv.members) || 0} member${Number(sv.members) === 1 ? '' : 's'}</span></span></a></li>`).join('')}</ul>` : `<p class="oc-side-empty oc-muted">You are in no servers yet.</p>`}
+</section>`;
         await page(req, res, 200, {
-            actor, title: 'Servers', path: '/servers', active: 'servers', robots: 'index, follow', footer: 'compact',
+            actor, shell: true, title: 'Explore servers', path: '/servers', active: 'servers', robots: 'index, follow', footer: 'none',
             description: 'Servers on OpenVibe.Chat: a place for a group, with text and voice channels, roles and invites.',
-            body: `${ui.head({ title: 'Servers', sub: 'Groups with text and voice channels, roles and invites', actions: me ? [`<a class="oc-icon-btn" href="#oc-new-server" aria-label="Start a server" title="Start a server">${IC.plus}</a>`] : [] })}${errorOf(req)}
-${mine.length ? `<h2 class="oc-list-head">Your servers</h2><ul class="oc-list">${mine.map(serverRow).join('')}</ul>` : ''}
-<h2 class="oc-list-head">${mine.length ? 'More public servers' : 'Public servers'}</h2>${others.length ? `<ul class="oc-list">${others.map(serverRow).join('')}</ul>` : `<p class="oc-rooms-empty oc-muted">${mine.length ? 'No other public server yet.' : 'No public server yet. Start one: it can be public, or private to the people you invite.'}</p>`}
-${create}`,
+            body: shell.shell({
+                rail: shell.rail({ explore: true, dmUnread: me ? await require('../chat/dm').getTotalUnread(me.id) : 0, servers: mine.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                side, sideLabel: 'Your servers',
+                main: `${ui.head({ title: 'Explore servers', sub: `${listed.length} server${listed.length === 1 ? '' : 's'}` })}
+<form class="oc-find" method="get" action="/servers" role="search">${IC.search}<label for="oc-server-q" class="oc-sr">Find a server</label><input id="oc-server-q" name="q" value="" placeholder="Find a server" autocomplete="off"><button type="submit" class="oc-send" aria-label="Find" title="Find">${IC.search}</button></form>
+${chips}
+<div class="oc-cards">${listed.map(card).join('')}${startCard}</div>
+${sheet}`,
+                mainLabel: 'Explore servers',
+                page: true,
+            }),
         });
     });
 
-    router.post('/servers/new', formLimit, sameSite, orError(async (req, res) => {
+    // The Start sheet's picture (multipart; the other fields are ordinary form fields).
+    const serverPicture = require('multer')({ storage: require('multer').memoryStorage(), limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 12 } }).single('picture');
+
+    router.post('/servers/new', serverPicture, formLimit, sameSite, orError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         const b = req.body || {};
-        const s = await servers.create(actor.user, { name: b.name, description: b.description, visibility: b.private === '1' ? 'private' : 'public' });
-        res.redirect(303, `/s/${s.slug}`);
+        // A picture, when one was sent: OpenVibe.Pics, as the person (server/rooms/pictures.js).
+        let picture = null;
+        try {
+            const pics = require('../rooms/pictures');
+            if (pics.enabled() && req.file && req.file.buffer) {
+                const up = await pics.upload({ token: req.cookies && req.cookies.ov_token, buffer: req.file.buffer, contentType: req.file.mimetype, title: `Server: ${String(b.name || '').slice(0, 40)}`, ip: req.ip });
+                if (up && up.url) picture = up.url;
+            }
+        } catch { /* no picture: the monogram tile is the icon */ }
+        const s = await servers.create(actor.user, {
+            name: b.name, description: b.description,
+            // The sheet sends visibility; the older form sent private=1.
+            visibility: (b.visibility === 'private' || b.private === '1') ? 'private' : 'public',
+            category: b.category, picture_url: picture, template: b.template,
+        });
+        // The invite link shows at the end, with Copy and Share (the sheet's last step).
+        const invite = await servers.createInvite(s, actor.user, { max_uses: null, expires_hours: null }).catch(() => null);
+        res.redirect(303, `/s/${s.slug}${invite && invite.code ? `?invite=${encodeURIComponent(invite.code)}` : ''}`);
     }));
 
     /** The server behind :slug for this viewer (404 page when they may not read it). */
@@ -107,18 +188,24 @@ ${create}`,
         const msgs = await rooms.history(room, { limit: 60 });
         if (me && rcan.role) await rooms.markRead(room, me);
         const mine = me ? (await servers.list(me)).mine : [];
+        const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
         const people = await servers.members(server, { limit: 300 });
+        // The people's presence (Network, cached 30 s) and their mark.
+        await require('../presence').attachTo(me ? me.subject_id : null, people.map((p) => ({ ...p, id: p.user_id })));
         const isVoice = room.kind === 'call';
         const callReady = isVoice && !!require('../config').calls.enabled;
         const callOf = (c) => { try { return require('../rooms/routes').callOf({ kind: 'call', slug: c.room }) || null; } catch { return null; } };
-        const chanLink = (c) => {
-            const here = c.slug === pick.slug;
-            const unread = !here && c.unread ? `<span class="oc-chan-dot" aria-label="${c.unread} unread">${c.unread > 99 ? '99+' : c.unread}</span>` : '';
-            const inCall = c.kind === 'voice' ? (callOf(c) || {}).participants : 0;
-            return `<li><a class="oc-chan${c.kind === 'voice' ? ' oc-chan-voice' : ''}${here ? ' is-active' : ''}${unread ? ' is-unread' : ''}" href="/s/${esc(server.slug)}/${esc(c.slug)}"${here ? ' aria-current="page"' : ''}>${c.kind === 'voice' ? VOICE_ICON : '<span class="oc-chan-hash" aria-hidden="true">#</span>'}<span class="oc-chan-name">${esc(c.name)}</span>${inCall ? `<span class="oc-muted oc-chan-in">${inCall} in</span>` : ''}${unread}</a></li>`;
-        };
-        const texts = chans.filter((c) => c.kind === 'text');
-        const voices = chans.filter((c) => c.kind === 'voice');
+        // The people in each voice channel (the plan: "voice channels with who is in them").
+        const occupants = {};
+        for (const c of chans) if (c.kind === 'voice') occupants[c.slug] = ((callOf(c) || {}).people || []).map((p) => ({ username: p.username, display_name: p.display_name }));
+        // The channel categories: a channel's own category, or the kind's default.
+        const categories = [];
+        const byCat = new Map();
+        for (const c of chans) {
+            const name = c.category || (c.kind === 'voice' ? 'Voice channels' : 'Text channels');
+            if (!byCat.has(name)) { byCat.set(name, []); categories.push({ name, channels: byCat.get(name) }); }
+            byCat.get(name).push(c);
+        }
         let composer;
         const back = `/s/${server.slug}/${pick.slug}`;
         if (!me) composer = `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${encodeURIComponent(back)}">Sign in with OpenVibe</a> to join the conversation.</p>`;
@@ -127,21 +214,34 @@ ${create}`,
         else composer = notice('error', 'You cannot write here right now.');
         const ais = require('../rooms/ai-members').enabled() ? (await require('../rooms/ai-members').list(room)).filter((a) => Number(a.enabled)) : [];
         const aiHere = ais.length ? `<p class="oc-ai-here">${ais.map((a) => `<span class="oc-badge oc-ai">AI</span> <strong>${esc(a.name)}</strong> <span class="oc-muted oc-ai-model">(${esc(require('../rooms/ai-members').modelOf(a))})</span>`).join(' · ')} <span class="oc-muted">· write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask</span></p>` : '';
+        // The people, grouped by their role (the members column).
         const byRank = {};
         for (const p of people) (byRank[p.role] = byRank[p.role] || []).push(p);
-        const person = (p) => `<li><a class="oc-name" href="${LIVE}/@${encodeURIComponent(p.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(p.profile_color || '') ? ` style="--nc:${esc(p.profile_color)}"` : ''}>${esc(p.display_name || p.username || '?')}</a></li>`;
-        const peopleHtml = ['owner', 'admin', 'mod', 'member'].filter((r) => byRank[r]).map((r) => `<h3 class="oc-srv-group">${RANK_TITLE[r]} <span class="oc-muted">${byRank[r].length}</span></h3><ul class="oc-srv-people-list">${byRank[r].map(person).join('')}</ul>`).join('');
-        const tools = [
-            can.moderate ? `<a href="/s/${esc(server.slug)}/settings">${can.manage ? 'Server settings' : 'Members and invites'}</a>` : '',
-            can.member && can.role !== 'owner' ? `<form class="oc-inline" method="post" action="/s/${esc(server.slug)}/leave"><button type="submit" class="oc-link">Leave server</button></form>` : '',
-        ].filter(Boolean).join(' · ');
+        const roleGroups = ['owner', 'admin', 'mod', 'member'].filter((r) => byRank[r]).map((r) => ({
+            role: r, title: RANK_TITLE[r],
+            people: byRank[r].map((p) => ({
+                id: p.user_id, username: p.username || '', display_name: p.display_name || p.username || '',
+                avatar_url: p.avatar_url || null, presence: p.presence || null,
+                color: /^#[0-9a-f]{3,8}$/i.test(p.profile_color || '') ? p.profile_color : '',
+                href: `${LIVE}/@${encodeURIComponent(p.username || '')}`,
+            })),
+        }));
         const canInvite = can.manage || (can.moderate && server.visibility === 'public');
+        // The sheet's last step: the invite link, with Copy and Share (a fresh server comes with one).
+        const inviteCode = String(req.query.invite || '').toLowerCase();
+        const invite = inviteCode && /^[a-z0-9]{6,16}$/.test(inviteCode) ? await servers.inviteByCode(inviteCode).catch(() => null) : null;
+        const invitePanel = invite && invite.invite ? `<section class="oc-invite-new" aria-label="Your invite link">
+<h2>Your invite link</h2><p class="oc-muted">Anyone with this link can join ${esc(server.name)}.</p>
+<code class="oc-invite-url" id="oc-invite-url">${esc(`${site}/join/${invite.invite.code}`)}</code>
+<p class="oc-invite-tools"><button type="button" class="oc-button" id="oc-invite-copy" data-oc-copy="${esc(`${site}/join/${invite.invite.code}`)}">Copy</button>
+<a class="oc-button oc-button--quiet" href="/s/${esc(server.slug)}/settings#oc-invites">More invites</a></p>
+</section>` : '';
         // The canonical URL is the one served and listed in the sitemap: /s/<server> without a channel in the
         // request, and the channel's own URL when the request named it. `back` stays the channel URL the composer
         // and the sign-in link post to (POST /s/:slug/:channel).
         const canonicalPath = req.params.channel ? back : `/s/${server.slug}`;
         await page(req, res, 200, {
-            actor, wide: true, footer: 'compact', title: `${isVoice ? '' : '#'}${room.name} · ${server.name}`, path: canonicalPath, active: 'servers',
+            actor, shell: true, footer: 'none', title: `${isVoice ? '' : '#'}${room.name} · ${server.name}`, path: canonicalPath, active: 'servers',
             robots: server.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
             description: server.description || `${server.name}, a server on OpenVibe.Chat with ${server.member_count} member${Number(server.member_count) === 1 ? '' : 's'}.`,
             page: {
@@ -149,31 +249,35 @@ ${create}`,
                 me: me ? me.id : null, moderate: rcan.moderate, post: rcan.post, role: rcan.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: rcan.join, talk: rcan.talk } } : {}),
             },
-            body: `<div class="oc-srv">
-<nav class="oc-srv-rail" aria-label="Your servers">${mine.map((s) => icon(s, s.slug === server.slug)).join('')}${mine.some((s) => s.slug === server.slug) ? '' : icon(servers.publicServer(server), true)}
-<a class="oc-srv-icon oc-srv-add" href="/servers#oc-new-server" title="Start a server"><span aria-hidden="true">+</span><span class="oc-sr">Start a server</span></a>
-<a class="oc-srv-icon oc-srv-explore" href="/servers" title="Find servers">${SEARCH_ICON}<span class="oc-sr">Find servers</span></a></nav>
-<aside class="oc-srv-side" aria-label="${esc(server.name)}">
-<header class="oc-srv-head"><h1 class="oc-srv-name">${esc(server.name)}</h1>${server.slug === servers.OFFICIAL_SLUG ? '<span class="oc-badge oc-badge-official">official</span>' : ''}${server.visibility === 'private' ? '<span class="oc-badge">private</span>' : ''}
-<p class="oc-muted oc-srv-meta">${Number(server.member_count) || 0} member${Number(server.member_count) === 1 ? '' : 's'}${YOU_ARE[can.role] ? ` · you are ${YOU_ARE[can.role]}` : ''}</p>
-${server.description ? `<p class="oc-srv-desc">${esc(server.description)}</p>` : ''}</header>
-<details class="oc-srv-channels" open><summary>Channels</summary>
-<h2 class="oc-srv-group">Text channels</h2><ul class="oc-srv-list">${texts.map(chanLink).join('')}</ul>
-${voices.length ? `<h2 class="oc-srv-group">Voice channels</h2><ul class="oc-srv-list">${voices.map(chanLink).join('')}</ul>` : ''}
-</details>
-${!can.member && me ? `<form class="oc-srv-join" method="post" action="/s/${esc(server.slug)}/join"><button type="submit">Join ${esc(server.name)}</button></form>` : ''}
-${canInvite ? `<p class="oc-srv-invite"><a class="oc-button oc-button--quiet" href="/s/${esc(server.slug)}/settings#oc-invites">Invite people</a></p>` : ''}
-${tools ? `<p class="oc-srv-tools">${tools}</p>` : ''}
-</aside>
-<section class="oc-srv-main" aria-labelledby="oc-chan-h">
-<header class="oc-chan-head"><h2 id="oc-chan-h">${isVoice ? VOICE_ICON : '<span class="oc-chan-hash" aria-hidden="true">#</span>'}${esc(room.name)}</h2>${room.topic ? `<span class="oc-muted oc-chan-topic">${esc(room.topic)}</span>` : ''}<span class="oc-live" id="oc-live" hidden>● live</span></header>
+            body: shell.shell({
+                rail: shell.rail({
+                    servers: mine.map((s) => ({ slug: s.slug, name: s.name, unread: s.unread, active: s.slug === server.slug })),
+                    dmUnread,
+                }),
+                side: shell.sideServer({
+                    server: { ...server, official: server.slug === servers.OFFICIAL_SLUG }, can: { ...can, invite: canInvite }, me: !!me,
+                    categories: categories.map((c) => ({
+                        name: c.name,
+                        channels: c.channels.map((ch) => ({
+                            kind: ch.kind, name: ch.name, slug: ch.slug, unread: ch.unread,
+                            href: `/s/${server.slug}/${ch.slug}`, active: ch.slug === pick.slug,
+                        })),
+                    })),
+                    occupants,
+                    you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
+                }),
+                sideLabel: server.name,
+                main: `${shell.channelHeader({ name: room.name, kind: isVoice ? 'voice' : 'text', topic: room.topic, members: true })}
+${invitePanel}
+<span class="oc-live" id="oc-live" hidden>● live</span>
 ${aiHere}${errorOf(req)}
 ${isVoice ? callPanel(room, rcan, me) : ''}
 <ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages in ${esc(room.name)}">${msgs.map((m) => roomMessage(m, rcan, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${isVoice ? 'The voice channel\'s chat is empty.' : `This is the start of #${esc(room.name)}.`}</li>`}</ol>
-${composer}
-</section>
-<aside class="oc-srv-people" aria-label="People in ${esc(server.name)}"><details open><summary>People <span class="oc-muted">${Number(server.member_count) || 0}</span></summary>${peopleHtml}${people.length >= 300 ? '<p class="oc-muted">And more.</p>' : ''}</details></aside>
-</div>`,
+${composer}`,
+                mainLabel: `${isVoice ? '' : '#'}${room.name}`,
+                members: shell.membersColumn({ groups: roleGroups }),
+                membersLabel: `People in ${server.name}`,
+            }),
         });
     }
     router.get('/s/:slug', serverPage);

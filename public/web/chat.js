@@ -14,6 +14,40 @@
   var input = document.getElementById('oc-input');
   var latest = Number(cfg.latest) || 0;
   var LIVE = 'https://openvibe.live';
+  var viewToggle = document.getElementById('oc-view-toggle');
+  if (viewToggle && cfg.conversation) viewToggle.addEventListener('click', function () {
+    var next = viewToggle.dataset.view === 'bubbles' ? 'room' : 'bubbles';
+    viewToggle.disabled = true;
+    fetch('/api/dm/conversations/' + encodeURIComponent(cfg.conversation) + '/view', {
+      method: 'PUT', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ view: next })
+    }).then(function (response) { if (!response.ok) throw new Error('Could not save view'); window.location.reload(); })
+      .catch(function () { viewToggle.disabled = false; });
+  });
+  var peopleSearch = document.getElementById('oc-people-search');
+  var peopleResults = document.getElementById('oc-people-results');
+  if (peopleSearch && peopleResults) {
+    var recentPeopleMarkup = peopleResults.innerHTML;
+    var peopleTimer = 0;
+    peopleSearch.addEventListener('input', function () {
+      window.clearTimeout(peopleTimer);
+      peopleTimer = window.setTimeout(function () {
+        var q = peopleSearch.value.trim();
+        peopleResults.replaceChildren();
+        if (q.length < 2) { peopleResults.innerHTML = recentPeopleMarkup; return; }
+        fetch('/api/dm/users/search?q=' + encodeURIComponent(q), { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : { users: [] }; }).then(function (data) {
+          if (peopleSearch.value.trim() !== q) return;
+          (data.users || []).forEach(function (person) {
+            var li = document.createElement('li'), form = document.createElement('form'), username = String(person.username || '');
+            form.method = 'post'; form.action = '/messages/new';
+            var field = document.createElement('input'); field.type = 'hidden'; field.name = 'username'; field.value = username;
+            var button = document.createElement('button'); button.type = 'submit'; button.textContent = String(person.display_name || username) + (username ? ' · @' + username : '');
+            form.appendChild(field); form.appendChild(button); li.appendChild(form); peopleResults.appendChild(li);
+          });
+          if (!peopleResults.children.length) { var empty = el('li', 'oc-muted', 'No people found'); peopleResults.appendChild(empty); }
+        }).catch(function () { peopleResults.replaceChildren(); });
+      }, 180);
+    });
+  }
 
   // The session token (the ov_token cookie is JS-readable), presented in each socket's first message.
   function sessionToken() {

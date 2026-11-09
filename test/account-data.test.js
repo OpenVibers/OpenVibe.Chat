@@ -34,7 +34,7 @@ t('export, then erase and confirm', async () => {
     {
         const missing = await uncovered(d, {
             taskKeyed: ['calls', 'channel_moderators', 'channel_sounds', 'chat_app_callbacks', 'chat_app_link_tokens', 'chat_messages', 'chat_server_invites', 'chat_server_members',
-                'ctx_channels', 'ctx_managed_streams', 'ctx_streams', 'dm_conversations', 'dm_participants', 'emotes', 'inbox_actions',
+                'ctx_channels', 'ctx_managed_streams', 'ctx_streams', 'dm_conversations', 'dm_contacts', 'dm_participants', 'dm_view_defaults', 'dm_view_preferences', 'emotes', 'inbox_actions',
                 'inbox_members', 'inbox_saved_replies', 'inbox_webhooks', 'pending_ip_messages', 'room_hooks', 'room_members', 'room_messages', 'agent_room_poll_votes', 'room_message_reactions',
                 'user_tags', 'vibe_asks', 'vibe_deliveries', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_usage', 'vibe_model_preferences', 'vibe_import_notices'],
             exempt: {

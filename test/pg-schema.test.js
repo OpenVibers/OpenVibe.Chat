@@ -30,6 +30,7 @@ const TABLES = [
     'chat_ingress_applied', 'audio_requests', 'import_hold', 'import_runs', 'chat_meta', 'deploy_releases',
     'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'room_ai_members', 'room_ai_usage', 'room_tasks', 'room_hooks', 'vibe_usage', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_asks', 'vibe_deliveries', 'inboxes', 'inbox_members', 'inbox_conversations', 'inbox_messages', 'inbox_ai_usage', 'inbox_saved_replies', 'inbox_webhooks', 'inbox_actions', 'inbox_translations', 'feeds', 'feed_sessions', 'feed_events', 'chat_servers', 'chat_server_members', 'chat_server_invites', 'token_revocations', 'chat_control_log',
     'network_blocks', 'account_data_events', 'ticket_conversations', 'ticket_messages', 'telemetry_samples',
+    'dm_contacts', 'dm_view_defaults', 'dm_view_preferences',
     'chat_app_link_tokens', 'chat_app_settings', 'chat_app_callbacks', 'chat_app_deliveries', 'chat_app_rates',
     'agent_room_reads', 'agent_room_polls', 'agent_room_poll_votes', 'agent_room_identities', 'agent_room_controls', 'room_parties',
     'room_sync_clocks', 'room_control_leases',
@@ -40,6 +41,7 @@ const INDEXES = [
     'idx_chat_ts_deleted', 'idx_chat_page_live', 'idx_chat_channel_user_ts', 'idx_chat_stream_ts', 'idx_emotes_channel_code', 'idx_chat_tl_dedup',
     'idx_calls_open', 'idx_ctx_users_subject', 'idx_ctx_users_username', 'idx_audio_requests_room_state', 'idx_events_outbox_unsent', 'service_outbox_due', 'service_outbox_sent',
     'idx_room_messages_room', 'idx_room_members_user', 'idx_network_blocks_blocked', 'idx_mod_actions_created',
+    'idx_dm_contacts_user',
     'chat_app_link_tokens_by_person', 'chat_app_link_tokens_expiry', 'chat_app_callbacks_by_chat', 'chat_app_callbacks_expiry',
 ];
 const MIRRORED = ['chat_messages', 'dm_conversations', 'dm_participants', 'dm_messages', 'dm_blocks', 'tts_voice_overrides',
