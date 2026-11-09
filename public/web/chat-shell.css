@@ -92,7 +92,9 @@
 .oc-chan-tools { display: flex; align-items: center; gap: 4px; margin-left: auto; }
 .oc-col-main > .oc-notice, .oc-col-main > .oc-ai-here { margin: 10px 18px 0; }
 .oc-col-main > .oc-call { margin: 12px 18px 0; }
-.oc-col-main > .oc-compose, .oc-col-main > .oc-signin, .oc-col-main > form { margin: 0; padding: 12px 18px 16px; border-top: 1px solid var(--oc-line); }
+.oc-col-main > .oc-compose, .oc-col-main > .oc-signin, .oc-col-main > form, .oc-col-main > .oc-dock { margin: 0; padding: 12px 18px 16px; border-top: 1px solid var(--oc-line); }
+/* A conversation's head (a DM) sits like a channel's: inside the gutter, a line under it. */
+.oc-col-main > .oc-page-head { margin: 0; padding: 10px 18px; border-bottom: 1px solid var(--oc-line); }
 .oc-side-join { margin: 0 0 8px; }
 .oc-side-join button, .oc-side-join .oc-button { width: 100%; text-align: center; }
 
