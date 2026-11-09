@@ -172,6 +172,10 @@ t('the site: directory, a server page, settings by rank, an invite page, /r/<cha
     r = await page('/s/saturday-raiders', dee);
     assert.strictEqual(r.status, 200);
     assert.match(r.text, /class="oc-srv"/);
+    assert.match(r.text, /aria-label="Chat destinations"/);
+    assert.match(r.text, /title="Home"/);
+    assert.match(r.text, /title="Vibe"/);
+    assert.match(r.text, /class="oc-mobile-bar"/);
     assert.match(r.text, /aria-current="page"[^>]*>.*general/s);
     assert.match(r.text, /Voice channels/);
     assert.match(r.text, /<h3 class="oc-srv-group">Owner/);

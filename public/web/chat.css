@@ -153,6 +153,10 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-main--wide { max-width: 1440px; }
 .oc-srv { display: grid; grid-template-columns: 64px 232px minmax(0, 1fr) 212px; height: min(80vh, 900px); min-height: 480px; background: var(--oc-panel); border: 1px solid var(--oc-line); border-radius: 16px; overflow: hidden; }
 .oc-srv-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0; background: var(--oc-bg); border-right: 1px solid var(--oc-line); overflow-y: auto; scrollbar-width: none; }
+.oc-srv-divider { width: 30px; height: 1px; flex: 0 0 1px; background: var(--oc-line); }
+.oc-srv-home, .oc-srv-vibe { background: var(--oc-panel-2); color: var(--oc-text); }
+.oc-srv-home .oc-i, .oc-srv-vibe .oc-i { width: 21px; height: 21px; }
+.oc-mobile-bar { display: none; }
 .oc-srv-icon { position: relative; display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 auto; border-radius: 50%; background: hsl(var(--oc-hue, 215) 52% 34%); color: #fff; font-weight: 800; font-size: .92rem; letter-spacing: .02em; text-decoration: none; transition: border-radius .15s ease, background-color .15s ease; }
 .oc-srv-icon:hover, .oc-srv-icon:focus-visible, .oc-srv-icon.is-active { border-radius: 14px; }
 .oc-srv-rail .oc-srv-icon.is-active::before { content: ''; position: absolute; left: -10px; top: 9px; bottom: 9px; width: 4px; border-radius: 0 4px 4px 0; background: var(--oc-text); }
@@ -220,7 +224,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
   .oc-srv-people-list { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
 }
 @media (max-width: 760px) {
-  .oc-srv { grid-template-columns: minmax(0, 1fr); border-radius: 12px; }
+  .oc-srv { grid-template-columns: minmax(0, 1fr); border: 0; border-radius: 0; overflow: visible; padding-bottom: 68px; }
   .oc-srv-rail, .oc-srv-side, .oc-srv-main { height: auto; }
   .oc-srv-rail { flex-direction: row; justify-content: flex-start; padding: 10px 12px; gap: 10px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--oc-line); }
   .oc-srv-rail .oc-srv-icon.is-active::before { left: 9px; right: 9px; top: auto; bottom: -10px; width: auto; height: 4px; border-radius: 4px 4px 0 0; }
@@ -230,6 +234,10 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
   .oc-srv-feed { max-height: 62vh; min-height: 220px; }
   .oc-chan-head, .oc-srv-main > .oc-compose, .oc-srv-main > .oc-signin, .oc-srv-main > form { padding-left: 12px; padding-right: 12px; }
   .oc-srv-main > .oc-notice, .oc-srv-main > .oc-ai-here, .oc-srv-main > .oc-call { margin-left: 12px; margin-right: 12px; }
+  .oc-mobile-bar { position: fixed; z-index: 20; inset: auto 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 6px max(8px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); border-top: 1px solid var(--oc-line); background: var(--oc-panel); }
+  .oc-mobile-bar a { min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--oc-muted); text-decoration: none; font-size: .68rem; }
+  .oc-mobile-bar a.is-active { color: var(--oc-accent); }
+  .oc-mobile-bar .oc-i { width: 20px; height: 20px; }
 }
 
 .oc-badge-new { color: var(--oc-text); border-color: var(--oc-red); }

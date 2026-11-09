@@ -150,7 +150,7 @@ ${create}`,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: rcan.join, talk: rcan.talk } } : {}),
             },
             body: `<div class="oc-srv">
-<nav class="oc-srv-rail" aria-label="Your servers">${mine.map((s) => icon(s, s.slug === server.slug)).join('')}${mine.some((s) => s.slug === server.slug) ? '' : icon(servers.publicServer(server), true)}
+<nav class="oc-srv-rail" aria-label="Chat destinations"><a class="oc-srv-icon oc-srv-home" href="/messages" title="Home">${IC.chat}<span class="oc-sr">Home</span></a><a class="oc-srv-icon oc-srv-vibe" href="/vibe" title="Vibe">${IC.spark}<span class="oc-sr">Vibe</span></a><span class="oc-srv-divider" aria-hidden="true"></span>${mine.map((s) => icon(s, s.slug === server.slug)).join('')}${mine.some((s) => s.slug === server.slug) ? '' : icon(servers.publicServer(server), true)}
 <a class="oc-srv-icon oc-srv-add" href="/servers#oc-new-server" title="Start a server"><span aria-hidden="true">+</span><span class="oc-sr">Start a server</span></a>
 <a class="oc-srv-icon oc-srv-explore" href="/servers" title="Find servers">${SEARCH_ICON}<span class="oc-sr">Find servers</span></a></nav>
 <aside class="oc-srv-side" aria-label="${esc(server.name)}">
@@ -173,6 +173,7 @@ ${isVoice ? callPanel(room, rcan, me) : ''}
 ${composer}
 </section>
 <aside class="oc-srv-people" aria-label="People in ${esc(server.name)}"><details open><summary>People <span class="oc-muted">${Number(server.member_count) || 0}</span></summary>${peopleHtml}${people.length >= 300 ? '<p class="oc-muted">And more.</p>' : ''}</details></aside>
+<nav class="oc-mobile-bar" aria-label="Chat navigation"><a href="/messages">${IC.chat}<span>Home</span></a><a class="is-active" href="/servers">${IC.globe}<span>Servers</span></a><a href="/vibe">${IC.spark}<span>Vibe</span></a><a href="/notifications">${IC.alert}<span>Activity</span></a><a href="/settings">${IC.gear}<span>You</span></a></nav>
 </div>`,
         });
     }
