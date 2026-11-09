@@ -51,19 +51,40 @@
     '.b svg{width:26px;height:26px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}' +
     '.d{position:absolute;top:2px;right:2px;width:13px;height:13px;border-radius:50%;background:#ef4444;border:2px solid #fff;display:none}' +
     '.d.on{display:block}.b .x,.b.on .m{display:none}.b.on .x{display:block}' +
-    '.p{position:fixed;' + side + ':20px;bottom:88px;z-index:2147483000;width:380px;height:min(640px,calc(100vh - 110px));border-radius:18px;overflow:hidden;' +
+    '.p{position:fixed;' + side + ':20px;bottom:88px;z-index:2147483000;width:380px;height:min(640px,calc(100vh - 110px));border-radius:18px;overflow:hidden;display:flex;flex-direction:column;' +
     'box-shadow:0 24px 70px rgba(0,0,0,.35);background:#0a0f1c;opacity:0;transform:translateY(10px);pointer-events:none;transition:opacity .16s,transform .2s}' +
-    '.p.on{opacity:1;transform:none;pointer-events:auto}.p iframe{width:100%;height:100%;border:0;display:block}' +
-    '@media (max-width:520px){.p{left:0;right:0;bottom:0;top:0;width:auto;height:auto;border-radius:0}.p.on~.b{display:none}}' +
+    '.p.on{opacity:1;transform:none;pointer-events:auto}.p iframe{width:100%;height:100%;flex:1;min-height:0;border:0;display:block}' +
+    '.h{display:none;align-items:center;justify-content:space-between;padding:8px 14px;background:#121a2b;color:#fff;font:600 14px system-ui}.h button{min-width:44px;min-height:44px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer}' +
+    '@media (max-width:520px){.p{left:0;right:0;bottom:0;top:0;width:auto;height:auto;border-radius:0}.p.on~.b{display:none}.h{display:flex;touch-action:none}}' +
     '@media (prefers-reduced-motion:reduce){.b,.p{transition:none}}' +
     '</style>' +
-    '<div class="p" role="dialog" aria-label="Chat"></div>' +
+    '<div class="p" role="dialog" aria-label="Chat"><div class="h"><span>Chat</span><button type="button" aria-label="Close chat">Close</button></div></div>' +
     '<button class="b" type="button" aria-label="Open the chat" aria-expanded="false"><span class="d"></span>' +
     '<svg class="m" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v11H9l-5 4Z"/></svg>' +
     '<svg class="x" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button>';
   var bubble = root.querySelector('.b'), panel = root.querySelector('.p'), dot = root.querySelector('.d');
   host.style.setProperty('--c', color);   // custom properties cross into the shadow root (all:initial leaves them)
-  var frame = null, open = false;
+  var frame = null, open = false, savedScroll = null;
+  function phone() { return window.innerWidth <= 520; }
+  function lockPage() {
+    if (savedScroll) return;
+    var html = document.documentElement, body = document.body, y = window.scrollY;
+    var gap = Math.max(0, window.innerWidth - html.clientWidth);
+    savedScroll = { y: y, overflow: html.style.overflow, padding: html.style.paddingRight,
+      position: body.style.position, top: body.style.top, left: body.style.left, right: body.style.right, width: body.style.width };
+    if (gap) html.style.paddingRight = ((parseFloat(getComputedStyle(html).paddingRight) || 0) + gap) + 'px';
+    html.style.overflow = 'hidden';
+    body.style.position = 'fixed'; body.style.top = '-' + y + 'px';
+    body.style.left = '0'; body.style.right = '0'; body.style.width = '100%';
+  }
+  function unlockPage() {
+    if (!savedScroll) return;
+    var s = savedScroll, html = document.documentElement, body = document.body; savedScroll = null;
+    html.style.overflow = s.overflow; html.style.paddingRight = s.padding;
+    body.style.position = s.position; body.style.top = s.top;
+    body.style.left = s.left; body.style.right = s.right; body.style.width = s.width;
+    window.scrollTo(0, s.y);
+  }
   var identity = null;
   function identityOf(u) { return u && u.id && u.hash ? { id: String(u.id), name: u.name || undefined, email: u.email || undefined, hash: String(u.hash) } : null; }
   if (!isRoom) identity = identityOf({ id: me.getAttribute('data-user-id'), name: me.getAttribute('data-user-name'), email: me.getAttribute('data-user-email'), hash: me.getAttribute('data-user-hash') });
@@ -81,16 +102,44 @@
     panel.appendChild(frame);
   }
   function setOpen(v) {
+    var wasOpen = open;
     open = !!v;
     if (open) { ensureFrame(); dot.classList.remove('on'); }
+    if (open && phone()) lockPage(); else unlockPage();
     panel.classList.toggle('on', open);
+    if (open && phone()) panel.setAttribute('aria-modal', 'true'); else panel.removeAttribute('aria-modal');
+    if (open && phone() && !wasOpen) panel.querySelector('.h button').focus({ preventScroll: true });
     bubble.classList.toggle('on', open);
     bubble.setAttribute('aria-expanded', open ? 'true' : 'false');
     bubble.setAttribute('aria-label', open ? 'Close the chat' : 'Open the chat');
     if (frame && frame.contentWindow) frame.contentWindow.postMessage({ ov: 'chat', type: 'visible', visible: open }, base);
+    if (wasOpen && !open) bubble.focus({ preventScroll: true });
     emit(open ? 'open' : 'close');
   }
   bubble.addEventListener('click', function () { setOpen(!open); });
+  var header = panel.querySelector('.h'), drag = null;
+  header.querySelector('button').addEventListener('click', function () { setOpen(false); });
+  header.addEventListener('pointerdown', function (e) {
+    if (e.pointerType !== 'touch' || e.target.closest('button')) return;
+    drag = { id: e.pointerId, y: e.clientY };
+    try { header.setPointerCapture(e.pointerId); } catch (err) { /* interrupted gesture */ }
+  });
+  header.addEventListener('pointermove', function (e) {
+    if (drag && drag.id === e.pointerId) panel.style.translate = '0 ' + Math.max(0, e.clientY - drag.y) + 'px';
+  });
+  function endDrag(e) {
+    if (!drag || drag.id !== e.pointerId) return;
+    var dy = e.clientY - drag.y; drag = null; panel.style.translate = '';
+    if (dy > 90) setOpen(false);
+  }
+  header.addEventListener('pointerup', endDrag);
+  header.addEventListener('pointercancel', endDrag);
+  document.addEventListener('pointerdown', function (e) {
+    if (!open || phone()) return;
+    if (e.composedPath && e.composedPath().indexOf(host) !== -1) return;
+    setOpen(false);
+  }, true);
+  window.addEventListener('resize', function () { if (open) { if (phone()) lockPage(); else unlockPage(); } });
   window.addEventListener('message', function (e) {
     if (e.origin !== base || !e.data || e.data.ov !== 'chat') return;
     if (e.data.type === 'close') setOpen(false);
