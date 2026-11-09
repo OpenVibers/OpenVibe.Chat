@@ -94,9 +94,20 @@
     return m ? decodeURIComponent(m[1]) : null;
   }
   var people = Array.prototype.slice.call(document.querySelectorAll('[data-oc-user]'));
-  if (!people.length) return;
+  // A message's author opens the card too: the message carries data-user, live messages included (one listener).
+  var hasMessages = !!document.querySelector('.oc-msg[data-user]');
+  if (!people.length && !hasMessages) return;
   var tok = token();
   if (!tok) return;   // signed out: no card to open
+  document.addEventListener('click', function (e) {
+    var name = e.target && e.target.closest && e.target.closest('.oc-msg[data-user] .oc-name');
+    if (!name || !window.OpenVibeUserCard || e.ctrlKey || e.metaKey || e.shiftKey) return;   // a modifier opens the profile page
+    var id = name.closest('.oc-msg').getAttribute('data-user');
+    if (!id || id === '0') return;
+    e.preventDefault();
+    var box = name.getBoundingClientRect();
+    window.OpenVibeUserCard.show(id, box.left + 8, box.bottom + 8);
+  });
 
   function openCard(el) {
     if (window.OpenVibeUserCard && window.OpenVibeUserCard.show) {
