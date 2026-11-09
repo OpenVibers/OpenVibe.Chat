@@ -18,6 +18,7 @@ const router = express.Router();
 const { requireAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const dm = require('./dm');
+const contacts = require('./contacts');
 const ctx = require('../live-context');
 const prefStores = require('../prefs/stores');
 const database = require('../db/database');
@@ -435,6 +436,61 @@ router.get('/users/search', async (req, res) => {
         const users = await dm.searchUsers(q, req.user.id);
         res.json({ users });
     } catch (err) {
+        res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// ── Friends and requests (the side column on Home) ─────────────
+
+// The people you talk to: your friends and the requests that wait for you.
+router.get('/contacts', async (req, res) => {
+    try {
+        const list = await contacts.of(req.user.id);
+        res.set('Cache-Control', 'private, no-store').json(list);
+    } catch (err) {
+        console.error('[Contacts] List error:', err.message);
+        res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// Ask someone to be a friend (or accept them, when they asked first).
+router.post('/contacts', manageLimit, async (req, res) => {
+    try {
+        const username = String((req.body && req.body.username) || '').trim();
+        if (!/^[A-Za-z0-9_]{3,24}$/.test(username)) return res.status(400).json({ error: 'That is not a username' });
+        const target = await ctx.getUserByUsername(username) || await ctx.ensureUserByUsername(username).catch(() => null);
+        if (!target) return res.status(404).json({ error: 'Nobody on OpenVibe goes by that name' });
+        if (Number(target.id) === Number(req.user.id)) return res.status(400).json({ error: 'That is you' });
+        if (await dm.hasBlocked(req.user.id, target.id) || await dm.hasBlocked(target.id, req.user.id)) {
+            return res.status(403).json({ error: 'You cannot add this person' });
+        }
+        const status = await contacts.add(req.user.id, target.id);
+        res.json({ ok: true, status });
+    } catch (err) {
+        console.error('[Contacts] Add error:', err.message);
+        res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// Accept a request.
+router.post('/contacts/:userId/accept', manageLimit, async (req, res) => {
+    try {
+        const ok = await contacts.accept(req.user.id, Number(req.params.userId));
+        if (!ok) return res.status(404).json({ error: 'No request from that person' });
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[Contacts] Accept error:', err.message);
+        res.status(500).json({ error: 'Failed' });
+    }
+});
+
+// Drop a friend or a request.
+router.delete('/contacts/:userId', manageLimit, async (req, res) => {
+    try {
+        await contacts.remove(req.user.id, Number(req.params.userId));
+        res.json({ ok: true });
+    } catch (err) {
+        console.error('[Contacts] Remove error:', err.message);
         res.status(500).json({ error: 'Failed' });
     }
 });

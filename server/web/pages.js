@@ -30,6 +30,7 @@
  * test/live-down.test.js renders every page and uses the core APIs with Live refusing and hanging.
  */
 const showcase = require('openvibe-shared/showcase');
+const shell = require('./shell');
 const path = require('path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
@@ -379,13 +380,31 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
         const support = await require('../inbox/inbox').mySupport(me, { limit: 20 }).catch(() => []);
         const STATUS = { bot: 'Vibe', waiting: 'Waiting', open: 'Open', resolved: 'Resolved' };
         const supportList = support.length ? `<h2 class="oc-list-head">Support</h2><ul class="oc-list">${support.map((c) => convRow({ href: `/support/${c.id}`, title: c.inbox.name, preview: c.preview || '', at: c.last_message_at, badge: ` <span class="oc-badge">${esc(STATUS[c.status] || c.status)}</span>` })).join('')}</ul>` : '';
+        // The rail, the side column (Home) and the list: the app shell (the plan, 2026-11-09, stage V2).
+        const mineServers = (await require('../rooms/servers').list(me)).mine;
+        const contacts = await require('../chat/contacts').of(me.id);
+        const dms = convs.map((c, i) => {
+            const others = participants[i].filter((p) => p.id !== me.id);
+            const title = c.name || others.map((p) => p.display_name || p.username).join(', ') || 'Just you';
+            return {
+                id: c.id, title, preview: c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet',
+                unread: Number(c.unread_count) || 0, presence: others.length === 1 ? others[0].presence : null,
+                avatarUrl: others.length === 1 ? others[0].avatar_url : '',
+            };
+        });
         await page(req, res, 200, {
-            actor, title: 'Messages', path: '/messages', active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'compact',
+            actor, shell: true, title: 'Messages', path: '/messages', active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'none',
             page: { view: 'inbox', unread, me: me.id },
-            body: `${ui.head({ title: 'Messages', sub: `<span id="oc-inbox-status" aria-live="polite">${unread ? `${unread} unread` : 'All caught up'}</span>`, actions: [`<details class="oc-new-picker"><summary class="oc-icon-btn" aria-label="New message" title="New message">${IC.pencil}<span>New</span></summary><div class="oc-new-pop"><label for="oc-people-search">Find someone</label><input id="oc-people-search" type="search" minlength="2" autocomplete="off" placeholder="Search people"><ul id="oc-people-results" aria-live="polite">${recentPicker || '<li class="oc-muted">Search by name or username</li>'}</ul></div></details>`] })}${error}${done}
+            body: shell.shell({
+                rail: shell.rail({ home: true, dmUnread: unread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests }),
+                sideLabel: 'Home',
+                main: `${ui.head({ title: 'Messages', sub: `<span id="oc-inbox-status" aria-live="polite">${unread ? `${unread} unread` : 'All caught up'}</span>`, actions: [`<details class="oc-new-picker"><summary class="oc-icon-btn" aria-label="New message" title="New message">${IC.pencil}<span>New</span></summary><div class="oc-new-pop"><label for="oc-people-search">Find someone</label><input id="oc-people-search" type="search" minlength="2" autocomplete="off" placeholder="Search people"><ul id="oc-people-results" aria-live="polite">${recentPicker || '<li class="oc-muted">Search by name or username</li>'}</ul></div></details>`] })}${error}${done}
 <ul class="oc-list" id="oc-convs">${rows.join('\n') || '<li class="oc-row-empty oc-muted">No conversations yet. Write a username above to start one.</li>'}</ul>
 ${supportList}
 ${blockedList}`,
+                mainLabel: 'Messages',
+            }),
         });
     });
 
@@ -395,6 +414,31 @@ ${blockedList}`,
         if (Number.isInteger(id) && id > 0) await dm.unblockUser(actor.user.id, id);
         const back = /^\/messages\/\d+$/.test(String(req.body && req.body.back)) ? req.body.back : '/messages?unblocked=1';
         res.redirect(303, back);
+    });
+
+    // ── Friends and requests (the side column on Home) ──
+    router.post('/messages/contacts', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const name = String((req.body && req.body.username) || '').trim();
+        const back = '/messages';
+        if (!/^[A-Za-z0-9_]{3,24}$/.test(name)) return res.redirect(303, `${back}?error=${encodeURIComponent('That is not a username')}`);
+        const target = await ctx.getUserByUsername(name) || await ctx.ensureUserByUsername(name).catch(() => null);
+        if (!target) return res.redirect(303, `${back}?error=${encodeURIComponent(`Nobody called ${name.slice(0, 24)} on OpenVibe`)}`);
+        if (Number(target.id) === Number(actor.user.id)) return res.redirect(303, back);
+        const status = await require('../chat/contacts').add(actor.user.id, target.id);
+        res.redirect(303, status === 'friend' ? `${back}?added=1` : `${back}?asked=1`);
+    });
+
+    router.post('/messages/contacts/:userId/accept', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        await require('../chat/contacts').accept(actor.user.id, Number(req.params.userId));
+        res.redirect(303, '/messages');
+    });
+
+    router.post('/messages/contacts/:userId/remove', formLimit, sameSite, async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        await require('../chat/contacts').remove(actor.user.id, Number(req.params.userId));
+        res.redirect(303, '/messages');
     });
 
     router.post('/messages/new', formLimit, sameSite, async (req, res, next) => {
@@ -424,7 +468,8 @@ ${blockedList}`,
         const msgs = (await dm.getMessages(id, 60)).slice().sort((a, b) => a.id - b.id);
         const savedView = await db.get('SELECT view FROM dm_view_preferences WHERE user_id = ? AND conversation_id = ?', [me.id, id]).catch(() => null);
         const viewKind = others.length <= 1 ? 'one_to_one' : 'group';
-        const view = savedView?.view || (preferences.view_defaults && preferences.view_defaults[viewKind]) || (viewKind === 'one_to_one' ? 'bubbles' : 'room');
+        const viewDefaults = await require('../chat/view-defaults').of(me.id);
+        const view = savedView?.view || viewDefaults[viewKind] || (viewKind === 'one_to_one' ? 'bubbles' : 'room');
         try { await dm.markRead(id, me.id); } catch { /* best effort */ }
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         // A 1:1 conversation: block or unblock the other person here; a block (either way) closes the composer.
@@ -446,12 +491,34 @@ ${blockedList}`,
         // A 1:1 conversation nobody blocked can become a call (POST /messages/:id/call rings the other person).
         const callForm = other && !closed && require('../config').calls.enabled
             ? `<form class="oc-inline oc-dm-call" method="post" action="/messages/${id}/call"><button type="submit" class="oc-icon-btn" aria-label="Call ${otherName}" title="Call ${otherName}">${IC.phone}<span class="oc-call-label">Call</span></button></form>` : '';
+        // The DMs down the side, so the conversation can be swapped without going back (the app shell).
+        const convs = await dm.getConversations(me.id);
+        const parts = await Promise.all(convs.map((c) => dm.getParticipants(c.id)));
+        await presence.attachTo(me.subject_id, parts.flat());
+        const dms = convs.map((c, i) => {
+            const others = parts[i].filter((p) => p.id !== me.id);
+            const name = c.name || others.map((p) => p.display_name || p.username).join(', ') || 'Just you';
+            return {
+                id: c.id, title: name, preview: c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet',
+                unread: Number(c.unread_count) || 0, presence: others.length === 1 ? others[0].presence : null,
+                avatarUrl: others.length === 1 ? others[0].avatar_url : '', current: Number(c.id) === Number(id),
+            };
+        });
+        const contacts = await require('../chat/contacts').of(me.id);
+        const mineServers = (await require('../rooms/servers').list(me)).mine;
+        const dmUnread = dms.reduce((n, d) => n + (d.current ? 0 : d.unread), 0);
         await page(req, res, 200, {
-            actor, title, path: `/messages/${id}`, active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'compact',
+            actor, shell: true, title, path: `/messages/${id}`, active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'none',
             page: { view: 'dm', conversation: id, messageView: view, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me.id, other: other ? { id: other.id, username: other.username || '' } : null },
-            body: `${ui.head({ title: esc(title), sub: `<span id="oc-dm-status">${subLine}</span>`, avatar, back: { href: '/messages', label: 'All messages' }, actions: [callForm, tools].filter(Boolean) })}${error}
+            body: shell.shell({
+                rail: shell.rail({ home: true, dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests }),
+                sideLabel: 'Home',
+                main: `${ui.head({ title: esc(title), sub: `<span id="oc-dm-status">${subLine}</span>`, avatar, back: { href: '/messages', label: 'All messages' }, actions: [callForm, tools].filter(Boolean) })}${error}
 <ol class="oc-feed oc-room-feed${view === 'bubbles' ? ' oc-bubbles' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => dmMessage(m, me, view)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
 ${composer}`,
+                mainLabel: title,
+            }),
         });
     });
 
@@ -538,7 +605,7 @@ ${composer}`,
     router.get('/settings', async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         const sid = actor.user.subject_id;
-        const [p, tts, dmSet, pres] = await Promise.all([prefsOf(actor), prefStores.settingsOf(prefStores.tts, sid), prefStores.settingsOf(prefStores.dm, sid), prefStores.settingsOf(prefStores.presence, sid)]);
+        const [p, tts, dmSet, pres, viewDefaults] = await Promise.all([prefsOf(actor), prefStores.settingsOf(prefStores.tts, sid), prefStores.settingsOf(prefStores.dm, sid), prefStores.settingsOf(prefStores.presence, sid), require('../chat/view-defaults').of(actor.user.id)]);
         const src = tts.sources || {};
         // A settings row: what it does on the left (with one muted line when it needs saying), the switch on the right.
         const box = (name, label, on, hint = '') => `<label class="oc-set-row"><span class="oc-set-text">${label}${hint ? `<small>${hint}</small>` : ''}</span><input type="checkbox" class="oc-switch" name="${name}" value="1"${on ? ' checked' : ''}></label>`;
@@ -558,7 +625,7 @@ ${box('show_badges', 'Staff and moderator badges', p.show_badges !== false)}
 ${box('hide_emotes', 'Hide emotes', p.hide_emotes === true)}
 <div class="oc-set-row"><span class="oc-set-text" id="oc-size-l">Text size</span><span class="oc-seg" role="radiogroup" aria-labelledby="oc-size-l">${sizes}</span></div>
 <h3>Conversation view</h3>
-${[['one_to_one','One-to-one chats','bubbles'],['ai','Chats with Vibe','bubbles'],['group','Group conversations','room'],['channel','Channels and stream chat','room']].map(([key,label,fallback]) => `<label class="oc-set-row"><span class="oc-set-text">${label}</span><select name="view_${key}"><option value="bubbles"${(p.view_defaults && p.view_defaults[key] || fallback) === 'bubbles' ? ' selected' : ''}>Bubbles</option><option value="room"${(p.view_defaults && p.view_defaults[key] || fallback) === 'room' ? ' selected' : ''}>Chat room</option></select></label>`).join('')}
+${[['one_to_one','One-to-one chats','bubbles'],['ai','Chats with Vibe','bubbles'],['group','Group conversations','room'],['channel','Channels and stream chat','room']].map(([key,label,fallback]) => `<label class="oc-set-row"><span class="oc-set-text">${label}</span><select name="view_${key}"><option value="bubbles"${((viewDefaults && viewDefaults[key]) || fallback) === 'bubbles' ? ' selected' : ''}>Bubbles</option><option value="room"${((viewDefaults && viewDefaults[key]) || fallback) === 'room' ? ' selected' : ''}>Chat room</option></select></label>`).join('')}
 </section>
 <section class="oc-set" aria-labelledby="oc-set-dm"><h2 id="oc-set-dm">Direct messages</h2>
 <label class="oc-set-row"><span class="oc-set-text">Who can start one with you</span><select name="new_conversations"><option value="everyone"${dmSet.new_conversations !== 'nobody' ? ' selected' : ''}>Everyone</option><option value="nobody"${dmSet.new_conversations === 'nobody' ? ' selected' : ''}>Nobody</option></select></label>
@@ -649,7 +716,6 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
             show_badges: b.show_badges === '1' ? null : false,
             hide_emotes: b.hide_emotes === '1' ? true : null,
             agents_read_messages: b.agents_read_messages === '1' ? null : false,
-            view_defaults: { one_to_one: b.view_one_to_one === 'room' ? 'room' : 'bubbles', ai: b.view_ai === 'room' ? 'room' : 'bubbles', group: b.view_group === 'bubbles' ? 'bubbles' : 'room', channel: b.view_channel === 'bubbles' ? 'bubbles' : 'room' },
             font_scale: Object.prototype.hasOwnProperty.call(FONT_SCALES, b.font_size) ? FONT_SCALES[b.font_size] : null,
         };
         const on = (k) => b[k] === '1';
@@ -658,6 +724,14 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
         const sid = actor.user.subject_id;
         try {
             await prefs.update(sid, patch);
+            // The view defaults are Chat's own (server/chat/view-defaults.js): the Network module has no field for
+            // them yet, and a refused patch would lose the whole save.
+            await require('../chat/view-defaults').save(actor.user.id, {
+                one_to_one: b.view_one_to_one === 'room' ? 'room' : 'bubbles',
+                ai: b.view_ai === 'room' ? 'room' : 'bubbles',
+                group: b.view_group === 'bubbles' ? 'bubbles' : 'room',
+                channel: b.view_channel === 'bubbles' ? 'bubbles' : 'room',
+            });
             await prefStores.dm.update(sid, { new_conversations: b.new_conversations === 'nobody' ? 'nobody' : null, group_invites: on('group_invites') ? null : false, previews: on('previews') ? null : false });
             await prefStores.presence.update(sid, { show_in_user_list: on('show_in_user_list') ? null : false });
             await prefStores.tts.update(sid, {

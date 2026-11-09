@@ -63,6 +63,9 @@ function navConfig(o, config, site = {}, siteLinks = null) {
         apiBase: NETWORK_URL,
         links: (siteLinks || site.links || links(o)).map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: o.active === l.key })),
         history: { type: 'page', title: o.title || site.name || SITE_NAME },
+        // The phone's bottom bar (Shared's app bar, appbar.js): Home, Servers, Vibe, Activity and You — one
+        // bar for every OpenVibe app (the plan, 2026-11-09, stage V2).
+        appBar: require('./shell').APP_BAR.map((l) => ({ ...l, active: o.active === l.page })),
         silentLogin: `${config.web.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
         loginUrl: `/auth/login?next=${encodeURIComponent(o.path || '/')}`,
@@ -145,7 +148,9 @@ function renderPage(o) {
     const p = o.prefs || {};
     const cls = [p.compact ? 'oc-compact' : '', p.timestamps ? 'oc-times' : '', p.show_badges === false ? 'oc-nobadges' : ''].filter(Boolean).join(' ');
     const scale = typeof p.font_scale === 'number' ? ` style="--oc-scale:${Math.min(1.4, Math.max(0.8, p.font_scale))}"` : '';
-    const footerVariant = o.footer === 'compact' ? 'compact' : 'full';
+    // 'none': the app shell's own pages (the plan, 2026-11-09, stage V2) have no footer: the conversation
+    // fills the screen, and the phone's bottom bar is Shared's app bar.
+    const footerVariant = o.footer === 'compact' ? 'compact' : (o.footer === 'none' ? 'none' : 'full');
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -155,6 +160,7 @@ ${head}
 ${appIcon.headTags({ site: 'network' })}
 ${INSTALL_LINKS}
 <link rel="stylesheet" href="${asset('chat.css')}">
+${o.shell ? `<link rel="stylesheet" href="${asset('chat-shell.css')}">` : ''}
 <link rel="stylesheet" href="${ovServe.url('items.css')}">
 ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` : ''}
 ${(o.inlineStyles || []).map((css) => `<style>${css}</style>`).join('\n')}
@@ -168,6 +174,7 @@ ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join
 <script src="${ovServe.url('navbar.js')}" defer></script>
 <script src="${ovServe.url('footer.js')}" defer></script>
 ${o.script ? `<script src="${asset('chat.js')}" defer></script>` : ''}
+${o.shell ? `<script src="${asset('chat-shell.js')}" defer></script>` : ''}
 ${o.callScript ? `<script src="${asset('call.js')}" defer></script>` : ''}
 ${o.ringScript ? `<script src="${asset('ring.js')}" defer></script>` : ''}
 ${o.kit ? `<script src="${ovServe.url('kit-web.js')}" defer></script>\n<script src="${ovServe.url('ov-thread.js')}" defer></script>` : ''}
@@ -178,11 +185,11 @@ ${o.app ? `<script src="${asset('vibe-md.js')}" defer></script>\n<script src="${
 <a class="oc-skip" href="#main">Skip to content</a>
 <div id="navbar-mount"></div>
 ${frame.noscriptNav({ name: siteName, home: '/', links: siteLinks.map(({ label, href }) => ({ label, href })) })}
-<main id="main" class="${o.app ? 'vb-wrap' : `oc-main${o.wide ? ' oc-main--wide' : ''}`}"${o.mainAttrs ? ` ${o.mainAttrs}` : ''}>
+<main id="main" class="${o.app ? 'vb-wrap' : `oc-main${o.shell ? ' oc-main--shell' : (o.wide ? ' oc-main--wide' : '')}`}"${o.mainAttrs ? ` ${o.mainAttrs}` : ''}>
 <noscript><p class="oc-account">${who}</p></noscript>
 ${o.body || ''}
 </main>
-${o.app ? '' : frame.footer({ service: siteService, variant: footerVariant, updates: '/updates' })}
+${o.app || footerVariant === 'none' ? '' : frame.footer({ service: siteService, variant: footerVariant, updates: '/updates' })}
 <script>
 window.__OV_PAGE = ${JSON.stringify({ navbar: navConfig(o, config, site, siteLinks), footer: { service: siteService, variant: footerVariant, mount: '#ov-footer', brandName: siteName, updates: '/updates' }, chat: o.page || null }).replace(/</g, '\\u003c')};
 document.addEventListener('DOMContentLoaded', function () {

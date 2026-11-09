@@ -1,0 +1,172 @@
+/* openvibe.chat — the app shell (the plan, 2026-11-09, stage V2): the rail, the side column, the members column and
+   the phone panels. Discord's four columns, our data; the look is Opus's (openvibe.design), this is the structure.
+   One icon button size: 40 px on a computer, 44 px on a phone. One primary style. Labels beside icons where there
+   is room. */
+
+.oc-app { display: grid; grid-template-columns: 72px 240px minmax(0, 1fr) 0; height: calc(100dvh - var(--ovnav-h, 56px)); min-height: 420px; background: var(--oc-panel); overflow: hidden; }
+.oc-app.is-members { grid-template-columns: 72px 240px minmax(0, 1fr) 240px; }
+.oc-app > .oc-col-members { overflow: hidden; border-left: 0; }
+.oc-app.is-members > .oc-col-members { overflow-y: auto; border-left: 1px solid var(--oc-line); }
+
+/* ── The rail (72 px): Home, Vibe, your servers, then Add and Explore ── */
+.oc-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0; background: var(--oc-bg); border-right: 1px solid var(--oc-line); overflow-y: auto; scrollbar-width: none; }
+.oc-rail::-webkit-scrollbar { display: none; }
+.oc-rail-icon { position: relative; display: grid; place-items: center; width: 48px; height: 48px; flex: 0 0 auto; border-radius: 50%; background: var(--oc-panel-2); color: var(--oc-text); font-weight: 800; font-size: .95rem; letter-spacing: .02em; text-decoration: none; transition: border-radius .15s ease, background-color .15s ease; }
+.oc-rail-icon:hover, .oc-rail-icon:focus-visible { border-radius: 16px; }
+.oc-rail-icon.is-active { border-radius: 16px; background: var(--oc-panel-2); }
+.oc-rail .oc-rail-icon.is-active::before { content: ''; position: absolute; left: -12px; top: 10px; bottom: 10px; width: 4px; border-radius: 0 4px 4px 0; background: var(--oc-text); }
+.oc-rail-home, .oc-rail-vibe { background: var(--oc-panel-2); }
+.oc-rail-home .oc-i, .oc-rail-vibe .oc-i { width: 22px; height: 22px; }
+.oc-rail-divider { width: 32px; height: 2px; flex: 0 0 2px; border-radius: 2px; background: var(--oc-line); }
+.oc-rail-dot { position: absolute; right: -6px; bottom: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--oc-red); color: #1a0505; font-size: .66rem; font-weight: 800; line-height: 18px; text-align: center; }
+.oc-rail-add { background: var(--oc-panel-2); color: var(--oc-ok); font-size: 1.5rem; font-weight: 500; }
+.oc-rail-explore { background: var(--oc-panel-2); color: var(--oc-accent); }
+.oc-rail-add:hover, .oc-rail-explore:hover { background: var(--oc-panel); }
+.oc-rail-explore .oc-i { width: 20px; height: 20px; }
+
+/* On a phone the side column opens from the rail: this button. */
+.oc-rail-menu { display: none; place-items: center; width: 44px; height: 44px; flex: 0 0 auto; border: 0; border-radius: 50%; background: var(--oc-panel-2); color: var(--oc-text); cursor: pointer; }
+.oc-rail-menu .oc-i { width: 20px; height: 20px; }
+
+/* ── The side column (240 px) ── */
+.oc-side { display: flex; flex-direction: column; min-width: 0; padding: 12px 8px 0; overflow-y: auto; border-right: 1px solid var(--oc-line); background: var(--oc-bg); }
+.oc-side-top { padding: 0 0 10px; }
+.oc-side-find { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 10px; border-radius: 10px; background: var(--oc-panel-2); color: var(--oc-text); text-decoration: none; font-size: .92rem; }
+.oc-side-find:hover { background: var(--oc-panel); }
+.oc-side-find .oc-i { width: 18px; height: 18px; color: var(--oc-muted); }
+.oc-side-sec { margin-bottom: 12px; }
+.oc-side-group { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 8px 4px; font-size: .72rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--oc-muted); }
+.oc-side-group > summary { cursor: pointer; list-style: none; }
+.oc-side-group > summary::-webkit-details-marker { display: none; }
+.oc-side-cat details > summary::after { content: '▾'; margin-left: auto; font-size: .8rem; }
+.oc-side-cat details:not([open]) > summary::after { content: '▸'; }
+.oc-side-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.oc-side-list .oc-row > a, .oc-side-list .oc-row > span { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 4px 8px; border-radius: 8px; color: var(--oc-text); text-decoration: none; }
+.oc-side-list .oc-row > a:hover { background: var(--oc-panel-2); }
+.oc-side-list .oc-row-main { min-width: 0; }
+.oc-side-list .oc-row-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.oc-side-list .oc-row-top strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-side-list .oc-row-sub { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8rem; }
+.oc-side-empty { margin: 0; padding: 2px 8px 6px; font-size: .84rem; }
+.oc-side-head { padding: 0 6px 8px; }
+.oc-side-name { font-size: 1.05rem; line-height: 1.3; margin: 0 0 2px; overflow-wrap: anywhere; }
+.oc-side-head .oc-badge { margin-left: 0; }
+.oc-side-meta { margin: 2px 0 0; font-size: .82rem; }
+.oc-side-desc { margin: 6px 0 0; font-size: .86rem; color: var(--oc-muted); }
+.oc-side-more { position: absolute; right: 8px; top: 8px; }
+.oc-side-event { display: flex; align-items: center; gap: 8px; min-height: 40px; margin: 0 0 6px; padding: 6px 8px; border-radius: 8px; color: var(--oc-muted); text-decoration: none; font-size: .9rem; }
+.oc-side-event:hover { background: var(--oc-panel-2); color: var(--oc-text); }
+.oc-side-event .oc-i { width: 18px; height: 18px; }
+
+/* Channels: text (#) and voice (a speaker), with the people in each voice channel. */
+.oc-chan { display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 4px 8px; border-radius: 8px; color: var(--oc-muted); text-decoration: none; }
+.oc-chan:hover, .oc-chan:focus-visible { background: var(--oc-panel-2); color: var(--oc-text); }
+.oc-chan.is-active { background: color-mix(in srgb, var(--oc-accent) 18%, transparent); color: var(--oc-text); }
+.oc-chan.is-unread { color: var(--oc-text); font-weight: 700; }
+.oc-chan-hash { width: 16px; text-align: center; font-weight: 700; opacity: .75; }
+.oc-chan-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-chan .oc-i { width: 16px; height: 16px; }
+.oc-voice-people { list-style: none; margin: 0 0 4px; padding: 0 8px 0 32px; }
+.oc-voice-people li { font-size: .8rem; color: var(--oc-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The you-bar at the foot of the side column. */
+.oc-you { position: sticky; bottom: 0; display: flex; align-items: center; gap: 8px; margin-top: auto; padding: 8px; border-top: 1px solid var(--oc-line); background: var(--oc-bg); }
+.oc-you-id { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--oc-text); text-decoration: none; }
+.oc-you-names { display: grid; min-width: 0; }
+.oc-you-names strong { font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-you-names .oc-muted { font-size: .74rem; }
+.oc-you-tools { display: flex; gap: 2px; margin-left: auto; }
+
+/* ── The members column ── */
+.oc-members-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 8px 0; }
+.oc-members-sec { margin-bottom: 10px; }
+.oc-member-row strong { color: color-mix(in oklab, var(--nc, var(--oc-text)) 50%, var(--oc-text)); }
+
+/* The shell fills the page: no gutter, no card. */
+.oc-main--shell { max-width: none; padding: 0; margin: 0; }
+
+/* ── The middle column ── */
+.oc-col-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: color-mix(in srgb, var(--oc-panel-2) 60%, var(--oc-panel)); }
+.oc-chan-head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 10px 16px; border-bottom: 1px solid var(--oc-line); }
+.oc-chan-title { display: flex; align-items: center; gap: 6px; margin: 0; font-size: 1.04rem; }
+.oc-chan-tools { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.oc-col-main > .oc-notice, .oc-col-main > .oc-ai-here { margin: 10px 18px 0; }
+.oc-col-main > .oc-call { margin: 12px 18px 0; }
+.oc-col-main > .oc-compose, .oc-col-main > .oc-signin, .oc-col-main > form { margin: 0; padding: 12px 18px 16px; border-top: 1px solid var(--oc-line); }
+.oc-side-join { margin: 0 0 8px; }
+.oc-side-join button, .oc-side-join .oc-button { width: 100%; text-align: center; }
+
+/* One icon button size: 40 px on a computer, 44 px on a phone. */
+.oc-icon-btn { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; background: transparent; color: var(--oc-muted); text-decoration: none; cursor: pointer; border: 0; }
+.oc-icon-btn:hover { background: var(--oc-panel-2); color: var(--oc-text); }
+.oc-icon-btn .oc-i { width: 20px; height: 20px; }
+
+/* ── The phone: the columns are panels you swipe between ── */
+@media (max-width: 760px) {
+  .oc-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); height: auto; min-height: 0; }
+  .oc-app.is-members { grid-template-columns: minmax(0, 1fr); }
+  .oc-rail-menu { display: grid; }
+  .oc-app > .oc-rail { flex-direction: row; justify-content: flex-start; gap: 10px; padding: 8px 10px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--oc-line); }
+  .oc-app .oc-rail .oc-rail-icon.is-active::before { left: 9px; right: 9px; top: auto; bottom: -8px; width: auto; height: 4px; border-radius: 4px 4px 0 0; }
+  .oc-app > .oc-side, .oc-app > .oc-col-members { display: none; }
+  .oc-app[data-oc-panel="side"] > .oc-side { display: flex; border-right: 0; }
+  .oc-app[data-oc-panel="members"] > .oc-col-members { display: block; border-left: 0; }
+  .oc-app[data-oc-panel="side"] > .oc-col-main, .oc-app[data-oc-panel="members"] > .oc-col-main { display: none; }
+  .oc-icon-btn { width: 44px; height: 44px; }
+  .oc-col-main > .oc-page-head, .oc-col-main > .oc-chan-head { padding-left: 12px; padding-right: 12px; }
+  .oc-col-main > .oc-compose, .oc-col-main > .oc-dock, .oc-col-main > .oc-signin { padding-left: 12px; padding-right: 12px; }
+  .oc-chan { min-height: 44px; }
+  .oc-side-list .oc-row > a, .oc-side-list .oc-row > span { min-height: 44px; }
+}
+
+/* A friend row is a button that opens the conversation; the form posts the username. */
+.oc-side-list .oc-row form { width: 100%; }
+.oc-side-person { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 40px; padding: 4px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--oc-text); text-align: left; cursor: pointer; font: inherit; }
+.oc-side-person:hover { background: var(--oc-panel-2); }
+.oc-side-add { display: flex; gap: 6px; margin: 6px 0 0; }
+.oc-side-add input { flex: 1; min-width: 0; min-height: 40px; }
+.oc-side-add button { min-height: 40px; }
+
+/* ── Explore: the cards, the chips and the Start sheet ── */
+.oc-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
+.oc-chip { display: inline-flex; align-items: center; min-height: 36px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--oc-line); color: var(--oc-muted); text-decoration: none; font-size: .9rem; }
+.oc-chip:hover { border-color: var(--oc-accent); color: var(--oc-text); }
+.oc-chip.is-active { background: var(--oc-accent); border-color: var(--oc-accent); color: var(--oc-on-accent); font-weight: 700; }
+.oc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+.oc-card { display: flex; flex-direction: column; gap: 6px; padding: 0 0 14px; border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel); overflow: hidden; }
+.oc-card-banner { height: 64px; background: linear-gradient(120deg, hsl(var(--oc-hue, 215) 52% 34%), hsl(var(--oc-hue, 215) 52% 22%)); }
+.oc-card .oc-srv-icon { margin: -24px 0 0 14px; border: 3px solid var(--oc-panel); }
+.oc-card h3 { margin: 4px 14px 0; font-size: 1.02rem; }
+.oc-card-line { margin: 0 14px; font-size: .88rem; color: var(--oc-muted); }
+.oc-card-meta { margin: 0 14px; font-size: .8rem; }
+.oc-card form, .oc-card > .oc-button { margin: 6px 14px 0; }
+.oc-card form button { width: 100%; }
+.oc-card > .oc-button { text-align: center; }
+.oc-server-card--new { justify-content: center; border-style: dashed; }
+
+/* The sheet: a template, a name and a picture, public or private. */
+.oc-sheet { margin: 18px 0 0; border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel); }
+.oc-sheet > summary { display: block; padding: 14px 18px; cursor: pointer; font-weight: 700; list-style: none; }
+.oc-sheet > summary::-webkit-details-marker { display: none; }
+.oc-sheet-form { padding: 0 18px 18px; }
+.oc-sheet-step { border: 0; padding: 0; margin: 0 0 18px; }
+.oc-sheet-step legend { padding: 0 0 8px; font-weight: 700; }
+.oc-templates { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; }
+.oc-template { display: block; }
+.oc-template input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.oc-template-body { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--oc-line); border-radius: 12px; cursor: pointer; }
+.oc-template input:checked + .oc-template-body { border-color: var(--oc-accent); background: color-mix(in srgb, var(--oc-accent) 14%, transparent); }
+.oc-template input:focus-visible + .oc-template-body { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+.oc-template-channels { font-size: .78rem; color: var(--oc-muted); }
+.oc-seg { display: inline-flex; border: 1px solid var(--oc-line); border-radius: 10px; overflow: hidden; }
+.oc-seg label { position: relative; }
+.oc-seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+.oc-seg span { display: block; min-width: 96px; min-height: 40px; padding: 8px 16px; text-align: center; cursor: pointer; color: var(--oc-muted); }
+.oc-seg input:checked + span { background: var(--oc-accent); color: var(--oc-on-accent); font-weight: 700; }
+.oc-seg input:focus-visible + span { outline: 2px solid var(--oc-accent); outline-offset: -2px; }
+
+/* The invite link at the end of the Start sheet. */
+.oc-invite-new { margin: 0 18px 14px; padding: 12px 14px; border: 1px solid var(--oc-line); border-radius: 12px; background: var(--oc-panel); }
+.oc-invite-new h2 { margin: 0 0 4px; font-size: 1rem; }
+.oc-invite-url { display: block; overflow-wrap: anywhere; padding: 8px 10px; border-radius: 8px; background: var(--oc-bg); }
+.oc-invite-tools { display: flex; gap: 8px; margin: 10px 0 0; }
