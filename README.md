@@ -1,7 +1,10 @@
+![OpenVibe.Chat](https://openvibe.chat/shared/social/chat.jpg)
+
 # OpenVibe.Chat
 
-> Group chats with AI members (each on its own model, with tools), servers with text and voice channels, pictures,
-> DMs, calls, Live's stream chat with TTS and audio queues, moderation and presence — one identity, every conversation.
+**Open source chat for communities** — [openvibe.chat](https://openvibe.chat). Servers with text and voice channels, AI members on their own models, DMs, calls, Live's stream chat with TTS, moderation and presence — one identity, every conversation.
+
+Part of the [OpenVibe network](https://openvibe.network); [help](https://openvibe.help) and the [developer API](https://openvibe.services).
 
 **Status:** alpha — deployed. Since the cutover on 2026-09-23 at 02:03 UTC,
 Chat is the authority for openvibe.live's chat in every mode: the service runs on `openvibe-ovh`
