@@ -125,9 +125,10 @@ function globalMessage(m) {
     const where = m.stream_channel ? ` <a class="oc-where" href="${LIVE}/@${encodeURIComponent(m.stream_channel)}" title="Sent from ${esc(m.stream_channel)}'s channel">@${esc(m.stream_channel)}</a>` : '';
     return `<li class="oc-msg" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who}${roleBadge(m.role)}${where} <span class="oc-text">${linkify(m.message)}</span>${ui.linkCard(m.card)}</li>`;
 }
-function dmMessage(m, me) {
+function dmMessage(m, me, view = 'room') {
     const t = hhmm(m.created_at);
     const mine = me && m.sender_id === me.id;
+    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div><time class="oc-bubble-time" datetime="${t.iso}">${t.text}</time></li>`;
     return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${ui.linkCard(m.card)}</li>`;
 }
 // Vibe, OpenVibe's assistant, as a room's AI member (one click on the room's settings; a person's own chats with it are
@@ -348,9 +349,9 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
     const dmApi = require('../chat/dm-routes');
     const { ICONS: IC } = require('./icons');
     /** One conversation in a list: initials, name and time on one line, the last message under it, unread marked. */
-    const convRow = ({ href, title, preview, at, unread = 0, badge = '', personPresence = null }) => {
+    const convRow = ({ href, title, preview, at, unread = 0, badge = '', personPresence = null, avatarUrl = '' }) => {
         const t = ui.when(at);
-        return `<li class="oc-row${unread ? ' oc-unread' : ''}"><a href="${esc(href)}">${ui.initials(title, personPresence)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(title)}</strong>${badge}${t.text ? `<time datetime="${t.iso}">${esc(t.text)}</time>` : ''}</span>`
+        return `<li class="oc-row${unread ? ' oc-unread' : ''}"><a href="${esc(href)}">${ui.initials(title, personPresence, { avatarUrl })}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(title)}</strong>${badge}${t.text ? `<time datetime="${t.iso}">${esc(t.text)}</time>` : ''}</span>`
             + `<span class="oc-row-sub">${esc(preview)}${unread ? `<span class="oc-dot" aria-label="${unread} new">${unread > 9 ? '9+' : unread}</span>` : ''}</span></span></a></li>`;
     };
     router.get('/messages', async (req, res) => {
@@ -365,8 +366,10 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
             const others = participants[i].filter((p) => p.id !== me.id);
             const title = c.name || others.map((p) => p.display_name || p.username).join(', ') || 'Just you';
             const personPresence = others.length === 1 ? others[0].presence : null;
-            return convRow({ href: `/messages/${c.id}`, title, preview: c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet', at: c.last_message_at, unread: Number(c.unread_count) || 0, personPresence });
+            return convRow({ href: `/messages/${c.id}`, title, preview: c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet', at: c.last_message_at, unread: Number(c.unread_count) || 0, personPresence, avatarUrl: others.length === 1 ? others[0].avatar_url : '' });
         });
+        const recentPeople = [...new Map(participants.flat().filter((person) => person.id !== me.id).map((person) => [person.id, person])).values()].slice(0, 6);
+        const recentPicker = recentPeople.map((person) => `<li><form method="post" action="/messages/new"><input type="hidden" name="username" value="${esc(person.username || '')}"><button type="submit">${ui.initials(person.display_name || person.username, person.presence, { avatarUrl: person.avatar_url })}<span>${esc(person.display_name || person.username)}${person.username ? ` <small>@${esc(person.username)}</small>` : ''}</span></button></form></li>`).join('');
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const done = req.query.unblocked ? notice('ok', 'Unblocked. They can message you again, and you them.') : '';
         const blocked = await dm.getBlockedUsers(me.id);
@@ -379,8 +382,7 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
         await page(req, res, 200, {
             actor, title: 'Messages', path: '/messages', active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'compact',
             page: { view: 'inbox', unread, me: me.id },
-            body: `${ui.head({ title: 'Messages', sub: `<span id="oc-inbox-status" aria-live="polite">${unread ? `${unread} unread` : 'All caught up'}</span>` })}${error}${done}
-<form class="oc-find" method="post" action="/messages/new" role="search">${IC.pencil}<label for="oc-to" class="oc-sr">New message: their username</label><input id="oc-to" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="New message: their username" autocomplete="off" enterkeyhint="go"><button type="submit" class="oc-send" aria-label="Start the conversation" title="Start">${IC.send}</button></form>
+            body: `${ui.head({ title: 'Messages', sub: `<span id="oc-inbox-status" aria-live="polite">${unread ? `${unread} unread` : 'All caught up'}</span>`, actions: [`<details class="oc-new-picker"><summary class="oc-icon-btn" aria-label="New message" title="New message">${IC.pencil}<span>New</span></summary><div class="oc-new-pop"><label for="oc-people-search">Find someone</label><input id="oc-people-search" type="search" minlength="2" autocomplete="off" placeholder="Search people"><ul id="oc-people-results" aria-live="polite">${recentPicker || '<li class="oc-muted">Search by name or username</li>'}</ul></div></details>`] })}${error}${done}
 <ul class="oc-list" id="oc-convs">${rows.join('\n') || '<li class="oc-row-empty oc-muted">No conversations yet. Write a username above to start one.</li>'}</ul>
 ${supportList}
 ${blockedList}`,
@@ -412,6 +414,7 @@ ${blockedList}`,
     router.get('/messages/:id', async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         const me = actor.user;
+        const preferences = await prefsOf(actor);
         const id = parseInt(req.params.id, 10);
         if (!Number.isInteger(id) || !await dm.isParticipant(id, me.id)) return await page(req, res, 404, { actor, title: 'Not found', path: req.path, robots: 'noindex', body: '<h1>No such conversation</h1><p><a href="/messages">Back to your messages</a></p>' });
         const others = (await dm.getParticipants(id)).filter((p) => p.id !== me.id);
@@ -419,6 +422,9 @@ ${blockedList}`,
         const conv = await dm.getConversation(id);
         const title = (conv && conv.name) || others.map((p) => p.display_name || p.username).join(', ') || 'Conversation';
         const msgs = (await dm.getMessages(id, 60)).slice().sort((a, b) => a.id - b.id);
+        const savedView = await db.get('SELECT view FROM dm_view_preferences WHERE user_id = ? AND conversation_id = ?', [me.id, id]).catch(() => null);
+        const viewKind = others.length <= 1 ? 'one_to_one' : 'group';
+        const view = savedView?.view || (preferences.view_defaults && preferences.view_defaults[viewKind]) || (viewKind === 'one_to_one' ? 'bubbles' : 'room');
         try { await dm.markRead(id, me.id); } catch { /* best effort */ }
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         // A 1:1 conversation: block or unblock the other person here; a block (either way) closes the composer.
@@ -431,20 +437,20 @@ ${blockedList}`,
         const otherPresence = other ? other.presence : null;
         const liveHref = otherPresence && (otherPresence.channel_url || otherPresence.url);
         const subLine = other ? (ui.presenceLine(otherPresence, { liveHref }) || `@${esc(other.username || '')}`) : `${others.length + 1} people`;
-        const avatar = other ? ui.initials(other.display_name || other.username || '?', otherPresence, { large: true, id: 'oc-dm-avatar' }) : '';
+        const avatar = other ? ui.initials(other.display_name || other.username || '?', otherPresence, { large: true, id: 'oc-dm-avatar', avatarUrl: other.avatar_url }) : '';
         let composer = `<div class="oc-dock"><form class="oc-compose" method="post" action="/messages/${id}" id="oc-compose"><label for="oc-input" class="oc-sr">Reply</label><textarea id="oc-input" name="message" maxlength="2000" rows="1" required placeholder="Write a message"></textarea><button type="submit" class="oc-send" aria-label="Send" title="Send">${IC.send}</button></form></div>`;
         if (iBlocked) composer = `${notice('error', `You blocked ${other.display_name || other.username}. Neither of you can message the other.`)}<form class="oc-inline" method="post" action="/messages/unblock/${Number(other.id)}"><input type="hidden" name="back" value="/messages/${id}"><button type="submit">Unblock ${otherName}</button></form>`;
         else if (closed) composer = notice('error', 'You cannot message this person.');
         // Blocking is in the conversation's "more" menu: one tap on an icon in the header should never block someone.
-        const tools = other && !iBlocked ? `<details class="oc-more"><summary class="oc-icon-btn" aria-label="More" title="More">${IC.more}</summary><div class="oc-pop"><form method="post" action="/messages/${id}/block"><button type="submit" class="oc-pop-item oc-danger">${IC.ban}<span>Block ${otherName}</span></button></form></div></details>` : '';
+        const tools = !closed ? `<details class="oc-more"><summary class="oc-icon-btn" aria-label="More" title="More">${IC.more}</summary><div class="oc-pop"><button type="button" class="oc-pop-item" id="oc-view-toggle" aria-label="Show as ${view === 'bubbles' ? 'a chat room' : 'bubbles'}" data-view="${view}">${IC.view}<span>${view === 'bubbles' ? 'Show as a chat room' : 'Show as bubbles'}</span></button>${other && !iBlocked ? `<form method="post" action="/messages/${id}/block"><button type="submit" class="oc-pop-item oc-danger">${IC.ban}<span>Block ${otherName}</span></button></form>` : ''}</div></details>` : '';
         // A 1:1 conversation nobody blocked can become a call (POST /messages/:id/call rings the other person).
         const callForm = other && !closed && require('../config').calls.enabled
-            ? `<form class="oc-inline oc-dm-call" method="post" action="/messages/${id}/call"><button type="submit" class="oc-icon-btn" aria-label="Call ${otherName}" title="Call ${otherName}">${IC.phone}</button></form>` : '';
+            ? `<form class="oc-inline oc-dm-call" method="post" action="/messages/${id}/call"><button type="submit" class="oc-icon-btn" aria-label="Call ${otherName}" title="Call ${otherName}">${IC.phone}<span class="oc-call-label">Call</span></button></form>` : '';
         await page(req, res, 200, {
             actor, title, path: `/messages/${id}`, active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'compact',
-            page: { view: 'dm', conversation: id, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me.id, other: other ? { id: other.id, username: other.username || '' } : null },
+            page: { view: 'dm', conversation: id, messageView: view, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me.id, other: other ? { id: other.id, username: other.username || '' } : null },
             body: `${ui.head({ title: esc(title), sub: `<span id="oc-dm-status">${subLine}</span>`, avatar, back: { href: '/messages', label: 'All messages' }, actions: [callForm, tools].filter(Boolean) })}${error}
-<ol class="oc-feed oc-room-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => dmMessage(m, me)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
+<ol class="oc-feed oc-room-feed${view === 'bubbles' ? ' oc-bubbles' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => dmMessage(m, me, view)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
 ${composer}`,
         });
     });
@@ -551,6 +557,8 @@ ${box('compact', 'Compact messages', p.compact === true)}
 ${box('show_badges', 'Staff and moderator badges', p.show_badges !== false)}
 ${box('hide_emotes', 'Hide emotes', p.hide_emotes === true)}
 <div class="oc-set-row"><span class="oc-set-text" id="oc-size-l">Text size</span><span class="oc-seg" role="radiogroup" aria-labelledby="oc-size-l">${sizes}</span></div>
+<h3>Conversation view</h3>
+${[['one_to_one','One-to-one chats','bubbles'],['ai','Chats with Vibe','bubbles'],['group','Group conversations','room'],['channel','Channels and stream chat','room']].map(([key,label,fallback]) => `<label class="oc-set-row"><span class="oc-set-text">${label}</span><select name="view_${key}"><option value="bubbles"${(p.view_defaults && p.view_defaults[key] || fallback) === 'bubbles' ? ' selected' : ''}>Bubbles</option><option value="room"${(p.view_defaults && p.view_defaults[key] || fallback) === 'room' ? ' selected' : ''}>Chat room</option></select></label>`).join('')}
 </section>
 <section class="oc-set" aria-labelledby="oc-set-dm"><h2 id="oc-set-dm">Direct messages</h2>
 <label class="oc-set-row"><span class="oc-set-text">Who can start one with you</span><select name="new_conversations"><option value="everyone"${dmSet.new_conversations !== 'nobody' ? ' selected' : ''}>Everyone</option><option value="nobody"${dmSet.new_conversations === 'nobody' ? ' selected' : ''}>Nobody</option></select></label>
@@ -641,6 +649,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
             show_badges: b.show_badges === '1' ? null : false,
             hide_emotes: b.hide_emotes === '1' ? true : null,
             agents_read_messages: b.agents_read_messages === '1' ? null : false,
+            view_defaults: { one_to_one: b.view_one_to_one === 'room' ? 'room' : 'bubbles', ai: b.view_ai === 'room' ? 'room' : 'bubbles', group: b.view_group === 'bubbles' ? 'bubbles' : 'room', channel: b.view_channel === 'bubbles' ? 'bubbles' : 'room' },
             font_scale: Object.prototype.hasOwnProperty.call(FONT_SCALES, b.font_size) ? FONT_SCALES[b.font_size] : null,
         };
         const on = (k) => b[k] === '1';
