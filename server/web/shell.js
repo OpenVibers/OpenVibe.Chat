@@ -38,8 +38,8 @@ const APP_BAR = [
 const iconBtn = (href, label, svg, extra = '') => `<a class="oc-icon-btn" href="${esc(href)}" aria-label="${esc(label)}" title="${esc(label)}"${extra}>${svg}</a>`;
 
 /**
- * The rail: Home and Vibe, your servers, then Add a server and Explore.
- * o: { servers: [{ slug, name, unread, active }], dmUnread, home, vibe, mine }
+ * The rail: Home, Global chat and Vibe, your servers, then Add a server and Explore.
+ * o: { servers: [{ slug, name, unread, active }], dmUnread, home, global, vibe, explore }
  */
 function rail(o = {}) {
     const servers = o.servers || [];
@@ -47,6 +47,7 @@ function rail(o = {}) {
     return `<nav class="oc-rail" aria-label="Chat destinations">
 <button type="button" class="oc-rail-menu" data-oc-panel="side" aria-label="Open the side column" title="Open the side column">${IC.menu}</button>
 <a class="oc-rail-icon oc-rail-home${o.home ? ' is-active' : ''}" href="/messages" title="Home"${o.home ? ' aria-current="page"' : ''}>${IC.chat}<span class="oc-sr">Home</span>${o.dmUnread ? `<span class="oc-rail-dot" aria-label="${o.dmUnread} unread">${o.dmUnread > 99 ? '99+' : o.dmUnread}</span>` : ''}</a>
+<a class="oc-rail-icon oc-rail-global${o.global ? ' is-active' : ''}" href="/" title="Global chat"${o.global ? ' aria-current="page"' : ''}>${IC.globe}<span class="oc-sr">Global chat</span></a>
 <a class="oc-rail-icon oc-rail-vibe${o.vibe ? ' is-active' : ''}" href="/vibe" title="Vibe"${o.vibe ? ' aria-current="page"' : ''}>${IC.spark}<span class="oc-sr">Vibe</span></a>
 <span class="oc-rail-divider" role="separator" aria-hidden="true"></span>
 ${servers.map(server).join('')}
@@ -138,6 +139,51 @@ ${categories.map(cat).join('')}
 ${youBar(o.you || {})}`;
 }
 
+/**
+ * The side column for the rooms: start one, Global chat, then the rooms you are in and the public ones.
+ * o: { mine: [{ slug, name, unread, private, current }], public: [...], you }
+ */
+function sideRooms(o = {}) {
+    const mine = o.mine || [];
+    const others = (o.public || []).filter((r) => !mine.some((m) => m.slug === r.slug));
+    const row = (r) => `<li><a class="oc-chan${r.current ? ' is-active' : ''}${r.unread ? ' is-unread' : ''}" href="/r/${esc(r.slug)}"${r.current ? ' aria-current="page"' : ''}><span class="oc-chan-hash" aria-hidden="true">#</span><span class="oc-chan-name">${esc(r.name)}</span>${r.private ? `<span class="oc-muted" aria-hidden="true">${IC.lock}</span>` : ''}${r.unread ? `<span class="oc-chan-dot" aria-label="${r.unread} unread">${r.unread > 99 ? '99+' : r.unread}</span>` : ''}</a></li>`;
+    const section = (id, title, rooms, empty) => `<section class="oc-side-sec" aria-labelledby="${id}"><h2 class="oc-side-group" id="${id}">${title}</h2>
+${rooms.length ? `<ul class="oc-side-list">${rooms.map(row).join('')}</ul>` : `<p class="oc-side-empty oc-muted">${empty}</p>`}</section>`;
+    return `<div class="oc-side-top">
+<a class="oc-side-find" href="/rooms#oc-new-room">${IC.plus}<span>Start a room</span></a>
+<a class="oc-side-find" href="/">${IC.globe}<span>Global chat</span></a>
+</div>
+${section('oc-side-your-rooms', 'Your rooms', mine, 'You are in no rooms yet.')}
+${section('oc-side-public-rooms', mine.length ? 'More public rooms' : 'Public rooms', others, 'No public room is open right now.')}
+${youBar(o.you || {})}`;
+}
+
+/**
+ * The side column for your settings: the sections of the page, then the you-bar.
+ * o: { items: [{ href, label, active }], you }
+ */
+function sideSettings(o = {}) {
+    const items = o.items || [];
+    return `<div class="oc-side-top"><a class="oc-side-find" href="/messages">${IC.back}<span>Back to chat</span></a></div>
+<section class="oc-side-sec" aria-labelledby="oc-side-set"><h2 class="oc-side-group" id="oc-side-set">Settings</h2>
+<ul class="oc-side-list">${items.map((i) => `<li><a class="oc-chan${i.active ? ' is-active' : ''}" href="${esc(i.href)}"${i.active ? ' aria-current="page"' : ''}><span class="oc-chan-name">${esc(i.label)}</span></a></li>`).join('')}</ul>
+</section>
+${youBar(o.you || {})}`;
+}
+
+/**
+ * The side column for the inbox: make one, then the inboxes you answer.
+ * o: { inboxes: [{ id, name, color, waiting, open, role, current }], you }
+ */
+function sideInbox(o = {}) {
+    const inboxes = o.inboxes || [];
+    const row = (i) => `<li class="oc-row${i.waiting ? ' oc-unread' : ''}"><a href="/inbox/${esc(i.id)}"${i.current ? ' aria-current="page"' : ''}><span class="oc-dot" style="background:${esc(i.color || 'var(--oc-accent)')}" aria-hidden="true"></span><span class="oc-row-main"><span class="oc-row-top"><strong>${esc(i.name)}</strong></span><span class="oc-row-sub">${i.waiting ? `${i.waiting} waiting · ` : ''}${i.open} open · ${i.role === 'owner' ? 'owner' : 'agent'}</span></span></a></li>`;
+    return `<div class="oc-side-top"><a class="oc-side-find" href="/inbox#oc-new-inbox">${IC.plus}<span>Make an inbox</span></a></div>
+<section class="oc-side-sec" aria-labelledby="oc-side-inboxes"><h2 class="oc-side-group" id="oc-side-inboxes">Your inboxes</h2>
+${inboxes.length ? `<ul class="oc-side-list">${inboxes.map(row).join('')}</ul>` : '<p class="oc-side-empty oc-muted">No inboxes yet.</p>'}</section>
+${youBar(o.you || {})}`;
+}
+
 /** The you-bar: your mark, your status, mute, deafen and settings (the foot of the side column). */
 function youBar(o = {}) {
     if (!o.name) return '';
@@ -185,4 +231,4 @@ ${o.members ? `<aside class="oc-col oc-col-members" aria-label="${esc(o.membersL
 </div>`;
 }
 
-module.exports = { APP_BAR, rail, sideHome, sideServer, membersColumn, channelHeader, youBar, shell, personRow };
+module.exports = { APP_BAR, rail, sideHome, sideServer, sideRooms, sideSettings, sideInbox, membersColumn, channelHeader, youBar, shell, personRow };

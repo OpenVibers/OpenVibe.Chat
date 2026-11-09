@@ -24,6 +24,7 @@ const { embedOf, sendExport } = require('../inbox/routes');
 const records = require('../inbox/records');
 const { esc, asset } = require('./layout');
 const ui = require('./ui');
+const shell = require('./shell');
 const kit = require('openvibe-shared/kit');
 const thread = require('openvibe-shared/thread');
 // A visitor's initial, in a circle, beside their row.
@@ -100,19 +101,28 @@ function mountInboxPages(router, { page, viewerOf, needUser, sameSite, formLimit
             ? `<ul class="ib-list">${mine.map((i) => `<li><a href="/inbox/${esc(i.id)}"><span class="ib-dot" style="background:${esc(i.color)}"></span><b>${esc(i.name)}</b>
 <span class="oc-muted">${i.waiting ? `${i.waiting} waiting · ` : ''}${i.open} open · ${i.role === 'owner' ? 'owner' : 'agent'}</span></a></li>`).join('')}</ul>`
             : '<p class="oc-muted">No inboxes yet. Make one below, paste its snippet into your site, and visitors can write to you: Vibe answers first, you take over when it matters.</p>';
+        const mineServers = (await require('../rooms/servers').list(actor.user)).mine;
+        const dmUnread = await require('../chat/dm').getTotalUnread(actor.user.id);
         await page(req, res, 200, {
-            actor, title: 'Inbox', path: '/inbox', active: 'inbox', robots: 'noindex, nofollow',
-            body: `<h1>Inbox</h1>
+            actor, title: 'Inbox', path: '/inbox', active: 'inbox', robots: 'noindex, nofollow', shell: true, footer: 'none',
+            body: shell.shell({
+                rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                side: shell.sideInbox({ inboxes: mine, you: { name: actor.user.display_name || actor.user.username, status: 'Online', avatarUrl: actor.user.avatar_url || '' } }),
+                sideLabel: 'Inbox',
+                main: `<h1>Inbox</h1>
 <p class="oc-muted">Live chat for your website or community: one line of HTML adds a chat bubble. Vibe, OpenVibe's assistant, answers visitors from your own instructions and pages, and hands them to you or your team when they ask for a person.</p>
 ${req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : ''}
 ${list}
-<h2>Make an inbox</h2>
+<h2 id="oc-new-inbox">Make an inbox</h2>
 <form class="oc-form" method="post" action="/inbox">
 <label>Name <input name="name" required minlength="2" maxlength="60" placeholder="Acme support"></label>
 <label>Greeting <input name="greeting" maxlength="300" placeholder="Hi! Ask us anything."></label>
 <label>What Vibe should know <textarea name="ai_instructions" rows="4" maxlength="4000" placeholder="We ship worldwide in 3-5 days. Refunds within 30 days. Hours: 9-5 PT."></textarea></label>
 <label>Pages Vibe may read (one per line) <textarea name="knowledge_urls" rows="3" placeholder="https://example.com/faq"></textarea></label>
 <p><button type="submit">Make the inbox</button></p></form>`,
+                mainLabel: 'Inbox',
+                page: true,
+            }),
         });
     });
 
@@ -143,16 +153,26 @@ ${list}
         const msgs = current ? await inboxes.messages(current) : [];
         if (current) await inboxes.markRead(inbox, current);
         const me = Number(actor.user.id);
-        const body = `<div class="ibk" id="ib" data-inbox="${esc(inbox.id)}" data-conv="${current ? esc(current.id) : ''}">${thread.page({
-            sidebar: conversationsRail({ inbox, list, filter, current, me, nameOf, waiting: counts.waiting }),
-            head: thread.head({ title: current ? (current.visitor_name || 'Visitor') : inbox.name, sidebar: 'ib-rail', sidebarLabel: 'Show conversations', actions: headActions({ inbox, current, team, me }) }),
+        // The shell's side column lists the conversations; the main column is the DM-like thread (head, turns, composer).
+        const pane = thread.page({
+            sidebar: '',
+            head: thread.head({ title: current ? (current.visitor_name || 'Visitor') : inbox.name, sidebar: null, actions: headActions({ inbox, current, team, me }) }),
             turns: current ? [...facts(current), ...msgs.map((m) => inboxTurn(m, current))] : [],
             empty: `<div class="ib-hello"><h2>${list.length ? 'Pick a conversation' : 'No conversations yet'}</h2><p>${list.length ? 'Waiting ones come first: those visitors asked for a person.' : 'Paste the snippet from Settings into your site. Visitors write; Vibe answers; you take over when it matters.'}</p></div>`,
             composer: current ? replyBox({ inbox, current, actor, saved }) : '',
             label: current ? `Conversation with ${current.visitor_name || 'a visitor'}` : inbox.name,
+        });
+        const mineServers = (await require('../rooms/servers').list(actor.user)).mine;
+        const dmUnread = await require('../chat/dm').getTotalUnread(actor.user.id);
+        const body = `<div class="ibk" id="ib" data-inbox="${esc(inbox.id)}" data-conv="${current ? esc(current.id) : ''}">${shell.shell({
+            rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+            side: conversationsRail({ inbox, list, filter, current, me, nameOf, waiting: counts.waiting }),
+            sideLabel: 'Conversations',
+            main: pane,
+            mainLabel: current ? `Conversation with ${current.visitor_name || 'a visitor'}` : inbox.name,
         })}</div>`;
         await page(req, res, 200, {
-            actor, app: true, kit: true, appScript: 'inbox.js', appStyle: 'inbox.css', scripts: ['support-call.js'], active: 'inbox', path: `/inbox/${inbox.id}`, title: `${current ? `${current.visitor_name || 'Visitor'} · ` : ''}${inbox.name} · Inbox`, robots: 'noindex, nofollow', body,
+            actor, shell: true, kit: true, appStyle: 'inbox.css', scripts: ['support-call.js', 'inbox.js'], active: 'inbox', path: `/inbox/${inbox.id}`, title: `${current ? `${current.visitor_name || 'Visitor'} · ` : ''}${inbox.name} · Inbox`, robots: 'noindex, nofollow', footer: 'none', body,
             page: { view: 'inbox', inbox: inbox.id, conversation: current ? current.id : null, call: !!(current && inboxes.convShape(current).call), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me, filter, saved: saved.map((r) => ({ shortcut: r.shortcut, body: r.body })) },
         });
     });

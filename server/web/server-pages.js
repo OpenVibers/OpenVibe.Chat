@@ -313,6 +313,21 @@ ${composer}`,
         const canInvite = can.manage || server.visibility === 'public';
         const invites = canInvite ? await servers.invites(server) : [];
         const myRank = can.staff ? -1 : servers.RANK[can.role];
+        // The side column: the server's channels, with the people in its voice channels, and the you-bar.
+        const categories = [];
+        const byCat = new Map();
+        for (const c of chans) {
+            const name = c.category || (c.kind === 'voice' ? 'Voice channels' : 'Text channels');
+            if (!byCat.has(name)) { byCat.set(name, []); categories.push({ name, channels: byCat.get(name) }); }
+            byCat.get(name).push(c);
+        }
+        const occupants = {};
+        for (const c of chans) {
+            if (c.kind !== 'voice') continue;
+            try { occupants[c.slug] = ((require('../rooms/routes').callOf({ kind: 'call', slug: c.room }) || {}).people || []).map((p) => ({ username: p.username, display_name: p.display_name })); } catch { occupants[c.slug] = []; }
+        }
+        const railServers = me ? (await servers.list(me)).mine : [];
+        const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
         const choices = (target) => {
             const list = [];
             if (myRank <= servers.RANK.owner) list.push('admin');
@@ -340,8 +355,17 @@ ${can.manage && c.kind !== 'voice' && require('../rooms/ai-members').enabled() ?
         const inviteRow = (i) => `<li><code class="oc-invite-url">${esc(`${site}/join/${i.code}`)}</code> <span class="oc-muted">${i.uses} use${i.uses === 1 ? '' : 's'}${i.max_uses != null ? ` of ${i.max_uses}` : ''}${i.expires_at ? ` · until <time datetime="${esc(i.expires_at)}">${esc(i.expires_at.slice(0, 16).replace('T', ' '))} UTC</time>` : ' · never expires'}</span>
 <form class="oc-inline" method="post" action="/s/${esc(server.slug)}/invites/${esc(i.code)}/revoke"><button type="submit" class="oc-link">Revoke</button></form></li>`;
         await page(req, res, 200, {
-            actor, title: `${server.name}: settings`, path: `/s/${server.slug}/settings`, active: 'servers', robots: 'noindex, nofollow',
-            body: `<p><a href="/s/${esc(server.slug)}">← ${esc(server.name)}</a></p><h1>Server settings</h1>${saved}${errorOf(req)}
+            actor, title: `${server.name}: settings`, path: `/s/${server.slug}/settings`, active: 'servers', robots: 'noindex, nofollow', shell: true, footer: 'none',
+            body: shell.shell({
+                rail: shell.rail({ dmUnread, servers: railServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread, active: sv.slug === server.slug })) }),
+                side: shell.sideServer({
+                    server: { ...server, official: server.slug === servers.OFFICIAL_SLUG }, can: { ...can, invite: canInvite }, me: !!me,
+                    categories: categories.map((c) => ({ name: c.name, channels: c.channels.map((ch) => ({ kind: ch.kind, name: ch.name, slug: ch.slug, href: `/s/${server.slug}/${ch.slug}` })) })),
+                    occupants,
+                    you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
+                }),
+                sideLabel: server.name,
+                main: `<p><a href="/s/${esc(server.slug)}">← ${esc(server.name)}</a></p><h1>Server settings</h1>${saved}${errorOf(req)}
 ${can.manage ? `<h2>Overview</h2><form class="oc-form" method="post" action="/s/${esc(server.slug)}/settings">
 <label>Name <input name="name" required minlength="2" maxlength="40" value="${esc(server.name)}"></label>
 <label>Description <input name="description" maxlength="300" value="${esc(server.description || '')}"></label>
@@ -358,6 +382,9 @@ ${canInvite ? `<h2 id="oc-invites">Invites</h2><p class="oc-muted">${server.visi
 ${banned.length ? `<details class="oc-blocked"><summary>Banned (${banned.length})</summary><ul class="oc-members">${banned.map((p) => `<li><strong>${esc(p.display_name || p.username || '?')}</strong> <span class="oc-muted">@${esc(p.username || '')}</span><form class="oc-inline" method="post" action="/s/${esc(server.slug)}/members"><input type="hidden" name="username" value="${esc(p.username || '')}"><input type="hidden" name="role" value="none"><button type="submit" class="oc-link">Lift the ban</button></form></li>`).join('')}</ul></details>` : ''}
 <form class="oc-new" method="post" action="/s/${esc(server.slug)}/members"><label for="oc-ban">Ban someone</label> <input id="oc-ban" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="their username"><input type="hidden" name="role" value="blocked"> <button type="submit">Ban</button></form>
 ${can.owner || can.staff ? `<h2>Delete the server</h2><form class="oc-form" method="post" action="/s/${esc(server.slug)}/delete"><label class="oc-check"><input type="checkbox" name="confirm" value="1" required> Delete ${esc(server.name)} and all its channels</label><p><button type="submit" class="oc-danger">Delete server</button></p></form>` : ''}`,
+                mainLabel: 'Server settings',
+                page: true,
+            }),
         });
     });
 
