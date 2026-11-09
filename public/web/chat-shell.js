@@ -9,6 +9,29 @@
   var app = document.querySelector('[data-oc-app]');
   if (!app) return;
 
+  // ── The Start sheet opens from any link to it (the rail's +, the side column, the Start card), so it needs no bar
+  // of its own while closed (chat-shell.css hides that bar once this runs; without this file the bar stays) ──
+  document.documentElement.classList.add('oc-js');
+  function openSheet() {
+    var sheet = document.getElementById('oc-new-server');
+    if (!sheet) return false;
+    sheet.open = true;
+    var page = sheet.closest('.oc-page');
+    if (page) page.scrollTo({ top: Math.max(0, sheet.offsetTop - page.offsetTop - 12) });
+    var first = sheet.querySelector('input:not([type=hidden]):not([type=radio]), input[type=radio]:checked, select, textarea');
+    if (first) first.focus({ preventScroll: true });
+    return true;
+  }
+  if (location.hash === '#oc-new-server') openSheet();
+  window.addEventListener('hashchange', function () { if (location.hash === '#oc-new-server') openSheet(); });
+  document.addEventListener('click', function (e) {
+    var a = e.target && e.target.closest && e.target.closest('a[href$="#oc-new-server"]');
+    if (!a || !document.getElementById('oc-new-server')) return;
+    e.preventDefault();
+    if (location.hash !== '#oc-new-server') history.replaceState(null, '', '#oc-new-server');
+    openSheet();
+  });
+
   // ── The panels: the side column on the left, the people on the right, the conversation between them ──
   function panel(name) {
     app.setAttribute('data-oc-panel', name);

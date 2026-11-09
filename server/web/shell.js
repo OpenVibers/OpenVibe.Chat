@@ -179,7 +179,7 @@ function shell(o = {}) {
     return `<div class="oc-app" data-oc-app data-oc-panel="main">
 ${o.rail || ''}
 ${o.side ? `<aside class="oc-side" aria-label="${esc(o.sideLabel || 'Chat')}">${o.side}</aside>` : ''}
-<section class="oc-col oc-col-main" aria-label="${esc(o.mainLabel || 'Conversation')}">${o.main || ''}</section>
+<section class="oc-col oc-col-main" aria-label="${esc(o.mainLabel || 'Conversation')}">${o.page ? `<div class="oc-page">${o.main || ''}</div>` : (o.main || '')}</section>
 ${o.members ? `<aside class="oc-col oc-col-members" aria-label="${esc(o.membersLabel || 'People')}">${o.members}</aside>` : ''}
 </div>`;
 }

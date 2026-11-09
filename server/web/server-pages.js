@@ -102,10 +102,12 @@ ${join}</article>`;
 <div class="oc-templates">${templates.TEMPLATES.map((t, i) => `<label class="oc-template"><input type="radio" name="template" value="${esc(t.id)}"${i === 0 ? ' checked' : ''}><span class="oc-template-body"><strong>${esc(t.name)}</strong><span class="oc-muted">${esc(t.description)}</span><span class="oc-template-channels">${t.channels.map((c) => esc(c.kind === 'voice' ? '🔊 ' : '# ') + esc(c.name)).join(' · ')}</span></span></label>`).join('')}</div>
 </fieldset>
 <fieldset class="oc-sheet-step"><legend>2. Its name and picture</legend>
-<label>Name <input name="name" required minlength="2" maxlength="40" placeholder="Saturday Raiders"></label>
-<label>Description <input name="description" maxlength="300" placeholder="What it is for (optional)"></label>
-<label>Category <select name="category"><option value="">No category</option>${templates.CATEGORIES.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select></label>
-<label>Picture <input type="file" name="picture" accept="image/png,image/jpeg,image/webp"></label>
+<div class="oc-sheet-fields">
+<label class="oc-field"><span>Name</span><input name="name" required minlength="2" maxlength="40" placeholder="Saturday Raiders"></label>
+<label class="oc-field"><span>Category</span><select name="category"><option value="">No category</option>${templates.CATEGORIES.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select></label>
+<label class="oc-field oc-field--wide"><span>Description</span><input name="description" maxlength="300" placeholder="What it is for (optional)"></label>
+<label class="oc-field oc-field--wide"><span>Picture</span><input type="file" name="picture" accept="image/png,image/jpeg,image/webp"><small class="oc-muted">PNG, JPEG or WebP. Without one, its initials on its colour.</small></label>
+</div>
 </fieldset>
 <fieldset class="oc-sheet-step"><legend>3. Who may find it?</legend>
 <div class="oc-seg" role="radiogroup"><label><input type="radio" name="visibility" value="public" checked><span>Public</span></label><label><input type="radio" name="visibility" value="private"><span>Private</span></label></div>
@@ -129,6 +131,7 @@ ${chips}
 <div class="oc-cards">${listed.map(card).join('')}${startCard}</div>
 ${sheet}`,
                 mainLabel: 'Explore servers',
+                page: true,
             }),
         });
     });

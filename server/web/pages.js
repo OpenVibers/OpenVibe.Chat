@@ -404,6 +404,7 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
 ${supportList}
 ${blockedList}`,
                 mainLabel: 'Messages',
+                page: true,
             }),
         });
     });
