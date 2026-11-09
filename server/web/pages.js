@@ -587,11 +587,11 @@ ${await aiKeySection(actor, req.query || {})}`,
         const opt = (v, label, cur) => `<option value="${v}"${v === cur ? ' selected' : ''}>${label}</option>`;
         const spent = key ? `$${key.spent_usd_today.toFixed(2)} of ${key.budget_usd_per_day ? `$${key.budget_usd_per_day.toFixed(2)}` : 'no cap'} used today` : '';
         // From openvibe.link/machines, "Use these models in OpenVibe.Chat": a model on your own computer, filled in.
-        const offered = q.own === 'node' && /^(dev_[0-9A-HJKMNP-TV-Z]{26}|any)$/.test(String(q.machine || '')) ? { machine: String(q.machine), model: /^[A-Za-z0-9._:/-]{1,120}$/.test(String(q.model || '')) ? String(q.model) : '' } : null;
-        const provider = offered ? 'node' : key ? key.provider : 'openai';
+        const offered = q.own === 'link' && /^(dev_[0-9A-HJKMNP-TV-Z]{26}|any)$/.test(String(q.machine || '')) ? { machine: String(q.machine), model: /^[A-Za-z0-9._:/-]{1,120}$/.test(String(q.model || '')) ? String(q.model) : '' } : null;
+        const provider = offered ? 'link' : key ? key.provider : 'openai';
         const machineValue = offered ? offered.machine : (key && key.machine) || '';
         const modelValue = offered && offered.model ? offered.model : (key && key.model) || '';
-        const keyLine = key && key.provider === 'node' ? `${key.machine === 'any' ? 'on whichever of your computers is on, the fastest first' : `on your computer <code>${esc(key.machine || '')}</code>`} · nothing spent` : key ? `key ending ${esc(key.key_hint || '····')} · ${esc(spent)}` : '';
+        const keyLine = key && key.provider === 'link' ? `${key.machine === 'any' ? 'on whichever of your computers is on, the fastest first' : `on your computer <code>${esc(key.machine || '')}</code>`} · nothing spent` : key ? `key ending ${esc(key.key_hint || '····')} · ${esc(spent)}` : '';
         const vibeOwn = key ? (await require('../rooms/vibe').engineOf(actor.user)).own : false;
         const vibeBox = require('../rooms/vibe').enabled() ? `<label class="oc-check"><input type="checkbox" name="vibe" value="1"${vibeOwn || offered ? ' checked' : ''}> Vibe thinks with it too (in all your chats with Vibe; its answers then have no daily limit)</label>` : '';
         const open = offered || q.saved || q.error ? ' open' : '';
@@ -600,7 +600,7 @@ ${await aiKeySection(actor, req.query || {})}`,
 ${offered ? notice('ok', `Save to let your AI members think with ${offered.model || 'a model'} on ${offered.machine === 'any' ? 'whichever of your computers is on' : 'your own computer'}.`) : ''}
 ${unreachable ? notice('error', 'OpenVibe.AI did not answer, so your key cannot be shown or changed right now.') : `${key ? `<p><strong>${esc(credentials.label(key))}</strong> <span class="oc-muted">· ${keyLine}${vibeOwn ? ' · Vibe thinks with it' : ''}</span></p>` : '<p class="oc-muted">No key yet.</p>'}
 <form class="oc-form oc-ai-form" method="post" action="/settings/ai-key">
-<label>Provider <select name="provider">${opt('openai', 'OpenAI or OpenAI-compatible', provider)}${opt('anthropic', 'Anthropic', provider)}${opt('node', 'A model on my own computer', provider)}</select></label>
+<label>Provider <select name="provider">${opt('openai', 'OpenAI or OpenAI-compatible', provider)}${opt('anthropic', 'Anthropic', provider)}${opt('link', 'A model on my own computer', provider)}</select></label>
 <label class="oc-if-node">Computer <input name="machine" maxlength="40" pattern="dev_[0-9A-Z]{26}" placeholder="dev_… (a model on your own computer only)" value="${esc(machineValue === 'any' ? '' : machineValue)}" autocomplete="off" spellcheck="false"></label>
 <label class="oc-check oc-if-node"><input type="checkbox" name="machine_any" value="1"${machineValue === 'any' ? ' checked' : ''}> Any of my computers that is on with this model (the fastest first, the next when one is busy)</label>
 <label class="oc-if-openai">Endpoint <input name="base_url" type="url" maxlength="300" inputmode="url" placeholder="https://openrouter.ai/api/v1 (leave empty for OpenAI itself)" value="${esc((key && key.base_url) || '')}"></label>
@@ -993,7 +993,7 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         if (can.manage && room.kind !== 'system' && aiMembers.enabled()) { try { myKey = await credentials.get(actor.user.subject_id); } catch { myKey = null; } }
         const engineField = (a) => {
             const cur = a ? (a.engine || 'openvibe') : 'openvibe';
-            const ownLabel = a && cur === 'own' ? aiMembers.modelOf(a) : myKey && myKey.provider === 'node' ? `Your own computer: ${myKey.model || 'its model'}` : myKey ? `Your own key: ${credentials.label(myKey)}` : 'Your own key (add one in your chat settings first)';
+            const ownLabel = a && cur === 'own' ? aiMembers.modelOf(a) : myKey && myKey.provider === 'link' ? `Your own computer: ${myKey.model || 'its model'}` : myKey ? `Your own key: ${credentials.label(myKey)}` : 'Your own key (add one in your chat settings first)';
             return `<label>Thinks with <select name="engine"><option value="openvibe"${cur === 'openvibe' ? ' selected' : ''}>OpenVibe's model</option><option value="own"${cur === 'own' ? ' selected' : ''}${cur === 'own' || myKey ? '' : ' disabled'}>${esc(ownLabel)}</option></select></label>
 ${myKey || cur === 'own' ? '' : '<p class="oc-muted">To give it a different model (yours, from OpenAI, Anthropic or an OpenAI-compatible provider, or a model on your own computer), <a href="/settings#oc-ai-key">add your AI key</a>.</p>'}`;
         };

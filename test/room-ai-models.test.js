@@ -35,8 +35,8 @@ const fakeHttp = {
             if (method === 'GET') { if (!store.has(subject)) throw problem(404, 'credential.not_found'); return store.get(subject); }
             if (method === 'DELETE') { if (!store.delete(subject)) throw problem(404, 'credential.not_found'); return null; }
             const prev = store.get(subject);
-            if (json.provider === 'node') {   // a model on the person's own computer: no key (contracts 0.220.0)
-                const row = { owner: 'chat', subject, provider: 'node', machine: json.machine, base_url: null, models: json.models, budget_usd_per_day: null, spent_usd_today: 0 };
+            if (json.provider === 'link') {   // a model on the person's own computer: no key (contracts 0.220.0)
+                const row = { owner: 'chat', subject, provider: 'link', machine: json.machine, base_url: null, models: json.models, budget_usd_per_day: null, spent_usd_today: 0 };
                 store.set(subject, row);
                 return row;
             }
@@ -154,40 +154,40 @@ t('a new model relabels its members; removing the key sends them back to OpenVib
     assert.strictEqual((await api('POST', '/rooms/model-night/ai-members', ann, { name: 'Echo', engine: 'own' })).body.code, 'rooms.ai_no_key', 'no key, no own engine');
 });
 
-t('a model on your own computer: the machine and no key; the settings form comes prefilled from openvibe.bot', async () => {
+t('a model on your own computer: the machine and no key; the settings form comes prefilled from openvibe.link', async () => {
     const MACHINE = 'dev_01M5YGM39VC2RRGDQPRD6D4SHD';
     const cy = h.addUser('cy', { subject: ids.newId('user') });
     await h.ctx.upsertUser(h.live.users.get(cy.id));
-    assert.strictEqual((await api('PUT', '/me/ai-key', cy, { provider: 'node', model: 'llama3.1:8b' })).status, 422, 'it names the computer');
-    assert.strictEqual((await api('PUT', '/me/ai-key', cy, { provider: 'node', machine: 'dev_nope', model: 'llama3.1:8b' })).status, 422);
-    const put = await api('PUT', '/me/ai-key', cy, { provider: 'node', machine: MACHINE, model: 'llama3.1:8b' });
+    assert.strictEqual((await api('PUT', '/me/ai-key', cy, { provider: 'link', model: 'llama3.1:8b' })).status, 422, 'it names the computer');
+    assert.strictEqual((await api('PUT', '/me/ai-key', cy, { provider: 'link', machine: 'dev_nope', model: 'llama3.1:8b' })).status, 422);
+    const put = await api('PUT', '/me/ai-key', cy, { provider: 'link', machine: MACHINE, model: 'llama3.1:8b' });
     assert.strictEqual(put.status, 200, JSON.stringify(put.body));
-    assert.deepStrictEqual([put.body.key.provider, put.body.key.machine, put.body.key.model], ['node', MACHINE, 'llama3.1:8b']);
+    assert.deepStrictEqual([put.body.key.provider, put.body.key.machine, put.body.key.model], ['link', MACHINE, 'llama3.1:8b']);
     const { label, memberLabel } = require('../server/ai/credentials');
     assert.strictEqual(label(put.body.key), 'your own computer · llama3.1:8b');
     assert.strictEqual(memberLabel(put.body.key, 'Cy'), 'llama3.1:8b on Cy\'s computer', 'what a room sees: whose computer, never "your own"');
     assert.strictEqual(memberLabel({ provider: 'openai', model: 'gpt-4o-mini' }, 'Cy'), 'openai · gpt-4o-mini, Cy\'s key');
     // From openvibe.link/machines ("Use these models in OpenVibe.Chat"): the form is filled in, nothing is saved yet.
-    const page = await web('GET', `/settings?own=node&machine=${MACHINE}&model=qwen2.5:7b`, cy);
+    const page = await web('GET', `/settings?own=link&machine=${MACHINE}&model=qwen2.5:7b`, cy);
     const sect = page.text.slice(page.text.indexOf('id="oc-ai-key"'));
-    assert.ok(sect.includes('<option value="node" selected>A model on my own computer</option>'), 'own computer chosen');
+    assert.ok(sect.includes('<option value="link" selected>A model on my own computer</option>'), 'own computer chosen');
     assert.ok(sect.includes(`name="machine" maxlength="40"`) && sect.includes(`value="${MACHINE}"`));
     assert.ok(sect.includes('class="oc-form oc-ai-form"') && sect.includes('<label class="oc-if-node">Computer') && sect.includes('<label class="oc-not-node">API key') && sect.includes('<label class="oc-if-openai">Endpoint'), 'each field says which providers take it (chat.css hides the rest)');
     assert.ok(sect.includes('value="qwen2.5:7b"'), 'the model from the link');
     assert.ok(sect.includes('Save to let your AI members think with qwen2.5:7b on your own computer.'));
     assert.ok(sect.includes('your own computer · llama3.1:8b') && sect.includes('nothing spent'), 'what is saved now');
     // Any of their computers (contracts 0.221.0): the box, the label, what a room sees.
-    const any = await web('POST', '/settings/ai-key', cy, { provider: 'node', machine: '', machine_any: '1', model: 'llama3.1:8b' });
+    const any = await web('POST', '/settings/ai-key', cy, { provider: 'link', machine: '', machine_any: '1', model: 'llama3.1:8b' });
     assert.strictEqual(any.status, 303);
     const anyKey = (await api('GET', '/me/ai-key', cy)).body.key;
     assert.deepStrictEqual([anyKey.machine, label(anyKey), memberLabel(anyKey, 'Cy')], ['any', 'any of your own computers · llama3.1:8b', 'llama3.1:8b on Cy\'s computers']);
     const anyPage = (await web('GET', '/settings', cy)).text;
     assert.ok(anyPage.includes('name="machine_any" value="1" checked') && anyPage.includes('on whichever of your computers is on, the fastest first'), 'the box, checked, and the saved line');
-    assert.strictEqual((await api('PUT', '/me/ai-key', cy, { provider: 'node', machine: 'anyone', model: 'llama3.1:8b' })).status, 422);
-    // From openvibe.bot when the person has several computers with models: any of them, the box checked.
-    const anyLink = (await web('GET', '/settings?own=node&machine=any&model=qwen2.5:7b', cy)).text;
+    assert.strictEqual((await api('PUT', '/me/ai-key', cy, { provider: 'link', machine: 'anyone', model: 'llama3.1:8b' })).status, 422);
+    // From openvibe.link when the person has several computers with models: any of them, the box checked.
+    const anyLink = (await web('GET', '/settings?own=link&machine=any&model=qwen2.5:7b', cy)).text;
     assert.ok(anyLink.includes('think with qwen2.5:7b on whichever of your computers is on') && anyLink.includes('name="machine_any" value="1" checked'), 'any, from the link');
-    const bad = await web('GET', '/settings?own=node&machine=../x&model=<b>', cy);
+    const bad = await web('GET', '/settings?own=link&machine=../x&model=<b>', cy);
     assert.ok(!bad.text.includes('Save to let your AI members'), 'a bad link fills nothing');
     assert.strictEqual((await api('DELETE', '/me/ai-key', cy)).status, 200);
 });
@@ -206,7 +206,7 @@ t('Vibe thinks with your own key or computer when you choose it: every chat of y
     const first = await vibeApi('POST', '', { message: 'hello there' });
     assert.strictEqual(first.status, 201, first.text);
     assert.strictEqual((await memberOf(first.body.room.slug)).engine, 'openvibe', 'OpenVibe\'s model by default');
-    assert.strictEqual((await api('PUT', '/me/ai-key', di, { provider: 'node', machine: MACHINE, model: 'llama3.1:8b' })).status, 200);
+    assert.strictEqual((await api('PUT', '/me/ai-key', di, { provider: 'link', machine: MACHINE, model: 'llama3.1:8b' })).status, 200);
     const on = await vibeApi('PUT', '/engine', { own: true });
     assert.deepStrictEqual(on.body, { own: true, label: 'llama3.1:8b on Di\'s computer' }, on.text);
     assert.deepStrictEqual(await memberOf(first.body.room.slug), { engine: 'own', engine_subject: h.live.users.get(di.id).subject_id, engine_label: 'llama3.1:8b on Di\'s computer' }, 'the chats they have');
@@ -226,15 +226,15 @@ t('Vibe thinks with your own key or computer when you choose it: every chat of y
     // The settings form says so and keeps it; unchecked, Vibe goes back to OpenVibe's model.
     const page = await web('GET', '/settings', di);
     assert.ok(page.text.includes('name="vibe" value="1" checked') && page.text.includes('· Vibe thinks with it'), 'the box, checked');
-    const saved = await web('POST', '/settings/ai-key', di, { provider: 'node', machine: MACHINE, model: 'qwen2.5:7b' });
+    const saved = await web('POST', '/settings/ai-key', di, { provider: 'link', machine: MACHINE, model: 'qwen2.5:7b' });
     assert.strictEqual(saved.status, 303);
     assert.deepStrictEqual((await vibeApi('GET', '/engine')).body, { own: false, label: null }, 'unchecked: OpenVibe\'s model');
     assert.ok((await web('GET', '/vibe', di)).text.includes('answers left today'), 'the free answers left again');
     assert.strictEqual((await memberOf(first.body.room.slug)).engine, 'openvibe');
-    await web('POST', '/settings/ai-key', di, { provider: 'node', machine: MACHINE, model: 'qwen2.5:7b', vibe: '1' });
+    await web('POST', '/settings/ai-key', di, { provider: 'link', machine: MACHINE, model: 'qwen2.5:7b', vibe: '1' });
     assert.strictEqual((await memberOf(next.body.room.slug)).engine_label, 'qwen2.5:7b on Di\'s computer', 'checked: their computer, the new model');
-    // From openvibe.bot's link the box comes checked.
-    assert.ok((await web('GET', `/settings?own=node&machine=${MACHINE}&model=phi3`, di)).text.includes('name="vibe" value="1" checked'));
+    // From openvibe.link's link the box comes checked.
+    assert.ok((await web('GET', `/settings?own=link&machine=${MACHINE}&model=phi3`, di)).text.includes('name="vibe" value="1" checked'));
     // The key goes: so does Vibe's use of it.
     assert.strictEqual((await api('DELETE', '/me/ai-key', di)).status, 200);
     assert.strictEqual((await memberOf(first.body.room.slug)).engine, 'openvibe');

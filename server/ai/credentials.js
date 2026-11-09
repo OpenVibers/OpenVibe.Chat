@@ -20,7 +20,7 @@ const config = require('../config');
 const aiClient = require('./client');
 
 const SUBJECT_RE = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
-const PROVIDERS = { openai: 'OpenAI (or any OpenAI-compatible endpoint)', anthropic: 'Anthropic', node: 'A model on your own computer' };
+const PROVIDERS = { openai: 'OpenAI (or any OpenAI-compatible endpoint)', anthropic: 'Anthropic', link: 'A model on your own computer' };
 const MACHINE_RE = /^dev_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 class CredentialError extends Error { constructor(status, code, message) { super(message); this.status = status; this.code = code; } }
@@ -53,13 +53,13 @@ async function put(subject, { provider, base_url, api_key, model, budget_usd_per
     if (!PROVIDERS[provider]) fail(422, 'credentials.provider', 'Choose OpenAI (or an OpenAI-compatible endpoint), Anthropic, or a model on your own computer.');
     const m = String(model || '').trim();
     if (!m || m.length > 120 || /\s/.test(m)) fail(422, 'credentials.model', 'Name the model, for example gpt-4o-mini or claude-haiku-4-5.');
-    if (provider === 'node') {
+    if (provider === 'link') {
         // A model on the person's own computer: the machine, no key, no budget (nothing is spent).
         const id = String(machine || '').trim();
         // `any` (contracts 0.221.0): whichever of their computers is on with the model, the fastest first.
         if (!MACHINE_RE.test(id) && id !== 'any') fail(422, 'credentials.machine', 'Name your computer (its id, dev_…, from openvibe.link/machines), or choose any of your computers.');
         try {
-            return view(await call('PUT', subject, { provider: 'node', machine: id, models: { chat: m } }));
+            return view(await call('PUT', subject, { provider: 'link', machine: id, models: { chat: m } }));
         } catch (err) {
             if (err instanceof CredentialError) throw err;
             if (err && err.status >= 400 && err.status < 500) throw new CredentialError(err.status, 'credentials.refused', (err.detail || err.message || 'OpenVibe.AI refused it.').slice(0, 200));
@@ -93,12 +93,12 @@ async function remove(subject) {
     }
 }
 
-const label = (c) => (c && c.provider === 'node' ? `${c.machine === 'any' ? 'any of your own computers' : 'your own computer'} · ${c.model || 'its model'}` : c ? `${c.provider}${c.base_url ? ` (${(() => { try { return new URL(c.base_url).hostname; } catch { return 'custom'; } })()})` : ''} · ${c.model || 'default model'}` : null);
+const label = (c) => (c && c.provider === 'link' ? `${c.machine === 'any' ? 'any of your own computers' : 'your own computer'} · ${c.model || 'its model'}` : c ? `${c.provider}${c.base_url ? ` (${(() => { try { return new URL(c.base_url).hostname; } catch { return 'custom'; } })()})` : ''} · ${c.model || 'default model'}` : null);
 
 /** What a room's members see an AI member think with: "<model> on Fran's computer", or "openai · gpt-4o-mini, Fran's key". */
 const memberLabel = (c, name) => {
     const who = String(name || 'a member').slice(0, 40);
-    return c && c.provider === 'node' ? `${c.model || 'a model'} on ${who}'s computer${c.machine === 'any' ? 's' : ''}` : `${label(c)}, ${who}'s key`;
+    return c && c.provider === 'link' ? `${c.model || 'a model'} on ${who}'s computer${c.machine === 'any' ? 's' : ''}` : `${label(c)}, ${who}'s key`;
 };
 
 module.exports = { get, put, remove, label, memberLabel, CredentialError, PROVIDERS };

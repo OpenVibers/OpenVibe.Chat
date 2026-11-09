@@ -162,9 +162,9 @@ t('a desktop party gates members, claims one Link machine, and issues member tic
     const seen = await api('GET', `/parties/${slug}`, bob);
     assert.strictEqual(seen.body.party.lease.holder.subject, bob.subject_id);
     assert.strictEqual((await api('GET', `/parties/${slug}/desktop/ticket`, ann)).status, 404);
-    const nodeId = ids.newId('node');
+    const nodeId = ids.newId('link');
     const now = Math.floor(Date.now() / 1000);
-    const nodeToken = (owner) => serviceAuth.signServiceToken({ iss: h.ISS, sub: `node:${nodeId}`, actor_type: 'node', on_behalf_of: owner,
+    const nodeToken = (owner) => serviceAuth.signServiceToken({ iss: h.ISS, sub: `link:${nodeId}`, actor_type: 'link', on_behalf_of: owner,
         aud: ['openvibe.chat'], cap: [], iat: now, exp: now + 300, jti: `party_${owner}` }, h.keys.privateKey);
     const wrong = await h.http('POST', `/api/chat/parties/${slug}/desktop/claim`, { token: nodeToken(ann.subject_id), body: { port: 18180 } });
     assert.strictEqual(wrong.status, 404);
