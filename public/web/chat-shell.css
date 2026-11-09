@@ -208,9 +208,44 @@
 /* Absolutely placed inputs (the template radios) stay inside the page that scrolls, not the document. */
 .oc-page, .oc-template { position: relative; }
 
-/* Onboarding: a server's rules keep their line breaks, and the roles a member may pick stack. */
-.oc-onboard-rules { white-space: pre-wrap; overflow-wrap: anywhere; }
-.oc-checks { display: grid; gap: 4px; margin: 8px 0 14px; }
+/* Onboarding (/s/:slug/welcome): the server's mark and name, its rules numbered one a line, the roles a member may
+   pick as chips in their own colours, and Continue. One column of reading width; on a phone the buttons fill it. */
+.oc-welcome { max-width: 620px; margin: 0 auto; }
+.oc-welcome-head { display: flex; align-items: center; gap: 16px; margin: 6px 0 18px; }
+.oc-welcome-head .oc-srv-icon--big { margin: 0; flex: none; }
+.oc-welcome-head h1 { margin: 0; font-size: clamp(1.35rem, 4.6vw, 1.75rem); line-height: 1.15; overflow-wrap: anywhere; }
+.oc-welcome-head .oc-muted { margin: 4px 0 0; }
+.oc-welcome-kicker { margin: 0 0 2px; font-size: .74rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
+.oc-welcome-form { display: grid; gap: 12px; }
+.oc-welcome-form .oc-set { margin: 0; }
+.oc-rules { list-style: none; counter-reset: oc-rule; margin: 0; padding: 4px 14px 12px; display: grid; gap: 2px; }
+.oc-rules li { counter-increment: oc-rule; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; align-items: start; padding: 7px 0; overflow-wrap: anywhere; }
+.oc-rules li + li { border-top: 1px solid var(--oc-line); }
+.oc-rules li::before { content: counter(oc-rule); display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: color-mix(in srgb, var(--oc-accent) 16%, transparent); color: var(--oc-text); font-size: .8rem; font-weight: 800; }
+.oc-rules-text { margin: 0; padding: 4px 14px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
+.oc-role-set > legend { float: left; width: 100%; margin: 0; padding: 12px 14px 4px; font-size: .74rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
+.oc-role-set > legend + * { clear: left; }
+.oc-set-note { margin: 0; padding: 0 14px 10px; color: var(--oc-muted); font-size: .88rem; }
+.oc-role-picks { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px; }
+.oc-role-pick { --oc-role: var(--oc-accent); position: relative; }
+.oc-role-pick input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; }
+.oc-role-pick span { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 0 14px 0 12px; border-radius: 999px; border: 1px solid var(--oc-line); color: var(--oc-text); font-weight: 600; }
+.oc-role-pick i { width: 10px; height: 10px; border-radius: 50%; background: var(--oc-role); flex: none; }
+.oc-role-pick input:checked + span { border-color: var(--oc-role); background: color-mix(in srgb, var(--oc-role) 18%, transparent); }
+.oc-role-pick input:checked + span::after { content: ''; width: 12px; height: 7px; margin: -3px 0 0 2px; border: solid currentColor; border-width: 0 0 2px 2px; transform: rotate(-45deg); }
+.oc-role-pick input:focus-visible + span { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+.oc-role-pick:hover span { border-color: var(--oc-role); }
+.oc-welcome-go { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 4px; }
+.oc-welcome-go button { min-height: 44px; padding: 0 22px; }
+.oc-welcome-skip { display: inline-flex; align-items: center; min-height: 44px; padding: 0 16px; border-radius: 10px; color: var(--oc-muted); text-decoration: none; font-weight: 600; }
+.oc-welcome-skip:hover { color: var(--oc-text); background: color-mix(in srgb, var(--oc-text) 7%, transparent); }
+@media (max-width: 560px) {
+  .oc-welcome-head { gap: 12px; }
+  .oc-welcome-head .oc-srv-icon--big { width: 56px; height: 56px; border-radius: 18px; font-size: 1.2rem; }
+  .oc-welcome-go { flex-direction: column; align-items: stretch; }
+  .oc-welcome-go button, .oc-welcome-skip { width: 100%; justify-content: center; }
+}
 
 /* The inbox's conversation on the network's kit: its conversation list is the shell's side column and its thread fills
    the middle, so the kit's own sidebar and sticky chrome give way to the shell's. */

@@ -347,21 +347,26 @@ ${composer}`,
         const picked = await servers.memberRoles(server, me.id);
         const chans = await servers.channels(server);
         const rules = typeof server.rules === 'string' ? server.rules.trim() : '';
-        const roleList = roles.map((r) => `<label class="oc-check"><input type="checkbox" name="roles" value="${esc(r.name)}"${picked.includes(r.name) ? ' checked' : ''}>${r.color ? `<span class="oc-dot" style="background:${esc(r.color)}" aria-hidden="true"></span>` : ''} <span>${esc(r.name)}</span></label>`).join('\n');
+        const roleList = roles.map((r) => `<label class="oc-role-pick"${r.color ? ` style="--oc-role:${esc(r.color)}"` : ''}><input type="checkbox" name="roles" value="${esc(r.name)}"${picked.includes(r.name) ? ' checked' : ''}><span><i aria-hidden="true"></i>${esc(r.name)}</span></label>`).join('\n');
+        // One rule a line (a leading "-", "*", "•" or "1." is the owner's own numbering and goes); a single line stays prose.
+        const ruleLines = rules.split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-*\u2022]|\d{1,2}[.)])\s+/, '').trim()).filter(Boolean);
+        const rulesHtml = ruleLines.length > 1 ? `<ol class="oc-rules">${ruleLines.map((l) => `<li>${esc(l)}</li>`).join('\n')}</ol>` : `<p class="oc-rules-text">${esc(rules)}</p>`;
         await page(req, res, 200, {
             actor, shell: true, footer: 'none', title: `Welcome to ${server.name}`, path: `/s/${server.slug}/welcome`, active: 'servers', robots: 'noindex, nofollow',
             body: shell.shell({
                 rail: await serverRail(me, server.slug),
                 side: await serverSide(server, can, me, chans),
                 sideLabel: server.name,
-                main: `<h1>Welcome to ${esc(server.name)}</h1>
-${rules ? `<section class="oc-set" aria-labelledby="oc-onboard-rules"><h2 id="oc-onboard-rules">The rules</h2><div class="oc-onboard-rules">${esc(rules)}</div></section>` : ''}
-${roles.length ? `<section class="oc-set" aria-labelledby="oc-onboard-roles"><h2 id="oc-onboard-roles">Pick your roles</h2>
-<p class="oc-muted">You can change these at any time.</p>
-<form method="post" action="/s/${esc(server.slug)}/welcome">
-<div class="oc-checks">${roleList}</div>
-<p><button type="submit">Continue</button> <a class="oc-muted" href="/s/${esc(server.slug)}">Skip for now</a></p></form></section>`
-        : `<form method="post" action="/s/${esc(server.slug)}/welcome"><p><button type="submit">Continue to ${esc(server.name)}</button></p></form>`}`,
+                main: `<div class="oc-welcome">
+<header class="oc-welcome-head"><span class="oc-srv-icon oc-srv-icon--big" style="--oc-hue:${hueOf(server.slug)}" aria-hidden="true">${esc(initials(server.name))}</span>
+<div><p class="oc-welcome-kicker">Welcome to</p><h1>${esc(server.name)}</h1><p class="oc-muted">${rules && roles.length ? 'Read the rules and pick your roles, then you are in.' : rules ? 'Read the rules, then you are in.' : 'Pick your roles, then you are in.'}</p></div></header>
+<form method="post" action="/s/${esc(server.slug)}/welcome" class="oc-welcome-form">
+${rules ? `<section class="oc-set" aria-labelledby="oc-onboard-rules"><h2 id="oc-onboard-rules">The rules</h2>${rulesHtml}</section>` : ''}
+${roles.length ? `<fieldset class="oc-set oc-role-set"><legend id="oc-onboard-roles">Pick your roles</legend>
+<p class="oc-set-note">Optional. You can change them any time in the server's menu.</p>
+<div class="oc-role-picks">${roleList}</div></fieldset>` : ''}
+<div class="oc-welcome-go"><button type="submit">${roles.length ? 'Continue' : `Continue to ${esc(server.name)}`}</button>${roles.length ? `<a class="oc-welcome-skip" href="/s/${esc(server.slug)}">Skip for now</a>` : ''}</div>
+</form></div>`,
                 mainLabel: `Welcome to ${server.name}`,
                 page: true,
             }),

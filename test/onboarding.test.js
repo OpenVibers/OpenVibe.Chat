@@ -44,7 +44,7 @@ t('a server with rules and roles shows them on joining: the rules first, then th
     const welcome = await get(`/s/${slug}/welcome`, bob);
     assert.strictEqual(welcome.status, 200);
     assert.match(welcome.text, /class="oc-app"/, 'inside the app shell');
-    assert.match(welcome.text, /Be kind\.\nNo spoilers\./, 'the rules, with their lines');
+    assert.match(welcome.text, /<li>Be kind\.<\/li>\s*<li>No spoilers\./, 'the rules, one a line, in order');
     assert.match(welcome.text, /name="roles" value="Reader"/, 'a role to pick');
     assert.ok(welcome.text.indexOf('Be kind.') < welcome.text.indexOf('Pick your roles'), 'the rules come first');
 
