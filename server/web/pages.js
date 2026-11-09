@@ -294,27 +294,44 @@ function createWebRoutes({ config }) {
         ].filter((pane) => pane.html);
         const explore = pickBlock({ key: 'explore', label: 'Explore OpenVibe.Chat', head: 'Explore OpenVibe.Chat', panes });
         const inlineStyles = [];
-        const feedList = `<ol class="oc-feed${signedIn ? ' oc-room-feed' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${shown.map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>`;
-        const appBody = () => `<section class="oc-room oc-global" aria-labelledby="oc-h">
-<header class="oc-room-head"><div class="oc-room-id"><h1 id="oc-h">Global chat</h1>
-<p class="oc-muted oc-room-sub">Everyone on OpenVibe${home.peopleLine(activity)} <span class="oc-live" id="oc-live" hidden>● live</span></p></div>
-<div class="oc-room-tools"><a class="oc-icon-btn" href="/vibe" aria-label="Chat with Vibe" title="Chat with Vibe">${IC.spark}</a><a class="oc-icon-btn" href="/settings" aria-label="Chat settings" title="Chat settings">${IC.gear}</a></div></header>
+        const feedList = `<ol class="oc-feed${signedIn ? ' oc-srv-feed' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${shown.map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>`;
+        // Someone signed in gets the app shell (the plan, 2026-11-09, stage V2): Global chat is a destination on the
+        // rail, the side column is Home's, and the feed fills the middle with the composer at its foot.
+        const shellBody = signedIn ? await (async () => {
+            const me = actor.user;
+            const convs = await dm.getConversations(me.id);
+            const participants = await Promise.all(convs.map((c) => dm.getParticipants(c.id)));
+            await presence.attachTo(me.subject_id, participants.flat());
+            const dms = convs.map((c, i) => {
+                const others = participants[i].filter((p) => p.id !== me.id);
+                return {
+                    id: c.id, title: c.name || others.map((p) => p.display_name || p.username).join(', ') || 'Just you',
+                    preview: c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet',
+                    unread: Number(c.unread_count) || 0, presence: others.length === 1 ? others[0].presence : null,
+                    avatarUrl: others.length === 1 ? others[0].avatar_url : '',
+                };
+            });
+            const contacts = await require('../chat/contacts').of(me.id);
+            const mineServers = (await require('../rooms/servers').list(me)).mine;
+            return shell.shell({
+                rail: shell.rail({ global: true, dmUnread: dms.reduce((n, d) => n + d.unread, 0), servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
+                sideLabel: 'Home',
+                main: `<header class="oc-chan-head"><h1 id="oc-h" class="oc-chan-title">Global chat</h1><span class="oc-muted oc-chan-topic">Everyone on OpenVibe${home.peopleLine(activity)}</span><span class="oc-chan-tools"><span class="oc-live" id="oc-live" hidden>● live</span><a class="oc-icon-btn" href="/vibe" aria-label="Chat with Vibe" title="Chat with Vibe">${IC.spark}</a><a class="oc-icon-btn" href="/settings" aria-label="Chat settings" title="Chat settings">${IC.gear}</a></span></header>
 ${error}
 ${feedList}
-${composer}
-</section>
-${parts.vibe}
-${parts.streams}
-${parts.servers}
-${parts.rooms}`;
+${composer}`,
+                mainLabel: 'Global chat',
+            });
+        })() : '';
         await page(req, res, 200, {
             actor, fullTitle: 'OpenVibe.Chat: global chat, servers, rooms and calls', path: '/', active: 'global', robots: 'index, follow', script: true,
             description: 'Chat with everyone on OpenVibe, start a server with text and voice channels, message friends and call them. Free and open source.',
             // The same JSON-LD for every reader (discovery.test.js): the questions are the site's, shown to visitors.
             jsonLd: [...homeJsonLd(config), sharedSeo.jsonLd.faq(home.FAQ)],
             page: { view: 'global', latest: latest_id, signedIn, me: signedIn ? actor.user.username : null },
-            footer: signedIn ? 'compact' : 'full',
-            body: signedIn ? appBody() : `<header class="oc-hero">
+            shell: signedIn, footer: signedIn ? 'none' : 'full',
+            body: signedIn ? shellBody : `<header class="oc-hero">
 <h1>Chat with everyone on OpenVibe, or start your own server</h1>
 <p class="oc-lede">The chat on every stream, servers with voice channels, messages and calls, and Vibe, your assistant. One free account, everywhere.</p>
 <p class="oc-hero-actions"><a class="oc-button" href="/vibe">Chat with Vibe</a> <a class="oc-button oc-button--quiet" href="${signedIn ? '/servers#oc-new-server' : '/auth/login?next=%2Fservers'}">Start a server</a></p>
@@ -615,9 +632,23 @@ ${composer}`,
         const sizes = ['small', 'default', 'large'].map((v) => `<label class="oc-seg-opt"><input type="radio" name="font_size" value="${v}"${v === size ? ' checked' : ''}><span>${v[0].toUpperCase()}${v.slice(1)}</span></label>`).join('');
         const saved = req.query.saved ? notice('ok', 'Saved. These settings follow you to Live chat and every device.') : '';
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
+        const mineServers = (await require('../rooms/servers').list(actor.user)).mine;
+        const dmUnread = await dm.getTotalUnread(actor.user.id);
+        const sections = [
+            { href: '#oc-set-look', label: 'Messages look' },
+            { href: '#oc-set-dm', label: 'Direct messages' },
+            { href: '#oc-set-agents', label: 'AI agents' },
+            { href: '#oc-set-sound', label: 'Speech and sounds' },
+            { href: '#oc-set-data', label: 'Your data' },
+        ];
+        if (require('../rooms/ai-members').enabled()) sections.push({ href: '#oc-ai-key', label: 'Your AI key' });
         await page(req, res, 200, {
-            actor, title: 'Chat settings', path: '/settings', active: 'settings', robots: 'noindex, nofollow', footer: 'compact',
-            body: `${ui.head({ title: 'Settings', sub: 'Saved to your account: here, in Live chat and on every device' })}${saved}${error}
+            actor, title: 'Chat settings', path: '/settings', active: 'settings', robots: 'noindex, nofollow', shell: true, footer: 'none',
+            body: shell.shell({
+                rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                side: shell.sideSettings({ items: sections, you: { name: actor.user.display_name || actor.user.username, status: 'Online', avatarUrl: actor.user.avatar_url || '' } }),
+                sideLabel: 'Settings',
+                main: `${ui.head({ title: 'Settings', sub: 'Saved to your account: here, in Live chat and on every device' })}${saved}${error}
 <form class="oc-settings" method="post" action="/settings">
 <section class="oc-set" aria-labelledby="oc-set-look"><h2 id="oc-set-look">Messages look</h2>
 ${box('timestamps', 'Times next to messages', p.timestamps === true)}
@@ -651,6 +682,9 @@ ${volume('tts_sound_volume', 'Sound volume', tts.sound_volume)}
 <div class="oc-set-row"><span class="oc-set-text">Every message you sent that is still visible<small>In Live chat and here</small></span><span class="oc-set-actions"><a class="oc-pill" href="/api/chat/me/export" download>${IC.download}<span>JSON</span></a><a class="oc-pill" href="/api/chat/me/export?format=csv" download>${IC.download}<span>CSV</span></a></span></div>
 </section>
 ${await aiKeySection(actor, req.query || {})}`,
+                mainLabel: 'Settings',
+                page: true,
+            }),
         });
     });
 
@@ -837,10 +871,14 @@ ${staff ? '<label class="oc-check"><input type="radio" name="kind" value="system
 <label class="oc-check"><input type="checkbox" name="private" value="1"> Private: only people you invite can read and post</label>
 <p><button type="submit">Create room</button></p>
 </form>` : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${wantWork ? '%2Frooms%3Fnew%3Dworkspace' : '%2Frooms'}">Sign in with OpenVibe</a> to start or join a room.</p>`;
-        await page(req, res, 200, {
-            actor, title: 'Rooms', path: '/rooms', active: 'rooms', robots: 'index, follow', footer: 'compact',
-            description: 'Chat and call rooms on OpenVibe: start one about anything, invite people, or join a public room.',
-            body: `${ui.head({ title: 'Rooms', sub: 'Group chats, calls and workspaces with Vibe', actions: me ? [`<a class="oc-icon-btn" href="#oc-new-room" aria-label="Start a room" title="Start a room">${IC.plus}</a>`] : [] })}${error}
+        const mineServers = me ? (await require('../rooms/servers').list(me)).mine : [];
+        const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
+        const sideRooms = shell.sideRooms({
+            mine: mine.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private' })),
+            public: others.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private' })),
+            you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
+        });
+        const content = `${ui.head({ title: 'Rooms', sub: 'Group chats, calls and workspaces with Vibe', actions: me ? [`<a class="oc-icon-btn" href="#oc-new-room" aria-label="Start a room" title="Start a room">${IC.plus}</a>`] : [] })}${error}
 ${mine.length ? `<h2 class="oc-list-head">Your rooms</h2><ul class="oc-list">${mine.map(roomCard).join('')}</ul>` : ''}
 <h2 class="oc-list-head">${mine.length ? 'More public rooms' : 'Public rooms'}</h2>${others.length ? `<ul class="oc-list">${others.map(roomCard).join('')}</ul>` : mine.length ? '<p class="oc-rooms-empty oc-muted">No other public room yet.</p>' : `<div class="oc-rooms-empty">
 <p><strong>No public room is open right now: start the first one below.</strong> A room can be about anything, private to the people you invite, a voice call, or a group chat with AI members who know the context.</p>
@@ -849,7 +887,18 @@ ${mine.length ? `<h2 class="oc-list-head">Your rooms</h2><ul class="oc-list">${m
 <li><a href="/servers">Servers</a>: channels, voice, roles and invite links, Discord-style</li>
 <li><a href="/messages">Messages</a>: direct messages with anyone on OpenVibe</li></ul></div>`}
 ${create}
-<p class="oc-muted">Building something? A <a href="/feeds">feed</a> shows your coding session live in a room, on your Live channel or on your site.</p>`,
+<p class="oc-muted">Building something? A <a href="/feeds">feed</a> shows your coding session live in a room, on your Live channel or on your site.</p>`;
+        await page(req, res, 200, {
+            actor, title: 'Rooms', path: '/rooms', active: 'rooms', robots: 'index, follow', shell: true, footer: 'none',
+            description: 'Chat and call rooms on OpenVibe: start one about anything, invite people, or join a public room.',
+            body: shell.shell({
+                rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                side: sideRooms,
+                sideLabel: 'Rooms',
+                main: content,
+                mainLabel: 'Rooms',
+                page: true,
+            }),
         });
     });
 
@@ -946,13 +995,24 @@ ${people}
         const topic = typeof room.topic === 'string' ? room.topic.trim() : '';
         const description = topic.length >= 40 ? topic
             : `${room.name}: a ${room.visibility === 'public' ? 'public' : 'private'} room on OpenVibe.Chat with ${memberCount} ${memberCount === 1 ? 'member' : 'members'}. Read along, or sign in to talk.`;
+        const mineServers = me ? (await require('../rooms/servers').list(me)).mine : [];
+        const listed = await rooms.list(me);
+        const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
         await page(req, res, 200, {
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady, feedView: !!feed,
-            footer: 'compact', scripts: ais.length ? ['vibe-md.js'] : [], wide: !!work,
+            footer: 'none', shell: true, scripts: ais.length ? ['vibe-md.js'] : [],
             description,
             page: { view: 'room', room: room.slug, kind: room.kind, pics: pictures.enabled() ? pictures.publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: can.join, talk: can.talk } } : {}) },
-            body: `<header class="oc-room-head">
+            body: shell.shell({
+                rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                side: shell.sideRooms({
+                    mine: listed.mine.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private', current: r.slug === room.slug })),
+                    public: listed.public.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private', current: r.slug === room.slug })),
+                    you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
+                }),
+                sideLabel: 'Rooms',
+                main: `<header class="oc-room-head">
 <a class="oc-icon-btn" href="/rooms" aria-label="All rooms" title="All rooms">${ICONS.back}</a>
 <div class="oc-room-id"><h1>${esc(room.name)}${room.visibility === 'private' ? `<span class="oc-room-lock" title="Private: only people invited read and post">${ICONS.lock}<span class="oc-sr">private</span></span>` : ''}${kindBadge(room)}</h1>
 <p class="oc-muted oc-room-sub">${room.topic && !isAgentRoom ? `${esc(room.topic)} · ` : ''}${memberCount} ${memberCount === 1 ? 'member' : 'members'}${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole} <span class="oc-live" id="oc-live" hidden>● live</span></p>${roomRules(room)}</div>
@@ -964,8 +1024,10 @@ ${aiHere}${error}
 ${isCall ? callPanel(room, can, me) : ''}
 ${feed ? `<div class="fv oc-room-fv" data-feed="${esc(feed.id)}"></div>` : ''}
 ${work && room.screen_url && can.role ? `<details class="oc-screen" open><summary>Shared screen</summary><iframe src="${esc(room.screen_url)}" title="The room's shared screen" loading="lazy" referrerpolicy="no-referrer" allow="clipboard-write; fullscreen"></iframe></details>` : ''}
-${work ? '<div class="oc-ws"><div class="oc-ws-main">' : ''}<ol class="oc-feed oc-room-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
+${work ? '<div class="oc-ws"><div class="oc-ws-main">' : ''}<ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
 ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
+                mainLabel: room.name,
+            }),
         });
     });
 
@@ -1095,11 +1157,23 @@ ${aiMembers.enabled() ? '' : notice('error', 'AI members are switched off on thi
 ${ais.map((a) => `<section class="oc-ai-member"><h3><span class="oc-badge oc-ai">AI</span> ${esc(a.name)} <span class="oc-muted">@${esc(a.handle)} · ${esc(aiMembers.modelOf(a))}</span>${a.link_service === 'food' ? ' <span class="oc-badge">knows the household\'s pantry (OpenVibe.Food)</span>' : ''}</h3>${aiForm(a)}<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/ai-members/${Number(a.id)}/delete"><button type="submit" class="oc-pill oc-pill-danger">${IC.trash}<span>Remove ${esc(a.name)}</span></button></form></section>`).join('')}
 ${ais.length < aiMembers.MAX_PER_ROOM && !ais.some((a) => a.handle === 'vibe') ? `<form class="oc-form oc-ai-quick" method="post" action="/r/${esc(room.slug)}/ai-members"><input type="hidden" name="name" value="Vibe"><input type="hidden" name="persona" value="${esc(VIBE_IN_ROOMS)}"><p><button type="submit">Add Vibe</button> <span class="oc-muted">OpenVibe's assistant joins the room: anyone here can ask it with @vibe.</span></p></form>` : ''}
 ${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}</details>` : '';
+        const mineServers = (await require('../rooms/servers').list(actor.user)).mine;
+        const listedRooms = await rooms.list(actor.user);
+        const dmUnread = await require('../chat/dm').getTotalUnread(actor.user.id);
+        const roomShell = (main) => shell.shell({
+            rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+            side: shell.sideRooms({
+                mine: listedRooms.mine.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private', current: r.slug === room.slug })),
+                public: listedRooms.public.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private', current: r.slug === room.slug })),
+                you: { name: actor.user.display_name || actor.user.username, status: 'Online', avatarUrl: actor.user.avatar_url || '' },
+            }),
+            sideLabel: 'Rooms', main, mainLabel: 'Settings', page: true,
+        });
         if (room.server_id) {
             return await page(req, res, 200, {
-                actor, title: `#${room.name}: AI members`, path: `/r/${room.slug}/settings`, active: 'servers', robots: 'noindex, nofollow', footer: 'compact',
-                body: `${ui.head({ title: `AI members in #${esc(room.name)}`, back: { href: await channelUrl(room, '/settings'), label: 'Server settings' } })}${saved}${error}
-${aiSection}`,
+                actor, title: `#${room.name}: AI members`, path: `/r/${room.slug}/settings`, active: 'servers', robots: 'noindex, nofollow', shell: true, footer: 'none',
+                body: roomShell(`${ui.head({ title: `AI members in #${esc(room.name)}`, back: { href: await channelUrl(room, '/settings'), label: 'Server settings' } })}${saved}${error}
+${aiSection}`),
             });
         }
         const hookList = can.manage && rooms.isWorkspace(room) ? await roomHooks.list(room) : [];
@@ -1113,8 +1187,8 @@ ${hookList.length < roomHooks.MAX_PER_ROOM ? `<form class="oc-form" method="post
         const communityUrl = config.web.communityUrl;
         const attachList = can.manage ? `<section class="oc-set"><h2>Attached to</h2>${attachments.length ? `<ul class="oc-members">${attachments.map((a) => `<li><a href="${esc(a.service === 'community' ? `${communityUrl}/forum/${encodeURIComponent(a.resource)}` : '#')}">${esc(a.title || a.resource)}</a> <span class="oc-muted">${esc(a.service === 'community' ? 'OpenVibe.Community space' : a.service)}</span><form class="oc-inline" method="post" action="/r/${esc(room.slug)}/attachments/${encodeURIComponent(a.service)}/${encodeURIComponent(a.resource)}/detach"><button type="submit" class="oc-link">Detach</button></form></li>`).join('')}</ul>` : '<p class="oc-muted oc-set-note">Not attached anywhere. A Community space you own can attach this room from the space\'s page.</p>'}</section>` : '';
         await page(req, res, 200, {
-            actor, title: `${room.name}: settings`, path: `/r/${room.slug}/settings`, active: 'rooms', robots: 'noindex, nofollow', footer: 'compact', script: true, page: { view: 'settings' },
-            body: `${ui.head({ title: 'Room settings', sub: esc(room.name), back: { href: `/r/${room.slug}`, label: 'Back to the room' } })}${saved}${error}
+            actor, title: `${room.name}: settings`, path: `/r/${room.slug}/settings`, active: 'rooms', robots: 'noindex, nofollow', shell: true, footer: 'none', script: true, page: { view: 'settings' },
+            body: roomShell(`${ui.head({ title: 'Room settings', sub: esc(room.name), back: { href: `/r/${room.slug}`, label: 'Back to the room' } })}${saved}${error}
 ${can.manage ? `<section class="oc-set"><h2>Room</h2><form class="oc-form oc-grid-form oc-set-form" method="post" action="/r/${esc(room.slug)}/settings">
 <label>Name <input name="name" required minlength="3" maxlength="40" value="${esc(room.name)}"></label>
 <label>Topic <input name="topic" maxlength="200" value="${esc(room.topic || '')}"></label>
@@ -1137,7 +1211,7 @@ ${can.manage && await require('./room-embed-pages').embeddable(room) ? `<details
 <p class="oc-muted oc-small">Or in a part of your page (an element with id="chat"):</p>
 <div class="oc-snip"><button type="button" class="oc-icon-btn" data-oc-copy="#oc-snip-inline" aria-label="Copy" title="Copy" hidden>${IC.copy}</button><pre class="ib-snippet" tabindex="0" id="oc-snip-inline"><code>${esc(`<script src="${config.web.baseUrl}/widget.js" data-room="${room.slug}" data-target="#chat" data-height="520" async></script>`)}</code></pre></div></details>` : ''}
 ${aiSection}
-${attachList}`,
+${attachList}`),
         });
     });
 

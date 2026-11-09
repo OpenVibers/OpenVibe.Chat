@@ -33,6 +33,7 @@
 .oc-side-top { padding: 0 0 10px; }
 .oc-side-find { display: flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 10px; border-radius: 10px; background: var(--oc-panel-2); color: var(--oc-text); text-decoration: none; font-size: .92rem; }
 .oc-side-find:hover { background: var(--oc-panel); }
+.oc-side-top .oc-side-find + .oc-side-find { margin-top: 6px; }
 .oc-side-find .oc-i { width: 18px; height: 18px; color: var(--oc-muted); }
 .oc-side-sec { margin-bottom: 12px; }
 .oc-side-group { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 8px 4px; font-size: .72rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--oc-muted); }
@@ -202,3 +203,11 @@
 
 /* Absolutely placed inputs (the template radios) stay inside the page that scrolls, not the document. */
 .oc-page, .oc-template { position: relative; }
+
+/* The inbox's conversation on the network's kit: its conversation list is the shell's side column and its thread fills
+   the middle, so the kit's own sidebar and sticky chrome give way to the shell's. */
+.oc-app .ovk-sidebar { position: static; height: auto; flex: 1; min-height: 0; border-right: 0; background: transparent; }
+.oc-app .ovt { height: 100%; min-height: 0; grid-template-columns: minmax(0, 1fr); }
+.oc-app .ovt-main { min-height: 0; height: 100%; }
+.oc-app .ovt-scroll { overflow-y: auto; min-height: 0; }
+.oc-app .ovt-head, .oc-app .ovt-dock { position: static; }
