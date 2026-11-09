@@ -20,6 +20,7 @@ const { limits } = require('../net/actor-limits');
 const dm = require('./dm');
 const ctx = require('../live-context');
 const prefStores = require('../prefs/stores');
+const database = require('../db/database');
 const presence = require('../presence');
 const { idParam } = require('./route-params');
 
@@ -46,6 +47,25 @@ async function withPresence(viewerSubject, conversations) {
 
 // All DM routes require authentication
 router.use(requireAuth);
+
+// A view choice is private to the signed-in participant and this conversation.
+router.get('/conversations/:id/view', async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || !await dm.isParticipant(id, req.user.id)) return res.status(404).json({ error: 'Conversation not found' });
+    const saved = await database.get('SELECT view FROM dm_view_preferences WHERE user_id = ? AND conversation_id = ?', [req.user.id, id]);
+    const participants = await dm.getParticipants(id);
+    const defaults = await prefStores.settingsOf(prefStores.preferences, req.user.subject_id);
+    const kind = participants.length <= 2 ? 'one_to_one' : 'group';
+    const view = saved?.view || (defaults.view_defaults && defaults.view_defaults[kind]) || (kind === 'one_to_one' ? 'bubbles' : 'room');
+    res.set('Cache-Control', 'private, no-store').json({ conversation_id: id, view });
+});
+router.put('/conversations/:id/view', async (req, res) => {
+    const id = Number(req.params.id), view = req.body && req.body.view;
+    if (!Number.isSafeInteger(id) || !await dm.isParticipant(id, req.user.id)) return res.status(404).json({ error: 'Conversation not found' });
+    if (view !== 'bubbles' && view !== 'room') return res.status(400).json({ error: 'view must be bubbles or room' });
+    await database.run('INSERT INTO dm_view_preferences (user_id, conversation_id, view, updated_at) VALUES (?, ?, ?, ov_now()) ON CONFLICT (user_id, conversation_id) DO UPDATE SET view = EXCLUDED.view, updated_at = ov_now()', [req.user.id, id, view]);
+    res.set('Cache-Control', 'private, no-store').json({ conversation_id: id, view });
+});
 
 // Ids are validated before the handler (and its queries) see them, one rule per param name.
 router.param('id', idParam('invalid conversation id'));

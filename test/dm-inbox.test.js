@@ -30,7 +30,11 @@ const navLabel = (page, key) => {
 t('boot', async () => {
     h = await boot({ env: { CHAT_WEB_URL: SITE } });
     alice = h.addUser('alice', { subject: ids.newId('user') });
+    alice.avatar_url = 'https://openvibe.media/fixture/alice.png';
+    h.live.users.get(alice.id).avatar_url = alice.avatar_url;
     bob = h.addUser('bob', { subject: ids.newId('user') });
+    bob.avatar_url = 'https://openvibe.media/fixture/bob.png';
+    h.live.users.get(bob.id).avatar_url = bob.avatar_url;
     carol = h.addUser('carol', { subject: ids.newId('user') });
     for (const u of [alice, bob, carol]) { await h.ctx.upsertUser(h.live.users.get(u.id)); h.netModules.subjects.add(u.subject_id); }
 });
@@ -46,6 +50,7 @@ t('the inbox: your conversations only, unread counts in the list and the navigat
     assert.match(inbox.text, /id="oc-inbox-status"[^>]*>2 unread</);
     assert.strictEqual(navLabel(inbox.text, '/messages'), 'Messages (2)');
     assert.ok(inbox.text.includes('are you there?'), 'the last message as a preview');
+    assert.ok(inbox.text.includes('src="https://openvibe.media/fixture/alice.png"'), 'DM list rows use the person picture from Network');
     const carolInbox = await req('GET', '/messages', { headers: cookie(carol) });
     assert.ok(!carolInbox.text.includes(`/messages/${conv}`), 'not in anyone else\'s inbox');
     assert.strictEqual(navLabel(carolInbox.text, '/messages'), 'Messages');
@@ -57,6 +62,11 @@ t('the inbox: your conversations only, unread counts in the list and the navigat
     assert.ok(!/\d+ new<\/span>/.test(inbox.text));
     assert.strictEqual(navLabel(inbox.text, '/messages'), 'Messages');
     assert.strictEqual((await dmApi('GET', '/unread', bob)).body.unread, 0);
+    const defaultView = await dmApi('GET', `/conversations/${conv}/view`, bob);
+    assert.strictEqual(defaultView.body.view, 'bubbles', 'one-to-one conversations default to bubbles');
+    assert.strictEqual((await dmApi('PUT', `/conversations/${conv}/view`, bob, { view: 'room' })).body.view, 'room');
+    assert.match((await req('GET', `/messages/${conv}`, { headers: cookie(bob) })).text, /oc-feed oc-room-feed" id="oc-feed"/);
+    assert.strictEqual((await dmApi('GET', `/conversations/${conv}/view`, bob)).body.view, 'room', 'view choice is saved per person and conversation');
 
     // Rooms count too.
     await h.http('POST', '/api/chat/rooms', { token: alice.token, body: { name: 'Book Club' } });

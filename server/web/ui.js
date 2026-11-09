@@ -76,7 +76,7 @@ function presenceLine(presence, { liveHref = null } = {}) {
     return `${shown}${presence.status_text ? ` · ${esc(String(presence.status_text).slice(0, 80))}` : ''}`;
 }
 
-function initials(name, presence = null, { large = false, id = '' } = {}) {
+function initials(name, presence = null, { large = false, id = '', avatarUrl = '' } = {}) {
     const words = String(name || '?').replace(/[^\p{L}\p{N} ]/gu, ' ').trim().split(/\s+/).filter(Boolean);
     const letters = (words.length > 1 ? words[0][0] + words[1][0] : (words[0] || '?').slice(0, 2)).toUpperCase();
     let h = 0;
@@ -84,8 +84,11 @@ function initials(name, presence = null, { large = false, id = '' } = {}) {
     const cls = `oc-av${large ? ' oc-av-lg' : ''}`;
     const idAttr = id ? ` id="${esc(id)}"` : '';
     const state = presenceState(presence);
-    if (!state) return `<span class="${cls}" style="--av:${h}"${idAttr} aria-hidden="true">${esc(letters)}</span>`;
-    return `<span class="${cls}" style="--av:${h}"${idAttr} role="img" aria-label="${esc(`${String(name || '?')}, ${PRESENCE[state].a11y}`)}">${esc(letters)}${presenceDot(presence)}</span>`;
+    let photo = '';
+    try { const u = new URL(String(avatarUrl || '')); if (u.protocol === 'https:' && u.hostname.toLowerCase() === 'openvibe.media') photo = `<img src="${esc(u.href)}" alt="" loading="lazy" referrerpolicy="no-referrer">`; } catch { /* initials are the fallback */ }
+    const content = photo || esc(letters);
+    if (!state) return `<span class="${cls}" style="--av:${h}"${idAttr} aria-hidden="true">${content}</span>`;
+    return `<span class="${cls}" style="--av:${h}"${idAttr} role="img" aria-label="${esc(`${String(name || '?')}, ${PRESENCE[state].a11y}`)}">${content}${presenceDot(presence)}</span>`;
 }
 
 /** An https address a card may link to; anything else (javascript:, http:, a relative path) is no link. */
