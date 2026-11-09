@@ -67,6 +67,20 @@ t('a chat is its person\'s alone, and an empty message is refused', async () => 
     assert.strictEqual((await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: '   ' } })).status, 422);
 });
 
+t('the Dock lists only your conversations with a preview and the site where each began', async () => {
+    const started = await h.http('POST', '/api/vibe/ask', { token: ann.token, headers: { origin: 'https://openvibe.today' }, body: { message: 'What is on today?', fresh: true } });
+    assert.strictEqual(started.status, 201, started.text);
+    const r = await h.http('GET', '/api/vibe/conversations', { token: ann.token });
+    assert.strictEqual(r.status, 200, r.text);
+    const row = r.body.conversations.find((c) => c.slug === started.body.chat.slug);
+    assert.deepStrictEqual([row.last_line, row.site], ['What is on today?', 'openvibe.today']);
+    assert.ok(r.body.count >= 1);
+    const short = await h.http('GET', '/api/vibe/conversations?limit=1', { token: ann.token });
+    assert.strictEqual(short.body.conversations.length, 1);
+    assert.ok(short.body.count > 1, 'the Chats row counts the full history, beyond this page');
+    assert.ok(!(await h.http('GET', '/api/vibe/conversations', { token: bob.token })).body.conversations.some((c) => c.slug === row.slug));
+});
+
 t('two and three explicit models run in parallel, keep receipts, and isolate a failure', async () => {
     require('../server/net/actor-limits').limits.reset();
     const seen = [];
