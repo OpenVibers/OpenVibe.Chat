@@ -72,7 +72,10 @@ t('a first message starts a private chat named after it, and Vibe answers it una
     const aiMembers = require('../server/rooms/ai-members');
     const at = Date.UTC(2026, 9, 30, 12, 0);
     const utc = aiMembers.vibePrompt({ name: 'Vibe' }, 'Ann', null, { now: at, timezone: 'Not/AZone' });
-    assert.match(utc, /^You are Vibe[^\n]*\nToday is Friday, October 30, 2026 \(UTC\)\./);
+    // The rules come first and the date is the last line, so the instruction prefix is the same from one minute to
+    // the next (a provider's prompt cache covers it).
+    assert.match(utc, /^You are Vibe[^\n]*\n\nHow you answer:/);
+    assert.match(utc, /\nToday is Friday, October 30, 2026 \(UTC\)\.$/);
     assert.ok(!utc.includes('Not/AZone'));
     const tokyo = aiMembers.vibePrompt({ name: 'Vibe' }, 'Ann', null, { now: at, timezone: 'Asia/Tokyo' });
     assert.match(tokyo, /for Ann it is Friday, October 30, 2026 .* in Asia\/Tokyo/);
