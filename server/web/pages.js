@@ -129,7 +129,7 @@ function globalMessage(m) {
 function dmMessage(m, me, view = 'room') {
     const t = hhmm(m.created_at);
     const mine = me && m.sender_id === me.id;
-    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div><time class="oc-bubble-time" datetime="${t.iso}">${t.text}</time></li>`;
+    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div>${ui.linkCard(m.card)}<time class="oc-bubble-time" datetime="${t.iso}">${t.text}</time></li>`;
     return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${ui.linkCard(m.card)}</li>`;
 }
 // Vibe, OpenVibe's assistant, as a room's AI member (one click on the room's settings; a person's own chats with it are

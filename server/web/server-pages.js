@@ -77,7 +77,8 @@ function mountServerPages(router, h) {
             for (const p of people) if (p.presence) online[p.slug] = (online[p.slug] || 0) + 1;
         }
         const chip = (name, href) => `<a class="oc-chip${name === cat ? ' is-active' : ''}" href="${esc(href)}">${esc(name || 'All')}</a>`;
-        const chips = `<nav class="oc-chips" aria-label="Categories">${chip('', `/servers${q ? `?q=${encodeURIComponent(q)}` : ''}`)}${templates.CATEGORIES.map((c) => chip(c, `/servers?category=${encodeURIComponent(c)}${q ? `&q=${encodeURIComponent(q)}` : ''}`)).join('')}</nav>`;
+        // Chat never writes ?q= back into a page (test/security-private.test.js): the chips do not carry it.
+        const chips = `<nav class="oc-chips" aria-label="Categories">${chip('', '/servers')}${templates.CATEGORIES.map((c) => chip(c, `/servers?category=${encodeURIComponent(c)}`)).join('')}</nav>`;
         // One server as a card: its banner, its icon, its name, one line about it, its people, and a way in.
         const card = (sv) => {
             const isMember = yours.has(sv.slug);
@@ -126,7 +127,7 @@ ${mine.length ? `<ul class="oc-side-list">${mine.map((sv) => `<li class="oc-row"
                 rail: shell.rail({ explore: true, dmUnread: me ? await require('../chat/dm').getTotalUnread(me.id) : 0, servers: mine.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
                 side, sideLabel: 'Your servers',
                 main: `${ui.head({ title: 'Explore servers', sub: `${listed.length} server${listed.length === 1 ? '' : 's'}` })}
-<form class="oc-find" method="get" action="/servers" role="search">${IC.search}<label for="oc-server-q" class="oc-sr">Find a server</label><input id="oc-server-q" name="q" value="${esc(req.query.q || '')}" placeholder="Find a server" autocomplete="off"><button type="submit" class="oc-send" aria-label="Find" title="Find">${IC.search}</button></form>
+<form class="oc-find" method="get" action="/servers" role="search">${IC.search}<label for="oc-server-q" class="oc-sr">Find a server</label><input id="oc-server-q" name="q" value="" placeholder="Find a server" autocomplete="off"><button type="submit" class="oc-send" aria-label="Find" title="Find">${IC.search}</button></form>
 ${chips}
 <div class="oc-cards">${listed.map(card).join('')}${startCard}</div>
 ${sheet}`,
