@@ -8,6 +8,7 @@ const assert = require('assert');
 const { suite } = require('./helpers');
 const { vibePrompt } = require('../server/rooms/ai-members');
 const aiTools = require('../server/rooms/ai-tools');
+const { inboxPrompt } = require('../server/inbox/inbox');
 
 const t = suite('vibe-prompt-prefix');
 const member = { name: 'Vibe', handle: 'vibe', persona: null };
@@ -54,6 +55,17 @@ t('the tools are offered in the same order every turn', () => {
     assert.strictEqual(JSON.stringify(first), JSON.stringify(second));
     const names = first.map((d) => d.function.name);
     assert.strictEqual(new Set(names).size, names.length, 'no tool is offered twice');
+});
+
+t('a site inbox\'s rules do not change with its business hours', () => {
+    const inbox = { name: 'Acme', handoff: 1, knowledge_urls: '[]', ai_instructions: 'Be kind.' };
+    const alwaysOpen = inboxPrompt(inbox);
+    // A schedule that is closed apart from one minute a day: whichever side of it "now" falls on, the away note
+    // can only ever come after the rules.
+    const closed = inboxPrompt({ ...inbox, hours: { tz: 'UTC', days: [0, 1, 2, 3, 4, 5, 6], start: '00:00', end: '00:01' } });
+    assert.strictEqual(closed.slice(0, alwaysOpen.length), alwaysOpen, 'the instruction block is identical');
+    assert.ok(!alwaysOpen.includes('they are away now'), 'no away state inside the rules');
+    if (closed.length > alwaysOpen.length) assert.match(closed.slice(alwaysOpen.length), /they are away now/);
 });
 
 t.run();
