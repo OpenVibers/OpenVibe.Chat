@@ -101,7 +101,7 @@ function rail({ chats, current, signedIn, allowance, query = '', here = null }) 
     const allow = own ? `<p class="vb-allow" id="vb-allow" data-own="1">No daily limit: Vibe thinks with ${esc(own.you)}</p>`
         : left != null ? `<p class="vb-allow" id="vb-allow">${left} of ${allowance.per_day} answers left today</p>` : '';
     // Chat's other places, quietly at the foot (the network's navbar reaches them too).
-    const more = [['https://openvibe.bot/machines', 'Computers & robots'], ['/work', 'Work together'], ['/messages', 'Messages'], ['/rooms', 'Rooms and servers'], ['/', 'Global chat']];
+    const more = [['https://openvibe.link/machines', 'Computers & robots'], ['/work', 'Work together'], ['/messages', 'Messages'], ['/rooms', 'Rooms and servers'], ['/', 'Global chat']];
     const html = kit.sidebar({
         id: 'vb-rail', label: 'Your chats with Vibe',
         action: { href: '/vibe', label: 'New chat', icon: 'pencil' },

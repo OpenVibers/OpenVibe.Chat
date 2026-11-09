@@ -487,7 +487,7 @@ async function afterPost(room, message, user, deps = {}) {
                 return await say(resting ? 'AI is resting for a moment. Try again in a minute.' : 'I could not answer just now. Try again in a minute.');
             }
             if (onComputer) return await say(vibe
-                ? 'I could not reach the model on your computer just now. Is it on, with its model server running (Ollama, LM Studio or llama.cpp), and "Let my AI use this computer\'s models" on at openvibe.bot/machines? You can switch me back to OpenVibe\'s model in Settings, under "Your AI key".'
+                ? 'I could not reach the model on your computer just now. Is it on, with its model server running (Ollama, LM Studio or llama.cpp), and "Let my AI use this computer\'s models" on at openvibe.link/machines? You can switch me back to OpenVibe\'s model in Settings, under "Your AI key".'
                 : 'I could not reach the model on my manager\'s computer just now. Try again later, or the room\'s owner can switch me to OpenVibe\'s model.');
             return await say(vibe
                 ? 'I could not reach your model just now (your key may be out of today\'s budget, or the provider did not answer). Try again later, or switch me back to OpenVibe\'s model in Settings, under "Your AI key".'

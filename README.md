@@ -353,7 +353,7 @@ API: `GET|PUT|DELETE /api/chat/me/ai-key` (own sign-in only, not API tokens); pa
 linked from the channel on the server's settings page.
 
 **A model on their own computer** (AI on your own machines; contracts 0.220.0/0.221.0). The key may instead be provider
-`node`: a `machine` (a `dev_` id from openvibe.bot/machines, or `any`, the fastest of theirs that is on) and a model,
+`node`: a `machine` (a `dev_` id from openvibe.link/machines, or `any`, the fastest of theirs that is on) and a model,
 with no key and nothing spent. OpenVibe.AI reaches it through OpenVibe.Bot and the person's OpenVibe Link, only where they
 turned on "Let my AI use this computer's models".
 - **The form** shows only the fields the chosen provider takes (`chat.css` `:has()`). It comes prefilled from Bot's

@@ -12,7 +12,7 @@ const controlLease = require('./control-lease');
 const rooms = require('./rooms');
 const parties = require('./parties');
 
-const NODE = /^node:(nod_[0-9A-HJKMNP-TV-Z]{26})$/;
+const NODE = /^link:(lnk_[0-9A-HJKMNP-TV-Z]{26})$/;
 const SHARE = /^shr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 async function nodeOf(req) {

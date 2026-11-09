@@ -177,7 +177,7 @@ ${tasks.length ? `<ol class="oc-tasks">${tasks.map((t) => taskItem(t, room, can,
             `<a class="oc-pill" href="${back.href}">${ICONS.chat}<span>${vibeChat ? 'Chat' : 'Room'}</span></a>`,
             t.result_url ? `<a class="oc-pill oc-pill-strong" href="${esc(t.result_url)}" rel="noopener nofollow">${ICONS.open}<span>Open where it landed</span></a>` : '',
             info && info.actor_url ? `<a class="oc-pill" href="${esc(info.actor_url)}" title="Every step the agent took, on OpenVibe.Actor">${ICONS.steps}<span>Every step</span></a>` : '',
-            t.kind === 'computer' || t.kind === 'code' ? `<a class="oc-pill" href="https://openvibe.bot/machines" title="Your computers: pair one, see its screen, set what agents may do on it">${ICONS.computer}<span>Your computers</span></a>` : '',
+            t.kind === 'computer' || t.kind === 'code' ? `<a class="oc-pill" href="https://openvibe.link/machines" title="Your computers: pair one, see its screen, set what agents may do on it">${ICONS.computer}<span>Your computers</span></a>` : '',
         ].filter(Boolean).join('');
         const checked = info ? info.lines.find((l) => l.startsWith('Checked by')) : null;
         const sources = t.sources.length ? `<section class="oc-tp-card" aria-labelledby="oc-src-h"><h2 id="oc-src-h">Sources <span class="oc-muted">${t.sources.length}</span></h2>

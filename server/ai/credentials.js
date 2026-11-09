@@ -13,7 +13,7 @@
  * Needs Network's grant [chat, ai.credential.manage, openvibe.ai]. Refusals come back as CredentialError (status, code).
  *
  * Provider node (contracts 0.220.0) is a model on the person's own computer instead: `machine` names it (a dev_ id on
- * openvibe.bot/machines), there is no key and nothing is spent; OpenVibe.AI reaches it through OpenVibe.Bot, and only
+ * openvibe.link/machines), there is no key and nothing is spent; OpenVibe.AI reaches it through OpenVibe.Bot, and only
  * while the person lets their AI use that computer's models there.
  */
 const config = require('../config');
@@ -57,7 +57,7 @@ async function put(subject, { provider, base_url, api_key, model, budget_usd_per
         // A model on the person's own computer: the machine, no key, no budget (nothing is spent).
         const id = String(machine || '').trim();
         // `any` (contracts 0.221.0): whichever of their computers is on with the model, the fastest first.
-        if (!MACHINE_RE.test(id) && id !== 'any') fail(422, 'credentials.machine', 'Name your computer (its id, dev_…, from openvibe.bot/machines), or choose any of your computers.');
+        if (!MACHINE_RE.test(id) && id !== 'any') fail(422, 'credentials.machine', 'Name your computer (its id, dev_…, from openvibe.link/machines), or choose any of your computers.');
         try {
             return view(await call('PUT', subject, { provider: 'node', machine: id, models: { chat: m } }));
         } catch (err) {

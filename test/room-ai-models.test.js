@@ -167,7 +167,7 @@ t('a model on your own computer: the machine and no key; the settings form comes
     assert.strictEqual(label(put.body.key), 'your own computer · llama3.1:8b');
     assert.strictEqual(memberLabel(put.body.key, 'Cy'), 'llama3.1:8b on Cy\'s computer', 'what a room sees: whose computer, never "your own"');
     assert.strictEqual(memberLabel({ provider: 'openai', model: 'gpt-4o-mini' }, 'Cy'), 'openai · gpt-4o-mini, Cy\'s key');
-    // From openvibe.bot/machines ("Use these models in OpenVibe.Chat"): the form is filled in, nothing is saved yet.
+    // From openvibe.link/machines ("Use these models in OpenVibe.Chat"): the form is filled in, nothing is saved yet.
     const page = await web('GET', `/settings?own=node&machine=${MACHINE}&model=qwen2.5:7b`, cy);
     const sect = page.text.slice(page.text.indexOf('id="oc-ai-key"'));
     assert.ok(sect.includes('<option value="node" selected>A model on my own computer</option>'), 'own computer chosen');
