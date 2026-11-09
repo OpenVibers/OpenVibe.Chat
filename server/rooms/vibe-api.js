@@ -70,7 +70,8 @@ const chatOf = (room) => (room ? { slug: room.slug, name: room.name || 'Vibe', u
 const siteOf = (req) => {
     try {
         const host = new URL(String(req.get('origin') || '')).hostname.toLowerCase();
-        return /^(?:[a-z0-9-]+\.)?openvibe\.(?:network|today|chat|actor|blog|wiki|fun|live|pics|codes|community|news|deals|coupons)$/.test(host) ? host : null;
+        // Any OpenVibe site (the Dock runs on all of them): openvibe.<site>, or a subdomain of one.
+        return /^(?:[a-z0-9-]+\.)?openvibe\.[a-z]{2,15}$/.test(host) ? host : null;
     } catch { return null; }
 };
 
