@@ -55,6 +55,7 @@ function mountServerPages(router, h) {
         const actor = await viewerOf(req);
         const me = userOf(actor);
         const { public: pub, mine } = await servers.list(me);
+        const featuredServers = await servers.featured();
         const templates = require('../rooms/server-templates');
         const q = String(req.query.q || '').trim().toLowerCase();
         const cat = String(req.query.category || '');
@@ -95,6 +96,8 @@ function mountServerPages(router, h) {
 ${join}</article>`;
         };
         const startCard = `<article class="oc-card oc-server-card oc-server-card--new"><h3>Start a server</h3><p class="oc-card-line">A template, a name and a picture: under ten seconds.</p><a class="oc-button" href="#oc-new-server">Start a server</a></article>`;
+        // Staff feature a few servers above the categories. With none featured the row is left out entirely.
+        const featuredRow = featuredServers.length ? `<section class="oc-featured" aria-labelledby="oc-featured-h"><h2 class="oc-list-head" id="oc-featured-h">Featured</h2><div class="oc-cards oc-featured-cards">${featuredServers.map(card).join('')}</div></section>` : '';
         // The sheet: a template first, then a name and a picture, then public or private.
         const sheet = me ? `<details class="oc-sheet" id="oc-new-server"><summary class="oc-button">Start a server</summary>
 <form class="oc-form oc-sheet-form" method="post" action="/servers/new" enctype="multipart/form-data">
@@ -128,6 +131,7 @@ ${mine.length ? `<ul class="oc-side-list">${mine.map((sv) => `<li class="oc-row"
                 side, sideLabel: 'Your servers',
                 main: `${ui.head({ title: 'Explore servers', sub: `${listed.length} server${listed.length === 1 ? '' : 's'}` })}
 <form class="oc-find" method="get" action="/servers" role="search">${IC.search}<label for="oc-server-q" class="oc-sr">Find a server</label><input id="oc-server-q" name="q" value="" placeholder="Find a server" autocomplete="off"><button type="submit" class="oc-send" aria-label="Find" title="Find">${IC.search}</button></form>
+${featuredRow}
 ${chips}
 <div class="oc-cards">${listed.map(card).join('')}${startCard}</div>
 ${sheet}`,
@@ -400,6 +404,15 @@ ${roles.length ? `<section class="oc-set" aria-labelledby="oc-onboard-roles"><h2
         await servers.update(server, actor.user, { self_roles: servers.selfRolesOf(server).filter((r) => r.name !== name) });
         res.redirect(303, `/s/${server.slug}/settings?saved=1#oc-onboarding`);
     }));
+    // Explore's featured row (the plan, stage V3): OpenVibe staff mark a public server featured, or take it down.
+    router.post('/s/:slug/featured', formLimit, sameSite, orError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const server = await servers.bySlug(req.params.slug);
+        if (!server) return res.redirect(303, '/servers');
+        req.back = `/s/${server.slug}/settings`;
+        await servers.setFeatured(server, actor.user, (req.body && req.body.featured) === '1');
+        res.redirect(303, `/s/${server.slug}/settings?saved=1#oc-featured`);
+    }));
 
 
     // ── Settings: what each rank may do (overview and channels: owner/admins; invites: owner/admins, and mods in a
@@ -483,6 +496,10 @@ ${can.manage ? `<h2>Overview</h2><form class="oc-form" method="post" action="/s/
 <h3>Roles people may pick</h3>
 ${selfRoles.length ? `<ul class="oc-members">${selfRoles.map((r) => `<li>${r.color ? `<span class="oc-dot" style="background:${esc(r.color)}" aria-hidden="true"></span> ` : ''}<strong>${esc(r.name)}</strong> <form class="oc-inline" method="post" action="/s/${esc(server.slug)}/roles/delete"><input type="hidden" name="name" value="${esc(r.name)}"><button type="submit" class="oc-link">Remove</button></form></li>`).join('')}</ul>` : '<p class="oc-muted">No roles yet.</p>'}
 <form class="oc-new" method="post" action="/s/${esc(server.slug)}/roles"><label for="oc-role-new">Add a role</label> <input id="oc-role-new" name="name" required maxlength="24" placeholder="Raider"> <input name="color" type="color" value="#5865f2" aria-label="Its colour"> <button type="submit">Add</button></form>
+</section>` : ''}
+${can.staff ? `<section class="oc-set" id="oc-featured" aria-labelledby="oc-feat-h"><h2 id="oc-feat-h">Explore</h2>
+<p class="oc-muted">Featured servers sit above the categories on Explore, for people who have not joined them.</p>
+<form method="post" action="/s/${esc(server.slug)}/featured"><input type="hidden" name="featured" value="${server.featured_at ? '0' : '1'}"><button type="submit">${server.featured_at ? 'Remove from featured' : 'Feature on Explore'}</button></form>
 </section>` : ''}
 ${canInvite ? `<h2 id="oc-invites">Invites</h2><p class="oc-muted">${server.visibility === 'private' ? 'A private server is joined only through an invite.' : 'Anyone can join a public server; an invite link is a handy way to bring people straight to it.'}</p>
 <form class="oc-new" method="post" action="/s/${esc(server.slug)}/invites"><label for="oc-inv-uses">New invite</label> <select id="oc-inv-uses" name="max_uses" aria-label="How many times it can be used"><option value="">any number of uses</option><option value="1">1 use</option><option value="10">10 uses</option><option value="100">100 uses</option></select> <select name="expires_hours" aria-label="When it expires"><option value="168">for 7 days</option><option value="24">for 1 day</option><option value="720">for 30 days</option><option value="">forever</option></select> <button type="submit">Make an invite</button></form>
