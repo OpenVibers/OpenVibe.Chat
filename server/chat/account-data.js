@@ -68,6 +68,8 @@ const EXPORTS = [
     ['vibe_memory.json', `SELECT id, text, source, created_at FROM vibe_memory WHERE user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['vibe_memory_off.json', `SELECT since FROM vibe_memory_off WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['vibe_own_engine.json', `SELECT since FROM vibe_own_engine WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
+    ['vibe_model_preferences.json', `SELECT message_id, winner, bench_round_id, created_at FROM vibe_model_preferences WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
+    ['vibe_import_notices.json', `SELECT dismissed_at, imported_at FROM vibe_import_notices WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     // What they asked Vibe by voice on their machines, the last 7 days (server/chat/internal-vibe.js).
     // Which of their agents' runs were posted into their Vibe chats (server/chat/internal-vibe.js).
     ['vibe_deliveries.json', `SELECT room_id, message_id, created_at FROM vibe_deliveries WHERE user_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
@@ -130,6 +132,8 @@ const ERASE_AFTER_ROOMS = [
     ['vibe_memory', 'DELETE FROM vibe_memory WHERE user_id = ANY(@ids)'],
     ['vibe_memory_off', 'DELETE FROM vibe_memory_off WHERE user_id = ANY(@ids)'],
     ['vibe_own_engine', 'DELETE FROM vibe_own_engine WHERE user_id = ANY(@ids)'],
+    ['vibe_model_preferences', 'DELETE FROM vibe_model_preferences WHERE user_id = ANY(@ids)'],
+    ['vibe_import_notices', 'DELETE FROM vibe_import_notices WHERE user_id = ANY(@ids)'],
     ['vibe_asks', 'DELETE FROM vibe_asks WHERE user_id = ANY(@ids)'],
     ['agent_room_votes', 'DELETE FROM agent_room_poll_votes WHERE user_id = ANY(@ids)'],
     ['room_reactions', 'DELETE FROM room_message_reactions WHERE user_id = ANY(@ids)'],
