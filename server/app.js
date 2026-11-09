@@ -133,6 +133,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     /** The Bearer-only DM reads and writes the shared navbar and Dock make from any OpenVibe site. */
     // /api/dm/users/search: the share sheet's "OpenVibe Chat" (Shared 4.144.0) starts a conversation by a person's name.
     const bearerDmPath = (p) => p === '/api/dm/unread' || p === '/api/dm/conversations' || p.startsWith('/api/dm/conversations/') || p === '/api/dm/users/search';
+    const bearerDockVibePath = (p) => p.startsWith('/api/vibe/') || p.startsWith('/api/chat/vibe/') || p === '/api/chat/vibe/picture' || /^\/api\/chat\/rooms\/[^/]+\/pictures$/.test(p);
 
     // ── Internal (loopback; never routed by nginx) ─────────────
     app.use('/internal/chat', express.json({ limit: '64kb' }), createInternalIngress({ chatServer }));
@@ -277,7 +278,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
         // echoed with no Allow-Credentials, so the Bearer is the whole key, a browser refuses a credentialed read or
         // preflight, and a foreign web origin is still refused.
         const origin = req.headers.origin;
-        if (origin && bearerDmPath(req.path) && !isAllowedOrigin(origin) && FIRST_PARTY.has(origin)) return openCors(req, res, next);
+        if (origin && (bearerDmPath(req.path) || bearerDockVibePath(req.path)) && !isAllowedOrigin(origin) && FIRST_PARTY.has(origin)) return openCors(req, res, next);
         return allowlistedCors(req, res, next);
     });
     // A workspace room's incoming hooks check a signature over the raw body, so they read it before the JSON parser does.
