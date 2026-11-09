@@ -204,6 +204,10 @@
 /* Absolutely placed inputs (the template radios) stay inside the page that scrolls, not the document. */
 .oc-page, .oc-template { position: relative; }
 
+/* Onboarding: a server's rules keep their line breaks, and the roles a member may pick stack. */
+.oc-onboard-rules { white-space: pre-wrap; overflow-wrap: anywhere; }
+.oc-checks { display: grid; gap: 4px; margin: 8px 0 14px; }
+
 /* The inbox's conversation on the network's kit: its conversation list is the shell's side column and its thread fills
    the middle, so the kit's own sidebar and sticky chrome give way to the shell's. */
 .oc-app .ovk-sidebar { position: static; height: auto; flex: 1; min-height: 0; border-right: 0; background: transparent; }

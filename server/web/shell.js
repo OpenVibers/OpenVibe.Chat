@@ -199,7 +199,7 @@ function membersColumn(o = {}) {
     const groups = o.groups || [];
     return `<div class="oc-members-head"><h2 class="oc-side-group">People</h2><button type="button" class="oc-icon-btn oc-members-close" data-oc-panel="main" aria-label="Hide the people" title="Hide the people">${IC.back}</button></div>
 ${groups.map((g) => `<section class="oc-members-sec"><h3 class="oc-side-group">${esc(g.title)} <span class="oc-muted">${g.people.length}</span></h3>
-<ul class="oc-side-list">${g.people.map((p) => `<li class="oc-row oc-member-row${p.presence ? ' is-online' : ''}"><a href="${p.href || '#'}"${p.id ? ` data-oc-user="${Number(p.id)}"` : ''}>${ui.initials(p.display_name || p.username || '?', p.presence, { avatarUrl: p.avatar_url })}<span class="oc-row-main"><span class="oc-row-top"><strong${p.color ? ` style="--nc:${esc(p.color)}"` : ''}>${esc(p.display_name || p.username || '?')}</strong></span><span class="oc-row-sub">${esc(p.username ? `@${p.username}` : '')}</span></span></a></li>`).join('')}</ul></section>`).join('')}`;
+<ul class="oc-side-list">${g.people.map((p) => `<li class="oc-row oc-member-row${p.presence ? ' is-online' : ''}"><a href="${p.href || '#'}"${p.id ? ` data-oc-user="${Number(p.id)}"` : ''}>${ui.initials(p.display_name || p.username || '?', p.presence, { avatarUrl: p.avatar_url })}<span class="oc-row-main"><span class="oc-row-top"><strong${p.color ? ` style="--nc:${esc(p.color)}"` : ''}>${esc(p.display_name || p.username || '?')}</strong></span><span class="oc-row-sub">${esc([p.username ? `@${p.username}` : '', ...(p.roles || [])].filter(Boolean).join(' · '))}</span></span></a></li>`).join('')}</ul></section>`).join('')}`;
 }
 
 /**

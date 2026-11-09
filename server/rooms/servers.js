@@ -46,9 +46,27 @@ const CHANNEL_RESERVED = new Set(['settings', 'join', 'leave', 'channels', 'invi
 const MAX_SERVERS_PER_OWNER = 5;
 const MAX_CHANNELS = 50;
 const MAX_INVITES = 25;
+const MAX_RULES = 4000;
+const MAX_SELF_ROLES = 10;
 const INVITE_ALPHABET = 'abcdefghjkmnpqrstuvwxyz23456789';
 
 const isStaff = (user) => rooms.isStaff(user);
+
+/** A JSON text column of names ({ name, color } for a server's roles, plain names for a member's picks). */
+function parseList(v) {
+    try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; }
+}
+/** The roles a server offers its members: [{ name, color }], names unique, at most MAX_SELF_ROLES. */
+function selfRolesOf(server) {
+    return parseList(server && server.self_roles)
+        .map((r) => ({ name: String((r && r.name) || '').slice(0, 24), color: /^#[0-9a-f]{3,8}$/i.test(String((r && r.color) || '')) ? r.color : null }))
+        .filter((r) => r.name)
+        .slice(0, MAX_SELF_ROLES);
+}
+/** Does a server ask anyone joining to read its rules or pick roles? */
+function hasOnboarding(server) {
+    return !!(server && typeof server.rules === 'string' && server.rules.trim()) || selfRolesOf(server).length > 0;
+}
 
 function slugify(name) {
     return String(name || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32).replace(/-+$/g, '');
@@ -106,6 +124,7 @@ function publicServer(s, extra = {}) {
         id: Number(s.id), slug: s.slug, name: s.name, description: s.description || null, visibility: s.visibility,
         official: s.slug === OFFICIAL_SLUG, members: Number(s.member_count) || 0, created_at: s.created_at,
         category: s.category || null, picture_url: s.picture_url || null, template: s.template || null, ...extra,
+        rules: typeof s.rules === 'string' && s.rules.trim() ? s.rules : null, self_roles: selfRolesOf(s),
     };
 }
 
@@ -307,21 +326,59 @@ async function setRole(server, actor, targetUserId, role) {
     return role === 'none' ? null : role;
 }
 
-/** The server's people by rank (blocked last, only for moderators). */
+/** The server's people by rank (blocked last, only for moderators). A member's picked roles ride along. */
 async function members(server, { blocked = false, limit = 1000, subjects = false } = {}) {
     const order = `CASE m.role ${Object.entries(RANK).map(([r, n]) => `WHEN '${r}' THEN ${n}`).join(' ')} ELSE 9 END`;
-    return await db.all(`SELECT m.user_id, m.role, m.joined_at, u.username, u.display_name, u.profile_color, u.subject_id, u.avatar_url FROM chat_server_members m
+    const rows = await db.all(`SELECT m.user_id, m.role, m.roles, m.joined_at, u.username, u.display_name, u.profile_color, u.subject_id, u.avatar_url FROM chat_server_members m
         LEFT JOIN ctx_users u ON u.id = m.user_id WHERE m.server_id = ? ${blocked ? '' : "AND m.role != 'blocked'"}
         ORDER BY ${order}, lower(u.username) LIMIT ?`, [server.id, Math.min(5000, Math.max(1, Number(limit) || 1000))]);
+    return rows.map((p) => ({ ...p, roles: parseList(p.roles).map(String).filter(Boolean) }));
 }
 
-async function update(server, actor, { name, description, visibility } = {}) {
+/** The roles one member picked in this server (empty when none). */
+async function memberRoles(server, userId) {
+    const row = await db.get('SELECT roles FROM chat_server_members WHERE server_id = ? AND user_id = ?', [server.id, Number(userId)]);
+    return row ? parseList(row.roles).map(String).filter(Boolean) : [];
+}
+
+/** A member picks their own roles: only names the server offers, and only while they are in it. */
+async function setMemberRoles(server, user, names) {
+    if (!user) fail(401, 'servers.sign_in', 'Sign in to pick your roles');
+    const role = await roleIn(server.id, user.id);
+    if (!role || role === 'blocked') fail(403, 'servers.member', 'Join the server first');
+    const offered = new Set(selfRolesOf(server).map((r) => r.name));
+    const picked = [...new Set((Array.isArray(names) ? names : [names]).map((n) => String(n || '').slice(0, 24)).filter((n) => offered.has(n)))];
+    await db.run('UPDATE chat_server_members SET roles = ? WHERE server_id = ? AND user_id = ?', [JSON.stringify(picked), server.id, user.id]);
+    return picked;
+}
+
+async function update(server, actor, { name, description, visibility, rules, self_roles } = {}) {
     if (!(await access(server, actor)).manage) fail(403, 'servers.not_admin', 'Only the server\'s owner and admins change it');
-    const next = { name: server.name, description: server.description, visibility: server.visibility };
+    const next = { name: server.name, description: server.description, visibility: server.visibility, rules: server.rules || null, self_roles: selfRolesOf(server) };
     if (name != null) { const n = cleanName(name, 2, 40); if (!n || wordFilter.check(n).safe === false) fail(422, 'servers.name', 'Server names are 2 to 40 characters'); next.name = n; }
     if (description != null) next.description = String(description).replace(/\s+/g, ' ').trim().slice(0, 300) || null;
     if (visibility != null) { if (!['public', 'private'].includes(visibility)) fail(422, 'servers.visibility', 'A server is public or private'); next.visibility = visibility; }
-    await db.run('UPDATE chat_servers SET name = ?, description = ?, visibility = ?, updated_at = ov_now() WHERE id = ?', [next.name, next.description, next.visibility, server.id]);
+    if (rules != null) {
+        const r = String(rules).replace(/\r\n?/g, '\n').trim();
+        if (r.length > MAX_RULES) fail(422, 'servers.rules', `The rules are up to ${MAX_RULES} characters`);
+        next.rules = r || null;
+    }
+    if (self_roles != null) {
+        if (!Array.isArray(self_roles)) fail(422, 'servers.roles', 'The roles are a list');
+        if (self_roles.length > MAX_SELF_ROLES) fail(422, 'servers.roles', `A server offers up to ${MAX_SELF_ROLES} roles`);
+        const seen = new Set();
+        next.self_roles = [];
+        for (const raw of self_roles) {
+            const n = String((raw && raw.name) || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 24);
+            if (!n || seen.has(n.toLowerCase())) continue;
+            if (ROLES.includes(n.toLowerCase())) fail(422, 'servers.roles', `“${n}” is a server permission, not a role to pick`);
+            if (wordFilter.check(n).safe === false) fail(422, 'servers.roles', `“${n}” is not allowed`);
+            seen.add(n.toLowerCase());
+            next.self_roles.push({ name: n, color: /^#[0-9a-f]{3,8}$/i.test(String((raw && raw.color) || '')) ? raw.color : null });
+        }
+    }
+    await db.run('UPDATE chat_servers SET name = ?, description = ?, visibility = ?, rules = ?, self_roles = ?, updated_at = ov_now() WHERE id = ?',
+        [next.name, next.description, next.visibility, next.rules, JSON.stringify(next.self_roles), server.id]);
     // The channels follow the server: going private redacts what public channels had published (rooms.update).
     if (next.visibility !== server.visibility) {
         for (const r of await db.all('SELECT * FROM rooms WHERE server_id = ? AND archived_at IS NULL', [server.id])) {
@@ -423,5 +480,6 @@ module.exports = {
     bySlug, byId, roleIn, access, channelAccess, publicServer, publicChannel, channels, channelBySlug,
     create, list, join, leave, setRole, members, update, createChannel, updateChannel, deleteChannel,
     createInvite, invites, revokeInvite, inviteByCode, archive,
-    SLUG_RE, ROLES, RANK, MAX_SERVERS_PER_OWNER, MAX_CHANNELS, OFFICIAL_SLUG,
+    selfRolesOf, hasOnboarding, memberRoles, setMemberRoles,
+    SLUG_RE, ROLES, RANK, MAX_SERVERS_PER_OWNER, MAX_CHANNELS, OFFICIAL_SLUG, MAX_RULES, MAX_SELF_ROLES,
 };
