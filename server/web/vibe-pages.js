@@ -20,6 +20,7 @@ const md = require('../../public/web/vibe-md.js');
 const pictures = require('../rooms/pictures');
 const rooms = require('../rooms/rooms');
 const vibe = require('../rooms/vibe');
+const compare = require('../rooms/vibe-compare');
 const workspace = require('../rooms/workspace');
 const how = require('../rooms/how');
 const memory = require('../rooms/vibe-memory');
@@ -28,10 +29,9 @@ const kit = require('openvibe-shared/kit');
 const thread = require('openvibe-shared/thread');
 
 const SUGGESTIONS = [
-    { title: 'Catch me up', text: 'on today\'s tech news', prompt: 'What happened in tech news today? Give me the highlights with links.' },
-    { title: 'Find a deal', text: 'on a mechanical keyboard', prompt: 'Find me a good deal on a mechanical keyboard on OpenVibe Deals.' },
-    { title: 'Look for jobs', text: 'remote video editing work', prompt: 'Find remote video editing jobs posted recently.' },
-    { title: 'Explain a page', text: 'how browser go-live works', prompt: 'Read https://openvibe.live/docs/go-live-in-your-browser and explain how going live from a browser works, in plain words.' },
+    { title: 'Explain a concept', prompt: 'Explain a concept I am curious about in plain English.' },
+    { title: 'Help me write', prompt: 'Help me write a clear, friendly message.' },
+    { title: 'Compare ideas', prompt: 'Give me two ways to approach this idea and their tradeoffs.' },
 ];
 
 const DAY = 86_400_000;
@@ -161,7 +161,10 @@ function youOf(m, me) {
 /** Vibe's answer: the rendered Markdown, what it did (reminders, timers), its sources and how, then Copy and Try again. */
 function answerOf(m, hows, retrySlug, slug) {
     const info = hows.get(Number(m.id));
-    return `<p class="oc-sr">Vibe said:</p>${thread.answer({ html: md.render(m.message), copy: false })}${resultChips(m, slug)}${how.chips(info, m.id)}${how.html(info, m.id)}${acts(retrySlug)}`;
+    return `<p class="oc-sr">Vibe said:</p>${m.vibe_model ? `<p class="vb-import-model">${esc(m.vibe_model)}</p>` : ''}${thread.answer({ html: md.render(m.message), copy: false })}${resultChips(m, slug)}${how.chips(info, m.id)}${how.html(info, m.id)}${acts(retrySlug)}`;
+}
+function compareOf(asked, answers) {
+    return `<div class="vb-compare" data-vb-question="${Number(asked.id)}"><div class="vb-compare-tabs" role="tablist" aria-label="Models">${answers.map((a, i) => `<button type="button" role="tab" class="vb-compare-tab${i ? '' : ' is-active'}" data-vb-tab="${i}" aria-selected="${i ? 'false' : 'true'}">${esc(a.model)} <span aria-hidden="true">${a.status === 'finished' ? '●' : '○'}</span></button>`).join('')}</div><div class="vb-compare-grid">${answers.map((a, i) => `<section class="vb-compare-answer${i ? '' : ' is-active'}" data-vb-answer="${i}"><header><strong>${esc(a.model)}</strong><small>${a.provider ? `${esc(a.provider)} · ` : ''}${a.cost_usd == null ? '' : `$${Number(a.cost_usd).toFixed(4)} · `}${a.ms == null ? '' : `${(Number(a.ms) / 1000).toFixed(1)}s`}</small></header><div class="vb-compare-text" data-vb-text>${a.status === 'writing' ? '<span class="vb-pulse" aria-hidden="true"></span>Writing…' : a.status === 'failed' ? esc(a.error || 'Could not answer') : md.render(a.text)}</div><div class="vb-compare-actions"><button type="button" data-vb-copy="${i}">Copy</button><button type="button" data-vb-pick="${esc(a.model)}" data-vb-message="${Number(asked.id)}">Continue with this one</button><button type="button" data-vb-prefer="${esc(a.model)}" data-vb-message="${Number(asked.id)}">This one was better</button></div></section>`).join('')}</div></div>`;
 }
 /** Vibe writing: the live line, open (ov-thread.js and vibe.js follow it). */
 const WRITING = thread.work({ open: true, live: 'Vibe is writing' });
@@ -178,7 +181,7 @@ function turnsOf(messages, me, hows, { retrySlug = null, slug = null, waiting = 
             const open = specs[specs.length - 1];
             if (open && open.reply == null) { open.reply = reply; open.ai = m.id; }
             else specs.push({ reply, ai: m.id });
-        } else specs.push({ you: youOf(m, me), me: m.id, reply: null });
+        } else specs.push({ you: youOf(m, me), me: m.id, reply: m.compareAnswers ? compareOf(m, m.compareAnswers) : null });
     }
     const tail = specs[specs.length - 1];
     if (waiting && tail && tail.reply == null) { tail.reply = WRITING; tail.open = true; }
@@ -196,7 +199,7 @@ const MODES = [
 // The text files the attach button takes (read in the browser, vibe.js readText).
 const TEXT_FILES = 'text/plain,text/markdown,text/csv,application/json,.txt,.md,.markdown,.csv,.tsv,.json,.log,.xml,.yaml,.yml,.toml,.ini,.html,.css,.js,.mjs,.ts,.py,.go,.rs,.java,.c,.h,.cpp,.rb,.php,.sh,.sql';
 
-function composer({ slug, signedIn, enabled, prefill = '', engine = null }) {
+function composer({ slug, signedIn, enabled, prefill = '', engine = null, models = [] }) {
     const action = !signedIn ? `/auth/login` : slug ? `/vibe/${esc(slug)}` : '/vibe';
     // A picture (public/web/vibe.js): it goes to OpenVibe.Pics as the person, and Vibe sees it with the question. A text
     // file (notes, a CSV, code) is read in the browser and goes into the message itself.
@@ -211,7 +214,7 @@ function composer({ slug, signedIn, enabled, prefill = '', engine = null }) {
         action, method: signedIn ? 'post' : 'get', name: 'message', id: 'vb-composer', attrs: signedIn ? {} : { 'data-signin': '1' },
         label: 'Message Vibe', placeholder: signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)', value: prefill, maxlength: 12000,
         hidden: signedIn ? {} : { next: slug ? `/vibe/${slug}` : (prefill ? `/vibe?ask=${encodeURIComponent(prefill)}` : '/vibe') },
-        top: '<div class="vb-preview" id="vb-preview" hidden></div>', tools: attach + modes,
+        top: `<div class="vb-model-picker"><button type="button" class="vb-model-chip" id="vb-model-chip" aria-haspopup="dialog" aria-expanded="false">${models.length > 1 ? `${models.length} models` : models[0] ? esc(models[0]) : 'Auto'} ▾</button><div class="vb-model-sheet" id="vb-model-sheet" role="dialog" aria-label="Choose models" hidden><div class="vb-model-sheet-head"><strong>Choose a model</strong><button type="button" id="vb-model-close" aria-label="Close model list">✕</button></div><label class="vb-model-compare"><input type="checkbox" id="vb-model-compare"> Compare models</label><div id="vb-model-list"><p>Loading models…</p></div><details><summary>Settings</summary><label>System prompt<textarea id="vb-system-prompt" maxlength="4000"></textarea></label><label>Temperature<input id="vb-temperature" type="number" min="0" max="2" step="0.1" value="1"></label></details><p class="vb-model-floor">The floor holds on every model: <a href="https://openvibe.network/rules">the rules</a></p></div></div><div class="vb-preview" id="vb-preview" hidden></div>`, tools: attach + modes,
         // Stop is drawn hidden: vibe.js shows it while Vibe writes, and it keeps what was written so far.
         stopAction: signedIn ? '' : null,
         foot: `<p class="vb-fine">${fine}</p>`,
@@ -254,6 +257,9 @@ function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit,
         const chats = user ? (searching ? await vibe.search(user, query) : await vibe.list(user)) : [];
         const allowance = user ? await allowanceOf(user) : null;
         const messages = room ? await rooms.history(room, { limit: 200 }) : [];
+        const compareAnswers = room ? await compare.answers(room, messages.filter((m) => !m.ai_member_id).map((m) => Number(m.id))) : new Map();
+        for (const m of messages) if (compareAnswers.has(Number(m.id))) m.compareAnswers = compareAnswers.get(Number(m.id));
+        const modelSettings = room ? await compare.settings(room) : { models: [] };
         const hows = room ? await how.forRoom(room) : new Map();   // "How Vibe did this" under agent tasks' answers
         // The agent's canvas beside the chat (plan HO9): only when the newest task in the chat is Actor's, because
         // that task's thread is the conversation the panel belongs to. The browser reads the document itself with
@@ -262,14 +268,15 @@ function mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit,
         const canvas = room && user ? await workspace.newestActor(room, user) : null;
         const enabled = vibe.enabled();
         const title = room ? room.name : 'Vibe';
-        const waiting = room && messages.length && !messages[messages.length - 1].ai_member_id;
+        const waiting = room && messages.length && !messages[messages.length - 1].ai_member_id && !messages[messages.length - 1].compareAnswers;
         // Try again goes under the last answer when it answers the person's last message.
         const retryable = room && messages.length > 1 && !!messages[messages.length - 1].ai_member_id && !messages[messages.length - 2].ai_member_id && user && Number(messages[messages.length - 2].user_id) === Number(user.id);
         const hello = `<div class="vb-hello">
+${user ? '<div class="vb-import" id="vb-import" hidden></div>' : ''}
 ${MARK}
-<h1>${user ? `What can I help with${user.display_name || user.username ? `, ${esc(String(user.display_name || user.username).split(' ')[0])}` : ''}?` : 'Hi, I\'m Vibe. What can I help with?'}</h1>
-<p class="vb-sub">OpenVibe's assistant. I search the web and all of OpenVibe (news, deals, jobs, rentals, videos), read the pages and pictures you share, remember what you ask me to, and set up work that runs every day for you.</p>
-<ul class="vb-suggest">${SUGGESTIONS.map((s) => `<li><button type="button" class="vb-chip" data-prompt="${esc(s.prompt)}"><b>${esc(s.title)}</b><span>${esc(s.text)}</span></button></li>`).join('')}</ul>
+<h1>Ask anything</h1>
+<p class="vb-sub">One model, or up to three side by side</p>
+<ul class="vb-suggest">${SUGGESTIONS.map((s) => `<li><button type="button" class="vb-chip" data-prompt="${esc(s.prompt)}"><b>${esc(s.title)}</b></button></li>`).join('')}</ul>
 </div>`;
         const head = thread.head({
             title: room ? title : '', sidebar: 'vb-rail', sidebarLabel: 'Show your chats',
@@ -285,7 +292,7 @@ ${MARK}
             head,
             turns: problem && room ? [thread.turn({ avatar: false, reply: problem }), ...turns] : turns,
             empty: problem + hello,
-            composer: composer({ slug: room && room.slug, signedIn: !!user, enabled, prefill: room ? '' : prefillOf(req.query || {}), engine: allowance && allowance.engine }),
+            composer: composer({ slug: room && room.slug, signedIn: !!user, enabled, prefill: room ? '' : prefillOf(req.query || {}), engine: allowance && allowance.engine, models: modelSettings.models }),
             center: !room, label: room ? 'Your chat with Vibe' : 'A new chat with Vibe',
         })}</div>`;
         await page(req, res, status, {
@@ -297,7 +304,8 @@ ${MARK}
             body,
             page: {
                 view: 'vibe', room: room ? room.slug : null, me: user ? user.id : null, latest: messages.length ? messages[messages.length - 1].id : 0,
-                waiting: !!waiting, enabled, signedIn: !!user,
+                waiting: !!waiting, enabled, signedIn: !!user, models: modelSettings.models,
+                system_prompt: modelSettings.system_prompt, temperature: modelSettings.temperature,
                 canvas: canvas ? { thread: canvas.thread, task: canvas.id, status: canvas.status } : null,
             },
         });

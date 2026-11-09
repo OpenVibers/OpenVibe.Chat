@@ -113,6 +113,9 @@ t('DNS rebinding: public at the check, loopback at the download — refused wher
 
 t('ratchet: every file that makes an outbound request itself is reviewed', () => {
     const REVIEWED = {
+        'server/ai/client.js': 'AI internal API (configured), fixed paths: runs and the Exchange catalogue',
+        'server/rooms/vibe-import.js': 'Exchange internal API (configured), a fixed path: the signed-in person\'s chat export',
+        'server/rooms/vibe-compare.js': 'Bench (configured), fixed paths: the compare round and its vote',
         'server/net/service-auth.js': 'Network JWKS (configured)',
         'server/chat/account-data.js': 'Network internal API (configured), fixed paths: export parts and deletion confirmations',
         'server/prefs/network-modules.js': 'Network user modules (configured)',

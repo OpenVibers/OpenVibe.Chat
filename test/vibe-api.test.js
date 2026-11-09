@@ -67,6 +67,85 @@ t('a chat is its person\'s alone, and an empty message is refused', async () => 
     assert.strictEqual((await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: '   ' } })).status, 422);
 });
 
-t('done', async () => { aiClient._setClient(null); await h.close(); });
+t('two and three explicit models run in parallel, keep receipts, and isolate a failure', async () => {
+    require('../server/net/actor-limits').limits.reset();
+    const seen = [];
+    aiClient._setComplete(async ({ model, subject }) => {
+        seen.push({ model, subject, at: Date.now() });
+        await wait(40);
+        if (model.includes('broken')) throw new Error('provider unavailable');
+        return { text: `From ${model}`, provider: 'test', cost_usd: 0.001, ms: 40, run_id: `run_${model}` };
+    });
+    const models = ['maker/one', 'maker/two'];
+    const first = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Compare this', models, fresh: true } });
+    assert.strictEqual(first.status, 201, first.text);
+    const slug = first.body.chat.slug;
+    let group;
+    for (let i = 0; i < 40; i++) {
+        const chat = await h.http('GET', `/api/vibe/chat?slug=${slug}`, { token: ann.token });
+        group = chat.body.messages.find((m) => m.id === first.body.message.id);
+        if (group && group.answers && group.answers.every((a) => a.status !== 'writing')) break;
+        await wait(50);
+    }
+    assert.deepStrictEqual(group.answers.map((a) => a.status), ['finished', 'finished']);
+    assert.ok(group.answers.every((a) => a.provider === 'test' && a.cost_usd === 0.001 && a.ms === 40 && a.run_id));
+    assert.ok(Math.abs(seen[0].at - seen[1].at) < 30, 'the calls start together');
+    assert.ok(seen.every((x) => x.subject === ann.subject_id));
+    const compare = require('../server/rooms/vibe-compare');
+    const benchCalls = [];
+    compare._setBench({ createRound: async (body) => {
+        benchCalls.push({ kind: 'round', body });
+        return { round: { id: 'brd_TEST' }, entries: [{ id: 'bte_LEFT' }, { id: 'bte_RIGHT' }] };
+    }, vote: async (body) => { benchCalls.push({ kind: 'vote', body }); return { judgement: { id: 'bju_TEST' } }; } });
+    const preferred = await h.http('POST', '/api/vibe/prefer', { token: ann.token, body: { message_id: first.body.message.id, model: 'maker/two' } });
+    assert.strictEqual(preferred.status, 200, preferred.text);
+    assert.deepStrictEqual(benchCalls.map((c) => c.kind), ['round', 'vote']);
+    assert.strictEqual(benchCalls[0].body.source, 'chat');
+    assert.strictEqual(benchCalls[1].body.subject, ann.subject_id);
+    assert.strictEqual((await h.http('POST', '/api/vibe/prefer', { token: ann.token, body: { message_id: first.body.message.id, model: 'maker/two' } })).status, 409);
+    compare._setBench(null);
+    const picked = await h.http('POST', '/api/vibe/pick', { token: ann.token, body: { message_id: first.body.message.id, model: 'maker/two' } });
+    assert.strictEqual(picked.status, 200, picked.text);
+    const next = await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'Three now', slug, models: ['maker/one', 'maker/two', 'maker/broken'] } });
+    assert.strictEqual(next.status, 201, next.text);
+    let answers;
+    for (let i = 0; i < 40; i++) {
+        const chat = await h.http('GET', `/api/vibe/chat?slug=${slug}`, { token: ann.token });
+        answers = chat.body.messages.find((m) => m.id === next.body.message.id).answers;
+        if (answers.every((a) => a.status !== 'writing')) break;
+        await wait(50);
+    }
+    assert.strictEqual(answers.filter((a) => a.status === 'finished').length, 2);
+    assert.strictEqual(answers.filter((a) => a.status === 'failed').length, 1);
+    assert.strictEqual((await h.http('POST', '/api/vibe/pick', { token: bob.token, body: { message_id: first.body.message.id, model: 'maker/one' } })).status, 404);
+    assert.strictEqual((await h.http('POST', '/api/vibe/ask', { token: ann.token, body: { message: 'too many', fresh: true, models: ['a/one', 'b/two', 'c/three', 'd/four'] } })).status, 422);
+});
+
+t('Exchange import is scoped to the person and repeating it makes no second chat', async () => {
+    require('../server/net/actor-limits').limits.reset();
+    const importer = require('../server/rooms/vibe-import');
+    const dates = ['2026-10-01T10:00:00.000Z', '2026-10-01T10:01:00.000Z'];
+    importer._setExport(async (subject) => ({ chats: [{ id: subject === ann.subject_id ? 'exc_ANN1' : 'exc_BOB1',
+        title: subject === ann.subject_id ? 'Alice old chat' : 'Bob old chat', models: ['maker/one'], created_at: dates[0], updated_at: dates[1],
+        messages: [{ role: 'user', content: 'Old question', created_at: dates[0] },
+            { role: 'assistant', model: 'maker/one', content: 'Old answer', created_at: dates[1] }] }] }));
+    const status = await h.http('GET', '/api/vibe/import', { token: ann.token });
+    assert.deepStrictEqual(status.body, { count: 1, show: true });
+    const first = await h.http('POST', '/api/vibe/import', { token: ann.token, body: {} });
+    assert.strictEqual(first.status, 200, first.text);
+    assert.strictEqual(first.body.imported, 1);
+    const again = await h.http('POST', '/api/vibe/import', { token: ann.token, body: {} });
+    assert.strictEqual(again.body.imported, 0);
+    const bobImport = await h.http('POST', '/api/vibe/import', { token: bob.token, body: {} });
+    assert.strictEqual(bobImport.body.imported, 1);
+    const aliceRoom = await h.db.get("SELECT id, name, created_at FROM rooms WHERE owner_id = ? AND name = 'Alice old chat'", [ann.id]);
+    assert.ok(aliceRoom && String(aliceRoom.created_at).startsWith('2026-10-01'));
+    const messages = await h.db.all('SELECT message FROM room_messages WHERE room_id = ? ORDER BY id', [aliceRoom.id]);
+    assert.deepStrictEqual(messages.map((m) => m.message), ['Old question', 'Old answer']);
+    assert.strictEqual(await h.db.get("SELECT id FROM rooms WHERE owner_id = ? AND name = 'Bob old chat'", [ann.id]), undefined);
+    importer._setExport(null);
+});
+
+t('done', async () => { aiClient._setComplete(null); aiClient._setClient(null); await h.close(); });
 
 t.run();
