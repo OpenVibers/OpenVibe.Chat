@@ -92,7 +92,8 @@ ${requests.length ? `<ul class="oc-side-list">${requests.map((r) => personRow(r,
 </section>
 <section class="oc-side-sec" aria-labelledby="oc-side-dms"><h2 class="oc-side-group" id="oc-side-dms">Direct messages</h2>
 ${dms.length ? `<ul class="oc-side-list">${dms.map(dmRow).join('')}</ul>` : `<p class="oc-side-empty oc-muted">No conversations yet.</p>`}
-</section>`;
+</section>
+${youBar(o.you || {})}`;
 }
 
 /**

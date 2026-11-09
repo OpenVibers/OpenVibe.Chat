@@ -397,7 +397,7 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
             page: { view: 'inbox', unread, me: me.id },
             body: shell.shell({
                 rail: shell.rail({ home: true, dmUnread: unread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
-                side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests }),
+                side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
                 main: `${ui.head({ title: 'Messages', sub: `<span id="oc-inbox-status" aria-live="polite">${unread ? `${unread} unread` : 'All caught up'}</span>`, actions: [`<details class="oc-new-picker"><summary class="oc-icon-btn" aria-label="New message" title="New message">${IC.pencil}<span>New</span></summary><div class="oc-new-pop"><label for="oc-people-search">Find someone</label><input id="oc-people-search" type="search" minlength="2" autocomplete="off" placeholder="Search people"><ul id="oc-people-results" aria-live="polite">${recentPicker || '<li class="oc-muted">Search by name or username</li>'}</ul></div></details>`] })}${error}${done}
 <ul class="oc-list" id="oc-convs">${rows.join('\n') || '<li class="oc-row-empty oc-muted">No conversations yet. Write a username above to start one.</li>'}</ul>
@@ -513,7 +513,7 @@ ${blockedList}`,
             page: { view: 'dm', conversation: id, messageView: view, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me.id, other: other ? { id: other.id, username: other.username || '' } : null },
             body: shell.shell({
                 rail: shell.rail({ home: true, dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
-                side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests }),
+                side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
                 main: `${ui.head({ title: esc(title), sub: `<span id="oc-dm-status">${subLine}</span>`, avatar, back: { href: '/messages', label: 'All messages' }, actions: [callForm, tools].filter(Boolean) })}${error}
 <ol class="oc-feed oc-room-feed${view === 'bubbles' ? ' oc-bubbles' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => dmMessage(m, me, view)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
