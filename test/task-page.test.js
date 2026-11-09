@@ -13,7 +13,7 @@ const { plain, took } = require('../server/web/workspace-pages');
 const { ICONS } = require('../server/web/icons');
 
 assert.strictEqual(
-    plain("I couldn't do it: **no computer is open to me**.\n\n**What I did**\n1. Asked for `list_my_computers`\n- see [the machines page](https://openvibe.bot/machines)"),
+    plain("I couldn't do it: **no computer is open to me**.\n\n**What I did**\n1. Asked for `list_my_computers`\n- see [the machines page](https://openvibe.link/machines)"),
     "I couldn't do it: no computer is open to me. What I did Asked for list_my_computers see the machines page");
 assert.strictEqual(plain('```\ncode\n```\nafter'), 'after');
 assert.strictEqual(plain('snake_case and 2*3*4 stay'), 'snake_case and 2*3*4 stay');

@@ -12,7 +12,7 @@ const controlLease = require('./control-lease');
 const rooms = require('./rooms');
 const parties = require('./parties');
 
-const NODE = /^node:(nod_[0-9A-HJKMNP-TV-Z]{26})$/;
+const NODE = /^link:(lnk_[0-9A-HJKMNP-TV-Z]{26})$/;
 const SHARE = /^shr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 async function nodeOf(req) {
@@ -21,7 +21,7 @@ async function nodeOf(req) {
     const r = await verifyServiceToken(header.slice(7).trim(), {
         ...keys().verifyOptions, issuer: config.networkUrl, audience: 'openvibe.chat', contracts,
     });
-    if (!r.ok || r.claims.actor_type !== 'node') return null;
+    if (!r.ok || r.claims.actor_type !== 'link') return null;
     const m = NODE.exec(String(r.claims.sub || ''));
     const owner = String(r.claims.on_behalf_of || '');
     return m && /^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(owner) ? { id: m[1], owner } : null;

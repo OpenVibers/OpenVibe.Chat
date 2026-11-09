@@ -152,7 +152,7 @@ t('the app page: signed out it invites a sign-in, signed in it lists the chats a
     // The rail leads to the rest of the person's agent: their tasks, their computers and robots, team workspaces.
     assert.ok(/href="https:\/\/openvibe\.actor\/tasks"[^>]*>[\s\S]*?<span>Tasks<\/span>/.test(signed.text), 'Tasks');
     assert.ok(/href="https:\/\/openvibe\.actor\/me\/agents"[^>]*>[\s\S]*?<span>Your agents<\/span>/.test(signed.text), 'Your agents: recurring work');
-    assert.ok(signed.text.includes('<a href="https://openvibe.bot/machines">Computers &amp; robots</a>'), 'Computers & robots, at the foot');
+    assert.ok(signed.text.includes('<a href="https://openvibe.link/machines">Computers &amp; robots</a>'), 'Computers & robots, at the foot');
     assert.ok(signed.text.includes('<a href="/work">Work together</a>'), 'Work together, at the foot');
     const form = await web('POST', '/vibe', ann, { message: 'hello from a form' });
     assert.strictEqual(form.status, 303);
@@ -200,7 +200,7 @@ t('answers render as escaped Markdown with http(s) links only', () => {
     assert.ok(!md.render('[x](https://a.com" onmouseover="alert(1))').includes('onmouseover="'));
     assert.strictEqual(md.render('```\n<i>\n```'), '<pre><code>&lt;i&gt;</code></pre>');
     // <https://…> (Markdown's autolink, which agents write): the address is the link; anything else in brackets stays text.
-    assert.strictEqual(md.render('Go to <https://openvibe.bot/machines>.'), '<p>Go to <a href="https://openvibe.bot/machines" rel="nofollow ugc noopener" target="_blank">https://openvibe.bot/machines</a>.</p>');
+    assert.strictEqual(md.render('Go to <https://openvibe.link/machines>.'), '<p>Go to <a href="https://openvibe.link/machines" rel="nofollow ugc noopener" target="_blank">https://openvibe.link/machines</a>.</p>');
     assert.ok(!md.render('<javascript:alert(1)>').includes('href'));
     // Tables and nested lists (answers are model-written Markdown, which uses both): escaped like everything else.
     assert.strictEqual(md.render('| Plan | Cost |\n|---|--:|\n| Rice | $2 |\n| <b>x</b> | 1 \\| 2 |'),

@@ -103,7 +103,7 @@ t('an agent that hands its person a step on its desk: Vibe asks them in the chat
     const r = await vibeApi('POST', `/${slug}/ask`, ann, { message: 'Book the cheapest flight to Lisbon', mode: 'agent' });
     assert.strictEqual(r.status, 201, r.text);
     await new Promise((res) => setTimeout(res, 150));
-    const desk = 'https://openvibe.bot/machines/dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9/screen?desk=desk-0123456789';
+    const desk = 'https://openvibe.link/machines/dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9/screen?desk=desk-0123456789';
     actorTask = { id: 'tsk_h1', state: 'running', needs_you: { seq: 7, what: 'Sign in to the airline.', url: desk } };
     await workspace.poll();
     await workspace.poll();
@@ -128,7 +128,7 @@ t('an agent working on a desk: Vibe offers to watch it and take it over, once pe
     const r = await vibeApi('POST', `/${slug}/ask`, bob, { message: 'Compare three laptops on the store site', mode: 'agent' });
     assert.strictEqual(r.status, 201, r.text);
     await new Promise((res) => setTimeout(res, 150));
-    const desk = 'https://openvibe.bot/machines/dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9/screen?desk=desk-9876543210';
+    const desk = 'https://openvibe.link/machines/dev_01M4W5JBFDG2TJ8C4FRDMCWBZ9/screen?desk=desk-9876543210';
     actorTask = { id: 'tsk_d1', state: 'running' };
     await workspace.poll();
     const lines = async () => (await messagesOf(slug, bob)).filter((m) => m.ai_member_id && /Your agent is working on/.test(m.message)).map((m) => m.message);

@@ -64,7 +64,7 @@ function titleOf(text) {
 const newSlug = () => `v-${crypto.randomBytes(8).toString('hex').slice(0, 12)}`;
 
 /** What Vibe thinks with, said to its person: "llama3.1:8b on your computer", "your openai key (gpt-4o-mini)". */
-const youOf = (cred) => (cred.provider === 'node'
+const youOf = (cred) => (cred.provider === 'link'
     ? `${cred.model || 'a model'} on your computer${cred.machine === 'any' ? 's' : ''}`
     : `your ${cred.provider} key (${cred.model || 'its default model'})`);
 
