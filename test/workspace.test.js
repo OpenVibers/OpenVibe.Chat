@@ -180,11 +180,12 @@ t('the room page shows the queue beside the conversation; the task page has the 
     const cookie = `ov_token=${staff.token}`;
     let r = await h.http('GET', '/r/staff', { headers: { cookie } });
     assert.strictEqual(r.status, 200);
-    assert.match(r.text, /<div class="oc-ws"><div class="oc-ws-main"><ol class="oc-feed oc-room-feed"/);
+    // A room is a channel in the app shell since Chat V2 (#441): its feed is the server channel's (oc-srv-feed).
+    assert.match(r.text, /<div class="oc-ws"><div class="oc-ws-main"><ol class="oc-feed oc-srv-feed"/);
     // The room's header: its controls are icons with names; an AI member's Markdown is rendered, escaped first.
     assert.match(r.text, /<a class="oc-icon-btn" href="\/r\/staff\/settings" aria-label="Room settings"/);
     assert.match(r.text, /<div class="oc-text vb-md"><p>✅ Done: &quot;/);
-    assert.match(r.text, /data-variant="compact"/, 'a room is a page people work in: the one-line footer');
+    assert.doesNotMatch(r.text, /data-variant="(compact|full)"/, 'a room fills the app shell: no footer under the conversation (Chat V2)');
     assert.match(r.text, /<aside class="oc-queue" id="oc-queue"[^>]*data-queue="\/r\/staff\/queue"/);
     assert.match(r.text, /Add a dark favicon to Tools/);
     r = await h.http('GET', '/r/staff/queue', { headers: { cookie } });

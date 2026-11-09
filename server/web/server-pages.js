@@ -55,6 +55,7 @@ function mountServerPages(router, h) {
         const actor = await viewerOf(req);
         const me = userOf(actor);
         const { public: pub, mine } = await servers.list(me);
+        const featuredServers = await servers.featured();
         const templates = require('../rooms/server-templates');
         const q = String(req.query.q || '').trim().toLowerCase();
         const cat = String(req.query.category || '');
@@ -95,6 +96,8 @@ function mountServerPages(router, h) {
 ${join}</article>`;
         };
         const startCard = `<article class="oc-card oc-server-card oc-server-card--new"><h3>Start a server</h3><p class="oc-card-line">A template, a name and a picture: under ten seconds.</p><a class="oc-button" href="#oc-new-server">Start a server</a></article>`;
+        // Staff feature a few servers above the categories. With none featured the row is left out entirely.
+        const featuredRow = featuredServers.length ? `<section class="oc-featured" aria-labelledby="oc-featured-h"><h2 class="oc-list-head" id="oc-featured-h">Featured</h2><div class="oc-cards oc-featured-cards">${featuredServers.map(card).join('')}</div></section>` : '';
         // The sheet: a template first, then a name and a picture, then public or private.
         const sheet = me ? `<details class="oc-sheet" id="oc-new-server"><summary class="oc-button">Start a server</summary>
 <form class="oc-form oc-sheet-form" method="post" action="/servers/new" enctype="multipart/form-data">
@@ -128,6 +131,7 @@ ${mine.length ? `<ul class="oc-side-list">${mine.map((sv) => `<li class="oc-row"
                 side, sideLabel: 'Your servers',
                 main: `${ui.head({ title: 'Explore servers', sub: `${listed.length} server${listed.length === 1 ? '' : 's'}` })}
 <form class="oc-find" method="get" action="/servers" role="search">${IC.search}<label for="oc-server-q" class="oc-sr">Find a server</label><input id="oc-server-q" name="q" value="" placeholder="Find a server" autocomplete="off"><button type="submit" class="oc-send" aria-label="Find" title="Find">${IC.search}</button></form>
+${featuredRow}
 ${chips}
 <div class="oc-cards">${listed.map(card).join('')}${startCard}</div>
 ${sheet}`,
@@ -223,6 +227,7 @@ ${sheet}`,
                 id: p.user_id, username: p.username || '', display_name: p.display_name || p.username || '',
                 avatar_url: p.avatar_url || null, presence: p.presence || null,
                 color: /^#[0-9a-f]{3,8}$/i.test(p.profile_color || '') ? p.profile_color : '',
+                roles: p.roles || [],
                 href: `${LIVE}/@${encodeURIComponent(p.username || '')}`,
             })),
         }));
@@ -289,7 +294,8 @@ ${composer}`,
         req.back = `/s/${server.slug}`;
         await servers.join(server, actor.user);
         await serverRoutes().applyServerChange(server);
-        res.redirect(303, `/s/${server.slug}`);
+        // Onboarding: the server's rules, then the roles they may pick (the plan, stage V3).
+        res.redirect(303, servers.hasOnboarding(server) ? `/s/${server.slug}/welcome` : `/s/${server.slug}`);
     }));
 
     router.post('/s/:slug/leave', formLimit, sameSite, orError(async (req, res) => {
@@ -302,6 +308,118 @@ ${composer}`,
         res.redirect(303, '/servers');
     }));
 
+    // ── Onboarding when joining (the plan, 2026-11-09, stage V3): the server's rules, then the roles they may pick ──
+    /** The shell's side column for a server: its channels and the people in its voice channels. */
+    async function serverSide(server, can, me, chans) {
+        const categories = [];
+        const byCat = new Map();
+        for (const c of chans) {
+            const name = c.category || (c.kind === 'voice' ? 'Voice channels' : 'Text channels');
+            if (!byCat.has(name)) { byCat.set(name, []); categories.push({ name, channels: byCat.get(name) }); }
+            byCat.get(name).push(c);
+        }
+        const occupants = {};
+        for (const c of chans) {
+            if (c.kind !== 'voice') continue;
+            try { occupants[c.slug] = ((require('../rooms/routes').callOf({ kind: 'call', slug: c.room }) || {}).people || []).map((p) => ({ username: p.username, display_name: p.display_name })); } catch { occupants[c.slug] = []; }
+        }
+        const mine = me ? (await servers.list(me)).mine : [];
+        const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
+        return shell.sideServer({
+            server: { ...server, official: server.slug === servers.OFFICIAL_SLUG }, can, me: !!me,
+            categories: categories.map((c) => ({ name: c.name, channels: c.channels.map((ch) => ({ kind: ch.kind, name: ch.name, slug: ch.slug, href: `/s/${server.slug}/${ch.slug}` })) })),
+            occupants,
+            you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
+        });
+    }
+    async function serverRail(me, activeSlug) {
+        const mine = me ? (await servers.list(me)).mine : [];
+        const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
+        return shell.rail({ dmUnread, servers: mine.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread, active: sv.slug === activeSlug })) });
+    }
+
+    router.get('/s/:slug/welcome', async (req, res) => {
+        const x = await loadServer(req, res); if (!x) return;
+        const { actor, me, server, can } = x;
+        if (!me) return res.redirect(303, `/auth/login?next=${encodeURIComponent(`/s/${server.slug}/welcome`)}`);
+        if (!can.member) return res.redirect(303, `/s/${server.slug}`);
+        const roles = servers.selfRolesOf(server);
+        const picked = await servers.memberRoles(server, me.id);
+        const chans = await servers.channels(server);
+        const rules = typeof server.rules === 'string' ? server.rules.trim() : '';
+        const roleList = roles.map((r) => `<label class="oc-role-pick"${r.color ? ` style="--oc-role:${esc(r.color)}"` : ''}><input type="checkbox" name="roles" value="${esc(r.name)}"${picked.includes(r.name) ? ' checked' : ''}><span><i aria-hidden="true"></i>${esc(r.name)}</span></label>`).join('\n');
+        // One rule a line (a leading "-", "*", "•" or "1." is the owner's own numbering and goes); a single line stays prose.
+        const ruleLines = rules.split(/\r?\n/).map((l) => l.replace(/^\s*(?:[-*\u2022]|\d{1,2}[.)])\s+/, '').trim()).filter(Boolean);
+        const rulesHtml = ruleLines.length > 1 ? `<ol class="oc-rules">${ruleLines.map((l) => `<li>${esc(l)}</li>`).join('\n')}</ol>` : `<p class="oc-rules-text">${esc(rules)}</p>`;
+        await page(req, res, 200, {
+            actor, shell: true, footer: 'none', title: `Welcome to ${server.name}`, path: `/s/${server.slug}/welcome`, active: 'servers', robots: 'noindex, nofollow',
+            body: shell.shell({
+                rail: await serverRail(me, server.slug),
+                side: await serverSide(server, can, me, chans),
+                sideLabel: server.name,
+                main: `<div class="oc-welcome">
+<header class="oc-welcome-head"><span class="oc-srv-icon oc-srv-icon--big" style="--oc-hue:${hueOf(server.slug)}" aria-hidden="true">${esc(initials(server.name))}</span>
+<div><p class="oc-welcome-kicker">Welcome to</p><h1>${esc(server.name)}</h1><p class="oc-muted">${rules && roles.length ? 'Read the rules and pick your roles, then you are in.' : rules ? 'Read the rules, then you are in.' : 'Pick your roles, then you are in.'}</p></div></header>
+<form method="post" action="/s/${esc(server.slug)}/welcome" class="oc-welcome-form">
+${rules ? `<section class="oc-set" aria-labelledby="oc-onboard-rules"><h2 id="oc-onboard-rules">The rules</h2>${rulesHtml}</section>` : ''}
+${roles.length ? `<fieldset class="oc-set oc-role-set"><legend id="oc-onboard-roles">Pick your roles</legend>
+<p class="oc-set-note">Optional. You can change them any time in the server's menu.</p>
+<div class="oc-role-picks">${roleList}</div></fieldset>` : ''}
+<div class="oc-welcome-go"><button type="submit">${roles.length ? 'Continue' : `Continue to ${esc(server.name)}`}</button>${roles.length ? `<a class="oc-welcome-skip" href="/s/${esc(server.slug)}">Skip for now</a>` : ''}</div>
+</form></div>`,
+                mainLabel: `Welcome to ${server.name}`,
+                page: true,
+            }),
+        });
+    });
+    router.post('/s/:slug/welcome', formLimit, sameSite, orError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const server = await servers.bySlug(req.params.slug);
+        if (!server) return res.redirect(303, '/servers');
+        await servers.setMemberRoles(server, actor.user, [].concat((req.body && req.body.roles) || []));
+        res.redirect(303, `/s/${server.slug}`);
+    }));
+
+    // The owner edits the rules and the roles members may pick, here in the server's settings.
+    router.post('/s/:slug/onboarding', formLimit, sameSite, orError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const server = await servers.bySlug(req.params.slug);
+        if (!server) return res.redirect(303, '/servers');
+        req.back = `/s/${server.slug}/settings`;
+        await servers.update(server, actor.user, { rules: (req.body && req.body.rules) || '' });
+        res.redirect(303, `/s/${server.slug}/settings?saved=1#oc-onboarding`);
+    }));
+    router.post('/s/:slug/roles', formLimit, sameSite, orError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const server = await servers.bySlug(req.params.slug);
+        if (!server) return res.redirect(303, '/servers');
+        req.back = `/s/${server.slug}/settings`;
+        const b = req.body || {};
+        const roles = servers.selfRolesOf(server);
+        if (roles.length >= servers.MAX_SELF_ROLES) return res.redirect(303, `/s/${server.slug}/settings?error=${encodeURIComponent(`A server offers up to ${servers.MAX_SELF_ROLES} roles`)}#oc-onboarding`);
+        await servers.update(server, actor.user, { self_roles: [...roles, { name: b.name, color: b.color }] });
+        res.redirect(303, `/s/${server.slug}/settings?saved=1#oc-onboarding`);
+    }));
+    router.post('/s/:slug/roles/delete', formLimit, sameSite, orError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const server = await servers.bySlug(req.params.slug);
+        if (!server) return res.redirect(303, '/servers');
+        req.back = `/s/${server.slug}/settings`;
+        const name = String((req.body && req.body.name) || '');
+        await servers.update(server, actor.user, { self_roles: servers.selfRolesOf(server).filter((r) => r.name !== name) });
+        res.redirect(303, `/s/${server.slug}/settings?saved=1#oc-onboarding`);
+    }));
+    // Explore's featured row (the plan, stage V3): OpenVibe staff mark a public server featured, or take it down.
+    router.post('/s/:slug/featured', formLimit, sameSite, orError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const server = await servers.bySlug(req.params.slug);
+        if (!server) return res.redirect(303, '/servers');
+        req.back = `/s/${server.slug}/settings`;
+        await servers.setFeatured(server, actor.user, (req.body && req.body.featured) === '1');
+        res.redirect(303, `/s/${server.slug}/settings?saved=1#oc-featured`);
+    }));
+
+
     // ── Settings: what each rank may do (overview and channels: owner/admins; invites: owner/admins, and mods in a
     // public server; members: owner/admins/mods; delete: the owner) ──
     router.get('/s/:slug/settings', async (req, res) => {
@@ -313,7 +431,23 @@ ${composer}`,
         const people = await servers.members(server, { blocked: true, limit: 2000 });
         const canInvite = can.manage || server.visibility === 'public';
         const invites = canInvite ? await servers.invites(server) : [];
+        const selfRoles = servers.selfRolesOf(server);
         const myRank = can.staff ? -1 : servers.RANK[can.role];
+        // The side column: the server's channels, with the people in its voice channels, and the you-bar.
+        const categories = [];
+        const byCat = new Map();
+        for (const c of chans) {
+            const name = c.category || (c.kind === 'voice' ? 'Voice channels' : 'Text channels');
+            if (!byCat.has(name)) { byCat.set(name, []); categories.push({ name, channels: byCat.get(name) }); }
+            byCat.get(name).push(c);
+        }
+        const occupants = {};
+        for (const c of chans) {
+            if (c.kind !== 'voice') continue;
+            try { occupants[c.slug] = ((require('../rooms/routes').callOf({ kind: 'call', slug: c.room }) || {}).people || []).map((p) => ({ username: p.username, display_name: p.display_name })); } catch { occupants[c.slug] = []; }
+        }
+        const railServers = me ? (await servers.list(me)).mine : [];
+        const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
         const choices = (target) => {
             const list = [];
             if (myRank <= servers.RANK.owner) list.push('admin');
@@ -341,15 +475,37 @@ ${can.manage && c.kind !== 'voice' && require('../rooms/ai-members').enabled() ?
         const inviteRow = (i) => `<li><code class="oc-invite-url">${esc(`${site}/join/${i.code}`)}</code> <span class="oc-muted">${i.uses} use${i.uses === 1 ? '' : 's'}${i.max_uses != null ? ` of ${i.max_uses}` : ''}${i.expires_at ? ` · until <time datetime="${esc(i.expires_at)}">${esc(i.expires_at.slice(0, 16).replace('T', ' '))} UTC</time>` : ' · never expires'}</span>
 <form class="oc-inline" method="post" action="/s/${esc(server.slug)}/invites/${esc(i.code)}/revoke"><button type="submit" class="oc-link">Revoke</button></form></li>`;
         await page(req, res, 200, {
-            actor, title: `${server.name}: settings`, path: `/s/${server.slug}/settings`, active: 'servers', robots: 'noindex, nofollow',
-            body: `<p><a href="/s/${esc(server.slug)}">← ${esc(server.name)}</a></p><h1>Server settings</h1>${saved}${errorOf(req)}
+            actor, title: `${server.name}: settings`, path: `/s/${server.slug}/settings`, active: 'servers', robots: 'noindex, nofollow', shell: true, footer: 'none',
+            body: shell.shell({
+                rail: shell.rail({ dmUnread, servers: railServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread, active: sv.slug === server.slug })) }),
+                side: shell.sideServer({
+                    server: { ...server, official: server.slug === servers.OFFICIAL_SLUG }, can: { ...can, invite: canInvite }, me: !!me,
+                    categories: categories.map((c) => ({ name: c.name, channels: c.channels.map((ch) => ({ kind: ch.kind, name: ch.name, slug: ch.slug, href: `/s/${server.slug}/${ch.slug}` })) })),
+                    occupants,
+                    you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
+                }),
+                sideLabel: server.name,
+                main: `<p><a href="/s/${esc(server.slug)}">← ${esc(server.name)}</a></p><h1>Server settings</h1>${saved}${errorOf(req)}
 ${can.manage ? `<h2>Overview</h2><form class="oc-form" method="post" action="/s/${esc(server.slug)}/settings">
 <label>Name <input name="name" required minlength="2" maxlength="40" value="${esc(server.name)}"></label>
 <label>Description <input name="description" maxlength="300" value="${esc(server.description || '')}"></label>
 <label>Who can find and read it <select name="visibility"><option value="public"${server.visibility === 'public' ? ' selected' : ''}>Anyone: listed, and signed-in people join (public)</option><option value="private"${server.visibility === 'private' ? ' selected' : ''}>Only people with an invite (private)</option></select></label>
 <p><button type="submit">Save</button></p></form>
 <h2>Channels</h2><ul class="oc-members oc-chan-rows">${chans.map(chanRow).join('')}</ul>
-<form class="oc-new" method="post" action="/s/${esc(server.slug)}/channels"><label for="oc-chan-new">Add a channel</label> <input id="oc-chan-new" name="name" required maxlength="40" placeholder="announcements"> <select name="kind" aria-label="Kind of channel"><option value="text">Text</option><option value="voice">Voice</option></select> <button type="submit">Add</button></form>` : ''}
+<form class="oc-new" method="post" action="/s/${esc(server.slug)}/channels"><label for="oc-chan-new">Add a channel</label> <input id="oc-chan-new" name="name" required maxlength="40" placeholder="announcements"> <select name="kind" aria-label="Kind of channel"><option value="text">Text</option><option value="voice">Voice</option></select> <button type="submit">Add</button></form>
+<section class="oc-set" id="oc-onboarding" aria-labelledby="oc-onb-h"><h2 id="oc-onb-h">Onboarding</h2>
+<p class="oc-muted">People who join read the rules, if there are any, then pick their roles.</p>
+<form class="oc-form" method="post" action="/s/${esc(server.slug)}/onboarding">
+<label>Rules <textarea name="rules" rows="6" maxlength="${servers.MAX_RULES}" placeholder="Be kind. No spam. Keep it on topic.">${esc(server.rules || '')}</textarea></label>
+<p><button type="submit">Save the rules</button></p></form>
+<h3>Roles people may pick</h3>
+${selfRoles.length ? `<ul class="oc-members">${selfRoles.map((r) => `<li>${r.color ? `<span class="oc-dot" style="background:${esc(r.color)}" aria-hidden="true"></span> ` : ''}<strong>${esc(r.name)}</strong> <form class="oc-inline" method="post" action="/s/${esc(server.slug)}/roles/delete"><input type="hidden" name="name" value="${esc(r.name)}"><button type="submit" class="oc-link">Remove</button></form></li>`).join('')}</ul>` : '<p class="oc-muted">No roles yet.</p>'}
+<form class="oc-new" method="post" action="/s/${esc(server.slug)}/roles"><label for="oc-role-new">Add a role</label> <input id="oc-role-new" name="name" required maxlength="24" placeholder="Raider"> <input name="color" type="color" value="#5865f2" aria-label="Its colour"> <button type="submit">Add</button></form>
+</section>` : ''}
+${can.staff ? `<section class="oc-set" id="oc-featured" aria-labelledby="oc-feat-h"><h2 id="oc-feat-h">Explore</h2>
+<p class="oc-muted">Featured servers sit above the categories on Explore, for people who have not joined them.</p>
+<form method="post" action="/s/${esc(server.slug)}/featured"><input type="hidden" name="featured" value="${server.featured_at ? '0' : '1'}"><button type="submit">${server.featured_at ? 'Remove from featured' : 'Feature on Explore'}</button></form>
+</section>` : ''}
 ${canInvite ? `<h2 id="oc-invites">Invites</h2><p class="oc-muted">${server.visibility === 'private' ? 'A private server is joined only through an invite.' : 'Anyone can join a public server; an invite link is a handy way to bring people straight to it.'}</p>
 <form class="oc-new" method="post" action="/s/${esc(server.slug)}/invites"><label for="oc-inv-uses">New invite</label> <select id="oc-inv-uses" name="max_uses" aria-label="How many times it can be used"><option value="">any number of uses</option><option value="1">1 use</option><option value="10">10 uses</option><option value="100">100 uses</option></select> <select name="expires_hours" aria-label="When it expires"><option value="168">for 7 days</option><option value="24">for 1 day</option><option value="720">for 30 days</option><option value="">forever</option></select> <button type="submit">Make an invite</button></form>
 <ul class="oc-members">${invites.map(inviteRow).join('') || '<li class="oc-muted">No invites yet.</li>'}</ul>` : ''}
@@ -359,6 +515,9 @@ ${canInvite ? `<h2 id="oc-invites">Invites</h2><p class="oc-muted">${server.visi
 ${banned.length ? `<details class="oc-blocked"><summary>Banned (${banned.length})</summary><ul class="oc-members">${banned.map((p) => `<li><strong>${esc(p.display_name || p.username || '?')}</strong> <span class="oc-muted">@${esc(p.username || '')}</span><form class="oc-inline" method="post" action="/s/${esc(server.slug)}/members"><input type="hidden" name="username" value="${esc(p.username || '')}"><input type="hidden" name="role" value="none"><button type="submit" class="oc-link">Lift the ban</button></form></li>`).join('')}</ul></details>` : ''}
 <form class="oc-new" method="post" action="/s/${esc(server.slug)}/members"><label for="oc-ban">Ban someone</label> <input id="oc-ban" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="their username"><input type="hidden" name="role" value="blocked"> <button type="submit">Ban</button></form>
 ${can.owner || can.staff ? `<h2>Delete the server</h2><form class="oc-form" method="post" action="/s/${esc(server.slug)}/delete"><label class="oc-check"><input type="checkbox" name="confirm" value="1" required> Delete ${esc(server.name)} and all its channels</label><p><button type="submit" class="oc-danger">Delete server</button></p></form>` : ''}`,
+                mainLabel: 'Server settings',
+                page: true,
+            }),
         });
     });
 
@@ -447,7 +606,7 @@ ${errorOf(req)}${action}</section>`,
         if (!found) return res.redirect(303, req.back);
         await servers.join(found.server, actor.user, { invite: found.invite.code });
         await serverRoutes().applyServerChange(found.server);
-        res.redirect(303, `/s/${found.server.slug}`);
+        res.redirect(303, servers.hasOnboarding(found.server) ? `/s/${found.server.slug}/welcome` : `/s/${found.server.slug}`);
     }));
 
     // A channel's page and its no-JavaScript message form (after the fixed /s/:slug/… routes above).

@@ -131,4 +131,64 @@ t('a server starts from a template and ends with its invite link', async () => {
     assert.match(shown.text, /\/join\/[a-z0-9]+/);
 });
 
+t('the rest of chat is inside the shell too: Global chat, Rooms, a room, settings and the inbox', async () => {
+    // A server, so the rail has one, and a standalone room with a message.
+    const made = await api('POST', '/', dee, { name: 'Shell Pages', description: 'Pages in the shell' });
+    const slug = made.body.server.slug;
+    const roomRes = await fetch(`${h.base}/rooms/new`, { method: 'POST', headers: { cookie: `ov_token=${dee.token}`, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ name: 'Shell Room' }).toString(), redirect: 'manual' });
+    assert.strictEqual(roomRes.status, 303);
+    const roomPath = roomRes.headers.get('location');
+    assert.match(roomPath, /^\/r\/shell-room$/);
+
+    // Global chat: the rail's Global entry is current, Home's side column, the feed and its composer.
+    let r = await page('/', dee);
+    assert.match(r.text, /class="oc-app"/, 'the shell on Global chat');
+    assert.match(r.text, /class="oc-rail-icon oc-rail-global is-active" href="\/"/, 'Global chat on the rail');
+    assert.match(r.text, /class="oc-side"/, 'Home down the side');
+    assert.match(r.text, /id="oc-feed"/, 'the global feed');
+    assert.match(r.text, /id="oc-compose"/, 'and the composer');
+
+    // Rooms: the side column lists them.
+    r = await page('/rooms', dee);
+    assert.match(r.text, /class="oc-app"/, 'the shell on Rooms');
+    assert.match(r.text, /id="oc-side-your-rooms"/, 'your rooms down the side');
+    assert.match(r.text, /href="\/r\/shell-room"/, 'the room is a row');
+    assert.match(r.text, /id="oc-new-room"/, 'the Start form is still the page');
+
+    // A room: the same side column and the room's feed in the middle.
+    r = await page(roomPath, dee);
+    assert.match(r.text, /class="oc-app"/, 'the shell in a room');
+    assert.match(r.text, /class="oc-chan is-active" href="\/r\/shell-room" aria-current="page"/, 'the room is marked in the side column');
+    assert.match(r.text, /id="oc-feed"/, 'the room feed');
+
+    // Settings: the shell's page gutter and its own sections down the side.
+    r = await page('/settings', dee);
+    assert.match(r.text, /class="oc-app"/, 'the shell on settings');
+    assert.match(r.text, /class="oc-page"/, 'the settings page scrolls in the gutter');
+    assert.match(r.text, /id="oc-side-set"/, 'the settings sections down the side');
+
+    // A room's settings and a server's settings.
+    r = await page('/r/shell-room/settings', dee);
+    assert.match(r.text, /class="oc-app"/, 'the shell on a room\'s settings');
+    assert.match(r.text, /class="oc-page"/);
+    r = await page(`/s/${slug}/settings`, dee);
+    assert.match(r.text, /class="oc-app"/, 'the shell on a server\'s settings');
+    assert.match(r.text, /class="oc-page"/);
+    assert.match(r.text, /id="oc-invites"/, 'the settings are still the page');
+
+    // The inbox: the list is a page, the conversation like a DM.
+    const madeInbox = await fetch(`${h.base}/inbox`, { method: 'POST', headers: { cookie: `ov_token=${dee.token}`, 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ name: 'Shell Support' }).toString(), redirect: 'manual' });
+    assert.strictEqual(madeInbox.status, 303);
+    const inboxId = (madeInbox.headers.get('location') || '').split('/')[2];
+    assert.ok(inboxId, 'an inbox was made');
+    r = await page('/inbox', dee);
+    assert.match(r.text, /class="oc-app"/, 'the shell on the inbox list');
+    assert.match(r.text, /class="oc-page"/);
+    assert.match(r.text, /id="oc-side-inboxes"/, 'your inboxes down the side');
+    r = await page(`/inbox/${inboxId}`, dee);
+    assert.match(r.text, /class="oc-app"/, 'the shell on a conversation');
+    assert.match(r.text, /id="ib-rail"/, 'the conversations are the side column');
+    assert.match(r.text, /data-ovt-thread/, 'the kit\'s thread is the middle');
+});
+
 t.run(async () => { if (h && h.close) await h.close(); });
