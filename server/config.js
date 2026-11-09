@@ -226,6 +226,12 @@ module.exports = {
         vibe: process.env.CHAT_VIBE !== '0',
         vibeRepliesPerDay: Math.max(1, int(process.env.CHAT_VIBE_REPLIES_PER_DAY, 100)),
     },
+    bench: {
+        url: strip(process.env.OV_BENCH_URL || 'https://bench.openvibe.services'),
+        audience: 'openvibe.bench',
+        scope: 'bench.round.create bench.judgement.cast',
+    },
+    exchange: { internalUrl: strip(process.env.OV_EXCHANGE_INTERNAL_URL || 'http://127.0.0.1:5150') },
 
     // The chat apps (Telegram, Discord, Slack): your OpenVibe agent in each of them (the agent plan of
     // 2026-10-30, stage A4). Each app is OFF until its own token and its own secret are here: the owner's

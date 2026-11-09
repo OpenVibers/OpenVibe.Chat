@@ -26,6 +26,83 @@
   var previewEl = document.getElementById('vb-preview');
   var picture = null;   // { file, url }: a picture waiting to go with the next message
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var chosenModels = Array.isArray(cfg.models) ? cfg.models.slice(0, 3) : [];
+  function persistModelChoice() {
+    if (!room) return;
+    fetch('/api/vibe/settings', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: room, models: chosenModels }) }).catch(function () { notice('Model choice could not be saved.'); });
+  }
+  try { var requested = new URLSearchParams(location.search).get('models'); if (requested) chosenModels = requested.split(',').filter(Boolean).slice(0, 3); } catch (_) {}
+  var modelChip = document.getElementById('vb-model-chip');
+  var modelSheet = document.getElementById('vb-model-sheet');
+  var modelList = document.getElementById('vb-model-list');
+  var compareSwitch = document.getElementById('vb-model-compare');
+  var modelCatalog = [];
+  function modelLabel(id) { var m = modelCatalog.find(function (x) { return x.slug === id; }); return m ? m.name : id; }
+  function syncModelChip() {
+    if (modelChip) modelChip.textContent = (chosenModels.length > 1 ? chosenModels.length + ' models' : chosenModels.length ? modelLabel(chosenModels[0]) : 'Auto') + ' ▾';
+    if (compareSwitch) compareSwitch.checked = chosenModels.length > 1 || compareSwitch.checked;
+  }
+  function paintModelList() {
+    if (!modelList) return;
+    modelList.replaceChildren();
+    var auto = document.createElement('button'); auto.type = 'button'; auto.className = 'vb-model-row'; auto.textContent = 'Auto · OpenVibe picks';
+    auto.addEventListener('click', function () { chosenModels = []; syncModelChip(); paintModelList(); modelSheet.hidden = true; persistModelChoice(); }); modelList.appendChild(auto);
+    var groups = new Map(); modelCatalog.forEach(function (m) { var maker = m.family || 'Other'; if (!groups.has(maker)) groups.set(maker, []); groups.get(maker).push(m); });
+    groups.forEach(function (models, maker) {
+      var h = document.createElement('h3'); h.textContent = '✦ ' + maker; modelList.appendChild(h);
+      models.forEach(function (m) {
+        var row = document.createElement('div'); row.className = 'vb-model-row';
+        var choice = document.createElement('button'); choice.type = 'button'; choice.className = 'vb-model-choice';
+        choice.textContent = (chosenModels.includes(m.slug) ? '✓ ' : '') + m.name;
+        choice.addEventListener('click', function () {
+          if (compareSwitch && compareSwitch.checked) {
+            if (chosenModels.includes(m.slug)) chosenModels = chosenModels.filter(function (id) { return id !== m.slug; });
+            else if (chosenModels.length < 3) chosenModels.push(m.slug);
+          } else { chosenModels = [m.slug]; modelSheet.hidden = true; }
+          syncModelChip(); paintModelList(); persistModelChoice();
+        }); row.appendChild(choice);
+        var offer = (m.offers || []).find(function (x) { return x.price; });
+        var facts = document.createElement('small');
+        facts.textContent = offer ? '$' + Number(offer.price.in).toFixed(2) + ' in · $' + Number(offer.price.out).toFixed(2) + ' out / million · ' + (offer.speed && offer.speed.p50_ms ? (offer.speed.p50_ms / 1000).toFixed(1) + 's' : 'speed varies') : 'Price and speed vary';
+        row.appendChild(facts);
+        var ranks = document.createElement('a'); ranks.href = 'https://openvibe.report/ai/models/' + encodeURIComponent(m.slug); ranks.textContent = 'How it ranks'; row.appendChild(ranks);
+        modelList.appendChild(row);
+      });
+    });
+  }
+  if (modelChip && modelSheet) {
+    modelChip.addEventListener('click', function () {
+      modelSheet.hidden = !modelSheet.hidden; modelChip.setAttribute('aria-expanded', String(!modelSheet.hidden));
+      if (!modelSheet.hidden && !modelCatalog.length) fetch('/api/vibe/models', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : { models: [] }; }).then(function (d) { modelCatalog = (d.models || []).filter(function (m) { return m && m.slug && m.name; }); paintModelList(); syncModelChip(); }).catch(function () { modelList.textContent = 'Models are unavailable right now.'; });
+    });
+    document.getElementById('vb-model-close').addEventListener('click', function () { modelSheet.hidden = true; modelChip.setAttribute('aria-expanded', 'false'); });
+    compareSwitch.addEventListener('change', function () { if (!compareSwitch.checked && chosenModels.length > 1) chosenModels = chosenModels.slice(0, 1); syncModelChip(); paintModelList(); persistModelChoice(); });
+    document.getElementById('vb-system-prompt').value = cfg.system_prompt || '';
+    document.getElementById('vb-temperature').value = cfg.temperature == null ? 1 : cfg.temperature;
+    syncModelChip();
+  }
+  var importNotice = document.getElementById('vb-import');
+  if (importNotice) fetch('/api/vibe/import', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+    if (!d || !d.show) return;
+    importNotice.hidden = false;
+    var title = document.createElement('span'); title.textContent = 'Bring your ' + d.count + ' chats from Exchange'; importNotice.appendChild(title);
+    var bring = document.createElement('button'); bring.type = 'button'; bring.textContent = 'Bring chats'; importNotice.appendChild(bring);
+    var dismiss = document.createElement('button'); dismiss.type = 'button'; dismiss.textContent = 'Dismiss'; importNotice.appendChild(dismiss);
+    bring.addEventListener('click', function () { bring.disabled = true; fetch('/api/vibe/import', { method: 'POST', credentials: 'same-origin' }).then(function (r) { if (!r.ok) throw new Error('Import could not finish'); location.reload(); }).catch(function () { bring.disabled = false; notice('Import could not finish. Try again.'); }); });
+    dismiss.addEventListener('click', function () { fetch('/api/vibe/import/dismiss', { method: 'POST', credentials: 'same-origin' }).then(function () { importNotice.hidden = true; }); });
+  }).catch(function () {});
+  if (form) form.addEventListener('submit', function (e) {
+    if (!chosenModels.length || (e.submitter && e.submitter === stopBtn) || form.dataset.signin) return;
+    var message = input.value.trim(); if (!message || sending) { e.preventDefault(); return; }
+    e.preventDefault(); e.stopImmediatePropagation(); sending = true;
+    fetch('/api/vibe/ask', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: message, slug: room, models: chosenModels, system_prompt: document.getElementById('vb-system-prompt').value,
+        temperature: Number(document.getElementById('vb-temperature').value) }) })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || 'Could not send'); return d; }); })
+      .then(function (d) { location.href = '/vibe/' + encodeURIComponent(d.chat.slug); })
+      .catch(function (err) { sending = false; notice(err.message); });
+  });
 
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function token() { var m = /(?:^|;\s*)ov_token=([^;]+)/.exec(document.cookie || ''); return m ? decodeURIComponent(m[1]) : undefined; }
@@ -629,6 +706,47 @@
       .catch(function () { notice('You seem to be offline.'); });
   });
   if (cfg.waiting) showWait();
+  var compareRows = app.querySelectorAll('[data-vb-question]');
+  if (compareRows.length) {
+    app.addEventListener('click', function (e) {
+      var tab = e.target.closest('[data-vb-tab]');
+      if (tab) {
+        var wrap = tab.closest('[data-vb-question]'), index = tab.getAttribute('data-vb-tab');
+        wrap.querySelectorAll('[data-vb-tab]').forEach(function (x) { x.classList.toggle('is-active', x === tab); x.setAttribute('aria-selected', String(x === tab)); });
+        wrap.querySelectorAll('[data-vb-answer]').forEach(function (x) { x.classList.toggle('is-active', x.getAttribute('data-vb-answer') === index); });
+        return;
+      }
+      var copy = e.target.closest('[data-vb-copy]');
+      if (copy) { var section = copy.closest('[data-vb-answer]'); if (navigator.clipboard) navigator.clipboard.writeText(section.querySelector('[data-vb-text]').textContent); return; }
+      var pick = e.target.closest('[data-vb-pick]'), prefer = e.target.closest('[data-vb-prefer]');
+      if (!pick && !prefer) return;
+      var button = pick || prefer, model = button.getAttribute(pick ? 'data-vb-pick' : 'data-vb-prefer');
+      fetch(pick ? '/api/vibe/pick' : '/api/vibe/prefer', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message_id: Number(button.getAttribute('data-vb-message')), model: model }) })
+        .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || 'That did not work'); return d; }); })
+        .then(function () { if (pick) { chosenModels = [model]; syncModelChip(); } else { button.textContent = 'Preference recorded'; button.disabled = true; } })
+        .catch(function (err) { notice(err.message); });
+    });
+    function refreshCompare() {
+      if (!room) return;
+      fetch('/api/vibe/chat?slug=' + encodeURIComponent(room), { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+        if (!d) return;
+        (d.messages || []).forEach(function (m) {
+          if (!m.answers) return;
+          var wrap = app.querySelector('[data-vb-question="' + m.id + '"]'); if (!wrap) return;
+          m.answers.forEach(function (a, i) {
+            var panel = wrap.querySelector('[data-vb-answer="' + i + '"]'); if (!panel) return;
+            var body = panel.querySelector('[data-vb-text]');
+            if (a.status === 'finished') body.innerHTML = MD.render(a.text);
+            else if (a.status === 'failed') body.textContent = a.error || 'Could not answer';
+            var head = panel.querySelector('small'); if (head && a.status === 'finished') head.textContent = [a.provider, a.cost_usd == null ? null : '$' + Number(a.cost_usd).toFixed(4), a.ms == null ? null : (a.ms / 1000).toFixed(1) + 's'].filter(Boolean).join(' · ');
+            var dot = wrap.querySelector('[data-vb-tab="' + i + '"] span'); if (dot) dot.textContent = a.status === 'finished' ? '●' : '○';
+          });
+        });
+      }).catch(function () {});
+    }
+    refreshCompare(); setInterval(refreshCompare, 1500);
+  }
   canvasInit();
   connect();
   window.addEventListener('pagehide', function () { var w = ws; room = null; if (w) w.close(); });

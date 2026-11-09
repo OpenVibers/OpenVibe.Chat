@@ -13,6 +13,7 @@ const config = require('../config');
 let _ai = null;
 let _http = null;
 let _tokens = null;
+let _complete = null;
 // Why the last run answered nothing, when the caller can show it: `ai.resting` today. Cleared by a run that
 // succeeds. A product asks lastProblem() instead of turning "no answer" into an error.
 let _lastProblem = null;
@@ -144,5 +145,36 @@ async function stream(workflow, input, opts = {}, onText = () => {}) {
     }
 }
 
-module.exports = { structured, stream, enabled, http, lastProblem, _setClient(c) { _ai = c; }, _setHttp(h) { _http = h; }, _setTokens(t) { _tokens = t; },
-    _setProblem(p) { _lastProblem = p; }, _reset() { _ai = null; _http = null; _tokens = null; _lastProblem = null; } };
+/** An explicit catalogue model, billed by AI to the person named in on_behalf_of. */
+async function complete({ model, messages, subject, temperature = null }) {
+    if (_complete) return _complete({ model, messages, subject, temperature });
+    if (!subject || !model) throw new Error('A person and model are required');
+    if (!_tokens) ai();
+    const token = await _tokens.getToken();
+    const res = await fetch(`${config.ai.internalUrl}/api/v1/runs?wait=${Math.max(0, Math.floor(config.ai.waitMs))}`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ workflow: 'ai.complete', input: { model, messages, max_tokens: 2048,
+            ...(temperature == null ? {} : { temperature }) }, on_behalf_of: { type: 'user', id: subject }, options: { cache: 'none' } }),
+        signal: AbortSignal.timeout(config.ai.waitMs + 10000),
+    });
+    const body = await res.json();
+    const run = body && (body.run || body);
+    if (!res.ok || !run || !['succeeded', 'cached'].includes(run.status)) throw new Error((run && run.error && run.error.code) || `AI answered ${res.status}`);
+    const choice = run.output && run.output.choices && run.output.choices[0];
+    return { text: String((choice && choice.message && choice.message.content) || ''),
+        model: (run.output && run.output.model) || (run.provenance && run.provenance.model) || model,
+        provider: run.provenance && run.provenance.provider || null,
+        cost_usd: run.usage && run.usage.cost_usd != null ? Number(run.usage.cost_usd) : null,
+        ms: run.started_at && run.finished_at ? Math.max(0, Date.parse(run.finished_at) - Date.parse(run.started_at)) : null,
+        run_id: run.id || null };
+}
+
+async function catalog() {
+    const res = await fetch(`${config.ai.internalUrl}/api/v1/exchange/catalog`, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) throw new Error(`AI catalogue answered ${res.status}`);
+    return res.json();
+}
+
+module.exports = { structured, stream, complete, catalog, enabled, http, lastProblem, _setClient(c) { _ai = c; }, _setComplete(c) { _complete = c; }, _setHttp(h) { _http = h; }, _setTokens(t) { _tokens = t; },
+    _setProblem(p) { _lastProblem = p; }, _reset() { _ai = null; _http = null; _tokens = null; _complete = null; _lastProblem = null; } };

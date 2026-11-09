@@ -499,6 +499,13 @@ socket, sends on Enter and keeps a draft typed while signed out through the sign
 - **API:** `GET /api/chat/vibe` (chats, allowance), `POST /api/chat/vibe { message }` → 201 `{ room, message }`,
   `PATCH /api/chat/vibe/:slug { name }`, `DELETE /api/chat/vibe/:slug`; then the rooms API for messages. People only
   (an API token gets 403).
+- **Model comparison:** `POST /api/vibe/ask { message, models: [id, ...] }` runs one to three AI catalogue models in
+  parallel on the person's own AI allowance and keys (`on_behalf_of`). `GET /api/vibe/chat` groups their answers under
+  the question with model, provider, cost, elapsed time and run id. `POST /api/vibe/pick` keeps one model for follow-ups;
+  `POST /api/vibe/prefer` submits a pairwise preference to Bench. `GET /api/vibe/models` fills the model sheet. Auto
+  still uses Vibe's existing engine and tools. `GET|POST /api/vibe/import` brings unsealed Exchange chats once through
+  its scoped service export; `POST /api/vibe/import/dismiss` hides the notice. The import needs the
+  `exchange.chat.export` grant to Chat's service client.
 
 ### Support inboxes and the website widget (openvibe.chat/inbox)
 

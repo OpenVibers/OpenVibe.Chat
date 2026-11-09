@@ -142,11 +142,11 @@ t('rename, then delete: the chat and its messages go, the day\'s count stays', a
 t('the app page: signed out it invites a sign-in, signed in it lists the chats and starts one from a form', async () => {
     const out = await web('GET', '/vibe');
     assert.strictEqual(out.status, 200);
-    assert.ok(out.text.includes('Hi, I&#39;m Vibe. What can I help with?') || out.text.includes('Hi, I\'m Vibe. What can I help with?'), 'the greeting');
+    assert.ok(out.text.includes('Ask anything'), 'the greeting');
     assert.ok(out.text.includes('data-signin="1"') && out.text.includes('Sign in to keep your chats'));
     assert.ok(!out.text.includes('id="ov-footer"'), 'the app has no footer');
     const signed = await web('GET', '/vibe', ann);
-    assert.ok(signed.text.includes('What can I help with, Ann?'));
+    assert.ok(signed.text.includes('One model, or up to three side by side'));
     assert.strictEqual((signed.text.match(/<h1[\s>]/g) || []).length, 1, 'one h1 on a new chat: the greeting (the header names it in a <p>)');
     assert.ok(signed.text.includes('class="ovk-sidebar-item" href="/vibe/v-'), 'the rail lists their chats (the network\'s one sidebar, kit.sidebar)');
     // The rail leads to the rest of the person's agent: their tasks, their computers and robots, team workspaces.

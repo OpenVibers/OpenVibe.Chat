@@ -91,6 +91,51 @@
 .vb-chip:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
 .vb-chip b { font-weight: 650; font-size: .95rem; color: var(--oc-text); }
 .vb-chip span { color: var(--oc-muted); font-size: .88rem; }
+.vb-import[hidden] { display: none; }
+.vb-import { width: 100%; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 10px; padding: 12px; margin-bottom: 18px; border: 1px solid var(--oc-accent); border-radius: 12px; background: var(--oc-panel); }
+.vb-import button { min-height: 44px; border: 1px solid var(--oc-line); border-radius: 8px; padding: 6px 12px; background: var(--oc-bg); color: var(--oc-text); cursor: pointer; }
+.vb-import-model { color: var(--oc-muted); font-size: .8rem; margin: 0 0 8px; }
+
+/* A model choice stays near the composer. Every option can be reached with a 44 px target. */
+.vb-model-picker { position: relative; margin-bottom: 6px; }
+.vb-model-chip, .vb-model-sheet button, .vb-model-sheet summary, .vb-compare button { min-height: 44px; cursor: pointer; font: inherit; }
+.vb-model-chip { padding: 6px 14px; border: 1px solid var(--oc-line); border-radius: 999px; background: var(--oc-panel); color: var(--oc-text); }
+.vb-model-sheet[hidden] { display: none; }
+.vb-model-sheet { position: absolute; z-index: 35; bottom: calc(100% + 8px); left: 0; width: min(440px, calc(100vw - 32px)); max-height: min(65vh, 600px); overflow-y: auto; padding: 16px; border: 1px solid var(--oc-line); border-radius: 18px; background: var(--oc-panel); color: var(--oc-text); box-shadow: 0 20px 60px #0005; }
+.vb-model-sheet-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.vb-model-sheet-head button { border: 0; background: transparent; color: inherit; width: 44px; }
+.vb-model-compare { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.vb-model-compare input { width: 20px; height: 20px; }
+#vb-model-list h3 { margin: 12px 0 4px; font-size: .78rem; color: var(--oc-muted); }
+.vb-model-row { display: flex; flex-wrap: wrap; align-items: center; gap: 3px 12px; width: 100%; padding: 5px 0; border: 0; border-bottom: 1px solid var(--oc-line); background: transparent; color: inherit; text-align: left; }
+.vb-model-choice { flex: 1 1 100%; border: 0; background: transparent; color: inherit; text-align: left; padding: 0; }
+.vb-model-row small { color: var(--oc-muted); flex: 1 1 auto; }
+.vb-model-row a, .vb-model-floor a { color: var(--oc-accent); }
+.vb-model-sheet details { padding: 8px 0; }
+.vb-model-sheet details label { display: grid; gap: 5px; margin: 8px 0; }
+.vb-model-sheet textarea, .vb-model-sheet input[type=number] { min-height: 44px; width: 100%; border: 1px solid var(--oc-line); border-radius: 8px; background: var(--oc-bg); color: inherit; padding: 9px; font: inherit; }
+.vb-model-floor { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid var(--oc-line); color: var(--oc-muted); font-size: .8rem; }
+.vb-compare { min-width: 0; width: 100%; }
+.vb-compare-tabs { display: none; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.vb-compare-tab { border: 1px solid var(--oc-line); border-radius: 999px; padding: 5px 10px; background: var(--oc-panel); color: var(--oc-text); }
+.vb-compare-tab.is-active { border-color: var(--oc-accent); }
+.vb-compare-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; min-width: 0; }
+.vb-compare-answer { min-width: 0; border: 1px solid var(--oc-line); border-radius: 16px; padding: 14px; background: var(--oc-panel); overflow-wrap: anywhere; }
+.vb-compare-answer header { display: grid; gap: 3px; padding-bottom: 10px; border-bottom: 1px solid var(--oc-line); }
+.vb-compare-answer header small { color: var(--oc-muted); }
+.vb-compare-text { line-height: 1.55; padding: 14px 0; }
+.vb-compare-actions { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+.vb-compare-actions button { border: 0; border-radius: 8px; padding: 6px 8px; background: transparent; color: var(--oc-accent); }
+.vb-pulse { display: inline-block; width: 8px; height: 8px; margin-right: 8px; border-radius: 50%; background: var(--oc-accent); animation: vb-pulse 1.4s ease-in-out infinite; }
+@keyframes vb-pulse { 50% { opacity: .3; } }
+@media (max-width: 899px) {
+  .vb-model-sheet { position: fixed; top: auto; bottom: 12px; left: 12px; right: 12px; width: auto; max-height: min(80dvh, 640px); }
+  .vb-compare-tabs { display: flex; }
+  .vb-compare-grid { display: block; }
+  .vb-compare-answer { display: none; }
+  .vb-compare-answer.is-active { display: block; }
+  .vb-suggest { grid-template-columns: 1fr; }
+}
 
 /* ── Memory (/vibe/memory): what Vibe remembers about the person ──────────── */
 .vb-page { max-width: 640px; margin: 0 auto; padding: 18px 0 8px; display: grid; gap: 16px; }
