@@ -106,7 +106,8 @@
   .oc-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); height: auto; min-height: 0; }
   .oc-app.is-members { grid-template-columns: minmax(0, 1fr); }
   .oc-rail-menu { display: grid; }
-  .oc-app > .oc-rail { flex-direction: row; justify-content: flex-start; gap: 10px; padding: 8px 10px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--oc-line); }
+  .oc-app > .oc-rail { flex-direction: row; justify-content: flex-start; gap: 10px; padding: 8px 10px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--oc-line); min-width: 0; }
+  .oc-app > .oc-side, .oc-app > .oc-col-main, .oc-app > .oc-col-members { min-width: 0; }
   .oc-app .oc-rail .oc-rail-icon.is-active::before { left: 9px; right: 9px; top: auto; bottom: -8px; width: auto; height: 4px; border-radius: 4px 4px 0 0; }
   .oc-app > .oc-side, .oc-app > .oc-col-members { display: none; }
   .oc-app[data-oc-panel="side"] > .oc-side { display: flex; border-right: 0; }
