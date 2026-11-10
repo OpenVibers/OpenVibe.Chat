@@ -41,7 +41,8 @@ const SCHEMA = Object.freeze({
         stage_channels_enabled: {
             type: 'boolean', title: 'Stage channels', 'x-group': 'Channels', default: false,
             description: 'Allow server owners to create stage channels. Stage audio uses Chat voice rooms.',
-            'x-owner-input': { group: 'channels', unlocks: 'Stage channel controls in servers.' },
+            'x-required-for': 'Stage channels',
+            'x-owner-input': { group: 'voices', unlocks: 'Stage channel controls in Chat servers using existing voice rooms.', get_it_at: 'https://openvibe.chat', get_it_how: 'This is a Chat feature switch. Enable it to let server owners create stage channels.' },
         },
         amazon_polly_access_key_id: {
             type: 'string', title: 'Amazon Polly access key ID', 'x-group': GROUP,
