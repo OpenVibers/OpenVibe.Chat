@@ -27,6 +27,17 @@ t('a fresh summary is ready and keeps its topics, people and timeline', async ()
     assert.strictEqual(shaped.overview.from, from);
 });
 
+t('a fresh summary with nobody consenting is quiet, never served as a read of the room', async () => {
+    const now = sqliteNow();
+    const shaped = roomInsight._shape({
+        overview: 'written before the consent filter', window_start: now, window_end: now, updated_at: now,
+        people: 0, window_message_count: 300, topics_json: '[]',
+    }, []);
+    assert.strictEqual(shaped.state, 'quiet');
+    assert.strictEqual(shaped.overview.text, '');
+    assert.strictEqual(shaped.overview.messages, 0);
+});
+
 t('an old summary is quiet: no text, no topics, the timeline stays', async () => {
     const old = sqliteNow(-48 * 3600e3);
     const shaped = roomInsight._shape({
