@@ -28,32 +28,67 @@ const { ICONS: IC } = require('./icons');
 /** The five places of the phone's bottom bar: Shared's app bar draws them (appbar.js). */
 const APP_BAR = [
     { label: 'Home', href: '/messages', icon: 'fa-comment-dots', page: 'messages' },
-    { label: 'Servers', href: '/servers', icon: 'fa-globe', page: 'servers' },
+    { label: 'Servers', href: '/servers', icon: 'fa-people-group', page: 'servers' },   // not the globe: that is Global chat
     { label: 'Vibe', href: '/vibe', icon: 'fa-wand-magic-sparkles', page: 'vibe' },
-    { label: 'Activity', href: '/notifications', icon: 'fa-bell', page: 'notifications' },
+    { label: 'Activity', href: '/activity', icon: 'fa-bell', page: 'activity', dot: true },
     { label: 'You', href: '/settings', icon: 'fa-user', page: 'settings' },
 ];
 
 /** One icon button: 40 px on a computer, 44 px on a phone (chat-shell.css), never a bare glyph at a random size. */
 const iconBtn = (href, label, svg, extra = '') => `<a class="oc-icon-btn" href="${esc(href)}" aria-label="${esc(label)}" title="${esc(label)}"${extra}>${svg}</a>`;
 
+/** What the rail and a server's sheet need of each server (servers.list(me).mine). */
+const railServers = (mine, active) => (mine || []).map((s) => ({
+    slug: s.slug, name: s.name, unread: s.unread, role: s.role || '', members: Number(s.members) || 0,
+    private: s.visibility === 'private', official: !!s.official, active: !!active && s.slug === active,
+}));
+
+/** A server's facts on the element that opens its sheet (chat-shell.js reads them: hold, right-click, or the open one). */
+const serverData = (s) => ` data-oc-server="${esc(s.slug)}" data-oc-name="${esc(s.name)}" data-oc-role="${esc(s.role || '')}" data-oc-members="${Number(s.members) || 0}" data-oc-hue="${ui.hueOf(s.slug)}"${s.private ? ' data-oc-private' : ''}${s.official ? ' data-oc-official' : ''}`;
+
 /**
- * The rail: Home, Global chat and Vibe, your servers, then Add a server and Explore.
- * o: { servers: [{ slug, name, unread, active }], dmUnread, home, global, vibe, explore }
+ * A server's sheet, once a page: what it is, your rank in it, and what you may do with it (open, invite, settings,
+ * leave, delete). chat-shell.js fills a copy from the element that was held; without the script a server's own page
+ * has the same actions in its side column. It carries only what the person may do in at least one of their servers:
+ * someone who runs none is not shown a word about settings.
+ */
+function serverSheet(servers) {
+    const runs = servers.some((s) => ['owner', 'admin', 'mod'].includes(s.role));
+    const owns = servers.some((s) => s.role === 'owner' && !s.official);
+    const leaves = servers.some((s) => s.role && s.role !== 'owner');
+    return `<template id="oc-srv-sheet"><dialog class="oc-ssheet" aria-labelledby="oc-ssheet-name">
+<header class="oc-ssheet-head"><span class="oc-srv-icon oc-srv-icon--row" data-s="mark" aria-hidden="true"></span><div class="oc-ssheet-id"><h2 id="oc-ssheet-name"><span data-s="name"></span><span class="oc-badge oc-badge-official" data-s="official">official</span><span class="oc-badge" data-s="private">private</span></h2><p class="oc-muted" data-s="sub"></p></div><button type="button" class="oc-icon-btn oc-ssheet-close" data-s="close" aria-label="Close" title="Close">${IC.close}</button></header>
+<nav class="oc-ssheet-list" aria-label="This server">
+<a class="oc-pop-item" data-s="open">${IC.enter}<span>Open</span></a>
+${runs ? `<a class="oc-pop-item" data-s="invite">${IC.members}<span>Invite people</span></a>
+<a class="oc-pop-item" data-s="settings">${IC.gear}<span><b>Server settings</b><small>Its name, channels, roles and members</small></span></a>` : ''}
+${leaves ? `<form method="post" data-s="leave"><button type="submit" class="oc-pop-item">${IC.leave}<span>Leave this server</span></button></form>` : ''}
+${owns ? `<details class="oc-ssheet-danger" data-s="delete"><summary class="oc-pop-item">${IC.trash}<span>Delete this server</span></summary>
+<form method="post" class="oc-ssheet-confirm"><input type="hidden" name="confirm" value="1"><p data-s="delete-line"></p><p class="oc-ssheet-go"><button type="submit" class="oc-danger">Delete it</button><button type="button" class="oc-button--quiet" data-s="keep">Keep it</button></p></form></details>` : ''}
+</nav></dialog></template>`;
+}
+
+/**
+ * The rail: the list button (a phone), Home, Global chat and Vibe, your servers, then New and Explore. Every place
+ * carries its name: beside the tile on a phone, where the rail is a strip of chips, and as a label that follows the
+ * pointer's tile on a computer (chat-shell.js). On a phone Home, Vibe and Explore are the bottom bar's, so the strip
+ * leaves them out while that bar is there (chat-shell.css).
+ * o: { servers: railServers(mine, activeSlug), dmUnread, home, global, vibe, explore, list }
  */
 function rail(o = {}) {
     const servers = o.servers || [];
-    const server = (s) => `<a class="oc-rail-icon${s.active ? ' is-active' : ''}" href="/s/${esc(s.slug)}" title="${esc(s.name)}" style="--oc-hue:${ui.hueOf(s.slug)}"${s.active ? ' aria-current="page"' : ''}><span aria-hidden="true">${esc(ui.serverLetters(s.name))}</span><span class="oc-sr">${esc(s.name)}</span>${s.unread ? `<span class="oc-rail-dot" aria-label="${s.unread} unread">${s.unread > 99 ? '99+' : s.unread}</span>` : ''}</a>`;
+    const dot = (n) => (n ? `<span class="oc-rail-dot" aria-label="${n} unread">${n > 99 ? '99+' : n}</span>` : '');
+    const place = (cls, href, name, inner, on, extra = '') => `<a class="oc-rail-icon ${cls}${on ? ' is-active' : ''}" href="${href}"${on ? ' aria-current="page"' : ''}><span class="oc-rail-tile" aria-hidden="true">${inner}</span><span class="oc-rail-label">${esc(name)}</span>${extra}</a>`;
+    const server = (s) => `<a class="oc-rail-icon oc-rail-server${s.active ? ' is-active' : ''}" href="/s/${esc(s.slug)}" style="--oc-hue:${ui.hueOf(s.slug)}"${s.active ? ' aria-current="page"' : ''}${serverData(s)}><span class="oc-rail-tile" aria-hidden="true">${esc(ui.serverLetters(s.name))}</span><span class="oc-rail-label">${esc(s.name)}</span>${s.active ? `<span class="oc-rail-more" aria-hidden="true">${IC.chevron}</span>` : ''}${dot(s.unread)}</a>`;
     return `<nav class="oc-rail" aria-label="Chat destinations">
-<button type="button" class="oc-rail-menu" data-oc-panel="side" aria-label="Open the side column" title="Open the side column">${IC.menu}</button>
-<a class="oc-rail-icon oc-rail-home${o.home ? ' is-active' : ''}" href="/messages" title="Home"${o.home ? ' aria-current="page"' : ''}>${IC.chat}<span class="oc-sr">Home</span>${o.dmUnread ? `<span class="oc-rail-dot" aria-label="${o.dmUnread} unread">${o.dmUnread > 99 ? '99+' : o.dmUnread}</span>` : ''}</a>
-<a class="oc-rail-icon oc-rail-global${o.global ? ' is-active' : ''}" href="/" title="Global chat"${o.global ? ' aria-current="page"' : ''}>${IC.globe}<span class="oc-sr">Global chat</span></a>
-<a class="oc-rail-icon oc-rail-vibe${o.vibe ? ' is-active' : ''}" href="/vibe" title="Vibe"${o.vibe ? ' aria-current="page"' : ''}>${IC.spark}<span class="oc-sr">Vibe</span></a>
+${place('oc-rail-home', '/messages', 'Home', IC.chat, o.home, dot(o.dmUnread))}
+${place('oc-rail-global', '/', 'Global', IC.globe, o.global)}
+${place('oc-rail-vibe', '/vibe', 'Vibe', IC.spark, o.vibe)}
 <span class="oc-rail-divider" role="separator" aria-hidden="true"></span>
 ${servers.map(server).join('')}
-<a class="oc-rail-icon oc-rail-add" href="/servers#oc-new-server" title="Start a server"><span aria-hidden="true">+</span><span class="oc-sr">Start a server</span></a>
-<a class="oc-rail-icon oc-rail-explore${o.explore ? ' is-active' : ''}" href="/servers" title="Explore servers"${o.explore ? ' aria-current="page"' : ''}>${IC.search}<span class="oc-sr">Explore servers</span></a>
-</nav>`;
+${place('oc-rail-add', '/servers#oc-new-server', 'New', IC.plus, false)}
+${place('oc-rail-explore', '/servers', 'Explore', IC.search, o.explore)}
+${servers.length ? serverSheet(servers) : ''}</nav>`;
 }
 
 /** One person in a list: their mark, their name and a muted line under it. */
@@ -184,6 +219,20 @@ ${inboxes.length ? `<ul class="oc-side-list">${inboxes.map(row).join('')}</ul>` 
 ${youBar(o.you || {})}`;
 }
 
+/**
+ * The composer, the same wherever a person writes (Global chat, a conversation, a room, a channel): one box with the
+ * text in it, Add on its left where the place takes pictures, Send on its right. What is being added waits in the
+ * tray above the text. It posts as a plain form; chat.js sends it over the socket's API instead, and chat-shell.js
+ * grows the box with the text and lights Send when there is something to send.
+ * o: { action, label, placeholder, max, add: the panel Add opens (pictureComposer's), hint }
+ */
+function composer(o = {}) {
+    const add = o.add || '';
+    return `<div class="oc-dock${add ? ' has-add' : ''}"><form class="oc-compose" method="post" action="${esc(o.action || '')}" id="oc-compose"><label for="oc-input" class="oc-sr">${esc(o.label || 'Message')}</label>
+<div class="oc-compose-box"><div class="oc-compose-tray" data-oc-tray hidden></div>
+<div class="oc-compose-row">${add ? `<button type="button" class="oc-compose-add" data-oc-attach aria-expanded="false" aria-controls="oc-add-panel" aria-label="Add a picture" title="Add a picture">${IC.plus}</button>` : ''}<textarea id="oc-input" name="message" maxlength="${Number(o.max) || 2000}" rows="1" required placeholder="${esc(o.placeholder || 'Write a message')}"></textarea><button type="submit" class="oc-send" aria-label="Send" title="Send">${IC.send}</button></div></div></form>${add}</div>`;
+}
+
 /** The you-bar: your mark, your status, mute, deafen and settings (the foot of the side column). */
 function youBar(o = {}) {
     if (!o.name) return '';
@@ -206,15 +255,21 @@ ${groups.map((g) => `<section class="oc-members-sec"><h3 class="oc-side-group">$
  * The channel header: the channel's name and topic, and the buttons that work (the people, the server's menu).
  * o: { name, kind, topic, href, members, active }
  */
+/**
+ * The way from a conversation to the list (a phone's two levels: the list, then the conversation). It is the first
+ * thing in a conversation's head; on a computer the list is beside the conversation and this is not drawn.
+ */
+const toList = `<button type="button" class="oc-icon-btn oc-tolist" data-oc-panel="side" aria-label="All chats" title="All chats">${IC.back}</button>`;
+
 function channelHeader(o = {}) {
     const kind = o.kind === 'voice' ? IC.voice : '<span class="oc-chan-hash" aria-hidden="true">#</span>';
     return `<header class="oc-chan-head">
-<h2 id="oc-chan-h" class="oc-chan-title">${kind}${esc(o.name || '')}</h2>
+${toList}<h2 id="oc-chan-h" class="oc-chan-title">${kind}${esc(o.name || '')}</h2>
 ${o.topic ? `<span class="oc-muted oc-chan-topic">${esc(o.topic)}</span>` : ''}
 <span class="oc-chan-tools">
 <button type="button" class="oc-icon-btn oc-members-toggle" data-oc-panel="members" aria-label="Show the people" title="People" aria-pressed="false">${IC.members}</button>
 ${o.back ? iconBtn(o.back.href, o.back.label, IC.back) : ''}
-</span></header>`;
+</span>${o.extra || ''}</header>`;
 }
 
 /**
@@ -231,4 +286,4 @@ ${o.members ? `<aside class="oc-col oc-col-members" aria-label="${esc(o.membersL
 </div>`;
 }
 
-module.exports = { APP_BAR, rail, sideHome, sideServer, sideRooms, sideSettings, sideInbox, membersColumn, channelHeader, youBar, shell, personRow };
+module.exports = { APP_BAR, toList, rail, railServers, serverData, composer, sideHome, sideServer, sideRooms, sideSettings, sideInbox, membersColumn, channelHeader, youBar, shell, personRow };

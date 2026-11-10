@@ -37,8 +37,11 @@ const cache = require('openvibe-shared/cache-policy');
 const { requireAuth, optionalAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
+const linkPreviews = require('../chat/link-previews');
 const parties = require('./parties');
 const ctx = require('../live-context');
+const db = require('../db/database');
+const activity = require('../chat/activity');
 
 const router = express.Router();
 
@@ -53,6 +56,8 @@ const deleteLimit = limits('chat.room.message.delete', { minute: 60, hour: 600 }
 const manageLimit = limits('chat.room.manage', { minute: 30, hour: 300 });
 // Marking read: once per room opened or caught up.
 const readLimit = limits('chat.room.read_mark', { minute: 60, hour: 1200 });
+// One reaction at a time, changed or taken back: a person taps a few a minute.
+const reactLimit = limits('chat.room.reaction', { minute: 120, hour: 1200 });
 // Attaching links the room to a Community space: an owner sets up a few.
 const attachLimit = limits('chat.room.attach', { minute: 10, hour: 100 });
 
@@ -197,17 +202,51 @@ router.patch('/:slug', requireAuth, manageLimit, async (req, res) => {
 router.get('/:slug/messages', optionalAuth, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     try {
-        const messages = await rooms.history(room, { before: req.query.before ?? null, after: req.query.after ?? null, limit: req.query.limit });
-        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ messages, latest_id: messages.length ? messages[messages.length - 1].id : null });
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+        if (req.query.after != null) {
+            const messages = await rooms.history(room, { after: req.query.after, limit });
+            return res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ messages, latest_id: messages.length ? messages[messages.length - 1].id : null });
+        }
+        const page = await rooms.historyPage(room, { before: req.query.before ?? null, limit });
+        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ ...page, latest_id: page.messages.length ? page.messages[0].id : null });
     } catch (err) { send(res, err); }
 });
 
 router.post('/:slug/messages', requireAuth, postLimit, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     try {
-        const message = await rooms.post(room, req.user, req.body && req.body.message, { timezone: req.body && req.body.timezone });
+        const message = await rooms.post(room, req.user, req.body && req.body.message, {
+            timezone: req.body && req.body.timezone,
+            files: require('./files').attachmentsFromBody(req.body),
+            reply_to_id: req.body && req.body.reply_to_id,
+        });
         chatServer().broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
         res.status(201).json({ message });
+    } catch (err) { send(res, err); }
+});
+
+// A reaction on a room message (room_message_reactions, migration 0038): the same one again takes it back. The
+// author's activity gets one row per person and message (server/chat/activity.js reaction).
+router.post('/:slug/messages/:id/react', requireAuth, reactLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    const reaction = String((req.body && req.body.reaction) || '');
+    if (!activity.REACTIONS.includes(reaction)) return res.status(422).json({ error: 'Unknown reaction', code: 'rooms.reaction' });
+    const message = await db.get('SELECT id, user_id, message, is_deleted FROM room_messages WHERE id = ? AND room_id = ?', [Number(req.params.id) || 0, room.id]);
+    if (!message || message.is_deleted) return res.status(404).json({ error: 'No such message', code: 'rooms.no_message' });
+    try {
+        const access = await rooms.access(room, req.user);
+        if (!access.read || !access.role) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
+        const existing = await db.get('SELECT reaction FROM room_message_reactions WHERE message_id = ? AND user_id = ?', [message.id, req.user.id]);
+        if (existing && existing.reaction === reaction) {
+            await db.run('DELETE FROM room_message_reactions WHERE message_id = ? AND user_id = ?', [message.id, req.user.id]);
+            await activity.removeReaction({ message, actor: req.user });
+            return res.json({ ok: true, reaction: null });
+        }
+        await db.run(`INSERT INTO room_message_reactions (message_id, user_id, reaction) VALUES (?, ?, ?)
+                      ON CONFLICT (message_id, user_id) DO UPDATE SET reaction = EXCLUDED.reaction, created_at = now()`,
+        [message.id, req.user.id, reaction]);
+        await activity.reaction({ room, message, actor: req.user, reaction });
+        res.json({ ok: true, reaction });
     } catch (err) { send(res, err); }
 });
 
@@ -232,6 +271,30 @@ router.delete('/:slug/messages/:id', requireAuth, deleteLimit, async (req, res) 
         const id = await rooms.deleteMessage(room, req.user, parseInt(req.params.id, 10));
         chatServer().broadcastToRoom(room.id, { type: 'room_message_deleted', room: room.slug, id });
         res.json({ ok: true, id });
+    } catch (err) { send(res, err); }
+});
+
+/**
+ * A preview on a room message, taken back by its author or a room moderator (server/chat/link-previews.js): with a
+ * position, that one address; without, every preview on the line. The row becomes a tombstone, so a job still
+ * running cannot put it back.
+ */
+router.delete('/:slug/messages/:id/embeds/:position?', requireAuth, deleteLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try {
+        const id = parseInt(req.params.id, 10);
+        const message = await db.get('SELECT id, user_id FROM room_messages WHERE id = ? AND room_id = ?', [id, room.id]);
+        if (!message) throw new rooms.RoomError(404, 'rooms.no_message', 'No such message');
+        const a = await rooms.access(room, req.user);
+        if (Number(message.user_id) !== Number(req.user.id) && !a.moderate) throw new rooms.RoomError(403, 'rooms.embeds', 'Only the author or a room moderator removes a preview');
+        let position = null;
+        if (req.params.position != null) {
+            position = Number(req.params.position);
+            if (!Number.isInteger(position) || position < 0 || position > 2) throw new rooms.RoomError(422, 'rooms.embed_position', 'A preview is 0, 1 or 2');
+        }
+        const embeds = await linkPreviews.remove('room', id, position, req.user.id);
+        chatServer().broadcastToRoom(room.id, { type: 'room_message_embeds', room: room.slug, id, embeds });
+        res.json({ embeds });
     } catch (err) { send(res, err); }
 });
 

@@ -307,7 +307,17 @@ router.get('/:slug/invites', requireAuth, async (req, res) => {
 router.post('/:slug/invites', requireAuth, manageLimit, async (req, res) => {
     const server = await readable(req, res); if (!server) return;
     try {
-        const invite = await servers.createInvite(server, req.user, req.body || {});
+        const b = req.body || {};
+        // One named person gets a single-use invite and an activity row; a plain link is the same as before.
+        const targetId = Number(b.user_id) || 0;
+        const name = String(b.username || '').trim();
+        if (targetId || /^[A-Za-z0-9_]{3,24}$/.test(name)) {
+            const target = targetId ? await ctx.getUserById(targetId) : await ctx.getUserByUsername(name) || await ctx.ensureUserByUsername(name).catch(() => null);
+            if (!target) return res.status(404).json({ error: `Nobody called ${name.slice(0, 24)} on OpenVibe`, code: 'servers.no_user' });
+            const invite = await servers.invitePerson(server, req.user, target.id);
+            return res.status(201).json({ invite, user_id: target.id, url: `${siteUrl()}/join/${invite.code}` });
+        }
+        const invite = await servers.createInvite(server, req.user, b);
         res.status(201).json({ invite, url: `${siteUrl()}/join/${invite.code}` });
     } catch (err) { send(res, err); }
 });

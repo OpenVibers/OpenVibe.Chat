@@ -119,7 +119,7 @@ const hasMemory = (member, room, memory) => !!memory && ownChat(member, room);
 const definitions = (member, room = null, { memory = false } = {}) => [
     ...BASE,
     ...(member && member.link_service === 'food' && member.link_resource ? [PANTRY] : []),
-    ...(isVibe(member) ? [WEB] : []),
+    ...(isVibe(member) && require('../config').ai.vibeWebSearch ? [WEB] : []),
     ...(isWorkspace(room) ? [QUEUE, QUEUE_STATUS] : []),
     ...(hasMemory(member, room, memory) ? [REMEMBER, FORGET] : []),
     ...(ownChat(member, room) ? [SET_UP_AGENT, MY_AGENTS, SET_REMINDER, MY_REMINDERS, STOP_REMINDER, MY_DAY, START_TIMER, STOP_TIMER] : []),
@@ -452,7 +452,7 @@ const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_sear
  */
 async function runWithResult(name, raw, ctx = {}) {
     const runner = RUNNERS[name];
-    if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food')) || (name === 'web_search' && !isVibe(ctx.member))
+    if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food')) || (name === 'web_search' && !(isVibe(ctx.member) && require('../config').ai.vibeWebSearch))
         || (['canvas_read', 'canvas_write'].includes(name) && !(ownChat(ctx.member, ctx.room) && ctx.user && require('../config').ai.vibeCanvas))
         || ((name === 'queue_task' || name === 'queue_status') && !isWorkspace(ctx.room))
         || ((name === 'remember' || name === 'forget') && !(hasMemory(ctx.member, ctx.room, ctx.memory) && ctx.user))

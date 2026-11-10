@@ -1217,13 +1217,14 @@ async function upsertChatAiSummary(sfx) {
         scope, subject_id = 0, window, overview = '', memory_json = '', timeline_json = '[]',
         message_count = 0, window_message_count = 0, last_message_id = 0,
         window_label = '', window_start = null, window_end = null,
+        people = 0, topics_json = '[]',
     } = sfx || {};
     return await transaction(async () => {
         const res = await run(
             `INSERT INTO chat_ai_summaries
                 (scope, subject_id, "window", overview, memory_json, timeline_json, message_count,
-                 window_message_count, last_message_id, window_label, window_start, window_end, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ov_now())
+                 window_message_count, last_message_id, window_label, window_start, window_end, people, topics_json, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ov_now())
              ON CONFLICT(scope, subject_id, "window") DO UPDATE SET
                 overview = excluded.overview,
                 memory_json = excluded.memory_json,
@@ -1234,9 +1235,11 @@ async function upsertChatAiSummary(sfx) {
                 window_label = excluded.window_label,
                 window_start = excluded.window_start,
                 window_end = excluded.window_end,
+                people = excluded.people,
+                topics_json = excluded.topics_json,
                 updated_at = ov_now()`,
             [scope, subject_id || 0, window, overview, memory_json, timeline_json, message_count,
-                window_message_count, last_message_id, window_label, window_start, window_end]
+                window_message_count, last_message_id, window_label, window_start, window_end, people, topics_json]
         );
         return _writeResult(res, 'chat_ai_summaries', [await get('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? AND "window" = ?', [scope, subject_id || 0, window])]);
     });
@@ -1250,8 +1253,9 @@ async function addChatTimelineEvents(scope, subjectId, events) {
         for (const e of events) {
             if (!e || !e.label || !e.ts) continue;
             try {
-                const res = await run('INSERT INTO chat_timeline_events (scope, subject_id, ts, label, detail) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
-                    [scope || 'global', subjectId || 0, e.ts, String(e.label).slice(0, 120), String(e.detail || '').slice(0, 400)]);
+                const res = await run('INSERT INTO chat_timeline_events (scope, subject_id, ts, label, detail, kind, message_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
+                    [scope || 'global', subjectId || 0, e.ts, String(e.label).slice(0, 120), String(e.detail || '').slice(0, 400),
+                        String(e.kind || 'moment').slice(0, 20), e.message_id == null ? null : Number(e.message_id)]);
                 if (res.changes) ids.push(Number(res.lastInsertRowid));
                 n++;   // Live counts every event it tried, the duplicates included
             } catch { /* */ }
@@ -1285,7 +1289,7 @@ async function getChatTimelineEvents({ scope = 'global', subjectId = 0, before =
     if (q && String(q).trim()) { const like = '%' + String(q).trim().slice(0, 60) + '%'; conds.push('(label ILIKE ? OR detail ILIKE ?)'); params.push(like, like); }
     params.push(Math.min(60, Math.max(1, limit)));
     try {
-        return await all(`SELECT id, ts, label, detail FROM chat_timeline_events WHERE ${conds.join(' AND ')} ORDER BY ts DESC, id DESC LIMIT ?`, params) || [];
+        return await all(`SELECT id, ts, label, detail, kind, message_id FROM chat_timeline_events WHERE ${conds.join(' AND ')} ORDER BY ts DESC, id DESC LIMIT ?`, params) || [];
     } catch { return []; }
 }
 
@@ -1300,8 +1304,8 @@ async function countChatMessagesSince(afterId, userId = null) {
     return (await get(sql, params))?.c || 0;
 }
 // Fetch analyzable messages for AI batching (with the channel/broadcaster label).
-async function getChatMessagesForAi({ afterId = null, sinceTs = null, userId = null, limit = 400, order = 'asc' } = {}) {
-    let sql = `SELECT cm.id, cm.user_id, cm.username, cm.message, cm.message_type, cm.timestamp,
+async function getChatMessagesForAi({ afterId = null, sinceTs = null, userId = null, channelUserId = null, limit = 400, order = 'asc' } = {}) {
+    let sql = `SELECT cm.id, cm.user_id, cm.subject_id, cm.username, cm.message, cm.message_type, cm.timestamp,
                       cm.stream_id, cm.channel_user_id, cm.is_global,
                       ch.username AS channel_username, ch.display_name AS channel_display
                FROM chat_messages cm
@@ -1311,6 +1315,7 @@ async function getChatMessagesForAi({ afterId = null, sinceTs = null, userId = n
     if (afterId != null) { sql += ' AND cm.id > ?'; params.push(afterId); }
     if (sinceTs != null) { sql += ' AND cm.timestamp >= ?'; params.push(sinceTs); }
     if (userId) { sql += ' AND cm.user_id = ?'; params.push(userId); }
+    if (channelUserId != null) { sql += ' AND cm.channel_user_id = ? AND cm.is_global = 0'; params.push(Number(channelUserId)); }
     sql += ` ORDER BY cm.id ${order === 'desc' ? 'DESC' : 'ASC'} LIMIT ?`;
     params.push(Math.max(1, Math.min(2000, limit)));
     const rows = await all(sql, params);
@@ -1324,6 +1329,62 @@ async function getNthRecentChatTs(n, userId = null) {
     sql += ' ORDER BY cm.id DESC LIMIT 1 OFFSET ?';
     params.push(Math.max(0, (n | 0) - 1));
     return (await get(sql, params))?.ts || null;
+}
+
+// ── Room insight (plan 2026-11-10, part 2): rooms, server channels and Live channels ─────────────
+// The newest messages of one room (oldest first), with the author's subject so the job can ask Network
+// whether AI may read them. AI members' own answers are not people's messages: left out.
+async function getRoomMessagesForAi({ roomId, limit = 120 } = {}) {
+    const rows = await all(`SELECT m.id, m.room_id, m.user_id, m.subject_id, m.message, m.created_at,
+                                   u.username, u.display_name
+                            FROM room_messages m LEFT JOIN ctx_users u ON u.id = m.user_id
+                            WHERE m.room_id = ? AND m.is_deleted = 0 AND m.ai_member_id IS NULL AND m.agent_stream = false
+                            ORDER BY m.id DESC LIMIT ?`,
+        [Number(roomId), Math.max(1, Math.min(400, Number(limit) || 120))]);
+    return (rows || []).reverse();
+}
+
+// Rooms with enough new chat (or a stale summary) to refresh. A server's channels are rooms too.
+async function getRoomsNeedingInsight({ threshold = 20, staleCutoffIso, sinceTs, limit = 2 } = {}) {
+    return await all(`
+        SELECT r.id, r.slug, r.name, r.visibility, MAX(m.id) AS max_id,
+               CAST(SUM(CASE WHEN m.id > COALESCE(s.last_message_id, 0) THEN 1 ELSE 0 END) AS BIGINT) AS new_msgs
+        FROM rooms r
+        JOIN room_messages m ON m.room_id = r.id AND m.is_deleted = 0 AND m.ai_member_id IS NULL AND m.agent_stream = false
+        LEFT JOIN chat_ai_summaries s
+          ON s.scope = 'room' AND s.subject_id = r.id AND s."window" = 'rolling'
+        WHERE r.archived_at IS NULL AND r.assistant = 0
+          AND COALESCE(r.ai_insight, CASE WHEN r.visibility = 'public' THEN 1 ELSE 0 END) = 1
+          AND m.created_at >= ?
+        GROUP BY r.id, r.slug, r.name, r.visibility, s.last_message_id, s.updated_at
+        HAVING SUM(CASE WHEN m.id > COALESCE(s.last_message_id, 0) THEN 1 ELSE 0 END) > 0
+           AND ( SUM(CASE WHEN m.id > COALESCE(s.last_message_id, 0) THEN 1 ELSE 0 END) >= ?
+                 OR s.last_message_id IS NULL OR s.updated_at IS NULL OR s.updated_at < ? )
+        ORDER BY new_msgs DESC, r.id
+        LIMIT ?`, [sinceTs, threshold, staleCutoffIso, Math.max(1, limit)]);
+}
+
+// The newest messages of one Live channel chat, oldest first.
+async function getChannelMessagesForAi({ channelUserId, limit = 120 } = {}) {
+    return await getChatMessagesForAi({ channelUserId, limit, order: 'desc' });
+}
+
+// Live channels with enough new chat (or a stale summary) to refresh.
+async function getChannelsNeedingInsight({ threshold = 30, staleCutoffIso, sinceTs, limit = 1 } = {}) {
+    return await all(`
+        SELECT cm.channel_user_id AS channel_id, MAX(cm.id) AS max_id,
+               CAST(SUM(CASE WHEN cm.id > COALESCE(s.last_message_id, 0) THEN 1 ELSE 0 END) AS BIGINT) AS new_msgs
+        FROM chat_messages cm
+        LEFT JOIN chat_ai_summaries s
+          ON s.scope = 'channel' AND s.subject_id = cm.channel_user_id AND s."window" = 'rolling'
+        WHERE cm.channel_user_id IS NOT NULL AND cm.is_global = 0 AND ${_CHAT_AI_WHERE}
+          AND cm.timestamp >= ?
+        GROUP BY cm.channel_user_id, s.last_message_id, s.updated_at
+        HAVING SUM(CASE WHEN cm.id > COALESCE(s.last_message_id, 0) THEN 1 ELSE 0 END) > 0
+           AND ( SUM(CASE WHEN cm.id > COALESCE(s.last_message_id, 0) THEN 1 ELSE 0 END) >= ?
+                 OR s.last_message_id IS NULL OR s.updated_at IS NULL OR s.updated_at < ? )
+        ORDER BY new_msgs DESC, channel_id
+        LIMIT ?`, [sinceTs, threshold, staleCutoffIso, Math.max(1, limit)]);
 }
 
 // Users with enough new chat activity (or a stale summary) to warrant an AI refresh.
@@ -1513,6 +1574,10 @@ module.exports = {
     countChatMessagesSince,
     getChatMessagesForAi,
     getNthRecentChatTs,
+    getRoomMessagesForAi,
+    getRoomsNeedingInsight,
+    getChannelMessagesForAi,
+    getChannelsNeedingInsight,
     getUsersNeedingChatAi,
     getRelayChatMessagesForAi,
     getRelayUsersNeedingChatAi,

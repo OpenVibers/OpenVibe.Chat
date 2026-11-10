@@ -67,6 +67,12 @@ async function accept(userId, contactId) {
     if (!mine || mine.status !== 'incoming') return false;
     await db.run("UPDATE dm_contacts SET status = 'friend' WHERE user_id = ? AND contact_id = ?", [a, b]);
     await db.run("UPDATE dm_contacts SET status = 'friend' WHERE user_id = ? AND contact_id = ?", [b, a]);
+    // The person who asked hears that it was accepted (server/chat/activity.js friend_accept): the actor is the
+    // person who accepted.
+    try {
+        const actor = await require('../live-context').getUserById(a);
+        if (actor) await require('./activity').friendAccept({ userId: b, actor });
+    } catch { /* a contact change is never held up by its activity */ }
     return true;
 }
 

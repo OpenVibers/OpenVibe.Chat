@@ -315,7 +315,7 @@ const PLAN_DAY = /\b(plan(?:\s+out)?\s+(?:my|the)\s+(?:day|morning|afternoon|eve
  * The answer through chat.member.turn with tools: up to MAX_TOOL_ROUNDS rounds of tool calls run here, then a turn
  * with tool_choice none. → the reply text, or null when a turn failed (the caller falls back to chat.member.reply).
  */
-async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], user = null, messageId = null, memory = null, timezone = null, called = new Set(), onText = null, steps = null, results = null, signal = null }) {
+async function answerWithTools({ room, member, context, transcript, askedBy, text, opts, subject = null, images = [], files = [], user = null, messageId = null, memory = null, timezone = null, called = new Set(), onText = null, steps = null, results = null, signal = null }) {
     const tools = aiTools.definitions(member, room, { memory: memory !== null });
     const vibe = Number(room.assistant) === 1;
     const tz = timezoneOf(timezone);
@@ -338,7 +338,7 @@ async function answerWithTools({ room, member, context, transcript, askedBy, tex
     for (let round = 0; round <= MAX_TOOL_ROUNDS; round++) {
         if (signal && signal.aborted) return null;   // stopped (stop()): the caller keeps what was written
         const last = round === MAX_TOOL_ROUNDS;
-        const turn = { messages, tools, tool_choice: last ? 'none' : 'auto', max_tokens: vibe ? 1500 : 600, temperature: 0.7 };
+        const turn = { messages, tools, tool_choice: last ? 'none' : 'auto', max_tokens: vibe ? 1500 : 600, temperature: 0.7, ...(files.length ? { files } : {}) };
         const turnOpts = { ...opts, idempotencyKey: `${opts.idempotencyKey}-t${round}`, ...(signal ? { signal } : {}) };
         // Vibe's answer streams (each round's text so far, to the chat as it is written); other members answer whole.
         const out = onText ? await aiClient.stream('chat.member.turn', turn, turnOpts, onText) : await aiClient.structured('chat.member.turn', turn, turnOpts);
@@ -428,7 +428,8 @@ async function afterPost(room, message, user, deps = {}) {
         if (controller) stoppers.set(room.id, controller);
         if (config.ai.memberTools) {
             const images = await picturesFor(message, history, user).catch(() => []);
-            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, vibe ? 12000 : 2000), opts, subject: user.subject_id || null, images, user, messageId: message.id, memory, timezone: deps.timezone, called, onText, steps, results, signal: controller && controller.signal }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
+            const files = require('./files').filesOf(message);
+            try { text = clean(await answerWithTools({ room, member, context, transcript, askedBy, text: String(message.message).slice(0, vibe ? 12000 : 2000), opts, subject: user.subject_id || null, images, files, user, messageId: message.id, memory, timezone: deps.timezone, called, onText, steps, results, signal: controller && controller.signal }) || '', vibe ? 8000 : 2000); } catch { text = ''; }
         }
         if (controller && controller.signal.aborted) {
             const sofar = clean(pending || '', 7900);

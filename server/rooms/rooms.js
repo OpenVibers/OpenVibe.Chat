@@ -1,4 +1,5 @@
 'use strict';
+const messageFiles = require('./files');
 /**
  * Chat rooms (roadmap WS-I task 4): rooms people create on openvibe.chat, beside the global room and
  * the stream/channel rooms Live's chat already has. Three kinds:
@@ -48,6 +49,7 @@ const ctx = require('../live-context');
 const wordFilter = require('../chat/word-filter');
 const permissions = require('../auth/permissions');
 const linkCards = require('../chat/link-cards');
+const linkPreviews = require('../chat/link-previews');
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$/;
 const RESERVED = new Set(['global', 'new', 'rooms', 'settings', 'messages', 'updates', 'auth', 'api', 'admin', 'staff', 'help', 'system', 'ice-servers']);
@@ -107,12 +109,25 @@ async function publicRoom(r, extra = {}) {
         id: r.id, slug: r.slug, name: r.name, topic: r.topic || null, kind: kindOf(r), visibility: r.visibility,
         ...(kindOf(r) === 'call' ? { join_role: joinRoleOf(r), call_channel: `room-${r.slug}` } : {}),
         slow_seconds: r.slow_seconds, message_count: r.message_count, last_message_at: r.last_message_at,
+        link_previews: r.link_previews !== false,
         created_at: r.created_at, members: (await db.get("SELECT COUNT(*) AS n FROM room_members WHERE room_id = ? AND role != 'blocked'", [r.id]) || {}).n || 0,
         ...(Number(r.assistant) === 1 ? { assistant: true } : {}),
         ...(isWorkspace(r) ? { workspace: true } : {}),
+        insight: insightOn(r),
         ...(r.server_id ? { server: { slug: (await db.get('SELECT slug FROM chat_servers WHERE id = ?', [r.server_id]) || {}).slug || null, channel: r.channel_slug } } : {}),
         ...extra,
     };
+}
+
+/**
+ * Whether a room is summarised (plan 2026-11-10, part 2): NULL keeps the default — a public room on, a
+ * private one off until its owner turns it on. A chat with Vibe is never: it is a person's own conversation.
+ */
+function insightOn(room) {
+    if (!room) return false;
+    if (Number(room.assistant) === 1) return false;
+    if (room.ai_insight == null) return room.visibility === 'public';
+    return Number(room.ai_insight) === 1;
 }
 
 async function bySlug(slug) {
@@ -267,7 +282,7 @@ async function announceDeleted(room, ids) {
     }
 }
 
-async function post(room, user, text, { now = Date.now(), ai = true, timezone = null } = {}) {
+async function post(room, user, text, { now = Date.now(), ai = true, timezone = null, reply_to_id = null, files = [] } = {}) {
     const a = await access(room, user);
     if (!user) fail(401, 'rooms.sign_in', 'Sign in to chat');
     if (siteBanned(user)) fail(403, 'rooms.banned', 'Your account is banned from chat');
@@ -296,13 +311,21 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
             if (open) await polls.castVote({ poll: open, user, optionId: body.slice(1) });
         } catch { /* a vote that does not count is never a failed message */ }
     }
+    // What this answers, when the client sends a reply_to_id. It must be a live message of this same room.
+    const replyToId = Number(reply_to_id) || null;
+    let replyTo = null;
+    if (replyToId) {
+        replyTo = await db.get('SELECT id, user_id, message, is_deleted FROM room_messages WHERE id = ? AND room_id = ?', [replyToId, room.id]);
+        if (!replyTo || replyTo.is_deleted) fail(422, 'rooms.reply', 'That message is not here to reply to');
+    }
     const filtered = wordFilter.check(body);
     const message = filtered.safe ? body : filtered.filtered;
+    const attached = messageFiles.cleanFiles(files, user.subject_id || null);
     // The message's known OpenVibe link, with a second's budget: the card is stored on the row and arrives with the
     // broadcast when it is ready; a slower one fills the row later.
     const { card, pending } = await linkCards.forSend(message);
     const id = await db.tx(async () => {
-        const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, card) VALUES (?, ?, ?, ?, ?)', [room.id, user.id, user.subject_id || null, message, linkCards.toJson(card)]);
+        const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, card, reply_to_id, files) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb)', [room.id, user.id, user.subject_id || null, message, linkCards.toJson(card), replyToId, JSON.stringify(attached)]);
         await db.run('UPDATE rooms SET message_count = message_count + 1, last_message_at = ov_now() WHERE id = ?', [room.id]);
         await db.run('UPDATE room_members SET last_read_id = ?, last_seen_at = ov_now() WHERE room_id = ? AND user_id = ?', [r.lastInsertRowid, room.id, user.id]);
         await announceMessage(room, user, Number(r.lastInsertRowid), message, now);
@@ -310,6 +333,13 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
     });
     const row = await messageById(id);
     if (pending) linkCards.fillLater('room_messages', id, pending);
+    // General address previews are a background job: the message and its response never wait on another site.
+    if (room.link_previews !== false) linkPreviews.schedule({ scope: 'room', messageId: id, text: message, room: { id: room.id, slug: room.slug } });
+    // Activity: the people this names, and the person it answers (server/chat/activity.js). A failure here never
+    // takes a message back.
+    const activity = require('../chat/activity');
+    await activity.mentionsInRoom({ room, message: row, actor: user });
+    if (replyTo) await activity.replyInRoom({ room, message: row, parent: replyTo, actor: user });
     // The chat plays commands of an agent stream's room (Agent Streams S6): '!do', '!vote', and the
     // moderators' '!skip', '!remove' and '!pin'. They are handled after the message is out, so a request is
     // a message of the room and a thumbs up on it is a vote.
@@ -336,11 +366,12 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null } = {
         await announceMessage(room, { subject_id: null, username: member.handle, display_name: member.name }, Number(r.lastInsertRowid), message, now);
         return Number(r.lastInsertRowid);
     });
+    if (room.link_previews !== false) linkPreviews.schedule({ scope: 'room', messageId: id, text: message, room: { id: room.id, slug: room.slug } });
     return await messageById(id);
 }
 
 // A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
-const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.created_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model,
+const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.reply_to_id, m.created_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle WHEN m.agent_stream THEN 'aiagent' ELSE u.username END AS username,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.name WHEN m.agent_stream THEN 'AI agent' ELSE u.display_name END AS display_name,
         m.agent_stream, u.profile_color, u.role AS user_role
@@ -348,11 +379,31 @@ const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.crea
     LEFT JOIN room_ai_members a ON a.id = m.ai_member_id`;
 async function messageById(id) {
     const row = await db.get(`${MSG_SELECT} WHERE m.id = ?`, [id]) || null;
-    if (row) await linkCards.hydrate([row], 'room_messages');
+    if (row) {
+        row.attachments = messageFiles.attachmentRefs(messageFiles.filesOf(row));
+        await linkCards.hydrate([row], 'room_messages');
+        const setting = await db.get('SELECT link_previews FROM rooms WHERE id = ?', [row.room_id]);
+        await linkPreviews.attach([row], 'room', { enabled: !setting || setting.link_previews !== false });
+    }
     return row;
 }
 
-/** Messages oldest → newest: the newest page, one before `before`, or everything after `after`. */
+/** A bounded page, newest first. `before` is an exclusive message ID cursor. */
+async function historyPage(room, { before = null, limit = 50 } = {}) {
+    const lim = Math.min(100, Math.max(1, Number(limit) || 50));
+    const params = [room.id];
+    let where = 'm.room_id = ? AND m.is_deleted = 0';
+    if (before != null) { where += ' AND m.id < ?'; params.push(Number(before) || 0); }
+    params.push(lim + 1);
+    const rows = await db.all(`${MSG_SELECT} WHERE ${where} ORDER BY m.id DESC LIMIT ?`, params);
+    const more = rows.length > lim;
+    rows.length = Math.min(rows.length, lim);
+    await linkCards.hydrate(rows, 'room_messages');
+    await linkPreviews.attach(rows, 'room', { enabled: room.link_previews !== false });
+    return { messages: rows, more };
+}
+
+/** Existing internal callers get chronological arrays; external paged readers use historyPage. */
 async function history(room, { before = null, after = null, limit = 60 } = {}) {
     const lim = Math.min(200, Math.max(1, Number(limit) || 60));
     const rows = after != null
@@ -360,7 +411,9 @@ async function history(room, { before = null, after = null, limit = 60 } = {}) {
         : before != null
             ? await db.all(`${MSG_SELECT} WHERE m.room_id = ? AND m.id < ? AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT ?`, [room.id, Number(before) || 0, lim])
             : await db.all(`${MSG_SELECT} WHERE m.room_id = ? AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT ?`, [room.id, lim]);
+    for (const row of rows) row.attachments = messageFiles.attachmentRefs(messageFiles.filesOf(row));
     await linkCards.hydrate(rows, 'room_messages');
+    await linkPreviews.attach(rows, 'room', { enabled: room.link_previews !== false });
     return after != null ? rows : rows.reverse();
 }
 
@@ -419,6 +472,9 @@ async function setRole(room, actor, targetUserId, role) {
                     : role === 'speaker' && current !== 'speaker' ? 'room_speaker_add'
                         : current === 'speaker' && role !== 'speaker' ? 'room_speaker_remove' : null;
     if (action) await db.logModerationAction({ scope_type: 'room', scope_id: room.slug, actor_user_id: actor.id, target_user_id: targetUserId, action_type: action, details: { from: current, to: role } });
+    if (role !== 'blocked' && role !== 'none' && current !== role && Number(targetUserId) !== Number(actor.id)) {
+        await require('../chat/activity').roleGiven({ targetUserId, actor, role, roomId: room.id });
+    }
     return role;
 }
 
@@ -431,7 +487,7 @@ function screenUrlOf(v) {
     return s;
 }
 
-async function update(room, actor, { name, topic, visibility, slow_seconds, join_role, screen_url, workspace } = {}, { fromServer = false, minName = 3 } = {}) {
+async function update(room, actor, { name, topic, visibility, slow_seconds, join_role, screen_url, workspace, ai_insight, link_previews } = {}, { fromServer = false, minName = 3 } = {}) {
     if (!(await access(room, actor)).manage) fail(403, 'rooms.not_owner', 'Only the owner changes the room');
     // A server's channel follows the server's visibility, and is changed through the server (servers.js).
     if (room.server_id && !fromServer && visibility != null && visibility !== room.visibility) fail(409, 'rooms.server_channel', 'A channel is as public as its server: change the server instead');
@@ -441,6 +497,7 @@ async function update(room, actor, { name, topic, visibility, slow_seconds, join
     if (visibility != null) { if (!['public', 'private'].includes(visibility)) fail(422, 'rooms.visibility', 'Visibility is public or private'); next.visibility = visibility; }
     if (Number(room.assistant) === 1 && next.visibility !== 'private') fail(409, 'vibe.private', 'A chat with Vibe stays private');
     if (slow_seconds != null) { const v = Number(slow_seconds); if (!Number.isInteger(v) || v < 0 || v > 600) fail(422, 'rooms.slow', 'Slow mode is 0 to 600 seconds'); next.slow_seconds = v; }
+    if (link_previews != null) next.link_previews = link_previews === true || link_previews === 1 || link_previews === '1' || link_previews === 'on';
     if (join_role != null && join_role !== '') {
         if (kindOf(room) !== 'call' || !JOIN_ROLES_CALL.includes(join_role)) fail(422, 'rooms.join_role', 'People join a call room as speakers, participants or viewers');
         next.join_role = join_role;
@@ -458,8 +515,14 @@ async function update(room, actor, { name, topic, visibility, slow_seconds, join
     }
     if (screen_url !== undefined && isWorkspace(next)) next.screen_url = screenUrlOf(screen_url);
     else if (screen_url !== undefined && screen_url !== '' && screen_url !== null) fail(409, 'rooms.not_workspace', 'Only a workspace room shows a shared screen');
+    // The room's AI insight (plan 2026-11-10, part 2): the owner turns it on or off; without a choice the
+    // default (public on, private off) applies. A chat with Vibe never records one.
+    if (ai_insight !== undefined && ai_insight !== null) {
+        if (Number(room.assistant) === 1 && (ai_insight === true || ai_insight === 1 || ai_insight === '1' || ai_insight === 'on')) fail(409, 'rooms.insight_vibe', 'A chat with Vibe is never summarised');
+        next.ai_insight = (ai_insight === true || ai_insight === 1 || ai_insight === '1' || ai_insight === 'on') ? 1 : 0;
+    }
     await db.tx(async () => {
-        await db.run('UPDATE rooms SET name = ?, topic = ?, visibility = ?, slow_seconds = ?, join_role = ?, screen_url = ?, workspace = ? WHERE id = ?', [next.name, next.topic, next.visibility, next.slow_seconds, next.join_role == null ? null : next.join_role, next.screen_url == null ? null : next.screen_url, Number(next.workspace) === 1 ? 1 : 0, room.id]);
+        await db.run('UPDATE rooms SET name = ?, topic = ?, visibility = ?, slow_seconds = ?, join_role = ?, screen_url = ?, workspace = ?, ai_insight = ?, link_previews = ? WHERE id = ?', [next.name, next.topic, next.visibility, next.slow_seconds, next.join_role == null ? null : next.join_role, next.screen_url == null ? null : next.screen_url, Number(next.workspace) === 1 ? 1 : 0, next.ai_insight == null ? null : Number(next.ai_insight), next.link_previews !== false, room.id]);
         // Public → private: everything the room published stops being replayable on the realtime plane.
         if (room.visibility === 'public' && next.visibility === 'private') {
             await announceDeleted(room, (await db.all('SELECT id FROM room_messages WHERE room_id = ? AND is_deleted = 0 ORDER BY id', [room.id])).map((r) => r.id));
@@ -537,7 +600,7 @@ module.exports = {
     LIMITS,
     isWorkspace, isStaffRoom,
     postAsAi,
-    ensureSchema, create, list, bySlug, access, join, leave, post, history, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
-    attach, detach, attachments, joinRoleOf, unreadTotal, isStaff, siteBanned, POSTERS, TALKERS,
+    ensureSchema, create, list, bySlug, access, join, leave, post, history, historyPage, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
+    attach, detach, attachments, joinRoleOf, unreadTotal, isStaff, siteBanned, insightOn, POSTERS, TALKERS,
     RoomError, SLUG_RE, KINDS, ROLES, KIND_ROLES, JOIN_ROLE, JOIN_ROLES_CALL, ATTACH_SERVICES, _reset,
 };

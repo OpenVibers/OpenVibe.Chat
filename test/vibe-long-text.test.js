@@ -46,14 +46,15 @@ t('everywhere else the limits stay: 2000 characters, spam refused', async () => 
     assert.strictEqual((await post('look ==============')).status, 422, 'spam still refused in a room');
 });
 
-t('the composer takes 12000 characters and the attach button takes text files', async () => {
+t('the composer takes 12000 characters and any file through the tray', async () => {
     const page = await fetch(`${h.base}/vibe`, { headers: { cookie: `ov_token=${ann.token}` } }).then((x) => x.text());
     assert.match(page, /<textarea id="ovt-text" name="message" rows="1"[^>]*maxlength="12000"/);
-    assert.match(page, /data-vb-upload data-accept="[^"]*text\/plain[^"]*\.csv[^"]*\.py[^"]*"/);
+    assert.match(page, /data-vb-upload data-accept=""/, 'the picker takes any type');
+    assert.match(page, /id="vb-files"/, 'the attachment tray is there');
     assert.match(page, /\/shared\/ov-upload\.js/);
     assert.match(page, /\/shared\/ov-upload\.css/);
     assert.doesNotMatch(page, /id="vb-file"/, "the hand-rolled file input is gone");
-    assert.match(page, /aria-label="Add (a picture or )?a text file"/);
+    assert.match(page, /aria-label="(Attach a file|Add a picture or a file)"/);
 });
 
 t.run(async () => { if (aiClient) aiClient._setClient(null); if (h && h.close) await h.close(); });

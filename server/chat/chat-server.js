@@ -34,6 +34,7 @@ const soundboard = require('./soundboard-service');
 const audioQueue = require('./audio-queue');
 const dm = require('./dm');
 const linkCards = require('./link-cards');
+const linkPreviews = require('./link-previews');
 const networkBlocks = require('./network-blocks');
 const presence = require('../presence');
 const vipBadges = require('../vip/badges');
@@ -1189,6 +1190,16 @@ class ChatServer {
             });
             if (result.lastInsertRowid) chatMsg.id = Number(result.lastInsertRowid);
             if (pending && result.lastInsertRowid) linkCards.fillLater('chat_messages', Number(result.lastInsertRowid), pending);
+            // General address previews run after the line is out (server/chat/link-previews.js): the saved message
+            // carries embeds: [] and a later frame carries the filled list. Channel/global viewers get the same frame.
+            if (result.lastInsertRowid) {
+                const id = Number(result.lastInsertRowid);
+                linkPreviews.schedule({ scope: 'chat', messageId: id, text, onReady: (embeds) => {
+                    const frame = { type: 'chat_embeds', id, embeds };
+                    if (client.streamId || client.channelUserId) this.broadcastToChannelRoom(client.channelUserId, client.streamId, frame).catch(() => {});
+                    else this.broadcastGlobal(frame).catch(() => {});
+                } });
+            }
             firstChat = !!result.first_chat;
         } catch (err) {
             // Not saved means not sent: a line everyone saw but history, moderation and replays never
@@ -1200,6 +1211,14 @@ class ChatServer {
 
         // Attach reply context to broadcast
         if (replyTo) chatMsg.reply_to = replyTo;
+
+        // Activity (server/chat/activity.js): the person this answers, and anyone @named. A chat line is never
+        // held up by its activity; every write there is best effort.
+        if (client.user && client.user.id) {
+            const activity = require('./activity');
+            if (replyTo) await activity.replyInChat({ client, message: chatMsg, parent: replyTo });
+            await activity.mentionsInChat({ client, message: chatMsg });
+        }
 
         // Live's reactions to a real chat line — OpenCoins chat bonus (logged-in users in a
         // stream), AI chat viewers (stream chat), the PowerChat overlay relay (any channel chat) —
@@ -2895,6 +2914,15 @@ class ChatServer {
             if (state) this.sendTo(ws, { type: 'sync', room: room.slug, state });
         } catch (err) {
             console.warn('[Sync] state:', err && err.message);
+        }
+        // A party room's music is the room's too: the joiner starts at the room's own second, not at zero.
+        try {
+            if (room.kind === 'party') {
+                const state = await require('../rooms/party-music').stateForRoom(room);
+                if (state !== undefined) this.sendTo(ws, { type: 'music', room: room.slug, state });
+            }
+        } catch (err) {
+            console.warn('[Music] state:', err && err.message);
         }
         await this._broadcastLease(room);
     }

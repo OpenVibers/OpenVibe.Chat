@@ -25,6 +25,7 @@ t('boot', async () => {
     aiClient = require('../server/ai/client');
     aiTools = require('../server/rooms/ai-tools');
     config = require('../server/config');
+    config.ai.vibeWebSearch = true; // enable the owner-gated Search Fabric tool for these fixtures
     ann = h.addUser('ann', { subject: ids.newId('user') });
     await h.ctx.upsertUser(h.live.users.get(ann.id));
     aiClient._setClient({
@@ -45,6 +46,11 @@ t('boot', async () => {
 t('the tool list and the runners: bounded, fair, refusing what is not theirs', async () => {
     const names = aiTools.definitions({}).map((d) => d.function.name);
     assert.deepStrictEqual(names, ['search_openvibe', 'read_page', 'current_time', 'roll_dice', 'pick_one'], 'no pantry for an unlinked member');
+    config.ai.vibeWebSearch = false;
+    assert.ok(!aiTools.definitions({ handle: 'vibe' }).some((d) => d.function.name === 'web_search'), 'the web tool is absent while its owner switch is off');
+    const refused = await aiTools.runWithResult('web_search', '{"query":"latest"}', { member: { handle: 'vibe' } });
+    assert.match(refused.text, /no tool called web_search/, 'the runner also enforces the owner switch');
+    config.ai.vibeWebSearch = true;
     // Both search tools take the Search Fabric's freshness window (10-30): "today" and "recently" reach Search.
     const schemaOf = (name) => aiTools.definitions({ handle: 'vibe' }).find((d) => d.function.name === name).function.parameters;
     for (const name of ['search_openvibe', 'web_search']) {
@@ -290,7 +296,7 @@ t('@dealer rolls through a tool: the call runs here, its result goes back, the t
     assert.match(turns[0].input.messages[0].content, /You are Dealer/);
     assert.match(turns[0].input.messages[1].content, /Ann just wrote to you: @dealer roll two dice/);
     assert.deepStrictEqual([turns[0].o.idempotencyKey.endsWith('-t0'), turns[1].o.idempotencyKey.endsWith('-t1')], [true, true]);
-    const last = (await api('GET', '/rooms/game-night/messages', ann)).body.messages.pop();
+    const last = (await api('GET', '/rooms/game-night/messages', ann)).body.messages[0];
     assert.match(last.message, /^You rolled \d and \d: \d+\.$/);
     assert.strictEqual(last.display_name, 'Dealer');
 });
@@ -301,14 +307,14 @@ t('after three rounds of tools the fourth turn must answer in text; a failing tu
     await api('POST', '/rooms/game-night/messages', ann, { message: '@dealer what time is it, really?' });
     await settle();
     assert.strictEqual(calls.length - before, 4);
-    assert.strictEqual((await api('GET', '/rooms/game-night/messages', ann)).body.messages.pop().message, 'It is late.');
+    assert.strictEqual((await api('GET', '/rooms/game-night/messages', ann)).body.messages[0].message, 'It is late.');
 
     before = calls.length;
     script = []; // the turn fails (a provider without tools)
     await api('POST', '/rooms/game-night/messages', ann, { message: '@dealer hello' });
     await settle();
     assert.deepStrictEqual(calls.slice(before).map((c) => c.workflow), ['chat.member.turn', 'chat.member.reply']);
-    assert.strictEqual((await api('GET', '/rooms/game-night/messages', ann)).body.messages.pop().message, 'The plain reply.');
+    assert.strictEqual((await api('GET', '/rooms/game-night/messages', ann)).body.messages[0].message, 'The plain reply.');
 });
 
 t('CHAT_AI_MEMBER_TOOLS=0: straight to chat.member.reply', async () => {

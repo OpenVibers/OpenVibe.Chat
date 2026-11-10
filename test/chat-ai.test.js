@@ -13,12 +13,14 @@ const t = suite('chat-ai');
 let h, db, ctx, chatAi, aiClient, streamer, alice, bob, channelId, streamId;
 
 async function msg(o = {}) {
+    const subject = o.subject_id !== undefined ? o.subject_id
+        : (o.user_id ? ((h.live.users.get(o.user_id) || {}).subject_id || null) : null);
     return (await db.run(
-        `INSERT INTO chat_messages (stream_id, user_id, username, message, message_type, is_global, channel_user_id, timestamp)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO chat_messages (stream_id, user_id, username, message, message_type, is_global, channel_user_id, timestamp, subject_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [o.stream_id === undefined ? streamId : o.stream_id, o.user_id === undefined ? null : o.user_id,
             o.username || null, o.message || 'a message', o.message_type || 'chat', o.is_global ? 1 : 0,
-            o.channel_user_id === undefined ? streamer.id : o.channel_user_id, o.timestamp || sqliteNow()]
+            o.channel_user_id === undefined ? streamer.id : o.channel_user_id, o.timestamp || sqliteNow(), subject]
     )).lastInsertRowid;
 }
 
@@ -28,9 +30,12 @@ t('boot', async () => {
     ctx = require('../server/live-context');
     chatAi = require('../server/ai/chat-ai');
     aiClient = require('../server/ai/client');
-    streamer = h.addUser('streamer', { role: 'streamer' });
-    alice = h.addUser('alice');
-    bob = h.addUser('bob');
+    streamer = h.addUser('streamer', { role: 'streamer', subject: 'usr_01J8Z3Q4R5S6T7V8W9X0Y1Z2A1' });
+    alice = h.addUser('alice', { subject: 'usr_01J8Z3Q4R5S6T7V8W9X0Y1Z2A2' });
+    bob = h.addUser('bob', { subject: 'usr_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3' });
+    h.consent.allowed.add(streamer.subject_id);
+    h.consent.allowed.add(alice.subject_id);
+    h.consent.allowed.add(bob.subject_id);
     channelId = h.addChannel(streamer.id);
     streamId = h.addStream(streamer.id, channelId);
     await h.ctx.sync();
@@ -77,7 +82,7 @@ t('falls back to the extractive summary when AI does not answer', async () => {
     await chatAi._tick();
 
     const row = await db.getChatAiSummary('global', 0, 'global');
-    assert.ok(/messages from \d+ chatter/.test(row.overview), row.overview);
+    assert.ok(/chatting; the latest line was/.test(row.overview), row.overview);
     assert.ok(row.overview.includes('the extractive line'), row.overview);
     aiClient._reset();
     aiClient._setClient(null);
@@ -168,6 +173,94 @@ t('the six routes answer with Live\'s shapes, publicly', async () => {
     assert.deepStrictEqual(r.body.sessions, []);
     r = await h.http('GET', '/api/chat/ai/timeline/nobody');
     assert.strictEqual(r.status, 404);
+});
+
+t('the summariser reads only people who allowed AI use, and stores people and topics', async () => {
+    const calls = [];
+    aiClient._setClient({
+        runs: {
+            create: async (workflow, input) => {
+                calls.push({ workflow, input });
+                return { run: { status: 'succeeded', output: {
+                    recent_overview: 'consenting talk', memory: 'memory line',
+                    timeline: [{ label: 'a moment', detail: 'detail', mins_ago: 1 }],
+                } } };
+            },
+        },
+    });
+    const carol = h.addUser('carol', { subject: 'usr_01J8Z3Q4R5S6T7V8W9X0Y1Z2A4' });   // no consent
+    await db.run("UPDATE chat_ai_summaries SET updated_at = ? WHERE scope = 'global'", [sqliteNow(-60 * 60 * 1000)]);
+    await msg({ user_id: carol.id, username: 'carol', message: 'carol secret line' });
+    await msg({ user_id: alice.id, username: 'alice', message: 'zelda talk is good' });
+    await msg({ user_id: bob.id, username: 'bob', message: 'zelda again' });
+
+    await chatAi._tick();
+
+    const global = calls.find((c) => c.workflow === chatAi.WORKFLOW_GLOBAL);
+    assert.ok(global, 'the global workflow was called');
+    const authors = global.input.messages.map((m) => m.author);
+    assert.ok(!authors.includes('carol'), 'carol is left out');
+    assert.ok(authors.includes('alice') && authors.includes('bob'), JSON.stringify(authors));
+    const row = await db.getChatAiSummary('global', 0, 'global');
+    assert.strictEqual(row.overview, 'consenting talk');
+    assert.strictEqual(Number(row.people), 2);
+    const topics = JSON.parse(row.topics_json);
+    assert.ok(topics.some((x) => x.label === 'zelda' && x.count >= 2), JSON.stringify(topics));
+});
+
+t('a consent check that fails leaves everyone out (fail closed)', async () => {
+    const consent = require('../server/net/consent');
+    consent._reset();
+    h.consent.down = true;
+    const before = (await db.getChatAiSummary('global', 0, 'global')).message_count;
+    await db.run("UPDATE chat_ai_summaries SET updated_at = ? WHERE scope = 'global'", [sqliteNow(-60 * 60 * 1000)]);
+    await msg({ user_id: alice.id, username: 'alice', message: 'not read while Network is down' });
+    await chatAi._tick();
+    assert.strictEqual((await db.getChatAiSummary('global', 0, 'global')).message_count, before);
+    h.consent.down = false;
+    consent._reset();
+});
+
+t('GET /api/v1/rooms/global/insight answers the room shape, publicly', async () => {
+    await db.upsertChatAiSummary({
+        scope: 'global', subject_id: 0, window: 'global', overview: 'arrivals see this', memory_json: 'm',
+        timeline_json: JSON.stringify([{ ts: sqliteNow(), label: 'a moment', detail: 'detail' }]),
+        message_count: 12, window_message_count: 4, window_label: 'past hour',
+        window_start: sqliteNow(-3600e3), window_end: sqliteNow(), people: 3,
+        topics_json: JSON.stringify([{ label: 'zelda', count: 2 }]),
+    });
+    await db.addChatTimelineEvents('global', 0, [{ ts: sqliteNow(), label: 'the moment', detail: 'what happened', kind: 'moment' }]);
+
+    let r = await h.http('GET', '/api/v1/rooms/global/insight');   // no token: public
+    assert.strictEqual(r.status, 200, r.text);
+    assert.strictEqual(r.body.state, 'ready');
+    assert.strictEqual(r.body.overview.text, 'arrivals see this');
+    assert.deepStrictEqual(r.body.overview.topics, [{ label: 'zelda', count: 2 }]);
+    assert.strictEqual(r.body.overview.people, 3);
+    assert.strictEqual(r.body.overview.messages, 4);
+    assert.ok(r.body.overview.from && r.body.overview.to && r.body.overview.updated_at);
+    assert.ok(Array.isArray(r.body.timeline) && r.body.timeline.length >= 1);
+    const ev = r.body.timeline.find((e) => e.title === 'the moment');
+    assert.ok(ev, JSON.stringify(r.body.timeline.slice(0, 3)));
+    assert.deepStrictEqual(Object.keys(ev).sort(), ['at', 'kind', 'message_id', 'text', 'title']);
+    assert.strictEqual(ev.text, 'what happened');
+
+    r = await h.http('GET', '/api/v1/rooms/nope/insight');
+    assert.strictEqual(r.status, 404);
+
+    r = await h.http('GET', '/');
+    assert.strictEqual(r.status, 200, r.text);
+    assert.ok(r.text.includes('arrivals see this'), 'the Global page shows the overview');
+    assert.ok(r.text.includes('AI overview of this room'), 'behind the head button');
+});
+
+t('an old summary is said as quiet, never as today\'s news', async () => {
+    await db.run("UPDATE chat_ai_summaries SET window_end = ?, updated_at = ? WHERE scope = 'global'", [sqliteNow(-48 * 3600e3), sqliteNow(-48 * 3600e3)]);
+    const r = await h.http('GET', '/api/v1/rooms/global/insight');
+    assert.strictEqual(r.status, 200, r.text);
+    assert.strictEqual(r.body.state, 'quiet');
+    assert.strictEqual(r.body.overview.text, '');
+    assert.deepStrictEqual(r.body.overview.topics, []);
 });
 
 t.run(async () => { try { chatAi.stop(); } catch { /* */ } });

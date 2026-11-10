@@ -32,6 +32,7 @@ const rooms = require('./rooms');
 const vibe = require('./vibe');
 const how = require('./how');
 const memory = require('./vibe-memory');
+const media = require('../media/client');
 const canvasStore = require('./vibe-canvas');
 
 const router = express.Router();
@@ -87,11 +88,29 @@ router.get('/', requireAuth, personOnly, async (req, res) => {
     } catch (err) { send(res, err); }
 });
 
+// A file for the composer's tray: the body is the file (any Content-Type), its name URI-encoded in
+// X-Filename. It goes to Media as the person (unlisted, theirs), and the message carries its reference.
+const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const fileLimit = limits('chat.vibe.file', { minute: 30, hour: 600 });
+router.post('/files', requireAuth, personOnly, fileLimit, (req, res, next) => express.raw({ type: () => true, limit: MAX_FILE_BYTES + 1 })(req, res, (err) => {
+    if (err && err.type === 'entity.too.large') return res.status(413).json({ error: 'A file can be up to 10 MB', code: 'vibe.file_too_large' });
+    return next(err);
+}), async (req, res) => {
+    try {
+        if (!req.user.subject_id) return res.status(403).json({ error: 'Sign in with an OpenVibe account to attach files', code: 'vibe.file_subject' });
+        if (!Buffer.isBuffer(req.body) || !req.body.length) return res.status(422).json({ error: 'Choose a file first', code: 'vibe.file_empty' });
+        const filename = (() => { try { return decodeURIComponent(String(req.get('x-filename') || '')).slice(0, 255); } catch { return String(req.get('x-filename') || '').slice(0, 255); } })() || 'file';
+        const mimeType = String(req.get('content-type') || 'application/octet-stream').split(';')[0].trim().toLowerCase().slice(0, 255) || 'application/octet-stream';
+        const file = await media.uploadFile(req.body, { filename, mimeType, subject: req.user.subject_id });
+        res.status(201).json({ file });
+    } catch (err) { send(res, err); }
+});
+
 const modeOf = (b) => (b && b.mode && b.mode !== 'chat' ? String(b.mode) : null);
 router.post('/', requireAuth, personOnly, startLimit, async (req, res) => {
     try {
         const b = req.body || {};
-        const out = modeOf(b) ? await vibe.startWork(req.user, b.message, modeOf(b)) : await vibe.start(req.user, b.message, { timezone: b.timezone, site: 'openvibe.chat' });
+        const out = modeOf(b) ? await vibe.startWork(req.user, b.message, modeOf(b)) : await vibe.start(req.user, b.message, { timezone: b.timezone, site: 'openvibe.chat', files: b.files });
         res.status(201).json(out);
     } catch (err) { send(res, err); }
 });

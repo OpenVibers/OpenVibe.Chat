@@ -120,7 +120,8 @@ main[data-party] [hidden] { display: none !important; }
 main[data-party].is-guest [data-party-chat] { min-height: 0; flex: 0 0 auto; align-self: start; }
 .pt-float { position: absolute; bottom: 12px; font-size: 30px; animation: pt-rise 2.4s cubic-bezier(.2, .7, .3, 1) forwards; }
 @keyframes pt-rise { 0% { transform: translateY(0) scale(.7); opacity: 0; } 12% { opacity: 1; transform: translateY(-14px) scale(1.05); } 100% { transform: translateY(-190px) scale(1); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .pt-float { animation: pt-fade 1.6s ease forwards; } @keyframes pt-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } } }
+@keyframes pt-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+html[data-ov-motion=reduced] .pt-float { animation: pt-fade 1.6s ease forwards; }
 
 /* The bar under the picture: the remote pill and the reactions. */
 .pt-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
@@ -214,4 +215,31 @@ main[data-party].is-guest [data-party-chat] { min-height: 0; flex: 0 0 auto; ali
 @media (max-width: 420px) {
   .pt-react-btn { width: 40px; height: 44px; font-size: 19px; }
   .pt-remote { flex: 1 1 100%; }
+}
+
+/* ── Listening together (openvibe.party): the room plays OpenVibe Radio beside the video or desktop ──
+   Plain markup on purpose: layout, type and the player's face are the design pass's. */
+.pt-music {
+  order: 3; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px;
+  border: 1px solid var(--pt-line); border-radius: 14px; background: var(--pt-panel);
+}
+.pt-music[hidden] { display: none !important; }
+.pt-music .pt-h { margin: 0; }
+.pt-music-note { margin: 0; color: var(--pt-muted); font-size: 13.5px; line-height: 1.45; }
+.pt-music-now { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; min-width: 0; }
+.pt-music-copy { flex: 1 1 240px; min-width: 0; }
+.pt-music-title { margin: 2px 0 0; font-size: 16px; line-height: 1.3; overflow-wrap: anywhere; }
+.pt-music-by, .pt-music-proof { margin: 2px 0 0; color: var(--pt-muted); font-size: 13px; }
+.pt-music-proof a { color: var(--pt-accent); }
+.pt-music-audio { display: none; }
+.pt-music-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.pt-music-volume { display: inline-flex; align-items: center; gap: 8px; color: var(--pt-muted); font-size: 13.5px; }
+.pt-music-volume input { width: 140px; accent-color: var(--pt-accent); }
+.pt-music-start { display: flex; gap: 8px; flex-wrap: wrap; }
+.pt-music-start select {
+  flex: 1 1 220px; min-width: 0; min-height: 40px; padding: 0 10px; border-radius: 9px;
+  border: 1px solid var(--pt-line); background: var(--pt-bg); color: var(--pt-text); font: inherit;
+}
+@media (max-width: 900px) {
+  .pt-music { margin: 0 12px; order: 3; }
 }

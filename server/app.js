@@ -177,6 +177,8 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // The chat plays queue of an agent stream's room (Agent Streams S6): what the desk may read of it and
     // how it records that a request ran (the capabilities chat.play_queue.read and chat.play_queue.write).
     app.use('/api/v1/rooms', require('./chat/play-queue-routes').service);
+    // A room's AI insight (plan 2026-11-10): public, one shape for Global and, in part 2, every room.
+    app.use('/api/v1/rooms', require('./chat/room-insight-routes'));
     app.get('/health', (req, res) => res.json({ ok: true, service: 'chat' }));
     // Readiness in the openvibe-shared/ready shape (status ready/degraded/not_ready, named checks):
     // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
@@ -334,6 +336,9 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     app.use('/api/tts', limits.identify, limits.reads('chat.tts.read', { skip: (req) => req.path.startsWith('/audio/') }));
     app.use('/api/sounds', limits.identify, limits.reads('chat.sounds.read', { skip: (req) => req.path.startsWith('/file/') }));
     app.use('/api/emotes', limits.identify, limits.reads('chat.emotes.read', { skip: (req) => req.path.startsWith('/file/') }));
+
+    // What happened to you in Chat (server/chat/activity.js, migration 0060): its own API, not Live's chat.
+    app.use('/api/v1/activity', limits.identify, limits.reads('chat.activity.read'), require('./chat/activity-routes'));
 
     // The person's chat settings: the Network user modules Chat owns (server/prefs/stores.js).
     for (const [mount, router] of Object.entries(require('./prefs/routes').ROUTES)) app.use(`/api/chat/${mount}`, router);

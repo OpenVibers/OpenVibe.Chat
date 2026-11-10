@@ -25,6 +25,8 @@ t('the home is one pick block: a chip per section, the first picked, every secti
     const streamer = await db.get("SELECT id FROM ctx_users WHERE username = 'streamer_x'");
     await db.run("INSERT INTO ctx_streams (user_id, title, is_live, started_at) VALUES (?, 'Live from the studio', 1, ?)", [streamer.id, stamp]);
     const page = await fetch(`${h.base}/`).then((r) => r.text());
+    // A stream row opens the maker's /@username address, so it is named by its @handle.
+    assert.ok(page.includes('>@streamer_x</'), 'the live stream row is named @streamer_x');
     const start = page.indexOf('<div class="pick" id="pick-explore">');
     assert.ok(start > 0, 'the pick block is on the home');
     const block = page.slice(start, page.indexOf('<div class="pick" id="pick-', start + 10) > 0 ? page.indexOf('<div class="pick" id="pick-', start + 10) : start + 60000);
