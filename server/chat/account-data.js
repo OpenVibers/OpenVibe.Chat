@@ -62,6 +62,8 @@ const EXPORTS = [
     ['ai_members_added.json', `SELECT * FROM room_ai_members WHERE created_by_subject = ANY(@s) ORDER BY id DESC LIMIT ${LIMIT}`],
     // Work they put on a workspace room's queue (server/rooms/workspace.js), with its results.
     ['room_tasks.json', `SELECT t.id, r.slug AS room, t.title, t.details, t.kind, t.status, t.via, t.result, t.result_url, t.sources, t.error, t.created_at, t.finished_at FROM room_tasks t JOIN rooms r ON r.id = t.room_id WHERE t.requested_subject = ANY(@s) OR t.requested_by = ANY(@ids) ORDER BY t.id DESC LIMIT ${LIMIT}`],
+    // What rooms remember from their messages, and what they wrote themselves (server/rooms/memory.js).
+    ['room_memory.json', `SELECT rm.id, r.slug AS room, rm.kind, rm.text, rm.confidence, rm.learned_at, rm.learned_by FROM room_memory rm JOIN rooms r ON r.id = rm.room_id WHERE rm.learned_by = ANY(@s) OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(rm.source_subjects) x WHERE x = ANY(@s)) ORDER BY rm.id DESC LIMIT ${LIMIT}`],
     // Hooks they made into a workspace room (server/rooms/hooks.js), without their secrets.
     ['room_hooks.json', `SELECT h.id, r.slug AS room, h.label, h.queue_kind, h.deliveries, h.last_at, h.created_at FROM room_hooks h JOIN rooms r ON r.id = h.room_id WHERE h.created_by = ANY(@ids) ORDER BY h.created_at DESC LIMIT ${LIMIT}`],
     ['vibe_usage.json', `SELECT * FROM vibe_usage WHERE user_id = ANY(@ids) ORDER BY day DESC LIMIT ${LIMIT}`],
@@ -147,6 +149,7 @@ const ERASE_AFTER_ROOMS = [
     ['agent_room_votes', 'DELETE FROM agent_room_poll_votes WHERE user_id = ANY(@ids)'],
     ['room_reactions', 'DELETE FROM room_message_reactions WHERE user_id = ANY(@ids)'],
     ['activity', 'DELETE FROM chat_activity WHERE user_id = ANY(@ids) OR actor_user_id = ANY(@ids)'],
+    ['room_memory', "DELETE FROM room_memory WHERE learned_by = ANY(@s) OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(room_memory.source_subjects) x WHERE x = ANY(@s))"],
     ['vibe_deliveries', 'DELETE FROM vibe_deliveries WHERE user_id = ANY(@ids)'],
     // Friends and conversation view preferences from the Chat app shell.
     ['dm_contacts', 'DELETE FROM dm_contacts WHERE user_id = ANY(@ids) OR contact_id = ANY(@ids)'],
