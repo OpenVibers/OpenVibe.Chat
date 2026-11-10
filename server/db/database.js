@@ -896,6 +896,7 @@ async function getChannelEmotes(userId) {
            LEFT JOIN ctx_users u ON e.user_id = u.id
            LEFT JOIN ctx_users up ON e.user_id = up.id
           WHERE ((e.channel_owner_id = ?) OR (e.channel_owner_id IS NULL AND e.user_id = ?))
+            AND e.server_id IS NULL
             AND e.is_approved = 1
           ORDER BY code`,
         [userId, userId]
@@ -905,7 +906,7 @@ async function getChannelEmotes(userId) {
 /** How many emotes a channel holds (Live's countChannelEmotes; ownerId is the streamer's user id). */
 async function countChannelEmotes(ownerId) {
     return (await get(
-        'SELECT COUNT(*) as count FROM emotes WHERE (channel_owner_id = ?) OR (channel_owner_id IS NULL AND user_id = ?)',
+        'SELECT COUNT(*) as count FROM emotes WHERE ((channel_owner_id = ?) OR (channel_owner_id IS NULL AND user_id = ?)) AND server_id IS NULL',
         [ownerId, ownerId]
     ))?.count || 0;
 }
@@ -915,6 +916,7 @@ async function getChannelEmoteByCode(ownerId, code) {
     return await get(
         `SELECT * FROM emotes
           WHERE code = ? AND ((channel_owner_id = ?) OR (channel_owner_id IS NULL AND user_id = ?))
+            AND server_id IS NULL
           LIMIT 1`,
         [code, ownerId, ownerId]
     );
@@ -927,7 +929,7 @@ async function getEmoteById(id) {
 
 /** A user's own emotes (Live's getEmotesByUser). */
 async function getEmotesByUser(userId) {
-    return await all('SELECT * FROM emotes WHERE user_id = ? ORDER BY code', [userId]);
+    return await all('SELECT * FROM emotes WHERE user_id = ? AND server_id IS NULL ORDER BY code', [userId]);
 }
 
 /** Moderation actions with actor/target names (Live's getModerationActions). */

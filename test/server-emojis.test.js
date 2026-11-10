@@ -89,6 +89,13 @@ t('the list is public and starts empty; a member uploads within the limits', asy
 
     r = await list(null);
     assert.deepStrictEqual(r.body.emojis.map((e) => [e.name, e.url, e.fallback]), [['party', up.body.emoji.url, ':party:']]);
+
+    // A server emoji is the server's, not a personal/channel emote of the person who uploaded it:
+    // it stays out of their own lists and does not count against their channel's allowance.
+    const mine = await h.http('GET', '/api/emotes/mine', { token: member.token });
+    assert.deepStrictEqual([mine.body.emotes.length, Number(mine.body.count)], [0, 0]);
+    const channel = await h.http('GET', `/api/emotes/channel/${member.id}`);
+    assert.deepStrictEqual(channel.body.emotes, []);
 });
 
 t('a name already taken on the server is refused, in any case; bad names and non-images too', async () => {
