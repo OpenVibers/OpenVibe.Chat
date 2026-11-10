@@ -120,7 +120,8 @@ main[data-party] [hidden] { display: none !important; }
 main[data-party].is-guest [data-party-chat] { min-height: 0; flex: 0 0 auto; align-self: start; }
 .pt-float { position: absolute; bottom: 12px; font-size: 30px; animation: pt-rise 2.4s cubic-bezier(.2, .7, .3, 1) forwards; }
 @keyframes pt-rise { 0% { transform: translateY(0) scale(.7); opacity: 0; } 12% { opacity: 1; transform: translateY(-14px) scale(1.05); } 100% { transform: translateY(-190px) scale(1); opacity: 0; } }
-@media (prefers-reduced-motion: reduce) { .pt-float { animation: pt-fade 1.6s ease forwards; } @keyframes pt-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } } }
+@keyframes pt-fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+html[data-ov-motion=reduced] .pt-float { animation: pt-fade 1.6s ease forwards; }
 
 /* The bar under the picture: the remote pill and the reactions. */
 .pt-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }

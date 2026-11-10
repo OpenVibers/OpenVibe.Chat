@@ -29,7 +29,7 @@
   var uploadRoot = document.querySelector('[data-vb-upload]');
   var picture = null;   // { file, url }: a picture waiting to go with the next message
   var attachments = []; // { file, row, xhr, ref }: files waiting to go with the next message (Media references)
-  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var reduce = document.documentElement.getAttribute('data-ov-motion') === 'off';
   var chosenModels = Array.isArray(cfg.models) ? cfg.models.slice(0, 3) : [];
   function persistModelChoice() {
     if (!room) return;
