@@ -56,7 +56,6 @@
     '.p.on{opacity:1;transform:none;pointer-events:auto}.p iframe{width:100%;height:100%;flex:1;min-height:0;border:0;display:block}' +
     '.h{display:none;align-items:center;justify-content:space-between;padding:8px 14px;background:#121a2b;color:#fff;font:600 14px system-ui}.h button{min-width:44px;min-height:44px;border:0;background:transparent;color:inherit;font:inherit;cursor:pointer}' +
     '@media (max-width:520px){.p{left:0;right:0;bottom:0;top:0;width:auto;height:auto;border-radius:0}.p.on~.b{display:none}.h{display:flex;touch-action:none}}' +
-    '@media (prefers-reduced-motion:reduce){.b,.p{transition:none}}' +
     '</style>' +
     '<div class="p" role="dialog" aria-label="Chat"><div class="h"><span>Chat</span><button type="button" aria-label="Close chat">Close</button></div></div>' +
     '<button class="b" type="button" aria-label="Open the chat" aria-expanded="false"><span class="d"></span>' +

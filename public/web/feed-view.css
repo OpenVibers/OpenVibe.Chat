@@ -31,4 +31,3 @@
 .fv-count, .fv-more { color: var(--fv-muted); font-size: .78rem; padding-left: 1.8em; }
 .fv-working { color: var(--fv-muted); font-size: .82rem; padding-left: 1.8em; }
 .fv-empty { margin: 4px 0; color: var(--fv-muted); font-size: .85rem; }
-@media (prefers-reduced-motion: reduce) { .fv-live .fv-dot { animation: none; } .fv-chev { transition: none; } }
