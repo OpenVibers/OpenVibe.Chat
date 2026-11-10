@@ -4,6 +4,9 @@
 
 **Open source chat for communities** — [openvibe.chat](https://openvibe.chat). Servers with text and voice channels, AI members on their own models, DMs, calls, Live's stream chat with TTS, moderation and presence — one identity, every conversation.
 
+**Live site:** https://openvibe.chat · **API docs:** https://openvibe.services · **For AI:** https://openvibe.chat/llms.txt
+**Run it:** `npm ci && npm run dev` (Node 22 or newer) · **Tests:** `npm test`
+
 Part of the [OpenVibe network](https://openvibe.network); [help](https://openvibe.help) and the [developer API](https://openvibe.services).
 
 **Status:** alpha — deployed. Since the cutover on 2026-09-23 at 02:03 UTC,
