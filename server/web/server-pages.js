@@ -100,7 +100,7 @@ ${join}</article>`;
         const featuredRow = featuredServers.length ? `<section class="oc-featured" aria-labelledby="oc-featured-h"><h2 class="oc-list-head" id="oc-featured-h">Featured</h2><div class="oc-cards oc-featured-cards">${featuredServers.map(card).join('')}</div></section>` : '';
         // The sheet: a template first, then a name and a picture, then public or private.
         const sheet = me ? `<details class="oc-sheet" id="oc-new-server"><summary class="oc-button">Start a server</summary>
-<form class="oc-form oc-sheet-form" method="post" action="/servers/new" enctype="multipart/form-data">
+<form class="oc-form oc-sheet-form" method="post" action="/servers/new" data-picture-upload-form>
 <h2>Start a server</h2>
 <fieldset class="oc-sheet-step"><legend>1. What is it for?</legend>
 <div class="oc-templates">${templates.TEMPLATES.map((t, i) => `<label class="oc-template"><input type="radio" name="template" value="${esc(t.id)}"${i === 0 ? ' checked' : ''}><span class="oc-template-body"><strong>${esc(t.name)}</strong><span class="oc-muted">${esc(t.description)}</span><span class="oc-template-channels">${t.channels.map((c) => esc(c.kind === 'voice' ? '🔊 ' : '# ') + esc(c.name)).join(' · ')}</span></span></label>`).join('')}</div>
@@ -110,7 +110,12 @@ ${join}</article>`;
 <label class="oc-field"><span>Name</span><input name="name" required minlength="2" maxlength="40" placeholder="Saturday Raiders"></label>
 <label class="oc-field"><span>Category</span><select name="category"><option value="">No category</option>${templates.CATEGORIES.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('')}</select></label>
 <label class="oc-field oc-field--wide"><span>Description</span><input name="description" maxlength="300" placeholder="What it is for (optional)"></label>
-<label class="oc-field oc-field--wide"><span>Picture</span><input type="file" name="picture" accept="image/png,image/jpeg,image/webp"><small class="oc-muted">PNG, JPEG or WebP. Without one, its initials on its colour.</small></label>
+<div class="oc-field oc-field--wide"><span>Picture</span>
+<div data-picture-upload data-accept="image/png,image/jpeg,image/webp"></div>
+<small class="oc-muted">PNG, JPEG or WebP. Without one, its initials on its colour.</small>
+<p class="oc-muted" data-picture-status role="status" aria-live="polite"></p>
+<div data-picture-progress hidden></div>
+</div>
 </div>
 </fieldset>
 <fieldset class="oc-sheet-step"><legend>3. Who may find it?</legend>
@@ -124,7 +129,7 @@ ${join}</article>`;
 ${mine.length ? `<ul class="oc-side-list">${mine.map((sv) => `<li class="oc-row"><a href="/s/${esc(sv.slug)}">${ui.serverMark(sv)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(sv.name)}</strong></span><span class="oc-row-sub">${Number(sv.members) || 0} member${Number(sv.members) === 1 ? '' : 's'}</span></span></a></li>`).join('')}</ul>` : `<p class="oc-side-empty oc-muted">You are in no servers yet.</p>`}
 </section>`;
         await page(req, res, 200, {
-            actor, shell: true, title: 'Explore servers', path: '/servers', active: 'servers', robots: 'index, follow', footer: 'none',
+            actor, shell: true, title: 'Explore servers', path: '/servers', active: 'servers', robots: 'index, follow', footer: 'none', upload: require('../rooms/pictures').enabled(), scripts: require('../rooms/pictures').enabled() ? ['picture-upload.js'] : [],
             description: 'Servers on OpenVibe.Chat: a place for a group, with text and voice channels, roles and invites.',
             body: shell.shell({
                 rail: shell.rail({ explore: true, dmUnread: me ? await require('../chat/dm').getTotalUnread(me.id) : 0, servers: mine.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
@@ -283,7 +288,7 @@ ${sheet}`,
         // and the sign-in link post to (POST /s/:slug/:channel).
         const canonicalPath = req.params.channel ? back : `/s/${server.slug}`;
         await page(req, res, 200, {
-            actor, shell: true, footer: 'none', title: `${isVoice ? '' : '#'}${room.name} · ${server.name}`, path: canonicalPath, active: 'servers',
+            actor, shell: true, footer: 'none', title: `${isVoice ? '' : '#'}${room.name} · ${server.name}`, path: canonicalPath, active: 'servers', upload: require('../rooms/pictures').enabled(), scripts: require('../rooms/pictures').enabled() ? ['picture-upload.js'] : [],
             robots: server.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
             description: server.description || `${server.name}, a server on OpenVibe.Chat with ${server.member_count} member${Number(server.member_count) === 1 ? '' : 's'}.`,
             page: {

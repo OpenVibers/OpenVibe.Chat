@@ -206,7 +206,8 @@ function composer({ slug, signedIn, enabled, prefill = '', engine = null, models
     const pics = pictures.enabled();
     const label = pics ? 'Add a picture or a text file' : 'Add a text file';
     const attach = signedIn && enabled
-        ? `<input type="file" id="vb-file" accept="${pics ? 'image/jpeg,image/png,image/gif,image/webp,image/avif,' : ''}${TEXT_FILES}" hidden><button class="ovt-btn vb-attach" type="button" data-vb-attach aria-label="${label}" title="${label}">${ICON.attach}</button>`
+        ? `<button class="ovt-btn vb-attach" type="button" data-vb-attach aria-label="${label}" title="${label}">${ICON.attach}</button>
+<dialog class="vb-upload" data-vb-upload-dialog aria-labelledby="vb-upload-h"><div class="vb-upload-head"><h2 id="vb-upload-h">${pics ? 'Add a picture or a text file' : 'Add a text file'}</h2><button type="button" class="vb-upload-close" data-vb-upload-close aria-label="Close">✕</button></div><div data-vb-upload data-accept="${pics ? 'image/jpeg,image/png,image/gif,image/webp,image/avif,' : ''}${TEXT_FILES}"></div></dialog>`
         : '';
     const modes = `<fieldset class="vb-modes" aria-label="What Vibe does with it">${MODES.map(([value, label, hint, placeholder], i) => `<label title="${esc(hint)}"><input type="radio" name="mode" value="${value}" data-placeholder="${esc(placeholder)}"${i ? '' : ' checked'}><span>${label}</span></label>`).join('')}</fieldset>`;
     const fine = !enabled ? 'Vibe is resting right now. Try again later.' : engine && engine.own ? `Vibe thinks with ${esc(engine.you)} (<a href="/settings#oc-ai-key">change</a>). It can get things wrong: check what matters.` : 'Vibe can get things wrong. Check what matters.';
@@ -214,7 +215,7 @@ function composer({ slug, signedIn, enabled, prefill = '', engine = null, models
         action, method: signedIn ? 'post' : 'get', name: 'message', id: 'vb-composer', attrs: signedIn ? {} : { 'data-signin': '1' },
         label: 'Message Vibe', placeholder: signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)', value: prefill, maxlength: 12000,
         hidden: signedIn ? {} : { next: slug ? `/vibe/${slug}` : (prefill ? `/vibe?ask=${encodeURIComponent(prefill)}` : '/vibe') },
-        top: `<div class="vb-model-picker"><button type="button" class="vb-model-chip" id="vb-model-chip" aria-haspopup="dialog" aria-expanded="false">${models.length > 1 ? `${models.length} models` : models[0] ? esc(models[0]) : 'Auto'} ▾</button><div class="vb-model-sheet" id="vb-model-sheet" role="dialog" aria-label="Choose models" hidden><div class="vb-model-sheet-head"><strong>Choose a model</strong><button type="button" id="vb-model-close" aria-label="Close model list">✕</button></div><label class="vb-model-compare"><input type="checkbox" id="vb-model-compare"> Compare models</label><div id="vb-model-list"><p>Loading models…</p></div><details><summary>Settings</summary><label>System prompt<textarea id="vb-system-prompt" maxlength="4000"></textarea></label><label>Temperature<input id="vb-temperature" type="number" min="0" max="2" step="0.1" value="1"></label></details><p class="vb-model-floor">The floor holds on every model: <a href="https://openvibe.network/rules">the rules</a></p></div></div><div class="vb-preview" id="vb-preview" hidden></div>`, tools: attach + modes,
+        top: `<div class="vb-model-picker"><button type="button" class="vb-model-chip" id="vb-model-chip" aria-haspopup="dialog" aria-expanded="false">${models.length > 1 ? `${models.length} models` : models[0] ? esc(models[0]) : 'Auto'} ▾</button><div class="vb-model-sheet" id="vb-model-sheet" role="dialog" aria-label="Choose models" hidden><div class="vb-model-sheet-head"><strong>Choose a model</strong><button type="button" id="vb-model-close" aria-label="Close model list">✕</button></div><label class="vb-model-compare"><input type="checkbox" id="vb-model-compare"> Compare models</label><div id="vb-model-list"><p>Loading models…</p></div><details><summary>Settings</summary><label>System prompt<textarea id="vb-system-prompt" maxlength="4000"></textarea></label><label>Temperature<input id="vb-temperature" type="number" min="0" max="2" step="0.1" value="1"></label></details><p class="vb-model-floor">The floor holds on every model: <a href="https://openvibe.network/rules">the rules</a></p></div></div><div class="vb-preview" id="vb-preview" hidden></div><div class="vb-progress" data-vb-progress hidden></div>`, tools: attach + modes,
         // Stop is drawn hidden: vibe.js shows it while Vibe writes, and it keeps what was written so far.
         stopAction: signedIn ? '' : null,
         foot: `<p class="vb-fine">${fine}</p>`,
@@ -296,7 +297,7 @@ ${MARK}
             center: !room, label: room ? 'Your chat with Vibe' : 'A new chat with Vibe',
         })}</div>`;
         await page(req, res, status, {
-            actor, app: true, kit: true, canvas: !!room, active: 'vibe', path: room ? `/vibe/${room.slug}` : '/vibe',
+            actor, app: true, kit: true, upload: true, canvas: !!room, active: 'vibe', path: room ? `/vibe/${room.slug}` : '/vibe',
             title: room ? `${room.name} · Vibe` : 'Vibe, OpenVibe\'s assistant',
             fullTitle: room ? undefined : 'Vibe: chat with OpenVibe\'s assistant · OpenVibe.Chat',
             description: 'Chat with Vibe, OpenVibe\'s free assistant: it searches news, deals, jobs, rentals and videos across OpenVibe, reads pages you link and helps you think.',
