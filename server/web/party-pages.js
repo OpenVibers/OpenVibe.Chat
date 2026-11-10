@@ -27,6 +27,8 @@ const { createSessionRoutes } = require('./session');
 const { viewerOf } = require('./pages');
 const parties = require('../rooms/parties');
 const radio = require('../rooms/radio');
+const partyPool = require('../rooms/party-pool');
+const { isOwner } = require('../auth/permissions');
 const radioSource = (v) => ({ creator: 'Creator upload', creative_commons: 'Creative Commons', public_domain: 'Public domain', ai: 'AI-made music' })[v] || v;
 const radioLicence = (v) => v === 'creator_grant' ? 'Creator’s permission to stream' : v === 'public_domain' ? 'Public domain mark' : v;
 
@@ -152,12 +154,22 @@ function createPartyRoutes({ config }) {
 <ul class="pty-mine-list">${mine.map((x) => `<li><a href="/p/${encodeURIComponent(x.id)}"><strong>${esc(x.title)}</strong><span>${x.hosting ? 'You started it' : 'You joined'} · ${esc(since(x.started_at))}</span></a></li>`).join('')}</ul>
 </section>` : '';
         const startHref = (x) => `/new?media=${encodeURIComponent(x.page_url)}&title=${encodeURIComponent(x.title)}`;
-        // Two plain choices, not a dropdown (Opus's design pass): where the shared computer runs.
+        // Two plain choices, not a dropdown (Opus's design pass): where the shared computer runs. The OpenVibe
+        // choice is live only while the owner's pool has a machine; the line below it says the plain truth.
+        const available = await partyPool.availability().catch(() => ({ enabled: false, machines: 0, desktops: 0, free: 0, queued: 0 }));
+        const poolCanStart = available.enabled && available.machines > 0;
+        const poolLine = !available.enabled
+            ? 'OpenVibe computers are not on yet.'
+            : available.machines === 0
+                ? 'No OpenVibe computer is registered yet.'
+                : available.free > 0
+                    ? `${available.free} of ${available.desktops} OpenVibe computer${available.desktops === 1 ? '' : 's'} free.`
+                    : `All ${available.desktops} OpenVibe computer${available.desktops === 1 ? '' : 's'} busy${available.queued ? ` · ${available.queued} in line` : ''}.`;
         const desktopStart = signedIn ? `<form class="pty-desktop-start" method="get" action="/new">
 <h2 class="pty-start-h">Start a shared computer</h2>
 <div class="pty-host-choice">
 <button type="submit" name="desktop" value="link" class="pty-host"><strong>On my computer</strong><span>Free. Runs in the Link app on your computer.</span></button>
-<button type="submit" name="desktop" value="openvibe" class="pty-host" disabled aria-describedby="pty-openvibe-availability"><strong>On OpenVibe</strong><span id="pty-openvibe-availability">No OpenVibe machine is free right now.</span></button>
+<button type="submit" name="desktop" value="openvibe" class="pty-host"${poolCanStart ? '' : ' disabled'} aria-describedby="pty-openvibe-availability"><strong>On OpenVibe</strong><span id="pty-openvibe-availability">${esc(poolLine)}</span></button>
 </div>
 </form>` : `<p class="pty-cta"><a class="oc-button" href="/auth/login?next=%2F">Sign in to start a shared computer</a></p>`;
         const start = signedIn
@@ -211,8 +223,16 @@ ${grid}
         if (req.query.desktop) {
             const hosting = String(req.query.desktop);
             if (hosting !== 'link' && hosting !== 'openvibe') return res.redirect(303, '/');
-            if (hosting === 'openvibe') return page(req, res, 503, { actor, title: 'No OpenVibe computer is free', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
-                body: '<section class="oc-party-confirm pty-confirm"><h1>No OpenVibe machine is free right now</h1><p>You can host this party on your own computer with Link.</p><p><a class="oc-button" href="/new?desktop=link">Host it on my computer</a></p></section>' });
+            if (hosting === 'openvibe') {
+                const available = await partyPool.availability().catch(() => ({ enabled: false, machines: 0, desktops: 0, free: 0, queued: 0 }));
+                if (!available.enabled || available.machines === 0) return page(req, res, 503, { actor, title: 'No OpenVibe computer is available', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
+                    body: `<section class="oc-party-confirm pty-confirm"><h1>${available.enabled ? 'No OpenVibe computer is registered yet' : 'OpenVibe computers are not on yet'}</h1><p>${available.enabled ? 'The owner can add one on the pool panel; until then you can host this party on your own computer with Link.' : 'You can host this party on your own computer with Link.'}</p><p><a class="oc-button" href="/new?desktop=link">Host it on my computer</a> <a href="/" class="oc-muted">Not now</a></p></section>` });
+                const line = available.free > 0
+                    ? `An OpenVibe computer is free. It starts when the OpenVibe Link on that machine picks the party up.`
+                    : `Every OpenVibe computer is busy right now. You will wait in line (${available.queued + 1}${available.queued ? ' behind the parties already waiting' : 'st'}) and it starts as soon as one is free.`;
+                return page(req, res, 200, { actor, title: 'Start a shared computer on OpenVibe', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
+                    body: `<section class="oc-party-confirm pty-confirm"><h1>Start a shared computer on OpenVibe?</h1><p>OpenVibe runs a temporary browser for this party on one of its own computers. People you invite can watch, and you can pass the remote.</p><p class="oc-muted">${esc(line)}</p><form method="post" action="/new"><input type="hidden" name="desktop_hosting" value="openvibe"><button class="oc-button" type="submit">Start the party</button> <a href="/" class="oc-muted">Not now</a></form></section>` });
+            }
             return page(req, res, 200, { actor, title: 'Start a shared computer', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
                 body: `<section class="oc-party-confirm pty-confirm"><h1>Start a shared computer?</h1><p>Link runs a temporary browser in a container on your computer. People you invite can watch, and you can pass the remote.</p><p class="oc-muted">It needs the OpenVibe Link app on this computer. <a href="https://openvibe.link">Get Link</a></p><form method="post" action="/new"><input type="hidden" name="desktop_hosting" value="link"><button class="oc-button" type="submit">Start the party</button> <a href="/" class="oc-muted">Not now</a></form></section>` });
         }
@@ -261,7 +281,7 @@ ${source ? `<input type="hidden" name="source_url" value="${esc(source)}">` : ''
                 const out = await parties.createDesktop(actor.user, { desktop_hosting: String(req.body.desktop_hosting), title: 'Shared computer' });
                 return res.redirect(303, `/p/${encodeURIComponent(out.party.id)}?k=${encodeURIComponent(out.join_secret)}`);
             } catch (err) {
-                return res.redirect(303, `/?error=${encodeURIComponent(err instanceof parties.PartyError ? err.message : 'The shared computer could not be started')}`);
+                return res.redirect(303, `/?error=${encodeURIComponent(err && err.status && err.message ? err.message : 'The shared computer could not be started')}`);
             }
         }
         if (req.body && req.body.radio_track_id) {
@@ -286,6 +306,88 @@ ${source ? `<input type="hidden" name="source_url" value="${esc(source)}">` : ''
             const message = err instanceof parties.PartyError ? err.message : 'That party could not be started';
             return res.redirect(303, `/?error=${encodeURIComponent(message)}`);
         }
+    });
+
+    // ── The owner's pool panel (openvibe.party/pool): the switch and the Link machines OpenVibe may use ──
+    // Plain markup on purpose: layout, styling and copy are the design pass's.
+    const sameOrigin = (req) => {
+        const origin = String(req.get('origin') || '');
+        const site = String(req.get('sec-fetch-site') || '');
+        return (!origin || origin === base) && (!site || site === 'same-origin');
+    };
+    const poolPanel = async (req, res, { error = '' } = {}) => {
+        const data = await partyPool.panel();
+        const machineRows = data.machines.length ? `<table><thead><tr><th>Machine</th><th>Principal</th><th>Runs</th><th>Desktops</th><th>In use</th><th>Offered</th><th></th></tr></thead><tbody>${data.machines.map((m) => `<tr>
+<td>${esc(m.name)}</td><td><code>${esc(m.principal_id)}</code></td><td>${esc(m.can_run.join(', '))}</td><td>${esc(String(m.desktops))}</td><td>${esc(String(m.load))}</td><td>${m.enabled ? 'yes' : 'no'}</td>
+<td><form method="post" action="/pool/machines/${encodeURIComponent(m.principal_id)}/delete"><button type="submit" class="oc-link">Remove</button></form></td>
+</tr>`).join('')}</tbody></table>` : '<p class="oc-muted">No OpenVibe computers are registered yet.</p>';
+        const holdRows = data.holds.length ? `<table><thead><tr><th>Party</th><th>State</th><th>Machine</th><th>Person</th><th>Held</th></tr></thead><tbody>${data.holds.map((h) => `<tr><td><a href="/p/${encodeURIComponent(h.party)}">${esc(h.title || h.party)}</a></td><td>${esc(h.state)}</td><td>${h.machine ? `<code>${esc(h.machine)}</code>` : '—'}</td><td><code>${esc(h.actor)}</code></td><td>${esc(String(h.created_at || ''))}</td></tr>`).join('')}</tbody></table>` : '<p class="oc-muted">No party is waiting for or running on an OpenVibe computer.</p>';
+        return await page(req, res, 200, {
+            actor: await viewerOf(req), title: 'OpenVibe computers', path: '/pool', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
+            body: `<section class="oc-party-confirm pty-confirm">
+<h1>OpenVibe computers</h1>
+<p class="oc-muted">These are OpenVibe’s own Link machines. When a party asks for an OpenVibe computer, placement picks one with a free desktop and holds it for that party. There is no rental and no charge: the machines are the owner’s own.</p>
+${error ? notice('error', error) : ''}
+<p>OpenVibe computers are <strong>${data.enabled ? 'on' : 'off'}</strong>.</p>
+<form method="post" action="/pool/enabled"><input type="hidden" name="enabled" value="${data.enabled ? '0' : '1'}"><button type="submit" class="oc-button">${data.enabled ? 'Turn the pool off' : 'Turn the pool on'}</button></form>
+</section>
+<section class="oc-party-confirm pty-confirm"><h2>Machines</h2>
+${machineRows}
+<h3>Add a machine</h3>
+<p class="oc-muted">Pair the machine in OpenVibe Link first; its principal is on your machines page on openvibe.network. Enter what it can run and how many desktops it may host at once.</p>
+<form method="post" action="/pool/machines">
+<label>Principal <input name="principal_id" required pattern="lnk_[0-9A-HJKMNP-TV-Z]{26}" placeholder="lnk_…"></label>
+<label>Name <input name="name" required maxlength="80" placeholder="Dell tower 1"></label>
+<label>Desktops <input name="desktops" type="number" min="1" max="50" value="1" required></label>
+<label><input type="checkbox" name="can_run" value="desktop" checked> Desktop parties</label>
+<label><input type="checkbox" name="can_run" value="browser"> Browsers</label>
+<button type="submit" class="oc-button">Add the machine</button>
+</form></section>
+<section class="oc-party-confirm pty-confirm"><h2>Parties on OpenVibe computers</h2>
+${holdRows}
+<p class="oc-muted">${data.queued} waiting in line.</p>
+</section>`,
+        });
+    };
+
+    router.get('/pool', async (req, res) => {
+        const actor = await viewerOf(req);
+        if (actor.kind !== 'user' || !isOwner(actor.user)) return page(req, res, 403, {
+            actor, title: 'Not the owner', path: '/pool', robots: 'noindex, nofollow', footer: 'compact',
+            body: '<h1>Only the owner runs OpenVibe’s computers</h1><p><a href="/">Start a party</a></p>',
+        });
+        return await poolPanel(req, res);
+    });
+
+    router.post('/pool/enabled', express.urlencoded({ extended: false, limit: '2kb' }), async (req, res) => {
+        const actor = await viewerOf(req);
+        if (actor.kind !== 'user' || !isOwner(actor.user)) return res.status(403).type('text/plain').send('Only the owner changes the pool.');
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Change the pool from openvibe.party itself.');
+        await partyPool.setEnabled(String(req.body && req.body.enabled) === '1', actor.user.subject_id || null);
+        return res.redirect(303, '/pool');
+    });
+
+    router.post('/pool/machines', express.urlencoded({ extended: false, limit: '4kb' }), async (req, res) => {
+        const actor = await viewerOf(req);
+        if (actor.kind !== 'user' || !isOwner(actor.user)) return res.status(403).type('text/plain').send('Only the owner changes the pool.');
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Change the pool from openvibe.party itself.');
+        try {
+            const raw = req.body || {};
+            const fields = partyPool.registrationOf({ principal_id: raw.principal_id, name: raw.name, desktops: raw.desktops,
+                can_run: [].concat(raw.can_run == null ? [] : raw.can_run), enabled: true });
+            await partyPool.upsert({ ...fields, owner_subject: actor.user.subject_id });
+            return res.redirect(303, '/pool');
+        } catch (err) {
+            return await poolPanel(req, res, { error: err && err.message ? err.message : 'That machine was not added' });
+        }
+    });
+
+    router.post('/pool/machines/:principal/delete', async (req, res) => {
+        const actor = await viewerOf(req);
+        if (actor.kind !== 'user' || !isOwner(actor.user)) return res.status(403).type('text/plain').send('Only the owner changes the pool.');
+        if (!sameOrigin(req)) return res.status(403).type('text/plain').send('Change the pool from openvibe.party itself.');
+        await partyPool.removeMachine(String(req.params.principal || ''));
+        return res.redirect(303, '/pool');
     });
 
     const notFound = async (req, res) => page(req, res, 404, {
@@ -315,7 +417,7 @@ ${source ? `<input type="hidden" name="source_url" value="${esc(source)}">` : ''
                 description: 'Watch together on OpenVibe.',
                 mainAttrs: `data-party="${esc(out.id)}"`, party: true, wide: true,
                 body: `<article class="oc-party${out.kind === 'radio' ? ' is-radio' : ''}">
-<header class="oc-party-head"><h1>${esc(out.title)}</h1><p class="oc-muted">Started by ${esc(out.host_name || 'someone')}</p></header>
+<header class="oc-party-head"><h1>${esc(out.title)}</h1><p class="oc-muted">Started by ${esc(out.host_name || 'someone')}</p>${out.kind === 'desktop' && out.desktop && out.desktop.where ? `<p class="oc-party-where" data-party-where>${esc(out.desktop.where.line)}</p>` : ''}</header>
 <div class="oc-party-stage" data-party-stage aria-label="${out.kind === 'radio' ? 'The music stage' : 'The video'}"></div>
 <div class="oc-party-people" data-party-people aria-label="People here"></div>
 <div class="oc-party-chat" data-party-chat aria-label="Chat"></div>
