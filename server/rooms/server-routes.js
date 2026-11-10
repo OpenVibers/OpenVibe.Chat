@@ -12,7 +12,7 @@
  *   POST   /:slug/leave
  *   GET    /:slug/members               (moderators also see who is banned)
  *   POST   /:slug/members               moderators: { username | subject, role: admin | mod | member | blocked | none }
- *   POST   /:slug/channels              owner/admins: { name, kind: text | voice | stage, topic? }
+ *   POST   /:slug/channels              owner/admins: { name, kind: text | voice | forum | stage, community_space?, topic? }
  *   PATCH  /:slug/channels/:channel     owner/admins: { name?, topic?, slow_seconds?, join_role?, move?: up | down }
  *   DELETE /:slug/channels/:channel     owner/admins (a server keeps one text channel)
  *   GET    /:slug/invites               owner/admins: the live invites
@@ -29,6 +29,7 @@ const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
 const servers = require('./servers');
 const ctx = require('../live-context');
+const communityForum = require('./community-forum');
 
 const router = express.Router();
 const createLimit = limits('chat.server.create', { minute: 5, hour: 20 });
@@ -37,12 +38,23 @@ const joinLimit = limits('chat.server.join', { minute: 20, hour: 200 });
 
 function send(res, err) {
     if (err instanceof rooms.RoomError) return res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof communityForum.ForumError) return res.status(err.status).json({ error: err.message, code: err.code });
     console.error('[Servers]', err && err.message);
     return res.status(500).json({ error: 'Something went wrong' });
 }
 const chatServer = () => require('../chat/chat-server');
 const roomRoutes = () => require('./routes');
 const siteUrl = () => { try { return require('../config').web.baseUrl; } catch { return 'https://openvibe.chat'; } };
+const forumToken = (req) => {
+    const m = /^Bearer\s+(.+)$/i.exec(String(req.get('authorization') || ''));
+    return m ? m[1].trim() : req.cookies && req.cookies.ov_token || null;
+};
+async function forumChannel(req, res, server) {
+    const room = await channelOf(req, res, server);
+    if (!room) return null;
+    if (!room.forum_space) { res.status(404).json({ error: 'No such forum channel', code: 'forum.not_found' }); return null; }
+    return room;
+}
 
 /** After a membership, role or visibility change: every channel's sockets and calls follow the server. */
 async function applyServerChange(server) {
@@ -156,11 +168,56 @@ router.post('/:slug/channels', requireAuth, manageLimit, async (req, res) => {
     const server = await readable(req, res); if (!server) return;
     try {
         const b = req.body || {};
-        const room = await servers.createChannel(server, req.user, { name: b.name, kind: b.kind || 'text', topic: b.topic });
+        if (b.kind === 'forum' && req.authSource === 'api_token') return res.status(403).json({ error: 'Connect a forum with your own sign-in', code: 'forum.person_only' });
+        if (b.kind === 'forum' && require('../settings').value('forum_channels_enabled', null, false) !== true) return res.status(403).json({ error: 'Forum channels are not enabled', code: 'servers.forum_disabled' });
+        if (b.kind === 'forum' && !(await servers.access(server, req.user)).manage) return res.status(403).json({ error: 'Only the server owner and admins add channels', code: 'servers.not_admin' });
+        if (b.kind === 'forum') await communityForum.verifyManage(b.community_space, forumToken(req));
+        const room = await servers.createChannel(server, req.user, { name: b.name, kind: b.kind || 'text', topic: b.topic, community_space: b.community_space });
         res.status(201).json({ channel: servers.publicChannel(room) });
     } catch (err) { send(res, err); }
 });
 
+router.get('/:slug/:channel/forum', optionalAuth, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await forumChannel(req, res, server); if (!room) return;
+    try {
+        const out = await communityForum.list(room.forum_space, forumToken(req), req.query);
+        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json(out);
+    } catch (err) { send(res, err); }
+});
+router.get('/:slug/:channel/forum/categories', optionalAuth, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await forumChannel(req, res, server); if (!room) return;
+    try { res.set('Cache-Control', cache.htmlHeaders({ private: true })).json(await communityForum.categories(room.forum_space, forumToken(req))); }
+    catch (err) { send(res, err); }
+});
+router.get('/:slug/:channel/forum/:thread', optionalAuth, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await forumChannel(req, res, server); if (!room) return;
+    try { res.set('Cache-Control', cache.htmlHeaders({ private: true })).json(await communityForum.thread(room.forum_space, req.params.thread, forumToken(req), { page: req.query.page })); }
+    catch (err) { send(res, err); }
+});
+router.post('/:slug/:channel/forum', requireAuth, manageLimit, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await forumChannel(req, res, server); if (!room) return;
+    if (req.authSource === 'api_token') return res.status(403).json({ error: 'Post with your own sign-in', code: 'forum.person_only' });
+    try { res.status(201).json(await communityForum.create(room.forum_space, forumToken(req), req.body || {})); }
+    catch (err) { send(res, err); }
+});
+router.post('/:slug/:channel/forum/:thread/replies', requireAuth, manageLimit, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await forumChannel(req, res, server); if (!room) return;
+    if (req.authSource === 'api_token') return res.status(403).json({ error: 'Reply with your own sign-in', code: 'forum.person_only' });
+    try { res.status(201).json(await communityForum.reply(room.forum_space, req.params.thread, forumToken(req), req.body || {})); }
+    catch (err) { send(res, err); }
+});
+router.put('/:slug/:channel/forum/:thread/state', requireAuth, manageLimit, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await forumChannel(req, res, server); if (!room) return;
+    if (req.authSource === 'api_token') return res.status(403).json({ error: 'Moderate with your own sign-in', code: 'forum.person_only' });
+    try { res.json(await communityForum.moderate(room.forum_space, req.params.thread, forumToken(req), req.body || {})); }
+    catch (err) { send(res, err); }
+});
 router.get('/:slug/:channel/stage', optionalAuth, async (req, res) => {
     const server = await readable(req, res); if (!server) return;
     const room = await stageChannel(req, res, server); if (!room) return;

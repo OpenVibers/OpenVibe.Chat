@@ -40,7 +40,7 @@ const RESERVED = new Set(['new', 'servers', 'settings', 'join', 'invite', 'invit
 const OFFICIAL_SLUG = 'openvibe';
 const ROLES = ['owner', 'admin', 'mod', 'member', 'blocked'];
 const RANK = { owner: 0, admin: 1, mod: 2, member: 3, blocked: 4 };
-const CHANNEL_KINDS = { text: 'community', voice: 'call', stage: 'call' };
+const CHANNEL_KINDS = { text: 'community', voice: 'call', forum: 'community', stage: 'call' };
 /** Channel names the server's own pages use (/s/<server>/settings …). */
 const CHANNEL_RESERVED = new Set(['settings', 'join', 'leave', 'channels', 'invites', 'members', 'delete']);
 const MAX_SERVERS_PER_OWNER = 5;
@@ -134,7 +134,7 @@ function publicServer(s, extra = {}) {
 /** A channel as the server shows it. */
 function publicChannel(r, extra = {}) {
     return {
-        slug: r.channel_slug, room: r.slug, name: r.name, topic: r.topic || null, kind: r.stage_channel ? 'stage' : r.kind === 'call' ? 'voice' : 'text',
+        slug: r.channel_slug, room: r.slug, name: r.name, topic: r.topic || null, kind: r.forum_space ? 'forum' : r.stage_channel ? 'stage' : r.kind === 'call' ? 'voice' : 'text',
         position: Number(r.position) || 0, message_count: Number(r.message_count) || 0, last_message_at: r.last_message_at || null,
         category: r.category || null,
         ...(r.kind === 'call' ? { call_channel: `room-${r.slug}`, join_role: r.stage_channel ? 'participant' : rooms.joinRoleOf(r) } : {}), ...extra,
@@ -160,12 +160,14 @@ async function channelBySlug(server, channelSlug) {
     return await db.get('SELECT * FROM rooms WHERE server_id = ? AND channel_slug = ? AND archived_at IS NULL', [server.id, String(channelSlug || '').toLowerCase()]) || null;
 }
 
-async function insertChannel(server, user, { name, kind, topic = null, position = null }) {
+async function insertChannel(server, user, { name, kind, topic = null, position = null, community_space = null }) {
     const n = cleanName(name, 1, 40);
     if (!n) fail(422, 'servers.channel_name', 'Channel names are 1 to 40 characters');
     if (wordFilter.check(n).safe === false) fail(422, 'servers.channel_name_filtered', 'That channel name is not allowed');
     const roomKind = CHANNEL_KINDS[kind];
-    if (!roomKind) fail(422, 'servers.channel_kind', 'A channel is text or voice');
+    if (!roomKind) fail(422, 'servers.channel_kind', 'A channel is text, voice, forum or stage');
+    if (kind === 'forum' && require('../settings').value('forum_channels_enabled', null, false) !== true) fail(403, 'servers.forum_disabled', 'Forum channels are not enabled');
+    if (kind === 'forum' && !require('./community-forum').slugOf(community_space)) fail(422, 'servers.forum_space', 'Connect a valid Community forum address');
     if (kind === 'stage' && require('../settings').value('stage_channels_enabled', null, false) !== true) fail(403, 'servers.stage_disabled', 'Stage channels are not enabled');
     const count = Number((await db.get('SELECT COUNT(*) AS n FROM rooms WHERE server_id = ? AND archived_at IS NULL', [server.id]) || {}).n) || 0;
     if (count >= MAX_CHANNELS) fail(429, 'servers.too_many_channels', `A server has up to ${MAX_CHANNELS} channels`);
@@ -177,9 +179,9 @@ async function insertChannel(server, user, { name, kind, topic = null, position 
     const pos = position != null ? position : Number((await db.get('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM rooms WHERE server_id = ? AND kind = ?', [server.id, roomKind]) || {}).p) || 0;
     const t = topic ? String(topic).replace(/\s+/g, ' ').trim().slice(0, 200) || null : null;
     // The server owns its channels: owner_subject stays empty, so a person's own-room tools never act on one.
-    const r = await db.run(`INSERT INTO rooms (slug, name, topic, kind, visibility, owner_id, owner_subject, join_role, server_id, channel_slug, position, stage_channel)
-                            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)`,
-    [roomSlug, n, t, roomKind, server.visibility, server.owner_id, roomKind === 'call' ? (kind === 'stage' ? 'participant' : 'speaker') : null, server.id, cs, pos, kind === 'stage']);
+    const r = await db.run(`INSERT INTO rooms (slug, name, topic, kind, visibility, owner_id, owner_subject, join_role, server_id, channel_slug, position, forum_space, stage_channel)
+                            VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+    [roomSlug, n, t, roomKind, server.visibility, server.owner_id, roomKind === 'call' ? (kind === 'stage' ? 'participant' : 'speaker') : null, server.id, cs, pos, kind === 'forum' ? String(community_space).toLowerCase() : null, kind === 'stage']);
     if (kind === 'stage') await db.run('INSERT INTO chat_stage_sessions (room_id, topic) VALUES (?, ?)', [r.lastInsertRowid, t]);
     return await db.get('SELECT * FROM rooms WHERE id = ?', [r.lastInsertRowid]);
 }
@@ -408,9 +410,9 @@ async function update(server, actor, { name, description, visibility, rules, sel
     return await byId(server.id);
 }
 
-async function createChannel(server, actor, { name, kind = 'text', topic = null } = {}) {
+async function createChannel(server, actor, { name, kind = 'text', topic = null, community_space = null } = {}) {
     if (!(await access(server, actor)).manage) fail(403, 'servers.not_admin', 'Only the server\'s owner and admins add channels');
-    const room = await insertChannel(server, actor, { name, kind, topic });
+    const room = await insertChannel(server, actor, { name, kind, topic, community_space });
     // Every member reads the new channel from its first message on.
     await db.run(`INSERT INTO room_members (room_id, user_id, role, last_read_id, last_seen_at)
                   SELECT ?, user_id, 'member', 0, NULL FROM chat_server_members WHERE server_id = ? AND role != 'blocked'
