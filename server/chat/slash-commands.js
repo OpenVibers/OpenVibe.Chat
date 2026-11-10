@@ -13,7 +13,7 @@ const BUILT_INS = [
     { name:'shrug', description:'Send a shrug', options:[{name:'text',description:'Optional message',type:'string',required:false}] },
     { name:'help', description:'Show available commands', options:[] },
     { name:'mute', description:'Mute a member for five minutes', options:[{name:'user',description:'Member',type:'user',required:true}], permission:'moderate' },
-    { name:'timeout', description:'Temporarily mute a member', options:[{name:'user',description:'Member',type:'user',required:true},{name:'seconds',description:'Duration',type:'integer',required:false}], permission:'moderate' },
+    { name:'timeout', description:'Temporarily mute a member', options:[{name:'user',description:'Member',type:'user',required:true},{name:'seconds',description:'Duration',type:'integer',required:false,choices:['60','300','900']}], permission:'moderate' },
 ];
 router.get('/', requireAuth, readLimit, (req,res) => {
     if (!config.slashCommands.enabled) return res.status(404).json({ error:'Not found', code:'commands.disabled' });
