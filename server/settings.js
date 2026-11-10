@@ -33,11 +33,17 @@ const REGIONS = {
 
 const SCHEMA = Object.freeze({
     $schema: 'https://json-schema.org/draft/2020-12/schema',
-    title: 'Chat voices',
-    description: 'The accounts Chat speaks with: Amazon Polly and Google Cloud text-to-speech. A voice whose provider has no key stays unavailable; the free local voice always works.',
+    title: 'Chat settings',
+    description: 'Owner controlled Chat features and voice providers.',
     type: 'object',
     additionalProperties: false,
     properties: {
+        stage_channels_enabled: {
+            type: 'boolean', title: 'Stage channels', 'x-group': 'Channels', default: false,
+            description: 'Allow server owners to create stage channels. Stage audio uses Chat voice rooms.',
+            'x-required-for': 'Stage channels',
+            'x-owner-input': { group: 'voices', unlocks: 'Stage channel controls in Chat servers using existing voice rooms.', get_it_at: 'https://openvibe.chat', get_it_how: 'This is a Chat feature switch. Enable it to let server owners create stage channels.' },
+        },
         amazon_polly_access_key_id: {
             type: 'string', title: 'Amazon Polly access key ID', 'x-group': GROUP,
             description: 'The access key ID of an AWS user that may call Polly. Together with its secret it turns on the Polly voices in chat; the ID alone does nothing.',

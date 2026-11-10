@@ -202,16 +202,17 @@ ${sheet}`,
         // The people's presence (Network, cached 30 s) and their mark.
         await require('../presence').attachTo(me ? me.subject_id : null, people.map((p) => ({ ...p, id: p.user_id })));
         const isVoice = room.kind === 'call';
+        const isStage = !!room.stage_channel;
         const callReady = isVoice && !!require('../config').calls.enabled;
         const callOf = (c) => { try { return require('../rooms/routes').callOf({ kind: 'call', slug: c.room }) || null; } catch { return null; } };
         // The people in each voice channel (the plan: "voice channels with who is in them").
         const occupants = {};
-        for (const c of chans) if (c.kind === 'voice') occupants[c.slug] = ((callOf(c) || {}).people || []).map((p) => ({ username: p.username, display_name: p.display_name }));
+        for (const c of chans) if (c.kind === 'voice' || c.kind === 'stage') occupants[c.slug] = ((callOf(c) || {}).people || []).map((p) => ({ username: p.username, display_name: p.display_name }));
         // The channel categories: a channel's own category, or the kind's default.
         const categories = [];
         const byCat = new Map();
         for (const c of chans) {
-            const name = c.category || (c.kind === 'voice' ? 'Voice channels' : 'Text channels');
+            const name = c.category || (c.kind === 'stage' ? 'Stage channels' : c.kind === 'voice' ? 'Voice channels' : 'Text channels');
             if (!byCat.has(name)) { byCat.set(name, []); categories.push({ name, channels: byCat.get(name) }); }
             byCat.get(name).push(c);
         }
@@ -251,7 +252,7 @@ ${sheet}`,
         // and the sign-in link post to (POST /s/:slug/:channel).
         const canonicalPath = req.params.channel ? back : `/s/${server.slug}`;
         await page(req, res, 200, {
-            actor, shell: true, footer: 'none', title: `${isVoice ? '' : '#'}${room.name} · ${server.name}`, path: canonicalPath, active: 'servers', upload: require('../rooms/pictures').enabled(), scripts: require('../rooms/pictures').enabled() ? ['picture-upload.js'] : [],
+            actor, shell: true, footer: 'none', title: `${isVoice ? (isStage ? 'Stage · ' : '') : '#'}${room.name} · ${server.name}`, path: canonicalPath, active: 'servers', upload: require('../rooms/pictures').enabled(), scripts: require('../rooms/pictures').enabled() ? ['picture-upload.js'] : [],
             robots: server.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
             description: server.description || `${server.name}, a server on OpenVibe.Chat with ${server.member_count} member${Number(server.member_count) === 1 ? '' : 's'}.`,
             page: {
@@ -277,14 +278,15 @@ ${sheet}`,
                     you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
                 }),
                 sideLabel: server.name,
-                main: `${shell.channelHeader({ name: room.name, kind: isVoice ? 'voice' : 'text', topic: room.topic, members: true })}
+                main: `${shell.channelHeader({ name: room.name, kind: isStage ? 'stage' : isVoice ? 'voice' : 'text', topic: room.topic, members: true })}
 ${invitePanel}
 <span class="oc-live" id="oc-live" hidden>● live</span>
+${isStage ? `<section class="oc-stage" aria-label="Stage"><h2>${esc(room.topic || 'Stage')}</h2><p>Stage audio uses this server voice channel. Audience members join muted.</p><div id="oc-stage-speakers">Speakers and raised hands load when the stage is live.</div></section>` : ''}
 ${aiHere}${errorOf(req)}
 ${isVoice ? callPanel(room, rcan, me) : ''}
 <ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages in ${esc(room.name)}">${msgs.map((m) => roomMessage(m, rcan, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${isVoice ? 'The voice channel\'s chat is empty.' : `This is the start of #${esc(room.name)}.`}</li>`}</ol>
 ${composer}`,
-                mainLabel: `${isVoice ? '' : '#'}${room.name}`,
+                mainLabel: `${isVoice ? (isStage ? 'Stage: ' : '') : '#'}${room.name}`,
                 members: shell.membersColumn({ groups: roleGroups }),
                 membersLabel: `People in ${server.name}`,
             }),
@@ -319,13 +321,13 @@ ${composer}`,
         const categories = [];
         const byCat = new Map();
         for (const c of chans) {
-            const name = c.category || (c.kind === 'voice' ? 'Voice channels' : 'Text channels');
+            const name = c.category || (c.kind === 'stage' ? 'Stage channels' : c.kind === 'voice' ? 'Voice channels' : 'Text channels');
             if (!byCat.has(name)) { byCat.set(name, []); categories.push({ name, channels: byCat.get(name) }); }
             byCat.get(name).push(c);
         }
         const occupants = {};
         for (const c of chans) {
-            if (c.kind !== 'voice') continue;
+            if (!['voice', 'stage'].includes(c.kind)) continue;
             try { occupants[c.slug] = ((require('../rooms/routes').callOf({ kind: 'call', slug: c.room }) || {}).people || []).map((p) => ({ username: p.username, display_name: p.display_name })); } catch { occupants[c.slug] = []; }
         }
         const mine = me ? (await servers.list(me)).mine : [];
@@ -469,7 +471,7 @@ ${roles.length ? `<fieldset class="oc-set oc-role-set"><legend id="oc-onboard-ro
         };
         const active = people.filter((p) => p.role !== 'blocked');
         const banned = people.filter((p) => p.role === 'blocked');
-        const chanRow = (c) => `<li><span>${c.kind === 'voice' ? VOICE_ICON : '#'} <strong>${esc(c.name)}</strong>${c.topic ? ` <span class="oc-muted">${esc(c.topic)}</span>` : ''}</span>
+        const chanRow = (c) => `<li><span>${c.kind === 'stage' ? '◉' : c.kind === 'voice' ? VOICE_ICON : '#'} <strong>${esc(c.name)}</strong>${c.topic ? ` <span class="oc-muted">${esc(c.topic)}</span>` : ''}</span>
 <form class="oc-inline oc-moves" method="post" action="/s/${esc(server.slug)}/channels/${esc(c.slug)}"><button type="submit" name="move" value="up" class="oc-move" aria-label="Move ${esc(c.name)} up" title="Move up">↑</button><button type="submit" name="move" value="down" class="oc-move" aria-label="Move ${esc(c.name)} down" title="Move down">↓</button></form>
 <details class="oc-chan-edit"><summary>Edit</summary><form class="oc-form" method="post" action="/s/${esc(server.slug)}/channels/${esc(c.slug)}">
 <label>Name <input name="name" required maxlength="40" value="${esc(c.name)}"></label>
@@ -497,7 +499,7 @@ ${can.manage ? `<h2>Overview</h2><form class="oc-form" method="post" action="/s/
 <label>Who can find and read it <select name="visibility"><option value="public"${server.visibility === 'public' ? ' selected' : ''}>Anyone: listed, and signed-in people join (public)</option><option value="private"${server.visibility === 'private' ? ' selected' : ''}>Only people with an invite (private)</option></select></label>
 <p><button type="submit">Save</button></p></form>
 <h2>Channels</h2><ul class="oc-members oc-chan-rows">${chans.map(chanRow).join('')}</ul>
-<form class="oc-new" method="post" action="/s/${esc(server.slug)}/channels"><label for="oc-chan-new">Add a channel</label> <input id="oc-chan-new" name="name" required maxlength="40" placeholder="announcements"> <select name="kind" aria-label="Kind of channel"><option value="text">Text</option><option value="voice">Voice</option></select> <button type="submit">Add</button></form>
+<form class="oc-new" method="post" action="/s/${esc(server.slug)}/channels"><label for="oc-chan-new">Add a channel</label> <input id="oc-chan-new" name="name" required maxlength="40" placeholder="announcements"> <select name="kind" aria-label="Kind of channel"><option value="text">Text</option><option value="voice">Voice</option>${require('../settings').value('stage_channels_enabled', null, false) === true ? '<option value="stage">Stage</option>' : ''}</select> <button type="submit">Add</button></form>
 <section class="oc-set" id="oc-onboarding" aria-labelledby="oc-onb-h"><h2 id="oc-onb-h">Onboarding</h2>
 <p class="oc-muted">People who join read the rules, if there are any, then pick their roles.</p>
 <form class="oc-form" method="post" action="/s/${esc(server.slug)}/onboarding">
@@ -542,7 +544,7 @@ ${can.owner || can.staff ? `<h2>Delete the server</h2><form class="oc-form" meth
     }));
     router.post('/s/:slug/channels', ...settingsAction(async (req, res, server, user) => {
         const b = req.body || {};
-        const room = await servers.createChannel(server, user, { name: b.name, kind: b.kind === 'voice' ? 'voice' : 'text' });
+        const room = await servers.createChannel(server, user, { name: b.name, kind: ['voice', 'stage'].includes(b.kind) ? b.kind : 'text' });
         res.redirect(303, `/s/${server.slug}/${room.channel_slug}`);
     }));
     router.post('/s/:slug/channels/:channel', ...settingsAction(async (req, res, server, user) => {

@@ -32,7 +32,7 @@ const TABLES = [
     'network_blocks', 'account_data_events', 'ticket_conversations', 'ticket_messages', 'telemetry_samples',
     'dm_contacts', 'dm_view_defaults', 'dm_view_preferences',
     'chat_app_link_tokens', 'chat_app_settings', 'chat_app_callbacks', 'chat_app_deliveries', 'chat_app_rates',
-    'agent_room_reads', 'agent_room_polls', 'agent_room_poll_votes', 'agent_room_identities', 'agent_room_controls', 'room_parties',
+    'agent_room_reads', 'agent_room_polls', 'agent_room_poll_votes', 'agent_room_identities', 'agent_room_controls', 'room_parties', 'chat_stage_sessions', 'chat_stage_speakers',
     'room_sync_clocks', 'room_control_leases',
     'room_message_reactions', 'room_member_timeouts', 'config_snapshots', 'config_keys',
     'agent_play_requests', 'agent_play_votes', 'agent_play_log',
