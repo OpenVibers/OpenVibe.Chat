@@ -714,6 +714,7 @@ ${composer}`,
         const actor = await needUser(req, res); if (!actor) return;
         const sid = actor.user.subject_id;
         const [p, tts, dmSet, pres, viewDefaults] = await Promise.all([prefsOf(actor), prefStores.settingsOf(prefStores.tts, sid), prefStores.settingsOf(prefStores.dm, sid), prefStores.settingsOf(prefStores.presence, sid), require('../chat/view-defaults').of(actor.user.id)]);
+        const dmPreviews = await require('../chat/dm-preview-settings').enabledFor(actor.user.id);
         const src = tts.sources || {};
         // A settings row: what it does on the left (with one muted line when it needs saying), the switch on the right.
         const box = (name, label, on, hint = '') => `<label class="oc-set-row"><span class="oc-set-text">${label}${hint ? `<small>${hint}</small>` : ''}</span><input type="checkbox" class="oc-switch" name="${name}" value="1"${on ? ' checked' : ''}></label>`;
@@ -753,6 +754,7 @@ ${[['one_to_one','One-to-one chats','bubbles'],['ai','Chats with Vibe','bubbles'
 <label class="oc-set-row"><span class="oc-set-text">Who can start one with you</span><select name="new_conversations"><option value="everyone"${dmSet.new_conversations !== 'nobody' ? ' selected' : ''}>Everyone</option><option value="nobody"${dmSet.new_conversations === 'nobody' ? ' selected' : ''}>Nobody</option></select></label>
 ${box('group_invites', 'People can add me to groups', dmSet.group_invites !== false)}
 ${box('previews', 'Message text in notifications', dmSet.previews !== false)}
+${box('dm_link_previews', 'Link previews in direct messages', dmPreviews, 'Only when everyone in the conversation has them on')}
 ${box('show_in_user_list', 'My name in chat user lists', pres.show_in_user_list !== false, 'Off: you are counted, not named')}
 </section>
 <section class="oc-set" aria-labelledby="oc-set-agents"><h2 id="oc-set-agents">AI agents</h2>
@@ -848,6 +850,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
         const sources = Object.fromEntries(TTS_SOURCES.filter(([k]) => !on(`tts_src_${k}`)).map(([k]) => [k, false]));
         const sid = actor.user.subject_id;
         try {
+            await require('../chat/dm-preview-settings').setEnabled(actor.user.id, on('dm_link_previews'));
             await prefs.update(sid, patch);
             // The view defaults are Chat's own (server/chat/view-defaults.js): the Network module has no field for
             // them yet, and a refused patch would lose the whole save.

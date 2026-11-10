@@ -20,6 +20,8 @@ const db = require('../db/database');
 const outbox = require('../events/service-outbox');
 const networkBlocks = require('./network-blocks');
 const linkCards = require('./link-cards');
+const linkPreviews = require('./link-previews');
+const previewSettings = require('./dm-preview-settings');
 
 // ── Schema & Migrations ──────────────────────────────────────
 
@@ -202,7 +204,13 @@ async function sendMessage(conversationId, senderId, text, { reply_to_id = null 
     });
     if (row) {
         row.card = card;
+        row.embeds = [];                 // the job fills them; the send answer starts empty, as a room's does
         if (pending) linkCards.fillLater('dm_messages', row.id, pending);
+        // Address previews run after the line is out (server/chat/link-previews.js), and only when every person in
+        // the conversation left link previews on (part 4 privacy: one side off fetches nothing).
+        if (await previewSettings.allowedIn(conversationId)) {
+            linkPreviews.schedule({ scope: 'dm', messageId: row.id, text: trimmed });
+        }
         // Activity: @mentions in the conversation, and the person whose message this answers (server/chat/activity.js).
         const activity = require('./activity');
         const sender = senderId ? await require('../live-context').getUserById(senderId) : null;
@@ -248,7 +256,11 @@ async function getMessages(conversationId, limit = 50, before = null, after = nu
             LIMIT ?
         `, [conversationId, limit]);
     }
-    return await linkCards.hydrate(rows, 'dm_messages');
+    const messages = await linkCards.hydrate(rows, 'dm_messages');
+    // A preview is shown only while everyone in the conversation has the switch on: turning it off hides what an
+    // earlier message already had (server/chat/dm-preview-settings.js).
+    await linkPreviews.attach(messages, 'dm', { enabled: await previewSettings.allowedIn(conversationId) });
+    return messages;
 }
 
 async function getMessagesPage(conversationId, { before = null, limit = 50 } = {}) {
@@ -263,6 +275,7 @@ async function getMessagesPage(conversationId, { before = null, limit = 50 } = {
     const more = rows.length > lim;
     rows.length = Math.min(rows.length, lim);
     await linkCards.hydrate(rows, 'dm_messages');
+    await linkPreviews.attach(rows, 'dm', { enabled: await previewSettings.allowedIn(conversationId) });
     return { messages: rows, more };
 }
 
