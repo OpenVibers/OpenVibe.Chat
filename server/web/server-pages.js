@@ -232,7 +232,8 @@ ${sheet}`,
                 return await page(req, res, err.status || 503, { actor, shell: true, title: 'Forum unavailable', path: req.path, active: 'servers', robots: 'noindex', body: `<h1>Forum unavailable</h1><p>${esc(err.message)}</p><p><a href="/s/${esc(server.slug)}">${esc(server.name)}</a></p>` });
             }
         }
-        const msgs = await rooms.history(room, { limit: 60 });
+        const roomPage = await rooms.historyPage(room, { limit: 50 });
+        const msgs = roomPage.messages.slice().reverse();
         if (me && rcan.role) await rooms.markRead(room, me);
         const mine = me ? (await servers.list(me)).mine : [];
         const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
@@ -294,7 +295,7 @@ ${sheet}`,
             robots: server.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
             description: server.description || `${server.name}, a server on OpenVibe.Chat with ${server.member_count} member${Number(server.member_count) === 1 ? '' : 's'}.`,
             page: {
-                view: 'room', room: room.slug, back: `/s/${server.slug}`, kind: room.kind, pics: require('../rooms/pictures').enabled() ? require('../rooms/pictures').publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0,
+                view: 'room', room: room.slug, back: `/s/${server.slug}`, kind: room.kind, pics: require('../rooms/pictures').enabled() ? require('../rooms/pictures').publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, historyMore: roomPage.more,
                 me: me ? me.id : null, moderate: rcan.moderate, post: rcan.post, role: rcan.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: rcan.join, talk: rcan.talk } } : {}),
             },
@@ -322,7 +323,7 @@ ${invitePanel}
 ${isStage ? `<section class="oc-stage" aria-label="Stage"><h2>${esc(room.topic || 'Stage')}</h2><p>Stage audio uses this server voice channel. Audience members join muted.</p><div id="oc-stage-speakers">Speakers and raised hands load when the stage is live.</div></section>` : ''}
 ${aiHere}${errorOf(req)}
 ${isVoice ? callPanel(room, rcan, me) : ''}
-<ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages in ${esc(room.name)}">${msgs.map((m) => roomMessage(m, rcan, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${isVoice ? 'The voice channel\'s chat is empty.' : `This is the start of #${esc(room.name)}.`}</li>`}</ol>
+<ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages in ${esc(room.name)}"><li id="oc-history-state" class="oc-muted" hidden aria-live="polite"></li>${msgs.map((m) => roomMessage(m, rcan, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${isVoice ? 'The voice channel\'s chat is empty.' : `This is the start of #${esc(room.name)}.`}</li>`}</ol>
 ${composer}`,
                 mainLabel: `${isVoice ? (isStage ? 'Stage: ' : '') : '#'}${room.name}`,
                 members: shell.membersColumn({ groups: roleGroups }),

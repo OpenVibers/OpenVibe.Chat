@@ -44,7 +44,13 @@ t('create, list, join, post, history and unread', async () => {
     list = (await api('GET', '/', bob)).body;
     assert.strictEqual(list.mine.find((x) => x.slug === 'night-owls').unread, 0);
     const hist = (await api('GET', '/night-owls/messages', null)).body;
-    assert.deepStrictEqual(hist.messages.map((m) => m.message), ['welcome in', 'second'], 'public rooms are readable signed out');
+    assert.deepStrictEqual(hist.messages.map((m) => m.message), ['second', 'welcome in'], 'public rooms are readable signed out, newest first');
+    const newest = (await api('GET', '/night-owls/messages?limit=1', null)).body;
+    assert.strictEqual(newest.messages[0].message, 'second');
+    assert.strictEqual(newest.more, true);
+    const older = (await api('GET', `/night-owls/messages?before=${newest.messages[0].id}&limit=1`, null)).body;
+    assert.deepStrictEqual(older.messages.map((m) => m.message), ['welcome in']);
+    assert.strictEqual(older.more, false);
     assert.deepStrictEqual((await api('GET', `/night-owls/messages?after=${first}`, null)).body.messages.map((m) => m.message), ['second']);
 });
 

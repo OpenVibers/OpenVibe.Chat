@@ -62,6 +62,13 @@ t('DMs: create 1:1 (idempotent), send, list with unread, read, delete own messag
     assert.strictEqual(msgs.body.messages.length, 1);
     assert.ok(!('sender_subject_id' in msgs.body.messages[0]));
     const mid = msgs.body.messages[0].id;
+    await h.http('POST', `/api/dm/conversations/${convId}/messages`, { token: alice.token, body: { message: 'second hi bob' } });
+    const dmPage = await h.http('GET', `/api/dm/conversations/${convId}/messages?limit=1`, { token: bob.token });
+    assert.strictEqual(dmPage.body.messages[0].message, 'second hi bob');
+    assert.strictEqual(dmPage.body.more, true);
+    const dmOlder = await h.http('GET', `/api/dm/conversations/${convId}/messages?before=${dmPage.body.messages[0].id}&limit=1`, { token: bob.token });
+    assert.strictEqual(dmOlder.body.messages[0].message, 'hi bob');
+    assert.strictEqual(dmOlder.body.more, false);
     assert.strictEqual((await h.http('DELETE', `/api/dm/conversations/${convId}/messages/${mid}`, { token: bob.token })).status, 403, 'only the sender deletes');
     assert.strictEqual((await h.http('DELETE', `/api/dm/conversations/${convId}/messages/${mid}`, { token: alice.token })).status, 200);
 });

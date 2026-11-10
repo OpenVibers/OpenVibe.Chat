@@ -251,7 +251,7 @@ function createWebRoutes({ config }) {
     // ── Global chat ──
     router.get('/', async (req, res) => {
         const actor = await viewerOf(req);
-        const { messages, latest_id } = await historyStore.page('global', { limit: 50 });
+        const { messages, latest_id, more: historyMore } = await historyStore.page('global', { limit: 50 });
         // Not the lines of people this reader blocked on the network (chat/network-blocks.js).
         const hidden = actor.kind === 'user' ? await require('../chat/network-blocks').blockedUserIds(actor.user) : new Set();
         // And not what OpenVibe's global room does not show of other rooms' lines (chat/global-standard.js).
@@ -295,7 +295,7 @@ function createWebRoutes({ config }) {
         ].filter((pane) => pane.html);
         const explore = pickBlock({ key: 'explore', label: 'Explore OpenVibe.Chat', head: 'Explore OpenVibe.Chat', panes });
         const inlineStyles = [];
-        const feedList = `<ol class="oc-feed${signedIn ? ' oc-srv-feed' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages"><li id="oc-history-state" class="oc-muted" aria-live="polite"></li>${shown.slice().reverse().map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>`;
+        const feedList = `<ol class="oc-feed${signedIn ? ' oc-srv-feed' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages"><li id="oc-history-state" class="oc-muted" hidden aria-live="polite"></li>${shown.slice().reverse().map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>`;
         // Someone signed in gets the app shell (the plan, 2026-11-09, stage V2): Global chat is a destination on the
         // rail, the side column is Home's, and the feed fills the middle with the composer at its foot.
         const shellBody = signedIn ? await (async () => {
@@ -330,7 +330,7 @@ ${composer}`,
             description: 'Chat with everyone on OpenVibe, start a server with text and voice channels, message friends and call them. Free and open source.',
             // The same JSON-LD for every reader (discovery.test.js): the questions are the site's, shown to visitors.
             jsonLd: [...homeJsonLd(config), sharedSeo.jsonLd.faq(home.FAQ)],
-            page: { view: 'global', latest: latest_id, signedIn, me: signedIn ? actor.user.username : null },
+            page: { view: 'global', latest: latest_id, historyMore, signedIn, me: signedIn ? actor.user.username : null },
             shell: signedIn, footer: signedIn ? 'none' : 'full',
             body: signedIn ? shellBody : `<header class="oc-hero">
 <h1>Chat with everyone on OpenVibe, or start your own server</h1>
@@ -545,7 +545,8 @@ ${blockedList}`,
         await presence.attachTo(me.subject_id, others);
         const conv = await dm.getConversation(id);
         const title = (conv && conv.name) || others.map((p) => p.display_name || p.username).join(', ') || 'Conversation';
-        const msgs = (await dm.getMessages(id, 60)).slice().sort((a, b) => a.id - b.id);
+        const dmPage = await dm.getMessagesPage(id, { limit: 50 });
+        const msgs = dmPage.messages.slice().reverse();
         const savedView = await db.get('SELECT view FROM dm_view_preferences WHERE user_id = ? AND conversation_id = ?', [me.id, id]).catch(() => null);
         const viewKind = others.length <= 1 ? 'one_to_one' : 'group';
         const viewDefaults = await require('../chat/view-defaults').of(me.id);
@@ -589,13 +590,13 @@ ${blockedList}`,
         const dmUnread = dms.reduce((n, d) => n + (d.current ? 0 : d.unread), 0);
         await page(req, res, 200, {
             actor, shell: true, title, path: `/messages/${id}`, active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'none',
-            page: { view: 'dm', conversation: id, messageView: view, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me.id, other: other ? { id: other.id, username: other.username || '' } : null },
+            page: { view: 'dm', conversation: id, messageView: view, latest: msgs.length ? msgs[msgs.length - 1].id : 0, historyMore: dmPage.more, me: me.id, other: other ? { id: other.id, username: other.username || '' } : null },
             body: shell.shell({
                 rail: shell.rail({ home: true, dmUnread, servers: shell.railServers(mineServers) }),
                 side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
                 main: `${ui.head({ title: esc(title), sub: `<span id="oc-dm-status">${subLine}</span>`, avatar, back: { href: '/messages', label: 'All messages' }, actions: [callForm, tools].filter(Boolean) })}${error}
-<ol class="oc-feed oc-room-feed${view === 'bubbles' ? ' oc-bubbles' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => dmMessage(m, me, view)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
+<ol class="oc-feed oc-room-feed${view === 'bubbles' ? ' oc-bubbles' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages"><li id="oc-history-state" class="oc-muted" hidden aria-live="polite"></li>${msgs.map((m) => dmMessage(m, me, view)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
 ${composer}`,
                 mainLabel: title,
             }),
@@ -1028,7 +1029,8 @@ ${people}
         if (room.server_id) return res.redirect(302, await channelUrl(room));
         // A person's own Vibe chat opens in the Vibe app (its links in task pages and messages name /r/<slug>).
         if (me && Number(room.assistant) === 1 && await require('../rooms/vibe').ownChat(room.slug, me)) return res.redirect(302, `/vibe/${encodeURIComponent(room.slug)}`);
-        const msgs = await rooms.history(room, { limit: 60 });
+        const roomPage = await rooms.historyPage(room, { limit: 50 });
+        const msgs = roomPage.messages.slice().reverse();
         if (me && can.role) await rooms.markRead(room, me);
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const joinLabel = room.kind === 'system' ? 'Follow these announcements' : 'Join this room';
@@ -1068,7 +1070,7 @@ ${people}
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady, feedView: !!feed,
             footer: 'none', shell: true, upload: pictures.enabled(), scripts: [...(ais.length ? ['vibe-md.js'] : []), ...(pictures.enabled() ? ['picture-upload.js'] : [])],
             description,
-            page: { view: 'room', room: room.slug, kind: room.kind, pics: pictures.enabled() ? pictures.publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
+            page: { view: 'room', room: room.slug, kind: room.kind, pics: pictures.enabled() ? pictures.publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, historyMore: roomPage.more, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: can.join, talk: can.talk } } : {}) },
             body: shell.shell({
                 rail: shell.rail({ dmUnread, servers: shell.railServers(mineServers) }),
@@ -1078,7 +1080,7 @@ ${people}
                     you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
                 }),
                 sideLabel: 'Rooms',
-                main: `<header class="oc-room-head">
+            main: `<header class="oc-room-head">
 <a class="oc-icon-btn" href="/rooms" aria-label="All rooms" title="All rooms">${ICONS.back}</a>
 <div class="oc-room-id"><h1>${esc(room.name)}${room.visibility === 'private' ? `<span class="oc-room-lock" title="Private: only people invited read and post">${ICONS.lock}<span class="oc-sr">private</span></span>` : ''}${kindBadge(room)}</h1>
 <p class="oc-muted oc-room-sub">${room.topic && !isAgentRoom ? `${esc(room.topic)} · ` : ''}${memberCount} ${memberCount === 1 ? 'member' : 'members'}${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole} <span class="oc-live" id="oc-live" hidden>● live</span></p>${roomRules(room)}</div>
@@ -1090,7 +1092,7 @@ ${aiHere}${error}
 ${isCall ? callPanel(room, can, me) : ''}
 ${feed ? `<div class="fv oc-room-fv" data-feed="${esc(feed.id)}"></div>` : ''}
 ${work && room.screen_url && can.role ? `<details class="oc-screen" open><summary>Shared screen</summary><iframe src="${esc(room.screen_url)}" title="The room's shared screen" loading="lazy" referrerpolicy="no-referrer" allow="clipboard-write; fullscreen"></iframe></details>` : ''}
-${work ? '<div class="oc-ws"><div class="oc-ws-main">' : ''}<ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
+${work ? '<div class="oc-ws"><div class="oc-ws-main">' : ''}<ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages"><li id="oc-history-state" class="oc-muted" hidden aria-live="polite"></li>${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
 ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
                 mainLabel: room.name,
             }),
