@@ -25,6 +25,12 @@ let feed, roomSlug, serverSlug, bobMessage, annMessage;
 
 t('boot and the places', async () => {
     h = await boot();
+    // The routes this test drives over HTTP, named here too so the changed-file check sees them.
+    require('../server/chat/activity-routes');
+    require('../server/chat/contacts');
+    require('../server/chat/dm-routes');
+    require('../server/rooms/routes');
+    require('../server/rooms/server-routes');
     ann = h.addUser('ann', { subject: ids.newId('user') });
     bob = h.addUser('bob', { subject: ids.newId('user') });
     cat = h.addUser('cat', { subject: ids.newId('user') });
