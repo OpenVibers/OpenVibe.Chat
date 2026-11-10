@@ -314,7 +314,7 @@ t('the home offers OpenVibe.Video\'s latest, and a pasted watch page plays its f
         assert.ok(!home.text.includes('evil.example'), 'a page on another site is never offered');
         assert.match(home.text, /\/web\/party-home\.css/, 'the home\'s styles');
         assert.match(home.text, /How it works/);
-        assert.match(home.text, /No OpenVibe machine is free right now/);
+        assert.match(home.text, /OpenVibe computers are not on yet/, 'the plain truth while the owner pool is off');
         assert.match(home.text, /name="desktop" value="link" class="pty-host"><strong>On my computer<\/strong>/, 'hosting on my computer is one of two plain choices');
         assert.match(home.text, /value="openvibe" class="pty-host" disabled aria-describedby="pty-openvibe-availability"/, 'On OpenVibe cannot be chosen while no OpenVibe machine is free');
 
