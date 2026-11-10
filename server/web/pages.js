@@ -12,7 +12,8 @@
  *                             POST /messages/:id/block blocks the other person of a 1:1 conversation;
  *                             POST /messages/:id/call rings them (the call-user route) and opens /call/<channel>
  *   GET  /call/:channel       a 1:1 call's page (its caller and the people it invited): public/web/call.js joins
- *                             it, and while the caller waits it says ringing until the answer comes
+ *                             it only when the person presses "Turn on microphone", and while the caller waits
+ *                             it says ringing until the answer comes
  *   GET  /rooms, /r/:slug     rooms: community, call (a voice/video call in the page, public/web/call.js)
  *                             and system (staff announcements); /r/:slug/settings for moderators
  *   GET  /settings            your portable chat settings (Network module chat.preferences); POST saves
@@ -125,13 +126,13 @@ function globalMessage(m) {
     const name = fx ? `<span class="ov-fx ${fx}">${esc(m.display_name || m.username || m.anon_id || 'someone')}</span>` : esc(m.display_name || m.username || m.anon_id || 'someone');
     const who = handle ? `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(handle)}" style="--nc:${esc(/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? m.profile_color : 'inherit')}">${hatHtml(m)}${name}</a>` : `<span class="oc-name oc-anon">${name}</span>`;
     const where = m.stream_channel ? ` <a class="oc-where" href="${LIVE}/@${encodeURIComponent(m.stream_channel)}" title="Sent from ${esc(m.stream_channel)}'s channel">@${esc(m.stream_channel)}</a>` : '';
-    return `<li class="oc-msg" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who}${roleBadge(m.role)}${where} <span class="oc-text">${linkify(m.message)}</span>${ui.linkCard(m.card)}</li>`;
+    return `<li class="oc-msg" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who}${roleBadge(m.role)}${where} <span class="oc-text">${linkify(m.message)}</span>${ui.messageCards(m)}</li>`;
 }
 function dmMessage(m, me, view = 'room') {
     const t = hhmm(m.created_at);
     const mine = me && m.sender_id === me.id;
-    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div>${ui.linkCard(m.card)}<time class="oc-bubble-time" datetime="${t.iso}">${t.text}</time></li>`;
-    return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${ui.linkCard(m.card)}</li>`;
+    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div>${ui.messageCards(m)}<time class="oc-bubble-time" datetime="${t.iso}">${t.text}</time></li>`;
+    return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${ui.messageCards(m)}</li>`;
 }
 // Vibe, OpenVibe's assistant, as a room's AI member (one click on the room's settings; a person's own chats with it are
 // server/rooms/vibe.js): how it should be in a group.
@@ -669,13 +670,14 @@ ${composer}`,
             : '<li class="oc-muted">Nobody is in the call yet.</li>';
         await page(req, res, 200, {
             actor, title, path: `/call/${ch.id}`, active: 'messages', robots: 'noindex, nofollow', callScript: true,
-            page: { view: 'call', me: me.id, call: { channel: ch.id, join: true, talk: true, auto: true, ring: ringing ? { id: Number(ringing.id), name: nameOf(ringing) } : null } },
+            page: { view: 'call', me: me.id, call: { channel: ch.id, join: true, talk: true, ring: ringing ? { id: Number(ringing.id), name: nameOf(ringing) } : null } },
             body: `<p><a href="${backLink}">← Back to the conversation</a></p>
 <section class="oc-call oc-call-page" aria-labelledby="oc-call-h" id="oc-call">
 <h1 id="oc-call-h">${esc(title)} <span class="oc-muted oc-call-count" id="oc-call-count">${ch.participantCount ? `· ${ch.participantCount} in` : ''}</span></h1>
 <p class="oc-muted" id="oc-call-how">A voice call, peer to peer: your microphone goes only to the people in it.</p>
 <ul class="oc-call-people" id="oc-call-people">${people}</ul>
-<p class="oc-call-controls"><button type="button" id="oc-call-join" hidden>Join the call</button> <button type="button" id="oc-call-mute" hidden aria-pressed="false">Mute</button> <button type="button" id="oc-call-leave" hidden>Leave the call</button></p>
+<p class="oc-call-controls"><button type="button" id="oc-call-join" hidden>Turn on microphone</button> <button type="button" id="oc-call-mute" hidden aria-pressed="false">Mute</button> <button type="button" id="oc-call-leave" hidden>Leave the call</button></p>
+<p class="oc-muted oc-call-join-note">Join the voice call with the people listed above. Nothing is asked until you press it.</p>
 <p class="oc-muted oc-call-status" id="oc-call-status" role="status" aria-live="polite"></p>
 <noscript><p class="oc-muted">A call needs JavaScript.</p></noscript>
 </section>`,
@@ -933,7 +935,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
             : `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)}`;
         // An AI member writes Markdown (lists, bold, links): vibe-md.js escapes every character first, then marks it up.
         const text = ai ? `<div class="oc-text vb-md">${md.render(m.message)}</div>` : `<span class="oc-text">${linkify(m.message)}</span>`;
-        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${ai ? '' : pictures.pageHtml(m.message)}${ui.linkCard(m.card)}${del}</li>`;
+        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${ai ? '' : pictures.pageHtml(m.message)}${ui.messageCards(m)}${del}</li>`;
     };
     const applyRoomChange = async (room) => await roomRoutes.applyRoomChange(room);
 

@@ -41,6 +41,10 @@ t('the state line and the member-list order', () => {
     assert.strictEqual(ui.presenceLine({ state: 'dnd' }), 'Do not disturb');
     assert.strictEqual(ui.presenceLine({ state: 'online', live: true }), 'Live now');
     assert.strictEqual(ui.presenceLine({ state: 'online', live: true }, { liveHref: 'https://openvibe.live/@alice' }), '<a href="https://openvibe.live/@alice">Live now</a>');
+    assert.strictEqual(ui.presenceLine({ state: 'online', live: true }, { liveHref: 'https://openvibe.live/@alice#about' }), '<a href="https://openvibe.live/@alice">Live now</a>', 'a section is not the channel');
+    assert.strictEqual(ui.presenceLine({ state: 'online', live: true }, { liveHref: 'https://openvibe.live/@alice?section=videos' }), '<a href="https://openvibe.live/@alice">Live now</a>', 'nor a section query');
+    assert.strictEqual(ui.presenceLine({ state: 'online', live: true }, { liveHref: '/@alice#about' }), '<a href="/@alice">Live now</a>', 'a relative channel link stays relative');
+    assert.strictEqual(ui.presenceLine({ state: 'online', live: true }, { liveHref: 'https://openvibe.live/vod/5#t=10' }), '<a href="https://openvibe.live/vod/5#t=10">Live now</a>', 'other Live pages keep their fragment');
     assert.strictEqual(ui.presenceLine({ state: 'online' }, { liveHref: 'javascript:alert(1)' }), 'Online');
     assert.strictEqual(ui.presenceLine({ state: 'offline' }), '');
     assert.strictEqual(ui.presenceLine({ state: 'invisible' }), '');
@@ -48,6 +52,17 @@ t('the state line and the member-list order', () => {
         [{ state: 'online' }, { state: 'away' }, { state: 'offline' }, null, { state: 'online', live: true }].map(ui.presenceOrder),
         [0, 1, 2, 2, 0],
     );
+});
+
+t('the client draws the same section-free live channel link', () => {
+    const chat = fs.readFileSync(path.join(__dirname, '..', 'public', 'web', 'chat.js'), 'utf8');
+    const fn = /function channelHref\(href\) \{[\s\S]*?\n  \}/.exec(chat);
+    assert.ok(fn, 'channelHref is in public/web/chat.js');
+    const run = new Function('URL', `${fn[0]}; return channelHref;`)(URL);
+    assert.strictEqual(run('https://openvibe.live/@alice#about'), 'https://openvibe.live/@alice');
+    assert.strictEqual(run('https://openvibe.live/@alice?section=videos'), 'https://openvibe.live/@alice');
+    assert.strictEqual(run('/@alice#clips'), '/@alice');
+    assert.strictEqual(run('https://openvibe.live/vod/5#t=10'), 'https://openvibe.live/vod/5#t=10');
 });
 
 t('the dot CSS copies Shared\'s .ovp-dot', () => {

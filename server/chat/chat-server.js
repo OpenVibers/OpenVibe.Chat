@@ -2915,6 +2915,15 @@ class ChatServer {
         } catch (err) {
             console.warn('[Sync] state:', err && err.message);
         }
+        // A party room's music is the room's too: the joiner starts at the room's own second, not at zero.
+        try {
+            if (room.kind === 'party') {
+                const state = await require('../rooms/party-music').stateForRoom(room);
+                if (state !== undefined) this.sendTo(ws, { type: 'music', room: room.slug, state });
+            }
+        } catch (err) {
+            console.warn('[Music] state:', err && err.message);
+        }
         await this._broadcastLease(room);
     }
 

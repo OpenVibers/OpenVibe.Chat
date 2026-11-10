@@ -34,7 +34,7 @@ const MAX_DESCRIPTION = 300;
 const MAX_SITE = 80;
 const MAX_JOBS = 2;
 const MAX_QUEUE = 200;
-const KINDS = ['link', 'video', 'image'];
+const KINDS = ['link', 'video', 'image', 'live'];
 const USER_AGENT = 'OpenVibe-Chat-LinkPreview/1 (+https://openvibe.chat)';
 const PREVIEWS_ON = String(process.env.CHAT_LINK_PREVIEWS || '').toLowerCase() !== 'off';
 
@@ -198,6 +198,96 @@ function oembedFor(url) {
     return null;
 }
 
+/**
+ * OpenVibe's own sites are first-class kinds and are never page-fetched: an address there is resolved through that
+ * service's public API, or its oEmbed where it has one. Windows whose service has no resolver yet return null (and
+ * are not page-fetched either): that is the list of kinds a later part adds.
+ */
+const OWN_HOSTS = new Map([
+    ['openvibe.live', 'live'], ['openvibe.video', 'video'], ['openvibe.pics', 'picture'],
+    ['openvibe.design', 'design'], ['openvibe.community', 'post'], ['openvibe.network', 'profile'],
+    ['openvibe.games', 'game'],
+]);
+
+function baseOf(value, production) {
+    const raw = String(value || (process.env.NODE_ENV === 'test' ? '' : production)).replace(/\/+$/, '');
+    if (!raw) return '';
+    try {
+        const u = new URL(raw);
+        return u.protocol === 'https:' || u.protocol === 'http:' ? raw : '';
+    } catch { return ''; }
+}
+const liveBase = () => baseOf(process.env.CHAT_LINK_LIVE_URL, 'https://openvibe.live');
+const videoBase = () => baseOf(process.env.CHAT_LINK_VIDEO_URL, 'https://openvibe.video');
+
+/** What an address on one of our sites asks that site for, or null for host/path shapes we do not know. */
+function ownLink(u) {
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    if (!OWN_HOSTS.has(host)) return null;
+    const site = OWN_HOSTS.get(host);
+    if (site === 'live') {
+        const m = /^\/@([A-Za-z0-9_]{3,24})(?:\/[^/]+)?\/?$/.exec(u.pathname);
+        return m ? { site, username: m[1] } : { site };
+    }
+    if (site === 'video') {
+        if (u.pathname === '/watch' && /^[A-Za-z0-9_-]{11}$/.test(String(u.searchParams.get('v') || ''))) return { site, page: u.href };
+        if (/^\/[vc]\/[0-9]{1,12}$/.test(u.pathname)) return { site, page: u.href };
+        return { site };
+    }
+    return { site };
+}
+
+async function readJsonUrl(url) {
+    const res = await fetchFollowing(url);
+    if (!res) return null;
+    try { return JSON.parse(String(res.body || '')); } catch { return null; }
+}
+
+/** A live channel (/@name, no page fetch): Live's public channel API says who and whether they are live now. */
+async function livePreview(url, username) {
+    const base = liveBase();
+    if (!base) return null;
+    const item = await readJsonUrl(`${base}/api/streams/channel/${encodeURIComponent(username)}?pollOnly=1`);
+    const channel = item && item.channel;
+    if (!channel || typeof channel !== 'object') return null;
+    const title = textOf(channel.display_name || channel.username || username, MAX_TITLE);
+    if (!title) return null;
+    return {
+        url,
+        site_name: 'OpenVibe.Live',
+        title,
+        description: textOf(channel.bio, MAX_DESCRIPTION),
+        image: imageOf(channel.avatar_url),
+        kind: 'live',
+        width: 0,
+        height: 0,
+        by: textOf(channel.username || username, 80),
+        live: Array.isArray(item.streams) ? item.streams.length > 0 : !!item.stream,
+    };
+}
+
+/** A Video watch page (no page fetch): Video's own watchable resolver. */
+async function videoPreview(url, page) {
+    const base = videoBase();
+    if (!base) return null;
+    const item = await readJsonUrl(`${base}/api/v1/video/watchable?url=${encodeURIComponent(page)}`);
+    if (!item || typeof item !== 'object') return null;
+    const title = textOf(item.title, MAX_TITLE);
+    if (!title) return null;
+    return {
+        url,
+        site_name: 'OpenVibe.Video',
+        title,
+        description: '',
+        image: imageOf(item.thumbnail_url),
+        kind: 'video',
+        width: 0,
+        height: 0,
+        by: textOf(item.channel, 80),
+        live: false,
+    };
+}
+
 /** One GET, https only, through the egress lookup, no redirects followed here, at most FETCH_TIMEOUT_MS and MAX_BYTES. */
 function requestOnce(url) {
     if (_request) return Promise.resolve(_request(url));
@@ -259,6 +349,12 @@ async function fetchFollowing(url) {
 
 /** Read one address: oEmbed when it is on the short allow-list, the page otherwise. A failure is no preview. */
 async function readUrl(url) {
+    const own = ownLink(new URL(url));
+    if (own) {
+        if (own.username) return await livePreview(url, own.username);
+        if (own.page) return await videoPreview(url, own.page);
+        return null;
+    }
     const oembed = oembedFor(new URL(url));
     if (oembed) {
         try {
@@ -281,7 +377,7 @@ function parsePreview(value) {
     if (typeof p === 'string') { try { p = JSON.parse(p); } catch { return null; } }
     if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
     if (!KINDS.includes(p.kind) || typeof p.title !== 'string' || !p.title || typeof p.url !== 'string') return null;
-    return {
+    const preview = {
         url: p.url,
         site_name: textOf(p.site_name, MAX_SITE),
         title: textOf(p.title, MAX_TITLE),
@@ -291,6 +387,9 @@ function parsePreview(value) {
         width: intOf(p.width),
         height: intOf(p.height),
     };
+    if (p.by != null) preview.by = textOf(p.by, 80);
+    if (p.live === true || p.live === false) preview.live = p.live;
+    return preview;
 }
 
 async function cached(value) {
@@ -345,13 +444,13 @@ function settled() {
 }
 
 async function store(job, position, preview) {
-    if (!preview) {
-        await db.run('DELETE FROM link_previews WHERE message_scope = ? AND message_id = ? AND position = ?', [job.scope, job.messageId, position]).catch(() => {});
-        return;
-    }
+    // Nothing found is nothing written (a retry never leaves a stale preview); a removed row is a tombstone the job
+    // must not overwrite, so a preview removed while its job was still running never comes back.
+    if (!preview) return;
     await db.run(`INSERT INTO link_previews (message_scope, message_id, position, url, data) VALUES (?, ?, ?, ?, ?)
                   ON CONFLICT (message_scope, message_id, position)
-                  DO UPDATE SET url = EXCLUDED.url, data = EXCLUDED.data`,
+                  DO UPDATE SET url = EXCLUDED.url, data = EXCLUDED.data
+                  WHERE link_previews.removed_at IS NULL`,
         [job.scope, job.messageId, position, preview.url, JSON.stringify(preview)]);
 }
 
@@ -404,22 +503,34 @@ function schedule({ scope = 'room', messageId, text, room = null, onReady = null
     return job;
 }
 
+/**
+ * Take a preview back: one address (position) or all of them on the message. The author or a room moderator decides
+ * that in the route; the row stays as a tombstone so a running job cannot restore it. Returns the previews left.
+ */
+async function remove(scope, messageId, position = null, userId = null) {
+    const params = [userId || null, scope, Number(messageId) || 0];
+    let sql = 'UPDATE link_previews SET removed_at = ov_now(), removed_by = ? WHERE message_scope = ? AND message_id = ? AND removed_at IS NULL';
+    if (position != null) { sql += ' AND position = ?'; params.push(Number(position)); }
+    await db.run(sql, params);
+    return await embedsOf(scope, messageId);
+}
+
 /** The stored previews for one message, in the order their addresses appeared. */
 async function embedsOf(scope, messageId) {
-    const rows = await db.all('SELECT data FROM link_previews WHERE message_scope = ? AND message_id = ? ORDER BY position', [scope, Number(messageId) || 0]).catch(() => []);
+    const rows = await db.all('SELECT data FROM link_previews WHERE message_scope = ? AND message_id = ? AND removed_at IS NULL ORDER BY position', [scope, Number(messageId) || 0]).catch(() => []);
     return rows.map((r) => parsePreview(r.data)).filter(Boolean);
 }
 
 /** Put `embeds` on every row ([] when there are none yet), for the read the client makes. */
-async function attach(rows, scope = 'room') {
+async function attach(rows, scope = 'room', { enabled = true } = {}) {
     if (!Array.isArray(rows)) return rows;
     const list = rows.filter(Boolean);
     for (const row of list) row.embeds = [];
-    if (!list.length) return rows;
+    if (!enabled || !list.length) return rows;
     const ids = [...new Set(list.map((r) => Number(r.id)).filter((n) => n > 0))];
     if (!ids.length) return rows;
     const marks = ids.map(() => '?').join(',');
-    const records = await db.all(`SELECT message_id, data FROM link_previews WHERE message_scope = ? AND message_id IN (${marks}) ORDER BY message_id, position`,
+    const records = await db.all(`SELECT message_id, data FROM link_previews WHERE message_scope = ? AND message_id IN (${marks}) AND removed_at IS NULL ORDER BY message_id, position`,
         [scope, ...ids]).catch(() => []);
     const byId = new Map();
     for (const rec of records) {
@@ -435,7 +546,7 @@ async function attach(rows, scope = 'room') {
 
 module.exports = {
     addresses, normalizeUrl, textOf, decodeEntities, pageFields, previewFromResponse, previewFromOembed, imageOf,
-    previewOf, schedule, embedsOf, attach, idle,
+    previewOf, schedule, embedsOf, attach, remove, idle, ownLink,
     CACHE_MS, MISS_MS, MAX_URLS, MAX_BYTES, FETCH_TIMEOUT_MS, MAX_REDIRECTS, PREVIEWS_ON,
     _setRequest(fn) { _request = fn || null; },
     _setLookup(fn) { _lookup = fn || null; },
