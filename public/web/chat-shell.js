@@ -36,8 +36,6 @@
   function panel(name) {
     app.setAttribute('data-oc-panel', name);
     app.classList.toggle('is-members', name === 'members');
-    var listButton = app.querySelector('.oc-rail-menu');
-    if (listButton) listButton.setAttribute('aria-expanded', name === 'side' ? 'true' : 'false');
     document.querySelectorAll('[data-oc-panel-toggle]').forEach(function (b) {
       b.setAttribute('aria-pressed', b.getAttribute('data-oc-panel-toggle') === name ? 'true' : 'false');
     });
@@ -112,26 +110,69 @@
     railEl.addEventListener('pointerout', function (e) { var el = placeOf(e); if (el && !el.contains(e.relatedTarget)) hideTip(); });
     railEl.addEventListener('focusin', function (e) { var el = placeOf(e); if (el && el.matches(':focus-visible')) showTip(el); });
     railEl.addEventListener('focusout', hideTip);
-    var fade = function () {
-      hideTip();
-      if (!isPhone()) { railEl.removeAttribute('data-fade'); return; }
-      var max = railEl.scrollWidth - railEl.clientWidth, x = railEl.scrollLeft;
-      var start = x > 4, end = x < max - 4;
-      if (start || end) railEl.setAttribute('data-fade', start && end ? 'both' : start ? 'start' : 'end');
-      else railEl.removeAttribute('data-fade');
+    railEl.addEventListener('scroll', hideTip, { passive: true });
+  }
+
+  // ── A phone's two levels: the list (the rail and the list beside it), then the conversation ──
+  var talk = app.querySelector(':scope > .oc-col-main > .oc-dock, :scope > .oc-col-main > .oc-compose');
+  var sideCol = app.querySelector(':scope > .oc-side');
+  var phone = function () { return window.matchMedia && window.matchMedia('(max-width: 760px)').matches; };
+  // The place that is open, pressed again from the list: back into its conversation, with no reload.
+  document.addEventListener('click', function (e) {
+    var here = e.target.closest && e.target.closest('.oc-rail-icon.is-active');
+    if (!here || !phone() || !talk || app.getAttribute('data-oc-panel') !== 'side' || e.metaKey || e.ctrlKey) return;
+    e.preventDefault();
+    panel('main');
+  });
+  // A page with a list beside it and no conversation of its own (your conversations) opens on the list.
+  if (phone() && sideCol && !talk && app.querySelector('.oc-rail-home.is-active') && !/[?&]panel=main\b/.test(location.search)) panel('side');
+  // A page head with no way back of its own gets the way to the list.
+  var pageHead = app.querySelector(':scope > .oc-col-main > .oc-page-head, :scope > .oc-col-main > .oc-page > .oc-page-head');
+  if (pageHead && sideCol && !pageHead.querySelector('.oc-back, .oc-tolist')) {
+    var lb = document.createElement('button');
+    lb.type = 'button'; lb.className = 'oc-icon-btn oc-tolist'; lb.setAttribute('data-oc-panel', 'side'); lb.setAttribute('aria-label', 'All chats'); lb.title = 'All chats';
+    lb.innerHTML = '<svg class="oc-i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M14.5 5.500 8 12l6.500 6.500" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    pageHead.insertBefore(lb, pageHead.firstChild);
+  }
+
+  // ── Messages grouped by who said them: a run from one person within five minutes shows their mark, name and the
+  // time once; a line says where the day changes. New and older messages are grouped as they arrive. ──
+  var feed = app.querySelector('.oc-feed');
+  if (feed && feed.querySelector(':scope > .oc-msg > .oc-name')) {
+    var dayOf = function (d) { return d.getFullYear() + '-' + d.getMonth() + '-' + d.getDate(); };
+    var dayName = function (d) {
+      var now = new Date(), y = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1);
+      if (dayOf(d) === dayOf(now)) return 'Today';
+      if (dayOf(d) === dayOf(y)) return 'Yesterday';
+      return d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: d.getFullYear() === now.getFullYear() ? undefined : 'numeric' });
     };
-    railEl.addEventListener('scroll', fade, { passive: true });
-    window.addEventListener('resize', fade);
-    var here = railEl.querySelector('.oc-rail-icon.is-active');
-    if (here && isPhone()) {   // only as far as it takes to show the open place whole, past the list button
-      var box = here.getBoundingClientRect(), rbox = railEl.getBoundingClientRect();
-      var listButton = railEl.querySelector('.oc-rail-menu');
-      var lead = listButton ? listButton.getBoundingClientRect().right + 16 : rbox.left + 12;
-      if (box.right > rbox.right - 12) railEl.scrollLeft += box.right - (rbox.right - 12);
-      box = here.getBoundingClientRect();
-      if (box.left < lead) railEl.scrollLeft -= lead - box.left;
-    }
-    fade();
+    var grouping = false;
+    var group = function () {
+      if (grouping) return;
+      grouping = true;
+      feed.classList.add('is-grouped');
+      Array.prototype.forEach.call(feed.querySelectorAll(':scope > .oc-day'), function (n) { n.remove(); });
+      var prev = null;
+      Array.prototype.forEach.call(feed.querySelectorAll(':scope > .oc-msg'), function (li) {
+        var name = li.querySelector(':scope > .oc-name'), where = li.querySelector(':scope > .oc-where'), time = li.querySelector(':scope > .oc-time');
+        var who = (name ? name.textContent.trim() : '') + '|' + (where ? where.textContent.trim() : '');
+        var at = time && time.dateTime ? new Date(time.dateTime) : null;
+        var sameDay = !!(prev && at && prev.at && dayOf(prev.at) === dayOf(at));
+        if (at && !sameDay) { var d = document.createElement('li'); d.className = 'oc-day'; d.setAttribute('role', 'separator'); d.textContent = dayName(at); feed.insertBefore(d, li); }
+        var cont = !!(prev && sameDay && prev.who === who && name && at - prev.at < 5 * 60000);
+        li.classList.toggle('is-cont', cont); li.classList.toggle('is-first', !cont);
+        if (!cont && name) { li.setAttribute('data-initial', (name.textContent.trim().charAt(0) || '?').toUpperCase()); var nc = name.style.getPropertyValue('--nc'); if (nc) li.style.setProperty('--nc', nc); }
+        if (time && at) time.title = at.toLocaleString();
+        prev = { who: who, at: at };
+      });
+      grouping = false;
+    };
+    group();
+    if (window.MutationObserver) new MutationObserver(function (list) {
+      if (grouping) return;
+      var touched = list.some(function (m) { return Array.prototype.some.call(m.addedNodes, function (n) { return n.nodeType === 1 && n.classList.contains('oc-msg'); }) || Array.prototype.some.call(m.removedNodes, function (n) { return n.nodeType === 1 && n.classList.contains('oc-msg'); }); });
+      if (touched) group();
+    }).observe(feed, { childList: true });
   }
 
   // ── A server's sheet: what it is, your rank in it, what you may do with it. It opens when a server is held (a

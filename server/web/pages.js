@@ -318,7 +318,7 @@ function createWebRoutes({ config }) {
                 rail: shell.rail({ global: true, dmUnread: dms.reduce((n, d) => n + d.unread, 0), servers: shell.railServers(mineServers) }),
                 side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
-                main: `<header class="oc-chan-head"><h1 id="oc-h" class="oc-chan-title">Global chat</h1><span class="oc-muted oc-chan-topic">Everyone on OpenVibe${home.peopleLine(activity)}</span><span class="oc-chan-tools"><span class="oc-live" id="oc-live" hidden>● live</span><a class="oc-icon-btn" href="/vibe" aria-label="Chat with Vibe" title="Chat with Vibe">${IC.spark}</a><a class="oc-icon-btn" href="/settings" aria-label="Chat settings" title="Chat settings">${IC.gear}</a></span></header>
+                main: `<header class="oc-chan-head">${shell.toList}<h1 id="oc-h" class="oc-chan-title">Global chat</h1><span class="oc-muted oc-chan-topic">Everyone on OpenVibe${home.peopleLine(activity)}</span><span class="oc-chan-tools"><span class="oc-live" id="oc-live" hidden>● live</span><a class="oc-icon-btn" href="/vibe" aria-label="Chat with Vibe" title="Chat with Vibe">${IC.spark}</a><a class="oc-icon-btn" href="/settings" aria-label="Chat settings" title="Chat settings">${IC.gear}</a></span></header>
 ${error}
 ${feedList}
 ${composer}`,
