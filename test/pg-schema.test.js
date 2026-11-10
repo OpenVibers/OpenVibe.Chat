@@ -36,6 +36,7 @@ const TABLES = [
     'room_sync_clocks', 'room_control_leases',
     'room_message_reactions', 'room_member_timeouts', 'config_snapshots', 'config_keys', 'chat_activity',
     'agent_play_requests', 'agent_play_votes', 'agent_play_log',
+    'party_pool_settings', 'party_pool_machines', 'party_pool_holds',   // 0064: OpenVibe's own computers for parties
 ];
 const INDEXES = [
     'idx_chat_ts_deleted', 'idx_chat_page_live', 'idx_chat_channel_user_ts', 'idx_chat_stream_ts', 'idx_emotes_channel_code', 'idx_chat_tl_dedup',
