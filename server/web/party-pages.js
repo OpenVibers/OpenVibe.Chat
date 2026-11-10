@@ -152,13 +152,11 @@ function createPartyRoutes({ config }) {
 <ul class="pty-mine-list">${mine.map((x) => `<li><a href="/p/${encodeURIComponent(x.id)}"><strong>${esc(x.title)}</strong><span>${x.hosting ? 'You started it' : 'You joined'} · ${esc(since(x.started_at))}</span></a></li>`).join('')}</ul>
 </section>` : '';
         const startHref = (x) => `/new?media=${encodeURIComponent(x.page_url)}&title=${encodeURIComponent(x.title)}`;
-        // Two plain choices, not a dropdown (Opus's design pass): where the shared computer runs.
+        // Link machines are chosen from the shared picker; pairing and names live on openvibe.link.
         const desktopStart = signedIn ? `<form class="pty-desktop-start" method="get" action="/new">
 <h2 class="pty-start-h">Start a shared computer</h2>
-<div class="pty-host-choice">
-<button type="submit" name="desktop" value="link" class="pty-host"><strong>On my computer</strong><span>Free. Runs in the Link app on your computer.</span></button>
-<button type="submit" name="desktop" value="openvibe" class="pty-host" disabled aria-describedby="pty-openvibe-availability"><strong>On OpenVibe</strong><span id="pty-openvibe-availability">No OpenVibe machine is free right now.</span></button>
-</div>
+<div data-ov-machines data-needs="browser" data-name="machine" data-principal-name="desktop_node_id" data-value="${esc(String(req.query.machine || ''))}" data-principal-value="${esc(String(req.query.desktop_node_id || ''))}"></div>
+<input type="hidden" name="desktop" value="link"><button type="submit" class="pty-host"><strong>Start on this computer</strong></button>
 </form>` : `<p class="pty-cta"><a class="oc-button" href="/auth/login?next=%2F">Sign in to start a shared computer</a></p>`;
         const start = signedIn
             ? `<form class="pty-paste" method="get" action="/new">
@@ -213,8 +211,11 @@ ${grid}
             if (hosting !== 'link' && hosting !== 'openvibe') return res.redirect(303, '/');
             if (hosting === 'openvibe') return page(req, res, 503, { actor, title: 'No OpenVibe computer is free', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
                 body: '<section class="oc-party-confirm pty-confirm"><h1>No OpenVibe machine is free right now</h1><p>You can host this party on your own computer with Link.</p><p><a class="oc-button" href="/new?desktop=link">Host it on my computer</a></p></section>' });
+            const machine = String(req.query.machine || '');
+            const node = String(req.query.desktop_node_id || '');
+            if (!/^dev_[0-9A-HJKMNP-TV-Z]{26}$/.test(machine) || !/^lnk_[0-9A-HJKMNP-TV-Z]{26}$/.test(node)) return res.redirect(303, '/?error=Choose%20a%20Link%20computer%20to%20host%20the%20party');
             return page(req, res, 200, { actor, title: 'Start a shared computer', path: '/new', robots: 'noindex, nofollow', footer: 'compact', partyHome: true,
-                body: `<section class="oc-party-confirm pty-confirm"><h1>Start a shared computer?</h1><p>Link runs a temporary browser in a container on your computer. People you invite can watch, and you can pass the remote.</p><p class="oc-muted">It needs the OpenVibe Link app on this computer. <a href="https://openvibe.link">Get Link</a></p><form method="post" action="/new"><input type="hidden" name="desktop_hosting" value="link"><button class="oc-button" type="submit">Start the party</button> <a href="/" class="oc-muted">Not now</a></form></section>` });
+                body: `<section class="oc-party-confirm pty-confirm"><h1>Start a shared computer?</h1><p>Link runs a temporary browser in a container on your selected computer. People you invite can watch, and you can pass the remote.</p><form method="post" action="/new"><div data-ov-machines data-needs="browser" data-name="machine" data-principal-name="desktop_node_id" data-value="${esc(machine)}" data-principal-value="${esc(node)}"></div><input type="hidden" name="desktop_hosting" value="link"><button class="oc-button" type="submit">Start the party</button> <a href="/" class="oc-muted">Not now</a></form></section>` });
         }
         if (req.query.radio) {
             let chosen;
@@ -258,7 +259,7 @@ ${source ? `<input type="hidden" name="source_url" value="${esc(source)}">` : ''
         if ((origin && origin !== base) || (fetchSite && fetchSite !== 'same-origin')) return res.status(403).type('text/plain').send('Start a party from openvibe.party itself.');
         if (req.body && req.body.desktop_hosting) {
             try {
-                const out = await parties.createDesktop(actor.user, { desktop_hosting: String(req.body.desktop_hosting), title: 'Shared computer' });
+                const out = await parties.createDesktop(actor.user, { desktop_hosting: String(req.body.desktop_hosting), desktop_node_id: String(req.body.desktop_node_id || ''), title: 'Shared computer' });
                 return res.redirect(303, `/p/${encodeURIComponent(out.party.id)}?k=${encodeURIComponent(out.join_secret)}`);
             } catch (err) {
                 return res.redirect(303, `/?error=${encodeURIComponent(err instanceof parties.PartyError ? err.message : 'The shared computer could not be started')}`);
