@@ -107,6 +107,8 @@ t('a name already taken on the server is refused, in any case; bad names and non
     assert.deepStrictEqual([r.status, r.body.code], [400, 'emoji.invalid_name']);
     r = await upload(member, 'two', Buffer.from('<html><script>alert(1)</script></html>'), 'image/png');
     assert.deepStrictEqual([r.status, r.body.code], [400, 'emoji.invalid_image']);
+    r = await upload(member, 'big', Buffer.alloc(600 * 1024, 1));
+    assert.deepStrictEqual([r.status, r.body.code], [400, 'emoji.too_large'], 'past 512KB the answer is JSON, not a framework 500');
     assert.strictEqual(uploads.length, 1, 'a refused upload never reaches Media');
 });
 

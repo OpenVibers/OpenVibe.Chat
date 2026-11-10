@@ -49,4 +49,9 @@ router.delete('/:slug/emojis/:id', requireAuth, async (req,res) => {
     if (row.media_asset_id) await media.deleteObject(row.media_asset_id);
     res.json({ ok:true });
 });
+// An image past the 512KB limit (or of a type the filter refuses) answers JSON, not the framework's 500.
+router.use((err, _req, res, _next) => {
+    if (err && err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ error:'That image is larger than 512KB', code:'emoji.too_large' });
+    res.status(400).json({ error:'Upload a PNG, JPEG, GIF or WebP image', code:'emoji.invalid_image' });
+});
 module.exports = router;
