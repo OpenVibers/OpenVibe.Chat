@@ -33,11 +33,16 @@ const REGIONS = {
 
 const SCHEMA = Object.freeze({
     $schema: 'https://json-schema.org/draft/2020-12/schema',
-    title: 'Chat voices',
-    description: 'The accounts Chat speaks with: Amazon Polly and Google Cloud text-to-speech. A voice whose provider has no key stays unavailable; the free local voice always works.',
+    title: 'Chat settings',
+    description: 'Owner controlled Chat features and voice providers.',
     type: 'object',
     additionalProperties: false,
     properties: {
+        forum_channels_enabled: {
+            type: 'boolean', title: 'Forum channels', 'x-group': 'Channels', default: false,
+            description: 'Allow server owners to connect channels to Community forums.',
+            'x-owner-input': { group: 'channels', unlocks: 'Forum channels backed by Community discussions.' },
+        },
         amazon_polly_access_key_id: {
             type: 'string', title: 'Amazon Polly access key ID', 'x-group': GROUP,
             description: 'The access key ID of an AWS user that may call Polly. Together with its secret it turns on the Polly voices in chat; the ID alone does nothing.',

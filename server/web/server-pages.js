@@ -189,6 +189,43 @@ ${sheet}`,
         if (!pick) return page(req, res, 404, { actor, title: 'No such channel', path: req.path, robots: 'noindex', body: `<h1>No such channel</h1><p><a href="/s/${esc(server.slug)}">${esc(server.name)}</a></p>` });
         const room = await rooms.bySlug(pick.room);
         const rcan = await rooms.access(room, me);
+        if (room.forum_space) {
+            const forum = require('../rooms/community-forum');
+            const bearer = /^Bearer\s+(.+)$/i.exec(String(req.get('authorization') || ''));
+            const token = bearer ? bearer[1].trim() : req.cookies && req.cookies.ov_token || null;
+            try {
+                const data = req.query.post
+                    ? await forum.thread(room.forum_space, req.query.post, token, { page: req.query.page })
+                    : await forum.list(room.forum_space, token, req.query);
+                const mine = me ? (await servers.list(me)).mine : [];
+                const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
+                const categories = data.categories || [];
+                const post = data.thread || null;
+                const itemHref = (slug) => `/s/${server.slug}/${pick.slug}?post=${encodeURIComponent(slug)}`;
+                const sortLinks = `<nav aria-label="Forum order"><a href="?sort=active">Latest activity</a> · <a href="?sort=new">Newest</a></nav>`;
+                const tags = categories.length ? `<nav aria-label="Tags"><a href="?sort=active">All tags</a>${categories.map((tag) => ` · <a href="?category=${encodeURIComponent(tag.slug)}">${esc(tag.name)}</a>`).join('')}</nav>` : '';
+                const searchHref = `${require('../config').community.publicUrl}/search?type=thread&q=${encodeURIComponent(data.space && data.space.name || '')}`;
+                const listMarkup = (data.threads || []).map((t) => `<article><h3><a href="${itemHref(t.slug)}">${esc(t.title)}</a></h3><p>${esc(t.author && (t.author.display_name || t.author.username) || 'Member')} · ${Number(t.reply_count) || 0} replies · ${esc(t.last_activity_at || t.created_at || '')}${t.pinned ? ' · Pinned' : ''}${t.locked ? ' · Locked' : ''}</p>${t.category ? `<p>Tag: ${esc(t.category.name)}</p>` : ''}</article>`).join('') || '<p>No posts yet.</p>';
+                const postMarkup = post ? `<article><h2>${esc(post.title)}</h2><p>${esc(post.author && (post.author.display_name || post.author.username) || 'Member')} · ${esc(post.last_activity_at || post.created_at || '')}${post.pinned ? ' · Pinned' : ''}${post.locked ? ' · Locked' : ''}</p>${(data.posts || []).map((p) => `<section><p>${esc(p.author && (p.author.display_name || p.author.username) || 'Member')} · ${esc(p.created_at || '')}</p><div>${p.body_html || ''}</div></section>`).join('')}<p><a href="${esc(`${require('../config').community.publicUrl}/s/${encodeURIComponent(room.forum_space)}/t/${encodeURIComponent(post.slug)}`)}">Reply or edit in Community</a></p></article>` : `<section aria-label="Forum posts">${listMarkup}</section>`;
+                const forumForm = me && !post ? `<form class="oc-form" method="post" action="/s/${esc(server.slug)}/${esc(pick.slug)}/forum"><h3>Start a post</h3><label>Title <input name="title" maxlength="200" required></label><label>Post <textarea name="body" maxlength="40000" rows="5" required></textarea></label>${categories.length ? `<label>Tag <select name="category"><option value="">No tag</option>${categories.map((c) => `<option value="${esc(c.slug)}">${esc(c.name)}</option>`).join('')}</select></label>` : ''}<button class="ovk-btn ovk-btn--primary" type="submit">Post</button></form>` : '';
+                const replyForm = me && post && data.viewer && data.viewer.can_reply ? `<form class="oc-form" method="post" action="/s/${esc(server.slug)}/${esc(pick.slug)}/forum/${esc(post.slug)}/replies"><label>Reply <textarea name="body" maxlength="40000" rows="4" required></textarea></label><button class="ovk-btn ovk-btn--primary" type="submit">Reply</button></form>` : '';
+                const modForm = me && post && data.viewer && data.viewer.can_moderate ? `<form class="oc-form" method="post" action="/s/${esc(server.slug)}/${esc(pick.slug)}/forum/${esc(post.slug)}/state"><label><input type="checkbox" name="pinned" value="true"${post.pinned ? ' checked' : ''}> Pinned</label><label><input type="checkbox" name="locked" value="true"${post.locked ? ' checked' : ''}> Locked</label><button class="ovk-btn ovk-btn--quiet" type="submit">Save moderation</button></form>` : '';
+                const shellBody = shell.shell({
+                    rail: shell.rail({ servers: mine.map((s) => ({ slug: s.slug, name: s.name, unread: s.unread, active: s.slug === server.slug })), dmUnread }),
+                    side: shell.sideServer({ server: { ...server, official: server.slug === servers.OFFICIAL_SLUG }, can, me: !!me,
+                        categories: [{ name: 'Forum channels', channels: chans.filter((c) => c.kind === 'forum').map((c) => ({ kind: c.kind, name: c.name, slug: c.slug, href: `/s/${server.slug}/${c.slug}` })) },
+                            { name: 'Other channels', channels: chans.filter((c) => c.kind !== 'forum').map((c) => ({ kind: c.kind, name: c.name, slug: c.slug, href: `/s/${server.slug}/${c.slug}` })) }], occupants: {},
+                        you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {} }),
+                    sideLabel: server.name,
+                    main: `${shell.channelHeader({ name: room.name, kind: 'forum', topic: room.topic || data.space && data.space.description, members: true })}<h2>${esc(data.space && data.space.name || 'Forum')}</h2>${sortLinks}${tags}<p><a href="${esc(searchHref)}">Search posts</a></p>${postMarkup}${forumForm}${replyForm}${modForm}`,
+                    mainLabel: `Forum: ${room.name}`,
+                    members: shell.membersColumn({ groups: [] }), membersLabel: `People in ${server.name}`,
+                });
+                return await page(req, res, 200, { actor, shell: true, footer: 'none', title: `${post ? post.title : 'Forum'} · ${server.name}`, path: req.path, active: 'servers', robots: 'noindex,follow', script: true, description: server.description || `${server.name} forum on OpenVibe.Chat.`, body: shellBody });
+            } catch (err) {
+                return await page(req, res, err.status || 503, { actor, shell: true, title: 'Forum unavailable', path: req.path, active: 'servers', robots: 'noindex', body: `<h1>Forum unavailable</h1><p>${esc(err.message)}</p><p><a href="/s/${esc(server.slug)}">${esc(server.name)}</a></p>` });
+            }
+        }
         const msgs = await rooms.history(room, { limit: 60 });
         if (me && rcan.role) await rooms.markRead(room, me);
         const mine = me ? (await servers.list(me)).mine : [];
@@ -464,7 +501,7 @@ ${roles.length ? `<fieldset class="oc-set oc-role-set"><legend id="oc-onboard-ro
         };
         const active = people.filter((p) => p.role !== 'blocked');
         const banned = people.filter((p) => p.role === 'blocked');
-        const chanRow = (c) => `<li><span>${c.kind === 'voice' ? VOICE_ICON : '#'} <strong>${esc(c.name)}</strong>${c.topic ? ` <span class="oc-muted">${esc(c.topic)}</span>` : ''}</span>
+        const chanRow = (c) => `<li><span>${c.kind === 'forum' ? '▤' : c.kind === 'voice' ? VOICE_ICON : '#'} <strong>${esc(c.name)}</strong>${c.topic ? ` <span class="oc-muted">${esc(c.topic)}</span>` : ''}</span>
 <form class="oc-inline oc-moves" method="post" action="/s/${esc(server.slug)}/channels/${esc(c.slug)}"><button type="submit" name="move" value="up" class="oc-move" aria-label="Move ${esc(c.name)} up" title="Move up">↑</button><button type="submit" name="move" value="down" class="oc-move" aria-label="Move ${esc(c.name)} down" title="Move down">↓</button></form>
 <details class="oc-chan-edit"><summary>Edit</summary><form class="oc-form" method="post" action="/s/${esc(server.slug)}/channels/${esc(c.slug)}">
 <label>Name <input name="name" required maxlength="40" value="${esc(c.name)}"></label>
@@ -492,7 +529,7 @@ ${can.manage ? `<h2>Overview</h2><form class="oc-form" method="post" action="/s/
 <label>Who can find and read it <select name="visibility"><option value="public"${server.visibility === 'public' ? ' selected' : ''}>Anyone: listed, and signed-in people join (public)</option><option value="private"${server.visibility === 'private' ? ' selected' : ''}>Only people with an invite (private)</option></select></label>
 <p><button type="submit">Save</button></p></form>
 <h2>Channels</h2><ul class="oc-members oc-chan-rows">${chans.map(chanRow).join('')}</ul>
-<form class="oc-new" method="post" action="/s/${esc(server.slug)}/channels"><label for="oc-chan-new">Add a channel</label> <input id="oc-chan-new" name="name" required maxlength="40" placeholder="announcements"> <select name="kind" aria-label="Kind of channel"><option value="text">Text</option><option value="voice">Voice</option></select> <button type="submit">Add</button></form>
+<form class="oc-new" method="post" action="/s/${esc(server.slug)}/channels"><label for="oc-chan-new">Add a channel</label> <input id="oc-chan-new" name="name" required maxlength="40" placeholder="announcements"> <select name="kind" aria-label="Kind of channel"><option value="text">Text</option><option value="voice">Voice</option>${require('../settings').value('forum_channels_enabled', null, false) === true ? '<option value="forum">Forum</option>' : ''}</select>${require('../settings').value('forum_channels_enabled', null, false) === true ? '<label>Community forum slug <input name="community_space" maxlength="40" placeholder="my-forum"></label>' : ''} <button type="submit">Add</button></form>
 <section class="oc-set" id="oc-onboarding" aria-labelledby="oc-onb-h"><h2 id="oc-onb-h">Onboarding</h2>
 <p class="oc-muted">People who join read the rules, if there are any, then pick their roles.</p>
 <form class="oc-form" method="post" action="/s/${esc(server.slug)}/onboarding">
@@ -537,7 +574,10 @@ ${can.owner || can.staff ? `<h2>Delete the server</h2><form class="oc-form" meth
     }));
     router.post('/s/:slug/channels', ...settingsAction(async (req, res, server, user) => {
         const b = req.body || {};
-        const room = await servers.createChannel(server, user, { name: b.name, kind: b.kind === 'voice' ? 'voice' : 'text' });
+        if (b.kind === 'forum' && require('../settings').value('forum_channels_enabled', null, false) !== true) throw Object.assign(new Error('Forum channels are not enabled'), { status: 403 });
+        if (b.kind === 'forum' && !(await servers.access(server, user)).manage) throw Object.assign(new Error('Only the server owner and admins add channels'), { status: 403 });
+        if (b.kind === 'forum') await require('../rooms/community-forum').verifyManage(b.community_space, req.cookies && req.cookies.ov_token);
+        const room = await servers.createChannel(server, user, { name: b.name, kind: ['voice', 'forum'].includes(b.kind) ? b.kind : 'text', community_space: b.community_space });
         res.redirect(303, `/s/${server.slug}/${room.channel_slug}`);
     }));
     router.post('/s/:slug/channels/:channel', ...settingsAction(async (req, res, server, user) => {
@@ -611,11 +651,42 @@ ${errorOf(req)}${action}</section>`,
 
     // A channel's page and its no-JavaScript message form (after the fixed /s/:slug/… routes above).
     router.get('/s/:slug/:channel', serverPage);
+    router.post('/s/:slug/:channel/forum', formLimit, sameSite, orError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const server = await servers.bySlug(req.params.slug);
+        const room = server ? await servers.channelBySlug(server, req.params.channel) : null;
+        if (!room || !room.forum_space || !(await servers.access(server, actor.user)).read) return res.redirect(303, '/servers');
+        req.back = `/s/${server.slug}/${room.channel_slug}`;
+        if (req.body && req.body.category) req.body.category = String(req.body.category);
+        const token = req.cookies && req.cookies.ov_token;
+        const out = await require('../rooms/community-forum').create(room.forum_space, token, req.body || {});
+        res.redirect(303, `${req.back}?post=${encodeURIComponent(out.thread.slug)}`);
+    }));
+    router.post('/s/:slug/:channel/forum/:thread/replies', formLimit, sameSite, orError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const server = await servers.bySlug(req.params.slug);
+        const room = server ? await servers.channelBySlug(server, req.params.channel) : null;
+        if (!room || !room.forum_space || !(await servers.access(server, actor.user)).read) return res.redirect(303, '/servers');
+        req.back = `/s/${server.slug}/${room.channel_slug}?post=${encodeURIComponent(req.params.thread)}`;
+        await require('../rooms/community-forum').reply(room.forum_space, req.params.thread, req.cookies && req.cookies.ov_token, req.body || {});
+        res.redirect(303, req.back);
+    }));
+    router.post('/s/:slug/:channel/forum/:thread/state', formLimit, sameSite, orError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const server = await servers.bySlug(req.params.slug);
+        const room = server ? await servers.channelBySlug(server, req.params.channel) : null;
+        if (!room || !room.forum_space || !(await servers.access(server, actor.user)).read) return res.redirect(303, '/servers');
+        req.back = `/s/${server.slug}/${room.channel_slug}?post=${encodeURIComponent(req.params.thread)}`;
+        await require('../rooms/community-forum').moderate(room.forum_space, req.params.thread, req.cookies && req.cookies.ov_token,
+            { pinned: req.body && req.body.pinned === 'true', locked: req.body && req.body.locked === 'true' });
+        res.redirect(303, req.back);
+    }));
     router.post('/s/:slug/:channel', formLimit, sameSite, orError(async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         const server = await servers.bySlug(req.params.slug);
         const room = server ? await servers.channelBySlug(server, req.params.channel) : null;
         if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/servers');
+        if (room.forum_space) return res.redirect(303, `/s/${server.slug}/${room.channel_slug}`);
         req.back = `/s/${server.slug}/${room.channel_slug}`;
         const message = await rooms.post(room, actor.user, req.body && req.body.message);
         require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
