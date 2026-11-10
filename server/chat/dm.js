@@ -162,16 +162,22 @@ async function getConversation(conversationId) {
 /**
  * Send a message in a conversation. Returns the message row.
  */
-async function sendMessage(conversationId, senderId, text) {
+async function sendMessage(conversationId, senderId, text, { reply_to_id = null } = {}) {
     if (!text || !text.trim()) return null;
     const trimmed = text.trim().slice(0, 2000); // max 2000 chars
     const senderSubject = await db.subjectFor(senderId);
+    // What this answers: it must be a message of this same conversation.
+    const replyToId = Number(reply_to_id) || null;
+    const replyTo = replyToId
+        ? await db.get('SELECT id, sender_id, message FROM dm_messages WHERE id = ? AND conversation_id = ?', [replyToId, conversationId])
+        : null;
+    if (replyToId && !replyTo) return null;
     // A known OpenVibe link's card is resolved when the message is sent, with a second's budget (link-cards.js).
     const { card, pending } = await linkCards.forSend(trimmed);
     const row = await db.tx(async () => {
         const result = await db.run(
-            `INSERT INTO dm_messages (conversation_id, sender_id, message, sender_subject_id, card) VALUES (?, ?, ?, ?, ?)`,
-            [conversationId, senderId, trimmed, senderSubject, linkCards.toJson(card)]
+            `INSERT INTO dm_messages (conversation_id, sender_id, message, sender_subject_id, card, reply_to_id) VALUES (?, ?, ?, ?, ?, ?)`,
+            [conversationId, senderId, trimmed, senderSubject, linkCards.toJson(card), replyToId]
         );
         // Touch conversation updated_at
         await db.run(`UPDATE dm_conversations SET updated_at = ov_now() WHERE id = ?`, [conversationId]);
@@ -197,6 +203,13 @@ async function sendMessage(conversationId, senderId, text) {
     if (row) {
         row.card = card;
         if (pending) linkCards.fillLater('dm_messages', row.id, pending);
+        // Activity: @mentions in the conversation, and the person whose message this answers (server/chat/activity.js).
+        const activity = require('./activity');
+        const sender = senderId ? await require('../live-context').getUserById(senderId) : null;
+        if (sender) {
+            await activity.mentionsInDm({ conversationId, message: row, actor: sender });
+            if (replyTo) await activity.replyInDm({ conversationId, message: row, parent: replyTo, actor: sender });
+        }
     }
     return row;
 }

@@ -30,7 +30,7 @@ const APP_BAR = [
     { label: 'Home', href: '/messages', icon: 'fa-comment-dots', page: 'messages' },
     { label: 'Servers', href: '/servers', icon: 'fa-globe', page: 'servers' },
     { label: 'Vibe', href: '/vibe', icon: 'fa-wand-magic-sparkles', page: 'vibe' },
-    { label: 'Activity', href: '/notifications', icon: 'fa-bell', page: 'notifications' },
+    { label: 'Activity', href: '/notifications', icon: 'fa-bell', page: 'notifications', dot: true },
     { label: 'You', href: '/settings', icon: 'fa-user', page: 'settings' },
 ];
 

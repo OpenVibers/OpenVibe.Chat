@@ -1201,6 +1201,14 @@ class ChatServer {
         // Attach reply context to broadcast
         if (replyTo) chatMsg.reply_to = replyTo;
 
+        // Activity (server/chat/activity.js): the person this answers, and anyone @named. A chat line is never
+        // held up by its activity; every write there is best effort.
+        if (client.user && client.user.id) {
+            const activity = require('./activity');
+            if (replyTo) await activity.replyInChat({ client, message: chatMsg, parent: replyTo });
+            await activity.mentionsInChat({ client, message: chatMsg });
+        }
+
         // Live's reactions to a real chat line — OpenCoins chat bonus (logged-in users in a
         // stream), AI chat viewers (stream chat), the PowerChat overlay relay (any channel chat) —
         // are ONE call to Live per message; the coin result comes back for this socket.

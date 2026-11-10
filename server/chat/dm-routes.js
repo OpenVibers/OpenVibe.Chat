@@ -256,7 +256,7 @@ router.post('/conversations/:id/messages', sendLimit, async (req, res) => {
             return res.status(400).json({ error: 'Message required' });
         }
 
-        const msg = publicMessage(await dm.sendMessage(convId, req.user.id, message));
+        const msg = publicMessage(await dm.sendMessage(convId, req.user.id, message, { reply_to_id: req.body && req.body.reply_to_id }));
         if (!msg) return res.status(400).json({ error: 'Failed to send' });
 
         // Attach sender info

@@ -184,6 +184,7 @@ function createWebRoutes({ config }) {
             messages: await n(async () => await dm.getTotalUnread(actor.user.id)),
             rooms: await n(async () => await rooms.unreadTotal(actor.user)),
             servers: await n(async () => await rooms.unreadTotal(actor.user, { servers: true })),
+            activity: await n(async () => await require('../chat/activity').unreadCount(actor.user)),
         };
     };
     // Under the global room on the front page: what openvibe.chat is for (openvibe-shared/showcase), each card a real

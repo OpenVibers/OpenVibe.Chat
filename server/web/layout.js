@@ -58,6 +58,7 @@ function links(o) {
 }
 
 function navConfig(o, config, site = {}, siteLinks = null) {
+    const counts = o.counts || {};
     return {
         service: site.service || 'chat',
         apiBase: NETWORK_URL,
@@ -65,7 +66,8 @@ function navConfig(o, config, site = {}, siteLinks = null) {
         history: { type: 'page', title: o.title || site.name || SITE_NAME },
         // The phone's bottom bar (Shared's app bar, appbar.js): Home, Servers, Vibe, Activity and You — one
         // bar for every OpenVibe app (the plan, 2026-11-09, stage V2).
-        appBar: require('./shell').APP_BAR.map((l) => ({ ...l, active: o.active === l.page })),
+        // The Activity place carries a dot while something in it is unread (Shared's appbar.js draws `dot`).
+        appBar: require('./shell').APP_BAR.map(({ dot, ...l }) => ({ ...l, ...(dot ? { dot: !!counts.activity } : {}), active: o.active === l.page })),
         silentLogin: `${config.web.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
         loginUrl: `/auth/login?next=${encodeURIComponent(o.path || '/')}`,

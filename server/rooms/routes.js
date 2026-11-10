@@ -39,6 +39,8 @@ const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
 const parties = require('./parties');
 const ctx = require('../live-context');
+const db = require('../db/database');
+const activity = require('../chat/activity');
 
 const router = express.Router();
 
@@ -53,6 +55,8 @@ const deleteLimit = limits('chat.room.message.delete', { minute: 60, hour: 600 }
 const manageLimit = limits('chat.room.manage', { minute: 30, hour: 300 });
 // Marking read: once per room opened or caught up.
 const readLimit = limits('chat.room.read_mark', { minute: 60, hour: 1200 });
+// One reaction at a time, changed or taken back: a person taps a few a minute.
+const reactLimit = limits('chat.room.reaction', { minute: 120, hour: 1200 });
 // Attaching links the room to a Community space: an owner sets up a few.
 const attachLimit = limits('chat.room.attach', { minute: 10, hour: 100 });
 
@@ -205,9 +209,36 @@ router.get('/:slug/messages', optionalAuth, async (req, res) => {
 router.post('/:slug/messages', requireAuth, postLimit, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     try {
-        const message = await rooms.post(room, req.user, req.body && req.body.message, { timezone: req.body && req.body.timezone });
+        const message = await rooms.post(room, req.user, req.body && req.body.message, {
+            timezone: req.body && req.body.timezone,
+            reply_to_id: req.body && req.body.reply_to_id,
+        });
         chatServer().broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
         res.status(201).json({ message });
+    } catch (err) { send(res, err); }
+});
+
+// A reaction on a room message (room_message_reactions, migration 0038): the same one again takes it back. The
+// author's activity gets one row per person and message (server/chat/activity.js reaction).
+router.post('/:slug/messages/:id/react', requireAuth, reactLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    const reaction = String((req.body && req.body.reaction) || '');
+    if (!activity.REACTIONS.includes(reaction)) return res.status(422).json({ error: 'Unknown reaction', code: 'rooms.reaction' });
+    const message = await db.get('SELECT id, user_id, message, is_deleted FROM room_messages WHERE id = ? AND room_id = ?', [Number(req.params.id) || 0, room.id]);
+    if (!message || message.is_deleted) return res.status(404).json({ error: 'No such message', code: 'rooms.no_message' });
+    try {
+        if (!(await rooms.access(room, req.user)).read) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
+        const existing = await db.get('SELECT reaction FROM room_message_reactions WHERE message_id = ? AND user_id = ?', [message.id, req.user.id]);
+        if (existing && existing.reaction === reaction) {
+            await db.run('DELETE FROM room_message_reactions WHERE message_id = ? AND user_id = ?', [message.id, req.user.id]);
+            await activity.removeReaction({ message, actor: req.user });
+            return res.json({ ok: true, reaction: null });
+        }
+        await db.run(`INSERT INTO room_message_reactions (message_id, user_id, reaction) VALUES (?, ?, ?)
+                      ON CONFLICT (message_id, user_id) DO UPDATE SET reaction = EXCLUDED.reaction, created_at = now()`,
+        [message.id, req.user.id, reaction]);
+        await activity.reaction({ room, message, actor: req.user, reaction });
+        res.json({ ok: true, reaction });
     } catch (err) { send(res, err); }
 });
 

@@ -335,6 +335,9 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     app.use('/api/sounds', limits.identify, limits.reads('chat.sounds.read', { skip: (req) => req.path.startsWith('/file/') }));
     app.use('/api/emotes', limits.identify, limits.reads('chat.emotes.read', { skip: (req) => req.path.startsWith('/file/') }));
 
+    // What happened to you in Chat (server/chat/activity.js, migration 0060): its own API, not Live's chat.
+    app.use('/api/v1/activity', limits.identify, limits.reads('chat.activity.read'), require('./chat/activity-routes'));
+
     // The person's chat settings: the Network user modules Chat owns (server/prefs/stores.js).
     for (const [mount, router] of Object.entries(require('./prefs/routes').ROUTES)) app.use(`/api/chat/${mount}`, router);
     // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
