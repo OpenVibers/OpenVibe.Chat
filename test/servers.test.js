@@ -109,6 +109,7 @@ t('roles: the owner appoints admins, admins appoint mods, mods remove and ban me
 
 t('channels: admins add, rename, move and delete them; a server keeps one text channel; voice follows the join role', async () => {
     assert.strictEqual((await api('POST', '/saturday-raiders/channels', cat, { name: 'mods only' })).status, 403, 'mods do not add channels');
+    assert.strictEqual((await api('POST', '/saturday-raiders/channels', bob, { name: 'Town hall', kind: 'stage' })).body.code, 'servers.stage_disabled', 'stage channels default off');
     let r = await api('POST', '/saturday-raiders/channels', bob, { name: 'Announcements', topic: 'News' });
     assert.deepStrictEqual([r.status, r.body.channel.slug, r.body.channel.kind], [201, 'announcements', 'text']);
     r = await api('POST', '/saturday-raiders/channels', bob, { name: 'Settings', kind: 'voice' });
@@ -124,6 +125,26 @@ t('channels: admins add, rename, move and delete them; a server keeps one text c
     assert.strictEqual((await api('DELETE', '/saturday-raiders/channels/announcements', bob)).status, 204);
     assert.deepStrictEqual([(await api('DELETE', '/saturday-raiders/channels/general', bob)).status, (await api('DELETE', '/saturday-raiders/channels/general', bob)).body.code], [409, 'servers.last_channel']);
     assert.strictEqual((await roomApi('PATCH', `/${general}`, ann, { visibility: 'private' })).body.code, 'rooms.server_channel', 'a channel is as public as its server');
+});
+
+t('stage channels reuse call rooms, hands and moderator invitations change who can talk', async () => {
+    const settings = require('../server/settings');
+    const previous = settings.current();
+    settings.activate({ value: (key, _env, fallback) => key === 'stage_channels_enabled' ? true : fallback });
+    try {
+        const made = await api('POST', '/saturday-raiders/channels', bob, { name: 'Town hall', kind: 'stage', topic: 'Updates' });
+        assert.deepStrictEqual([made.status, made.body.channel.kind], [201, 'stage']);
+        const path = `/saturday-raiders/${made.body.channel.slug}/stage`;
+        assert.strictEqual((await api('POST', `${path}/start`, bob, { topic: 'Weekly news' })).body.stage.topic, 'Weekly news');
+        assert.strictEqual((await roomApi('GET', `/${made.body.channel.room}`, dee)).body.can.talk, false, 'audience starts muted');
+        const hand = await api('POST', `${path}/hand`, dee);
+        assert.strictEqual(hand.body.stage?.raised_hands?.[0]?.user_id, dee.id, `${hand.status} ${hand.text}`);
+        assert.strictEqual((await api('POST', `${path}/invite`, bob, { user_id: dee.id })).body.stage.speakers[0].user_id, dee.id);
+        assert.strictEqual((await roomApi('GET', `/${made.body.channel.room}`, dee)).body.can.talk, true, 'invited speaker can talk');
+        assert.strictEqual((await api('POST', `${path}/move-back`, bob, { user_id: dee.id })).status, 200);
+        assert.strictEqual((await roomApi('GET', `/${made.body.channel.room}`, dee)).body.can.talk, false, 'moving a speaker back mutes them');
+        assert.strictEqual((await api('POST', `${path}/end`, bob)).body.stage.ended_at != null, true);
+    } finally { settings.activate(previous); }
 });
 
 t('private servers: invisible to outsiders, joined through an invite with uses and expiry, revocable', async () => {
