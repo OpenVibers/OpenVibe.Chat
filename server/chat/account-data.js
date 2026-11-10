@@ -46,6 +46,8 @@ const LIMIT = ROW_LIMIT + 1;
 const EXPORTS = [
     ['chat_messages.json', `SELECT * FROM chat_messages WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['room_messages.json', `SELECT * FROM room_messages WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['vibe_canvases.json', `SELECT c.* FROM vibe_canvases c JOIN rooms r ON r.id = c.room_id WHERE r.owner_subject = ANY(@s) OR r.owner_id = ANY(@ids) ORDER BY c.updated_at DESC LIMIT ${LIMIT}`],
+    ['vibe_canvas_versions.json', `SELECT v.* FROM vibe_canvas_versions v JOIN vibe_canvases c ON c.id = v.canvas_id JOIN rooms r ON r.id = c.room_id WHERE r.owner_subject = ANY(@s) OR r.owner_id = ANY(@ids) ORDER BY v.created_at DESC LIMIT ${LIMIT}`],
     ['direct_messages.json', `SELECT * FROM dm_messages WHERE sender_subject_id = ANY(@s) OR sender_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['conversations.json', `SELECT * FROM dm_participants WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['rooms_owned.json', `SELECT * FROM rooms WHERE (owner_subject = ANY(@s) OR owner_id = ANY(@ids)) AND server_id IS NULL ORDER BY id DESC LIMIT ${LIMIT}`],

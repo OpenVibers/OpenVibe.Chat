@@ -11,12 +11,14 @@ const { boot, suite } = require('./helpers');
 
 const t = suite('vibe canvas');
 const TASK = 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2AB';
-let h, ann, workspace, room, slug, task;
+let h, ann, workspace, room, slug, task, config;
 
 const pageJson = (html) => JSON.parse((/window\.__OV_PAGE = (\{.*?\});\n/.exec(html) || [])[1].replace(/\\u003c/g, '<')).chat;
 
 t('boot: a Vibe chat whose newest task is Actor\'s', async () => {
     h = await boot();
+    config = require('../server/config');
+    config.ai.vibeCanvas = false;
     require('../server/config').ai.vibeDoIt = true; // This fixture explicitly enables Actor-backed tasks.
     workspace = require('../server/rooms/workspace');
     workspace._setTokens({ getToken: async () => 'chat-actor-token' });
@@ -69,6 +71,28 @@ t('the client draws it read-only and refreshes only while the task runs', async 
     assert.match(src, /credentials: 'omit'/, 'the person\'s Bearer, no cookies');
     assert.match(src, /\}, 30000\);/, 'at most every 30 s while the task runs');
     assert.match(src, /m\.type === 'room_task'[\s\S]{0,120}canvasTaskStatus/, 'a task status change refreshes it');
+});
+
+t('Canvas APIs are owner gated, version edits, retain references and export a file', async () => {
+    const off = await h.http('GET', `/api/chat/vibe/${slug}/canvases`, { token: ann.token });
+    assert.strictEqual(off.status, 404, 'the feature is off by default');
+    const { definitions } = require('../server/rooms/ai-tools');
+    assert.ok(!definitions({ handle: 'vibe' }, room).some((tool) => tool.function.name === 'canvas_write'));
+    config.ai.vibeCanvas = true;
+    assert.ok(definitions({ handle: 'vibe' }, room).some((tool) => tool.function.name === 'canvas_write'));
+    const made = await h.http('POST', `/api/chat/vibe/${slug}/canvases`, { token: ann.token, body: { title: 'Plan', kind: 'document', content: '# First\n\nDraft' } });
+    assert.strictEqual(made.status, 201, made.text);
+    const id = made.body.canvas.id;
+    assert.match(id, /^cv_[0-9a-f]{24}$/);
+    const revised = await h.http('PUT', `/api/chat/vibe/${slug}/canvas/${id}`, { token: ann.token, body: { title: 'Plan', kind: 'document', content: '# Revised' } });
+    assert.strictEqual(revised.body.canvas.version, 2);
+    const history = await h.http('GET', `/api/chat/vibe/${slug}/canvas/${id}`, { token: ann.token });
+    assert.deepStrictEqual(history.body.versions.map((v) => v.version), [2, 1]);
+    const file = await h.http('GET', `/api/chat/vibe/${slug}/canvas/${id}/export`, { token: ann.token });
+    assert.strictEqual(file.text, '# Revised');
+    assert.match(String(file.headers.get('content-disposition')), /Plan\.md/);
+    const bob = h.addUser('bob', { subject: ids.newId('user') });
+    assert.strictEqual((await h.http('GET', `/api/chat/vibe/${slug}/canvas/${id}`, { token: bob.token })).status, 404);
 });
 
 t.run();
