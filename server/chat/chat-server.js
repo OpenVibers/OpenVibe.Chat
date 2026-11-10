@@ -2069,6 +2069,20 @@ class ChatServer {
                 break;
             }
 
+            case 'shrug': {
+                const content = `${args ? `${args} ` : ''}¯\\_(ツ)_/¯`;
+                if (await this._commandTextBlocked(ws, client, content)) break;
+                const username = client.user?.display_name || client.anonId;
+                await this._broadcastToRoom(client, { type:'chat', username, core_username:client.user?.username || null,
+                    user_id:client.user?.id || null, role:client.user?.role || 'anon', message:content,
+                    timestamp:new Date().toISOString() });
+                break;
+            }
+
+            case 'mute':
+                this.handleModAction(ws, client, 'timeout', `${args} 300`);
+                break;
+
             case 'ban':
                 this.handleModAction(ws, client, 'ban', args);
                 break;
