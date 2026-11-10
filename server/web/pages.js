@@ -12,7 +12,8 @@
  *                             POST /messages/:id/block blocks the other person of a 1:1 conversation;
  *                             POST /messages/:id/call rings them (the call-user route) and opens /call/<channel>
  *   GET  /call/:channel       a 1:1 call's page (its caller and the people it invited): public/web/call.js joins
- *                             it, and while the caller waits it says ringing until the answer comes
+ *                             it only when the person presses "Turn on microphone", and while the caller waits
+ *                             it says ringing until the answer comes
  *   GET  /rooms, /r/:slug     rooms: community, call (a voice/video call in the page, public/web/call.js)
  *                             and system (staff announcements); /r/:slug/settings for moderators
  *   GET  /settings            your portable chat settings (Network module chat.preferences); POST saves
@@ -668,13 +669,14 @@ ${composer}`,
             : '<li class="oc-muted">Nobody is in the call yet.</li>';
         await page(req, res, 200, {
             actor, title, path: `/call/${ch.id}`, active: 'messages', robots: 'noindex, nofollow', callScript: true,
-            page: { view: 'call', me: me.id, call: { channel: ch.id, join: true, talk: true, auto: true, ring: ringing ? { id: Number(ringing.id), name: nameOf(ringing) } : null } },
+            page: { view: 'call', me: me.id, call: { channel: ch.id, join: true, talk: true, ring: ringing ? { id: Number(ringing.id), name: nameOf(ringing) } : null } },
             body: `<p><a href="${backLink}">← Back to the conversation</a></p>
 <section class="oc-call oc-call-page" aria-labelledby="oc-call-h" id="oc-call">
 <h1 id="oc-call-h">${esc(title)} <span class="oc-muted oc-call-count" id="oc-call-count">${ch.participantCount ? `· ${ch.participantCount} in` : ''}</span></h1>
 <p class="oc-muted" id="oc-call-how">A voice call, peer to peer: your microphone goes only to the people in it.</p>
 <ul class="oc-call-people" id="oc-call-people">${people}</ul>
-<p class="oc-call-controls"><button type="button" id="oc-call-join" hidden>Join the call</button> <button type="button" id="oc-call-mute" hidden aria-pressed="false">Mute</button> <button type="button" id="oc-call-leave" hidden>Leave the call</button></p>
+<p class="oc-call-controls"><button type="button" id="oc-call-join" hidden>Turn on microphone</button> <button type="button" id="oc-call-mute" hidden aria-pressed="false">Mute</button> <button type="button" id="oc-call-leave" hidden>Leave the call</button></p>
+<p class="oc-muted oc-call-join-note">Join the voice call with the people listed above. Nothing is asked until you press it.</p>
 <p class="oc-muted oc-call-status" id="oc-call-status" role="status" aria-live="polite"></p>
 <noscript><p class="oc-muted">A call needs JavaScript.</p></noscript>
 </section>`,
