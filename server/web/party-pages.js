@@ -418,7 +418,7 @@ ${holdRows}
                 mainAttrs: `data-party="${esc(out.id)}"`, party: true, wide: true,
                 body: `<article class="oc-party${out.kind === 'radio' ? ' is-radio' : ''}">
 <header class="oc-party-head"><h1>${esc(out.title)}</h1><p class="oc-muted">Started by ${esc(out.host_name || 'someone')}</p>${out.kind === 'desktop' && out.desktop && out.desktop.where ? `<p class="oc-party-where" data-party-where>${esc(out.desktop.where.line)}</p>` : ''}</header>
-<div class="oc-party-stage" data-party-stage aria-label="${out.kind === 'radio' ? 'The music stage' : 'The video'}"></div>
+<div class="oc-party-stage" data-party-stage aria-label="${out.kind === 'radio' ? 'The music stage' : 'The video'}">${out.kind === 'radio' ? '' : '<div class="oc-party-music" data-party-music aria-label="Music"></div>'}</div>
 <div class="oc-party-people" data-party-people aria-label="People here"></div>
 <div class="oc-party-chat" data-party-chat aria-label="Chat"></div>
 <div class="oc-party-remote" data-party-remote aria-label="The remote"></div>
