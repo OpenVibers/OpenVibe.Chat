@@ -22,15 +22,16 @@ function cleanOne(file, index, reader = null) {
     const name = String(raw.name || '').replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, NAME_MAX) || 'file';
     const mediaType = String(raw.media_type || raw.type || 'application/octet-stream').split(';')[0].trim().slice(0, NAME_MAX) || 'application/octet-stream';
     const size = Math.max(0, Math.floor(Number(raw.size) || 0));
+    const readers = Array.isArray(raw.access && raw.access.readers) && raw.access.readers.length
+        ? raw.access.readers.map((r) => String(r).slice(0, 200)).slice(0, 50)
+        : [reader].filter(Boolean);
     return {
         id,
         name,
         media_type: mediaType,
         size,
         storage: { provider: 'media', key: id },
-        access: { readers: Array.isArray(raw.access && raw.access.readers) && raw.access.readers.length
-            ? raw.access.readers.map((r) => String(r).slice(0, 200)).slice(0, 50)
-            : [reader].filter(Boolean) },
+        ...(readers.length ? { access: { readers } } : {}),
         read: { method: 'not_readable', reason: 'Attached; AI has not read it yet.' },
         role: 'input',
     };
