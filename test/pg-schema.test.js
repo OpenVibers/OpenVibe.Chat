@@ -36,7 +36,7 @@ const TABLES = [
     'room_sync_clocks', 'room_control_leases',
     'room_message_reactions', 'room_member_timeouts', 'config_snapshots', 'config_keys', 'chat_activity',
     'agent_play_requests', 'agent_play_votes', 'agent_play_log',
-    'link_previews', 'link_preview_cache',   // 0063: address previews beside the message, and the address cache
+    'link_previews', 'link_preview_cache',   // 0064: address previews beside the message, and the address cache
 ];
 const INDEXES = [
     'idx_chat_ts_deleted', 'idx_chat_page_live', 'idx_chat_channel_user_ts', 'idx_chat_stream_ts', 'idx_emotes_channel_code', 'idx_chat_tl_dedup',
