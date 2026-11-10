@@ -236,6 +236,8 @@ module.exports = {
         // Vibe, OpenVibe's assistant (server/rooms/vibe.js): on unless CHAT_VIBE=0 (it also needs AI members on); a person
         // gets this many answers a UTC day across all their Vibe chats.
         vibe: process.env.CHAT_VIBE !== '0',
+        // C3 web search in Vibe's composer (the existing Search Fabric tool and cited results); owner enables it explicitly.
+        vibeWebSearch: bool(process.env.CHAT_VIBE_WEB_SEARCH_ENABLED, false),
         vibeRepliesPerDay: Math.max(1, int(process.env.CHAT_VIBE_REPLIES_PER_DAY, 100)),
     },
     bench: {
