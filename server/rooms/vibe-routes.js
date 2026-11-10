@@ -32,18 +32,50 @@ const rooms = require('./rooms');
 const vibe = require('./vibe');
 const how = require('./how');
 const memory = require('./vibe-memory');
+const canvasStore = require('./vibe-canvas');
 
 const router = express.Router();
 const startLimit = limits('chat.vibe.start', { minute: 10, hour: 120 });
 const manageLimit = limits('chat.vibe.manage', { minute: 30, hour: 300 });
 
 function send(res, err) {
-    if (err instanceof vibe.VibeError || err instanceof rooms.RoomError) return res.status(err.status).json({ error: err.message, code: err.code });
+    if (err instanceof vibe.VibeError || err instanceof rooms.RoomError || (err && err.status && err.code)) return res.status(err.status).json({ error: err.message, code: err.code });
     console.error('[Vibe]', err && err.message);
     return res.status(500).json({ error: 'Something went wrong' });
 }
 /** Vibe speaks for nobody but the person signed in: API tokens get the rooms API instead. */
 const personOnly = (req, res, next) => (req.authSource === 'api_token' ? res.status(403).json({ error: 'Chat with Vibe with your own sign-in', code: 'vibe.person_only' }) : next());
+
+async function canvasRoom(req, res) {
+    if (!config.ai.vibeCanvas) { res.status(404).json({ error: 'Canvas is not enabled', code: 'vibe.canvas_disabled' }); return null; }
+    const room = await vibe.ownChat(req.params.slug, req.user);
+    if (!room) { res.status(404).json({ error: 'No such chat', code: 'rooms.not_found' }); return null; }
+    return room;
+}
+router.get('/:slug/canvases', requireAuth, personOnly, async (req, res) => {
+    try { const room = await canvasRoom(req, res); if (room) res.json({ canvases: await canvasStore.list(room) }); }
+    catch (err) { send(res, err); }
+});
+router.post('/:slug/canvases', requireAuth, personOnly, startLimit, async (req, res) => {
+    try { const room = await canvasRoom(req, res); if (room) res.status(201).json({ canvas: await canvasStore.write(room, req.user, req.body || {}) }); }
+    catch (err) { send(res, err); }
+});
+router.get('/:slug/canvas/:id/export', requireAuth, personOnly, async (req, res) => {
+    try {
+        const room = await canvasRoom(req, res); if (!room) return;
+        const doc = await canvasStore.get(room, req.params.id);
+        const file = `${doc.title.replace(/[^A-Za-z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'canvas'}${doc.kind === 'code' ? '.txt' : '.md'}`;
+        res.set('Content-Disposition', `attachment; filename="${file}"`).type('text/plain; charset=utf-8').send(doc.content);
+    } catch (err) { send(res, err); }
+});
+router.get('/:slug/canvas/:id', requireAuth, personOnly, async (req, res) => {
+    try { const room = await canvasRoom(req, res); if (room) res.json({ canvas: await canvasStore.get(room, req.params.id), versions: await canvasStore.versions(room, req.params.id) }); }
+    catch (err) { send(res, err); }
+});
+router.put('/:slug/canvas/:id', requireAuth, personOnly, startLimit, async (req, res) => {
+    try { const room = await canvasRoom(req, res); if (room) res.json({ canvas: await canvasStore.write(room, req.user, req.body || {}, req.params.id) }); }
+    catch (err) { send(res, err); }
+});
 
 router.get('/', requireAuth, personOnly, async (req, res) => {
     try {

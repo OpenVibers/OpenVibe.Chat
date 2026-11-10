@@ -71,6 +71,10 @@ const BASE = [
 const PANTRY = fn('household_pantry', 'What is in this household\'s pantry and its meal plan, from OpenVibe.Food, right now.');
 const WEB = fn('web_search', 'Search the open web (the Search Fabric: OpenVibe\'s open index, then its web providers) and get results with each one\'s title, URL, provider and date. Cite the URL, provider and date you use. Use it for current events, prices, schedules and facts that OpenVibe search does not have, and for news (pass freshness "day", or "week" for a roundup).',
     { query: { type: 'string', description: 'The question or search, in plain words' }, freshness: FRESHNESS_ARG }, ['query']);
+const CANVAS_READ = fn('canvas_read', 'Read the newest Canvas in this Vibe conversation, or a particular one by id. Use this before revising a Canvas.', { canvas_id: { type: 'string' } });
+const CANVAS_WRITE = fn('canvas_write', 'Create or revise a long document or code artifact in this conversation Canvas. Pass canvas_id to save a new version; otherwise a new artifact is created. Return the canvas id to the person.', {
+    title: { type: 'string' }, kind: { type: 'string', enum: ['document', 'code'] }, content: { type: 'string' }, canvas_id: { type: 'string' },
+}, ['title', 'kind', 'content']);
 
 const QUEUE = fn('queue_task', 'Put a piece of work on this room\'s work queue, for the person who asked you. research (a short report with sources), web (a current answer from the web) and answer run at once and their result comes back into the room in a minute or two; code (a change to an OpenVibe repository, done by a coding agent and handed in as a pull request for review), computer (something done on a computer) and other wait for a worker to take them. Queue only what someone asked to have done, one task per job.',
     {
@@ -119,6 +123,7 @@ const definitions = (member, room = null, { memory = false } = {}) => [
     ...(isWorkspace(room) ? [QUEUE, QUEUE_STATUS] : []),
     ...(hasMemory(member, room, memory) ? [REMEMBER, FORGET] : []),
     ...(ownChat(member, room) ? [SET_UP_AGENT, MY_AGENTS, SET_REMINDER, MY_REMINDERS, STOP_REMINDER, MY_DAY, START_TIMER, STOP_TIMER] : []),
+    ...(ownChat(member, room) && require('../config').ai.vibeCanvas ? [CANVAS_READ, CANVAS_WRITE] : []),
 ];
 
 const clip = (o) => { const s = typeof o === 'string' ? o : JSON.stringify(o); return s.length > RESULT_MAX ? `${s.slice(0, RESULT_MAX - 1)}…` : s; };
@@ -436,7 +441,10 @@ async function stopTimer(_args, ctx) {
     return await require('./vibe-timer').stop(subjectOf(ctx), { fetchImpl: ctx.fetchImpl });
 }
 
-const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus, remember, forget, set_up_agent: setUpAgent, my_agents: myAgents , set_reminder: setReminder, my_reminders: myReminders, stop_reminder: stopReminder, my_day: myDay, start_timer: startTimer, stop_timer: stopTimer };
+const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_search: webSearch, current_time: currentTime, roll_dice: rollDice, pick_one: pickOne, household_pantry: householdPantry, queue_task: queueTask, queue_status: queueStatus, remember, forget, set_up_agent: setUpAgent, my_agents: myAgents , set_reminder: setReminder, my_reminders: myReminders, stop_reminder: stopReminder, my_day: myDay, start_timer: startTimer, stop_timer: stopTimer,
+    canvas_read: async (args, ctx) => args.canvas_id ? await require('./vibe-canvas').get(ctx.room, args.canvas_id) : ((await require('./vibe-canvas').list(ctx.room))[0] || { canvas: null }),
+    canvas_write: async (args, ctx) => await require('./vibe-canvas').write(ctx.room, ctx.user, args, args.canvas_id || null),
+};
 
 /**
  * Runs one tool call and returns both what the model reads (the JSON clipped to RESULT_MAX) and the whole result, so
@@ -445,6 +453,7 @@ const RUNNERS = { search_openvibe: searchOpenvibe, read_page: readPage, web_sear
 async function runWithResult(name, raw, ctx = {}) {
     const runner = RUNNERS[name];
     if (!runner || (name === 'household_pantry' && !(ctx.member && ctx.member.link_service === 'food')) || (name === 'web_search' && !isVibe(ctx.member))
+        || (['canvas_read', 'canvas_write'].includes(name) && !(ownChat(ctx.member, ctx.room) && ctx.user && require('../config').ai.vibeCanvas))
         || ((name === 'queue_task' || name === 'queue_status') && !isWorkspace(ctx.room))
         || ((name === 'remember' || name === 'forget') && !(hasMemory(ctx.member, ctx.room, ctx.memory) && ctx.user))
         || (['set_up_agent', 'my_agents', 'set_reminder', 'my_reminders', 'stop_reminder', 'my_day', 'start_timer', 'stop_timer'].includes(name) && !(ownChat(ctx.member, ctx.room) && ctx.user))) {

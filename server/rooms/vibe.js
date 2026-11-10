@@ -243,6 +243,7 @@ async function rename(room, user, name) {
 }
 
 async function erase(roomId) {
+    await db.run('DELETE FROM vibe_canvases WHERE room_id = ?', [roomId]);
     await db.run('DELETE FROM room_messages WHERE room_id = ?', [roomId]);
     await db.run('DELETE FROM room_ai_members WHERE room_id = ?', [roomId]);
     await db.run('DELETE FROM room_ai_usage WHERE room_id = ?', [roomId]);
