@@ -1217,13 +1217,14 @@ async function upsertChatAiSummary(sfx) {
         scope, subject_id = 0, window, overview = '', memory_json = '', timeline_json = '[]',
         message_count = 0, window_message_count = 0, last_message_id = 0,
         window_label = '', window_start = null, window_end = null,
+        people = 0, topics_json = '[]',
     } = sfx || {};
     return await transaction(async () => {
         const res = await run(
             `INSERT INTO chat_ai_summaries
                 (scope, subject_id, "window", overview, memory_json, timeline_json, message_count,
-                 window_message_count, last_message_id, window_label, window_start, window_end, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ov_now())
+                 window_message_count, last_message_id, window_label, window_start, window_end, people, topics_json, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ov_now())
              ON CONFLICT(scope, subject_id, "window") DO UPDATE SET
                 overview = excluded.overview,
                 memory_json = excluded.memory_json,
@@ -1234,9 +1235,11 @@ async function upsertChatAiSummary(sfx) {
                 window_label = excluded.window_label,
                 window_start = excluded.window_start,
                 window_end = excluded.window_end,
+                people = excluded.people,
+                topics_json = excluded.topics_json,
                 updated_at = ov_now()`,
             [scope, subject_id || 0, window, overview, memory_json, timeline_json, message_count,
-                window_message_count, last_message_id, window_label, window_start, window_end]
+                window_message_count, last_message_id, window_label, window_start, window_end, people, topics_json]
         );
         return _writeResult(res, 'chat_ai_summaries', [await get('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? AND "window" = ?', [scope, subject_id || 0, window])]);
     });
@@ -1250,8 +1253,9 @@ async function addChatTimelineEvents(scope, subjectId, events) {
         for (const e of events) {
             if (!e || !e.label || !e.ts) continue;
             try {
-                const res = await run('INSERT INTO chat_timeline_events (scope, subject_id, ts, label, detail) VALUES (?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
-                    [scope || 'global', subjectId || 0, e.ts, String(e.label).slice(0, 120), String(e.detail || '').slice(0, 400)]);
+                const res = await run('INSERT INTO chat_timeline_events (scope, subject_id, ts, label, detail, kind, message_id) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING',
+                    [scope || 'global', subjectId || 0, e.ts, String(e.label).slice(0, 120), String(e.detail || '').slice(0, 400),
+                        String(e.kind || 'moment').slice(0, 20), e.message_id == null ? null : Number(e.message_id)]);
                 if (res.changes) ids.push(Number(res.lastInsertRowid));
                 n++;   // Live counts every event it tried, the duplicates included
             } catch { /* */ }
@@ -1285,7 +1289,7 @@ async function getChatTimelineEvents({ scope = 'global', subjectId = 0, before =
     if (q && String(q).trim()) { const like = '%' + String(q).trim().slice(0, 60) + '%'; conds.push('(label ILIKE ? OR detail ILIKE ?)'); params.push(like, like); }
     params.push(Math.min(60, Math.max(1, limit)));
     try {
-        return await all(`SELECT id, ts, label, detail FROM chat_timeline_events WHERE ${conds.join(' AND ')} ORDER BY ts DESC, id DESC LIMIT ?`, params) || [];
+        return await all(`SELECT id, ts, label, detail, kind, message_id FROM chat_timeline_events WHERE ${conds.join(' AND ')} ORDER BY ts DESC, id DESC LIMIT ?`, params) || [];
     } catch { return []; }
 }
 
@@ -1301,7 +1305,7 @@ async function countChatMessagesSince(afterId, userId = null) {
 }
 // Fetch analyzable messages for AI batching (with the channel/broadcaster label).
 async function getChatMessagesForAi({ afterId = null, sinceTs = null, userId = null, limit = 400, order = 'asc' } = {}) {
-    let sql = `SELECT cm.id, cm.user_id, cm.username, cm.message, cm.message_type, cm.timestamp,
+    let sql = `SELECT cm.id, cm.user_id, cm.subject_id, cm.username, cm.message, cm.message_type, cm.timestamp,
                       cm.stream_id, cm.channel_user_id, cm.is_global,
                       ch.username AS channel_username, ch.display_name AS channel_display
                FROM chat_messages cm
