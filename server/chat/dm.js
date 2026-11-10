@@ -251,6 +251,21 @@ async function getMessages(conversationId, limit = 50, before = null, after = nu
     return await linkCards.hydrate(rows, 'dm_messages');
 }
 
+async function getMessagesPage(conversationId, { before = null, limit = 50 } = {}) {
+    const lim = Math.min(100, Math.max(1, Number(limit) || 50));
+    const params = [conversationId];
+    let where = 'm.conversation_id = ?';
+    if (before != null) { where += ' AND m.id < ?'; params.push(Number(before) || 0); }
+    params.push(lim + 1);
+    const rows = await db.all(`SELECT m.*, u.username, u.display_name, u.avatar_url, u.profile_color
+        FROM dm_messages m JOIN ctx_users u ON u.id = m.sender_id
+        WHERE ${where} ORDER BY m.id DESC LIMIT ?`, params);
+    const more = rows.length > lim;
+    rows.length = Math.min(rows.length, lim);
+    await linkCards.hydrate(rows, 'dm_messages');
+    return { messages: rows, more };
+}
+
 /**
  * Mark a conversation as read for a user (set last_read_at to now).
  */
@@ -461,7 +476,7 @@ module.exports = {
     getParticipants,
     getConversation,
     sendMessage,
-    getMessages,
+    getMessages, getMessagesPage,
     markRead,
     getTotalUnread,
     searchUsers,

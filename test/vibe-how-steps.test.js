@@ -18,7 +18,7 @@ const callTools = (...tc) => ({ choices: [{ index: 0, message: { role: 'assistan
 const vibeApi = (method, path, body) => h.http(method, `/api/chat/vibe${path}`, { token: ann.token, body });
 async function lastAi(slug) {
     for (let i = 0; i < 80; i++) {
-        const msgs = (await h.http('GET', `/api/chat/rooms/${slug}/messages`, { token: ann.token })).body.messages || [];
+        const msgs = ((await h.http('GET', `/api/chat/rooms/${slug}/messages`, { token: ann.token })).body.messages || []).slice().reverse();
         const ai = msgs.filter((m) => m.ai_member_id);
         if (ai.length) return ai[ai.length - 1];
         await new Promise((r) => setTimeout(r, 25));

@@ -201,8 +201,13 @@ router.patch('/:slug', requireAuth, manageLimit, async (req, res) => {
 router.get('/:slug/messages', optionalAuth, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     try {
-        const messages = await rooms.history(room, { before: req.query.before ?? null, after: req.query.after ?? null, limit: req.query.limit });
-        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ messages, latest_id: messages.length ? messages[messages.length - 1].id : null });
+        const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 50));
+        if (req.query.after != null) {
+            const messages = await rooms.history(room, { after: req.query.after, limit });
+            return res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ messages, latest_id: messages.length ? messages[messages.length - 1].id : null });
+        }
+        const page = await rooms.historyPage(room, { before: req.query.before ?? null, limit });
+        res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ ...page, latest_id: page.messages.length ? page.messages[0].id : null });
     } catch (err) { send(res, err); }
 });
 

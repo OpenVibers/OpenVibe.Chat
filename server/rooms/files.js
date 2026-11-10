@@ -61,4 +61,18 @@ function filesOf(message) {
     return Array.isArray(files) ? files : [];
 }
 
-module.exports = { cleanFiles, filesOf, attachmentsFromBody, MAX_FILES };
+/** Public message attachment refs, projected from owner-validated Media ids. */
+function attachmentRefs(files) {
+    const origin = require('../config').media.publicOrigin;
+    return (Array.isArray(files) ? files : []).map((file) => {
+        const type = String(file.media_type || 'application/octet-stream');
+        const kind = type.startsWith('image/') ? 'picture' : type.startsWith('video/') ? 'video' : type.startsWith('audio/') ? 'audio' : 'file';
+        return {
+            kind, service: 'media', id: file.id,
+            url: `${origin}/o/${encodeURIComponent(file.id)}`,
+            name: file.name || 'file', size: Number(file.size) || 0, type,
+        };
+    });
+}
+
+module.exports = { cleanFiles, filesOf, attachmentRefs, attachmentsFromBody, MAX_FILES };

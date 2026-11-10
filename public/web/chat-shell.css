@@ -14,7 +14,7 @@
    tile (chat-shell.js .oc-rail-tip); on a phone it is written beside the tile (below). ── */
 .oc-rail { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 0; background: var(--oc-bg); border-right: 1px solid var(--oc-line); overflow-y: auto; scrollbar-width: none; }
 .oc-rail::-webkit-scrollbar { display: none; }
-.oc-rail-icon, .oc-rail-menu { position: relative; flex: 0 0 auto; margin: 0; padding: 0; border: 0; background: none; color: var(--oc-text); font: inherit; text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.oc-rail-icon { position: relative; flex: 0 0 auto; margin: 0; padding: 0; border: 0; background: none; color: var(--oc-text); font: inherit; text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .oc-rail-icon { display: grid; place-items: center; width: 72px; height: 48px; }
 .oc-rail-icon[data-oc-server] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
 .oc-rail-tile { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--oc-panel-2); color: var(--oc-text); font-weight: 800; font-size: .95rem; letter-spacing: .02em; transition: border-radius .18s ease, background-color .18s ease, color .18s ease, transform .16s ease; }
@@ -42,7 +42,6 @@
 .oc-rail-tip.is-on { opacity: 1; transform: translate(0, -50%); }
 
 /* On a phone the side column opens from the strip: this button, with the word for what it lists. */
-.oc-rail-menu { display: none; }
 
 /* ── The side column (240 px) ── */
 .oc-side { display: flex; flex-direction: column; min-width: 0; padding: 12px 8px 0; overflow-y: auto; border-right: 1px solid var(--oc-line); background: var(--oc-bg); }
@@ -129,43 +128,48 @@
 @media (max-width: 760px) {
   /* The shell takes what the navbar and the app bar leave, so a channel fills the screen and its composer sits at the
      bottom, above the app bar (the body keeps --ovnav-appbar-h of padding for it). */
-  .oc-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
-    height: calc(100dvh - var(--ovnav-h, 56px) - var(--ovnav-appbar-h, 0px)); min-height: 360px; }
+  .oc-app { height: calc(100dvh - var(--ovnav-h, 56px) - var(--ovnav-appbar-h, 0px)); min-height: 360px; }
   .oc-page { padding: 14px 16px 20px; }
   .oc-app.is-members { grid-template-columns: minmax(0, 1fr); }
-  /* The strip: each place is a chip with its tile and its name, so nothing here is a letter to be guessed. The list
-     button is first, with the word for what it opens; then Global chat, your servers and New. The open place is the
-     filled chip (a server's in its own colour); the open server's chip carries a small arrow: tap it again, or hold
-     any server, for its sheet. Home, Vibe and Explore are the bottom bar's while that bar is there. */
-  .oc-app > .oc-rail { flex-direction: row; justify-content: flex-start; align-items: center; gap: 8px; padding: 8px 12px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--oc-line); min-width: 0; scroll-padding-inline: 12px; overscroll-behavior-x: contain; }
-  .oc-app > .oc-rail::after { content: ''; position: sticky; right: -12px; order: 9; flex: 0 0 36px; align-self: stretch; margin-left: -44px; background: linear-gradient(90deg, transparent, var(--oc-bg)); pointer-events: none; opacity: 0; transition: opacity .15s ease; }
-  .oc-app > .oc-rail[data-fade="end"]::after, .oc-app > .oc-rail[data-fade="both"]::after { opacity: 1; }
-  .oc-rail-icon, .oc-rail-menu { display: inline-flex; align-items: center; gap: 8px; width: auto; height: 44px; padding: 0 14px 0 6px; border: 1px solid transparent; border-radius: 22px; background: var(--oc-panel-2); order: 2; transition: background-color .18s ease, border-color .18s ease, transform .12s ease; }
-  .oc-rail-icon:active, .oc-rail-menu:active { transform: scale(.97); }
+  /* Two levels (11-10; the strip of places across the top is gone). The list level: the rail of places down the left,
+     upright, and beside it the list for the place chosen, with the app's bar at the bottom. A conversation: the whole
+     screen under the site's bar, the way back first in its head, the composer at the bottom edge; no rail, no bottom
+     bar. A page that is not a conversation (Explore, Activity, settings) keeps the rail beside it. */
+  .oc-app { grid-template-columns: 68px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .oc-app:not(:has(> .oc-rail)) { grid-template-columns: minmax(0, 1fr); }
+  .oc-app > .oc-rail { flex-direction: column; align-items: center; justify-content: flex-start; gap: 10px; padding: 12px 0 16px; overflow: hidden auto; scrollbar-width: none; border: 0; border-right: 1px solid var(--oc-line); min-width: 0; background: color-mix(in srgb, var(--oc-bg) 70%, #000); }
+  .oc-app > .oc-rail::-webkit-scrollbar { display: none; }
+  .oc-rail-icon { position: relative; display: grid; place-items: center; flex: none; width: 48px; height: 48px; padding: 0; border: 0; border-radius: 0; background: none; }
   .oc-rail-icon::before { content: none; }
-  .oc-rail-icon:focus-visible, .oc-rail-menu:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
-  .oc-rail-icon:focus-visible .oc-rail-tile { outline: 0; }
-  .oc-rail-tile, .oc-rail-icon:hover .oc-rail-tile, .oc-rail-icon:focus-visible .oc-rail-tile, .oc-rail-icon.is-active .oc-rail-tile { width: 32px; height: 32px; border-radius: 50%; font-size: .76rem; }
-  .oc-rail-icon:active .oc-rail-tile { transform: none; }
-  .oc-rail-home .oc-rail-tile, .oc-rail-global .oc-rail-tile, .oc-rail-vibe .oc-rail-tile, .oc-rail-add .oc-rail-tile, .oc-rail-explore .oc-rail-tile { background: color-mix(in srgb, var(--oc-text) 9%, transparent); }
-  .oc-rail-tile .oc-i { width: 18px; height: 18px; }
-  .oc-rail-label { position: static; width: auto; height: auto; max-width: 15ch; clip: auto; text-overflow: ellipsis; font-size: .9rem; font-weight: 650; color: var(--oc-muted); }
-  .oc-rail-icon.is-active { background: color-mix(in srgb, var(--oc-accent) 20%, var(--oc-panel-2)); border-color: color-mix(in srgb, var(--oc-accent) 55%, transparent); }
-  .oc-rail-icon.is-active .oc-rail-tile { background: var(--oc-accent); color: var(--oc-on-accent); }
-  .oc-rail-server.is-active { background: color-mix(in srgb, hsl(var(--oc-hue, 215) 60% 50%) 24%, var(--oc-panel-2)); border-color: hsl(var(--oc-hue, 215) 55% 55% / .7); }
-  .oc-rail-server .oc-rail-tile, .oc-rail-server.is-active .oc-rail-tile, .oc-rail-server:hover .oc-rail-tile { background: hsl(var(--oc-hue, 215) 52% 34%); color: #fff; }
-  .oc-rail-icon.is-active .oc-rail-label { color: var(--oc-text); }
-  .oc-rail-more { display: grid; place-items: center; margin: 0 -6px 0 -4px; color: var(--oc-muted); }
-  .oc-rail-more .oc-i { width: 16px; height: 16px; transform: rotate(90deg); }
-  .oc-rail-dot { position: static; margin: 0 -6px 0 -2px; box-shadow: none; }
-  /* The list button stays at the strip's start while the places scroll under it. */
-  .oc-rail-menu { order: 0; padding: 0 14px 0 12px; position: sticky; left: 0; z-index: 1; box-shadow: 0 0 0 8px var(--oc-bg), 14px 0 10px -2px var(--oc-bg); }
-  .oc-rail-menu .oc-i { width: 20px; height: 20px; }
-  .oc-rail-menu .oc-rail-label { color: var(--oc-text); }
-  .oc-app[data-oc-panel="side"] .oc-rail-menu { background: var(--oc-accent); color: var(--oc-on-accent); }
-  .oc-app[data-oc-panel="side"] .oc-rail-menu .oc-rail-label { color: inherit; }
-  .oc-rail-divider { order: 1; width: 1px; height: 24px; flex: 0 0 1px; }
+  .oc-rail-tile, .oc-rail-icon:hover .oc-rail-tile, .oc-rail-icon:focus-visible .oc-rail-tile { width: 48px; height: 48px; border-radius: 50%; font-size: .9rem; transition: border-radius .2s ease, background-color .2s ease, transform .12s ease; }
+  .oc-rail-icon.is-active .oc-rail-tile { border-radius: 16px; }
+  .oc-rail-icon:active .oc-rail-tile { transform: scale(.94); }
+  .oc-rail-icon:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; border-radius: 16px; }
+  .oc-rail-tile .oc-i { width: 22px; height: 22px; }
+  .oc-rail-label, .oc-rail-more { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .oc-rail-icon.is-active::after { content: ""; position: absolute; left: -10px; top: 50%; width: 4px; height: 30px; margin-top: -15px; border-radius: 0 4px 4px 0; background: var(--oc-text); }
+  .oc-rail-dot { position: absolute; right: -2px; bottom: -2px; margin: 0; box-shadow: 0 0 0 3px var(--oc-bg); }
+  .oc-rail-divider { width: 28px; height: 2px; flex: 0 0 2px; border-radius: 2px; }
   .oc-rail-tip { display: none; }
+  /* A conversation (the middle column has a composer) takes the whole width and the bottom bar's place. */
+  .oc-app:has(> .oc-col-main > :is(.oc-dock, .oc-compose)):not([data-oc-panel="side"]) { grid-template-columns: minmax(0, 1fr); }
+  .oc-app:has(> .oc-col-main > :is(.oc-dock, .oc-compose)):not([data-oc-panel="side"]) > .oc-rail { display: none; }
+  html:has(.oc-app:not([data-oc-panel="side"]) > .oc-col-main > :is(.oc-dock, .oc-compose)) { --ovnav-appbar-h: 0px !important; }
+  html:has(.oc-app:not([data-oc-panel="side"]) > .oc-col-main > :is(.oc-dock, .oc-compose)) .ovnav-appbar { display: none !important; }
+  /* The messages take all the room between the head and the composer (chat.css capped them at 62% of the screen, for
+     the page that had three bars round it). */
+  .oc-app > .oc-col-main > .oc-feed { flex: 1 1 0; min-height: 0; max-height: none; }
+  .oc-app > .oc-col-main > .oc-dock { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+  /* Its head: the way back, the name over one line about it, the tools. One row. */
+  .oc-col-main > .oc-chan-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 0 4px; min-height: 52px; padding: 4px 6px 4px 2px; }
+  .oc-chan-head > .oc-tolist { grid-column: 1; grid-row: 1 / 3; }
+  .oc-chan-head > .oc-chan-title { grid-column: 2; grid-row: 1; align-self: end; margin: 0; font-size: 1.04rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .oc-chan-head > .oc-chan-topic { grid-column: 2; grid-row: 2; align-self: start; font-size: .76rem; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .oc-chan-head > .oc-chan-title:not(:has(~ .oc-chan-topic)) { grid-row: 1 / 3; align-self: center; }
+  .oc-chan-head > .oc-chan-tools { grid-column: 3; grid-row: 1 / 3; display: inline-flex; align-items: center; gap: 0; margin: 0; }
+  .oc-chan-head .oc-live { font-size: 0; margin-right: 4px; }
+  .oc-chan-head .oc-live::first-letter { font-size: .7rem; }
+  .oc-app .oc-tolist { display: inline-grid; }
   .oc-app > .oc-side, .oc-app > .oc-col-main, .oc-app > .oc-col-members { min-width: 0; }
   .oc-app > .oc-side, .oc-app > .oc-col-members { display: none; }
   .oc-app[data-oc-panel="side"] > .oc-side { display: flex; border-right: 0; }
@@ -181,9 +185,6 @@
 /* Home, Vibe and Servers are the bottom bar's on a phone. That bar is drawn by a script, so the strip leaves them out
    wherever scripts run, from the first paint (a strip that waited to see the bar showed three chips and took them
    away). Without scripts there is no bottom bar and the strip keeps all of them. */
-@media (max-width: 760px) and (scripting: enabled) {
-  .oc-rail .oc-rail-home, .oc-rail .oc-rail-vibe, .oc-rail .oc-rail-explore { display: none; }
-}
 
 /* A friend row is a button that opens the conversation; the form posts the username. */
 .oc-side-list .oc-row form { width: 100%; }
@@ -371,3 +372,27 @@ fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
 .oc-act-clear .oc-act-clear-go { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
 .oc-act-clear-go .oc-button { min-height: 44px; display: inline-flex; align-items: center; }
 @keyframes oc-act-pop { from { opacity: 0; transform: scale(calc(1 - .4 * var(--ov-move, 1))); } }
+
+/* The way to the list is a phone's; on a computer the list is beside the conversation. */
+.oc-tolist { display: none; }
+
+/* ── Messages, grouped by who said them ────────────────────────────────────────────────────────────────────────────
+   A run of messages from one person within a few minutes is one group: their mark, their name, where it was sent from
+   and the time once; the next lines are just the words (their time shows on a press). A line says when the day changes. */
+.oc-feed.is-grouped { padding: 4px 0 10px; }
+.oc-feed.is-grouped > .oc-msg { position: relative; display: block; margin: 0; padding: 1px 14px 1px 62px; line-height: 1.42; border: 0; }
+.oc-feed.is-grouped > .oc-msg.is-first { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; margin-top: 14px; }
+.oc-feed.is-grouped > .oc-msg.is-first::before { content: attr(data-initial); position: absolute; left: 14px; top: 1px; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; font-size: .92rem; font-weight: 800; color: var(--oc-text); background: color-mix(in srgb, var(--nc, var(--oc-accent)) 34%, var(--oc-panel-2)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nc, var(--oc-accent)) 50%, transparent); }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-name { order: 1; font-weight: 750; }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-where { order: 2; font-size: .74rem; padding: 1px 7px; border-radius: 999px; color: var(--oc-muted); background: color-mix(in srgb, var(--oc-text) 7%, transparent); text-decoration: none; }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-time { order: 3; font-size: .72rem; color: var(--oc-muted); }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-text { order: 4; flex: 1 0 100%; }
+.oc-feed.is-grouped > .oc-msg.is-cont > :is(.oc-name, .oc-where) { display: none; }
+.oc-feed.is-grouped > .oc-msg.is-cont > .oc-time { position: absolute; left: 8px; top: 4px; width: 46px; text-align: right; font-size: .66rem; color: var(--oc-muted); opacity: 0; transition: opacity .12s ease; }
+.oc-feed.is-grouped > .oc-msg.is-cont:is(:hover, :active, :focus-within) > .oc-time { opacity: 1; }
+.oc-feed.is-grouped > .oc-msg:is(:hover, :active) { background: color-mix(in srgb, var(--oc-text) 3.5%, transparent); }
+.oc-feed.is-grouped > .oc-msg .oc-text { overflow-wrap: anywhere; }
+.oc-feed.is-grouped > .oc-day { display: flex; align-items: center; gap: 12px; margin: 18px 14px 4px; font-size: .74rem; font-weight: 700; color: var(--oc-muted); list-style: none; }
+.oc-feed.is-grouped > .oc-day::before, .oc-feed.is-grouped > .oc-day::after { content: ""; flex: 1; height: 1px; background: var(--oc-line); }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-time { display: inline; margin: 0; }
+.oc-feed.is-grouped > .oc-msg.is-cont > .oc-time { display: block; margin: 0; }

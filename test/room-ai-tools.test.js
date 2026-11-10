@@ -290,7 +290,7 @@ t('@dealer rolls through a tool: the call runs here, its result goes back, the t
     assert.match(turns[0].input.messages[0].content, /You are Dealer/);
     assert.match(turns[0].input.messages[1].content, /Ann just wrote to you: @dealer roll two dice/);
     assert.deepStrictEqual([turns[0].o.idempotencyKey.endsWith('-t0'), turns[1].o.idempotencyKey.endsWith('-t1')], [true, true]);
-    const last = (await api('GET', '/rooms/game-night/messages', ann)).body.messages.pop();
+    const last = (await api('GET', '/rooms/game-night/messages', ann)).body.messages[0];
     assert.match(last.message, /^You rolled \d and \d: \d+\.$/);
     assert.strictEqual(last.display_name, 'Dealer');
 });
@@ -301,14 +301,14 @@ t('after three rounds of tools the fourth turn must answer in text; a failing tu
     await api('POST', '/rooms/game-night/messages', ann, { message: '@dealer what time is it, really?' });
     await settle();
     assert.strictEqual(calls.length - before, 4);
-    assert.strictEqual((await api('GET', '/rooms/game-night/messages', ann)).body.messages.pop().message, 'It is late.');
+    assert.strictEqual((await api('GET', '/rooms/game-night/messages', ann)).body.messages[0].message, 'It is late.');
 
     before = calls.length;
     script = []; // the turn fails (a provider without tools)
     await api('POST', '/rooms/game-night/messages', ann, { message: '@dealer hello' });
     await settle();
     assert.deepStrictEqual(calls.slice(before).map((c) => c.workflow), ['chat.member.turn', 'chat.member.reply']);
-    assert.strictEqual((await api('GET', '/rooms/game-night/messages', ann)).body.messages.pop().message, 'The plain reply.');
+    assert.strictEqual((await api('GET', '/rooms/game-night/messages', ann)).body.messages[0].message, 'The plain reply.');
 });
 
 t('CHAT_AI_MEMBER_TOOLS=0: straight to chat.member.reply', async () => {

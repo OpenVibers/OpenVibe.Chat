@@ -64,7 +64,23 @@ t('the shell: the rail, the side column, the members column and the bottom bar',
     // Every place on the rail carries its name; a server carries what its sheet says (hold it, or right-click it).
     assert.match(r.text, /class="oc-rail-icon oc-rail-server is-active" href="\/s\/saturday-raiders"[^>]* data-oc-server="saturday-raiders" data-oc-name="Saturday Raiders" data-oc-role="owner" data-oc-members="2"/, 'the open server, with your rank in it');
     assert.match(r.text, /<span class="oc-rail-label">Saturday Raiders<\/span>/, 'its name, not its initials alone');
-    assert.match(r.text, /<button type="button" class="oc-rail-menu" data-oc-panel="side" aria-expanded="false"[^>]*>.*<span class="oc-rail-label">Channels<\/span><\/button>/, 'the list button says what it lists');
+    // A phone's two levels (11-10): the rail has no list button; the way to the list is first in a conversation's head.
+    assert.ok(!/oc-rail-menu/.test(r.text), 'no list button on the rail');
+    assert.match(r.text, /<header class="oc-chan-head">\s*<button type="button" class="oc-icon-btn oc-tolist" data-oc-panel="side" aria-label="All chats"/, 'a conversation opens with the way back to the list');
+    {
+        const read = (f) => require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'web', f), 'utf8');
+        const css = read('chat-shell.css'); const js = read('chat-shell.js');
+        const phone = css.slice(css.indexOf('@media (max-width: 760px)'));
+        assert.ok(!/data-fade|oc-rail-menu/.test(css + js), 'the strip of places across the top, and its list button, are gone');
+        assert.match(phone, /\.oc-app \{ grid-template-columns: 68px minmax\(0, 1fr\);/, 'the list level: the rail down the left, the list beside it');
+        assert.match(phone, /\.oc-app:has\(> \.oc-col-main > :is\(\.oc-dock, \.oc-compose\)\):not\(\[data-oc-panel="side"\]\) > \.oc-rail \{ display: none; \}/, 'a conversation has no rail');
+        assert.ok(phone.includes('html:has(.oc-app:not([data-oc-panel="side"]) > .oc-col-main > :is(.oc-dock, .oc-compose)) .ovnav-appbar { display: none !important; }'), 'and no bottom bar');
+        assert.match(phone, /\.oc-app > \.oc-col-main > \.oc-feed \{ flex: 1 1 0; min-height: 0; max-height: none; \}/, 'its messages take the room down to the composer');
+        assert.match(phone, /\.oc-app \.oc-tolist \{ display: inline-grid; \}/, 'the way to the list shows on a phone');
+        assert.ok(css.indexOf('\n.oc-tolist { display: none; }') > 0, 'and not on a computer, where the list is beside the conversation');
+        assert.match(js, /closest\('\.oc-rail-icon\.is-active'\)[\s\S]{0,400}panel\('main'\)/, 'the open place pressed again goes back into its conversation');
+        assert.match(js, /classList\.toggle\('is-cont', cont\)/, 'messages are grouped by who said them');
+    }
     assert.match(r.text, /<template id="oc-srv-sheet"><dialog class="oc-ssheet"/, "a server's sheet, once a page");
     assert.ok(/data-s="settings"/.test(r.text) && /data-s="delete"/.test(r.text) && !/data-s="leave"/.test(r.text), 'the owner: settings and delete, and no leave (an owner cannot leave)');
     const asBob = await page(`/s/${slug}`, bob);

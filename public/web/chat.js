@@ -168,7 +168,11 @@
     var stick = nearBottom();
     removeEmpty();
     feed.appendChild(li);
-    while (feed.children.length > 300) feed.removeChild(feed.firstChild);
+    while (feed.children.length > 300) {
+      var oldest = feed.querySelector('[data-id]');
+      if (!oldest) break;
+      oldest.remove();
+    }
     if (stick) toBottom();
   }
   function showError(text) {
@@ -235,29 +239,11 @@
   function startGlobal() {
     var live = document.getElementById('oc-live');
     var ws = null, delay = 1000, opened = false;
-    var historyState = document.getElementById('oc-history-state'), loadingEarlier = false, historyMore = true;
-    function loadEarlier() {
-      if (loadingEarlier || !historyMore || !feed) return;
-      var first = feed.querySelector('[data-id]');
-      if (!first) return;
-      loadingEarlier = true;
-      if (historyState) historyState.textContent = 'Loading earlier messages';
-      var before = Number(first.dataset.id), height = feed.scrollHeight, top = feed.scrollTop;
-      fetch('/api/chat/global/history?before=' + encodeURIComponent(before) + '&limit=50', { credentials: 'same-origin' })
-        .then(function (r) { return r.ok ? r.json() : null; })
-        .then(function (d) {
-          if (!d || !Array.isArray(d.messages)) return;
-          var anchor = feed.querySelector('[data-id="' + first.dataset.id + '"]');
-          (d.messages || []).forEach(function (m) {
-            if ((m.message_type || 'chat') === 'chat' && !m.is_deleted && !feed.querySelector('[data-id="' + m.id + '"]')) feed.insertBefore(globalItem(m), historyState && historyState.nextSibling);
-          });
-          historyMore = !!d.more;
-          if (historyState) historyState.textContent = historyMore ? '' : 'The start of the chat';
-          if (anchor) feed.scrollTop = top + (feed.scrollHeight - height);
-        }).catch(function () {}).finally(function () { loadingEarlier = false; });
-    }
-    if (feed) feed.addEventListener('scroll', function () { if (feed.scrollTop < 600) loadEarlier(); });
-    if (feed) { feed.scrollTop = feed.scrollHeight; }
+    var historyState = document.getElementById('oc-history-state');
+    window.OvChatHistory.attach(feed, historyState, function (before) {
+      return fetch('/api/chat/global/history?before=' + encodeURIComponent(before) + '&limit=50', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; });
+    }, globalItem, cfg.historyMore);
     // A workspace room's queue (server/web/workspace-pages.js): its panel reloads when the socket says it changed.
     var queueBox = document.getElementById('oc-queue'), queueTimer = null;
     function refreshQueue() {
@@ -324,6 +310,10 @@
   }
   function startDm() {
     var base = '/api/dm/conversations/' + encodeURIComponent(cfg.conversation);
+    window.OvChatHistory.attach(feed, document.getElementById('oc-history-state'), function (before) {
+      return fetch(base + '/messages?before=' + encodeURIComponent(before) + '&limit=50', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; });
+    }, dmItem, cfg.historyMore);
     function poll() {
       if (document.hidden) return;
       fetch(base + '/messages?after=' + latest + '&limit=100', { credentials: 'same-origin' })
@@ -457,6 +447,10 @@
     var live = document.getElementById('oc-live');
     var ws = null, delay = 1000, opened = false;
     var api = '/api/chat/rooms/' + encodeURIComponent(cfg.room);
+    window.OvChatHistory.attach(feed, document.getElementById('oc-history-state'), function (before) {
+      return fetch(api + '/messages?before=' + encodeURIComponent(before) + '&limit=50', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; });
+    }, roomItem, cfg.historyMore);
     function catchUpRoom() {
       return fetch(api + '/messages?after=' + latest + '&limit=200', { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
