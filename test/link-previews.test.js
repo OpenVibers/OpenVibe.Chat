@@ -10,7 +10,7 @@ const { boot, suite } = require('./helpers');
 let previews;
 
 const t = suite('link-previews');
-let h, alice, room;
+let h, alice, mod, bob, room;
 
 const page = (head) => `<html><head>${head}</head><body>body</body></html>`;
 const type = (body) => ({ status: 200, headers: { 'content-type': 'text/html; charset=utf-8' }, body });
@@ -19,8 +19,12 @@ t('boot', async () => {
     h = await boot();
     previews = require('../server/chat/link-previews');
     alice = h.addUser('alice', { subject: ids.newId('user') });
-    await h.ctx.upsertUser(h.live.users.get(alice.id));
-    h.netModules.subjects.add(alice.subject_id);
+    mod = h.addUser('mod', { subject: ids.newId('user'), role: 'global_mod' });
+    bob = h.addUser('bob', { subject: ids.newId('user') });
+    for (const u of [alice, mod, bob]) {
+        await h.ctx.upsertUser(h.live.users.get(u.id));
+        h.netModules.subjects.add(u.subject_id);
+    }
     await h.ctx.sync();
     const created = await h.http('POST', '/api/chat/rooms', { token: alice.token, body: { name: 'Preview room' } });
     assert.strictEqual(created.status, 201, created.text);
@@ -222,6 +226,58 @@ t('the room page draws a preview with its text escaped, never as markup', async 
     assert.ok(!html.includes('<b>bold title</b>'), 'never markup');
     assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'), 'the description is escaped too');
     assert.ok(!html.includes('<img src=x onerror='), 'never an injected tag');
+});
+
+t('a room can turn previews off, and its switch changes the answer', async () => {
+    previews._setRequest(async () => { throw new Error('off must not fetch'); });
+    const made = await h.http('POST', '/api/chat/rooms', { token: alice.token, body: { name: 'Switch room' } });
+    const slug = made.body.room.slug;
+    assert.strictEqual(made.body.room.link_previews, true, 'on by default');
+    const off = await h.http('PATCH', `/api/chat/rooms/${slug}`, { token: alice.token, body: { link_previews: false } });
+    assert.strictEqual(off.status, 200, off.text);
+    assert.strictEqual(off.body.room.link_previews, false);
+    const sent = await h.http('POST', `/api/chat/rooms/${slug}/messages`, { token: alice.token, body: { message: 'https://93.184.216.34/off-switch' } });
+    assert.strictEqual(sent.status, 201, sent.text);
+    await previews.idle();
+    let got = await h.http('GET', `/api/chat/rooms/${slug}/messages`, { token: alice.token });
+    assert.deepStrictEqual(got.body.messages.find((m) => m.id === sent.body.message.id).embeds, [], 'no fetch and no preview while off');
+
+    const on = await h.http('PATCH', `/api/chat/rooms/${slug}`, { token: alice.token, body: { link_previews: true } });
+    assert.strictEqual(on.body.room.link_previews, true);
+    previews._setRequest(async () => type(page('<meta property="og:title" content="Back on">')));
+    const again = await h.http('POST', `/api/chat/rooms/${slug}/messages`, { token: alice.token, body: { message: 'https://93.184.216.34/back-on' } });
+    await previews.idle();
+    got = await h.http('GET', `/api/chat/rooms/${slug}/messages`, { token: alice.token });
+    assert.strictEqual(got.body.messages.find((m) => m.id === again.body.message.id).embeds[0].title, 'Back on');
+});
+
+t('the author removes one preview, and the tombstone keeps a running job from putting it back', async () => {
+    previews._setRequest(async () => type(page('<meta property="og:title" content="Remove me">')));
+    const made = await h.http('POST', '/api/chat/rooms', { token: alice.token, body: { name: 'Remove room' } });
+    const sent = await h.http('POST', `/api/chat/rooms/${made.body.room.slug}/messages`, { token: alice.token, body: { message: 'https://93.184.216.34/remove-me https://93.184.216.34/keep-me' } });
+    await previews.idle();
+    const removed = await h.http('DELETE', `/api/chat/rooms/${made.body.room.slug}/messages/${sent.body.message.id}/embeds/0`, { token: alice.token });
+    assert.strictEqual(removed.status, 200, removed.text);
+    assert.strictEqual(removed.body.embeds.length, 1);
+    assert.strictEqual(removed.body.embeds[0].url, 'https://93.184.216.34/keep-me');
+    await previews.schedule({ scope: 'room', messageId: sent.body.message.id, text: 'https://93.184.216.34/remove-me', room: { id: made.body.room.id, slug: made.body.room.slug } });
+    await previews.idle();
+    const got = await h.http('GET', `/api/chat/rooms/${made.body.room.slug}/messages`, { token: alice.token });
+    const embeds = got.body.messages.find((m) => m.id === sent.body.message.id).embeds;
+    assert.deepStrictEqual(embeds.map((e) => e.url), ['https://93.184.216.34/keep-me'], 'the removed one stays gone');
+});
+
+t('a moderator removes any preview; another member may not', async () => {
+    previews._setRequest(async () => type(page('<meta property="og:title" content="Moderated">')));
+    const made = await h.http('POST', '/api/chat/rooms', { token: alice.token, body: { name: 'Moderator room' } });
+    const slug = made.body.room.slug;
+    await h.http('POST', `/api/chat/rooms/${slug}/join`, { token: bob.token });
+    const sent = await h.http('POST', `/api/chat/rooms/${slug}/messages`, { token: alice.token, body: { message: 'https://93.184.216.34/moderated' } });
+    await previews.idle();
+    assert.strictEqual((await h.http('DELETE', `/api/chat/rooms/${slug}/messages/${sent.body.message.id}/embeds/0`, { token: bob.token })).status, 403, 'a member is not the author or a moderator');
+    const removed = await h.http('DELETE', `/api/chat/rooms/${slug}/messages/${sent.body.message.id}/embeds/0`, { token: mod.token });
+    assert.strictEqual(removed.status, 200, removed.text);
+    assert.deepStrictEqual(removed.body.embeds, []);
 });
 
 t.run(async () => { previews._reset(); await h.close(); });
