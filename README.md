@@ -886,7 +886,7 @@ Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat
 `chat.call.*`, `chat.tts.queued|played|failed`. Consumed at `POST /internal/events` (signature v2,
 `CHAT_EVENTS_SECRET`, openvibe-sdk inbox): `live.release.deployed`, `network.module.updated`,
 `network.user.token_valid_after`, `vip.membership.changed`, `network.block.changed`,
-`network.subject.merged`, `network.account.export_requested` and `network.account.deleted` (Chat's own
+`network.account.export_requested` and `network.account.deleted` (Chat's own
 subscriptions, created at boot when missing).
 
 Called elsewhere, as the service principal `chat` ([server/net/service-auth.js](server/net/service-auth.js)):
