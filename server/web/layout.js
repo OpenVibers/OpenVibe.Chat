@@ -58,14 +58,16 @@ function links(o) {
 }
 
 function navConfig(o, config, site = {}, siteLinks = null) {
+    const counts = o.counts || {};
     return {
         service: site.service || 'chat',
         apiBase: NETWORK_URL,
         links: (siteLinks || site.links || links(o)).map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: o.active === l.key })),
-        history: { type: 'page', title: o.title || site.name || SITE_NAME },
+        history: { type: 'conversation', title: o.title || site.name || SITE_NAME, image_url: o.historyImage || null, private: !!o.private, mature: !!o.mature },
         // The phone's bottom bar (Shared's app bar, appbar.js): Home, Servers, Vibe, Activity and You — one
         // bar for every OpenVibe app (the plan, 2026-11-09, stage V2).
-        appBar: require('./shell').APP_BAR.map((l) => ({ ...l, active: o.active === l.page })),
+        // The Activity place carries a dot while something in it is unread (Shared's appbar.js draws `dot`).
+        appBar: require('./shell').APP_BAR.map(({ dot, ...l }) => ({ ...l, ...(dot ? { dot: !!counts.activity } : {}), active: o.active === l.page })),
         silentLogin: `${config.web.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
         loginUrl: `/auth/login?next=${encodeURIComponent(o.path || '/')}`,
@@ -162,25 +164,26 @@ ${INSTALL_LINKS}
 <link rel="stylesheet" href="${asset('chat.css')}">
 ${o.shell ? `<link rel="stylesheet" href="${asset('chat-shell.css')}">` : ''}
 <link rel="stylesheet" href="${ovServe.url('items.css')}">
-${o.upload ? `<link rel="stylesheet" href="${ovServe.url('ov-upload.css')}">` : ''}
 ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` : ''}
+${o.upload ? `<link rel="stylesheet" href="${ovServe.url('ov-upload.css')}">` : ''}
 ${(o.inlineStyles || []).map((css) => `<style>${css}</style>`).join('\n')}
 ${o.kit ? `<link rel="stylesheet" href="${ovServe.url('kit.css')}">\n<link rel="stylesheet" href="${ovServe.url('thread.css')}">` : ''}
 ${o.app || o.appStyle ? `<link rel="stylesheet" href="${asset(o.appStyle || 'vibe.css')}">` : ''}
 ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
 ${o.partyHome ? `<link rel="stylesheet" href="${asset('party-home.css')}">` : ''}
 ${o.party ? `<link rel="stylesheet" href="${ovServe.url('player.css')}">\n<link rel="stylesheet" href="${asset('party.css')}">\n<script src="${ovServe.url('player.js')}" defer></script>\n<script src="${ovServe.url('ov-sync.js')}" defer></script>\n<script src="${asset('party-providers.js')}" defer></script>\n<script src="${asset('party-provider-sync.js')}" defer></script>\n<script src="${asset('party.js')}" defer></script>` : ''}
-${o.upload ? `<script src="${ovServe.url('ov-upload.js')}" defer></script>` : ''}
 ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join('\n')}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>
 <script src="${ovServe.url('footer.js')}" defer></script>
-${o.script ? `<script src="${asset('chat.js')}" defer></script>` : ''}
+${o.script ? `<script src="${asset('chat-history.js')}" defer></script>
+<script src="${asset('chat.js')}" defer></script>` : ''}
 ${o.shell ? `<script src="${asset('chat-shell.js')}" defer></script>` : ''}
 ${o.callScript ? `<script src="${asset('call.js')}" defer></script>` : ''}
 ${o.ringScript ? `<script src="${asset('ring.js')}" defer></script>` : ''}
 ${o.kit ? `<script src="${ovServe.url('kit-web.js')}" defer></script>\n<script src="${ovServe.url('ov-thread.js')}" defer></script>` : ''}
 ${o.canvas ? `<script src="${ovServe.url('ov-canvas.js')}" defer></script>` : ''}
+${o.upload ? `<script src="${ovServe.url('ov-upload.js')}" defer></script>` : ''}
 ${o.app ? `<script src="${asset('vibe-md.js')}" defer></script>\n<script src="${asset(o.appScript || 'vibe.js')}" defer></script>` : ''}
 </head>
 <body class="${[cls, o.app ? 'oc-app-body' : ''].filter(Boolean).join(' ')}"${scale}>

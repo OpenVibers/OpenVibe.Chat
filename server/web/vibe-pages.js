@@ -196,18 +196,15 @@ const MODES = [
     ['code', 'Code', 'OpenVibe.Codes writes it on your computer and opens a pull request', 'What should I build or fix? Name the repository'],
 ];
 
-// The text files the attach button takes (read in the browser, vibe.js readText).
-const TEXT_FILES = 'text/plain,text/markdown,text/csv,application/json,.txt,.md,.markdown,.csv,.tsv,.json,.log,.xml,.yaml,.yml,.toml,.ini,.html,.css,.js,.mjs,.ts,.py,.go,.rs,.java,.c,.h,.cpp,.rb,.php,.sh,.sql';
-
 function composer({ slug, signedIn, enabled, prefill = '', engine = null, models = [] }) {
     const action = !signedIn ? `/auth/login` : slug ? `/vibe/${esc(slug)}` : '/vibe';
-    // A picture (public/web/vibe.js): it goes to OpenVibe.Pics as the person, and Vibe sees it with the question. A text
-    // file (notes, a CSV, code) is read in the browser and goes into the message itself.
+    // A picture (public/web/vibe.js) goes to OpenVibe.Pics; every other file is attached through the shared
+    // upload kit to Media and sent as a reference with the message (server/rooms/vibe-routes.js /files).
     const pics = pictures.enabled();
-    const label = pics ? 'Add a picture or a text file' : 'Add a text file';
+    const label = pics ? 'Add a picture or a file' : 'Attach a file';
     const attach = signedIn && enabled
         ? `<button class="ovt-btn vb-attach" type="button" data-vb-attach aria-label="${label}" title="${label}">${ICON.attach}</button>
-<dialog class="ovk-sheet vb-upload" data-vb-upload-dialog aria-labelledby="vb-upload-h"><div class="ovk-sheet-head" data-ov-sheet-head><h2 id="vb-upload-h">${pics ? 'Add a picture or a text file' : 'Add a text file'}</h2><button type="button" class="ovk-icon-btn" data-vb-upload-close aria-label="Close">${thread.icon('close')}</button></div><div class="ovk-sheet-body"><div data-vb-upload data-accept="${pics ? 'image/jpeg,image/png,image/gif,image/webp,image/avif,' : ''}${TEXT_FILES}"></div></div></dialog>`
+<dialog class="ovk-sheet vb-upload" data-vb-upload-dialog aria-labelledby="vb-upload-h"><div class="ovk-sheet-head" data-ov-sheet-head><h2 id="vb-upload-h">${label}</h2><button type="button" class="ovk-icon-btn" data-vb-upload-close aria-label="Close">${thread.icon('close')}</button></div><div class="ovk-sheet-body"><div data-vb-upload data-accept=""></div></div></dialog>`
         : '';
     const offeredModes = require('../config').ai.vibeDoIt ? MODES : MODES.slice(0, 1);
     const modes = `<fieldset class="vb-modes" aria-label="What Vibe does with it">${offeredModes.map(([value, label, hint, placeholder], i) => `<label title="${esc(hint)}"><input type="radio" name="mode" value="${value}" data-placeholder="${esc(placeholder)}"${i ? '' : ' checked'}><span>${label}</span></label>`).join('')}</fieldset>`;
@@ -216,7 +213,7 @@ function composer({ slug, signedIn, enabled, prefill = '', engine = null, models
         action, method: signedIn ? 'post' : 'get', name: 'message', id: 'vb-composer', attrs: signedIn ? {} : { 'data-signin': '1' },
         label: 'Message Vibe', placeholder: signedIn ? 'Message Vibe' : 'Message Vibe (you will sign in first)', value: prefill, maxlength: 12000,
         hidden: signedIn ? {} : { next: slug ? `/vibe/${slug}` : (prefill ? `/vibe?ask=${encodeURIComponent(prefill)}` : '/vibe') },
-        top: `<div class="vb-model-picker"><button type="button" class="vb-model-chip" id="vb-model-chip" aria-haspopup="dialog" aria-expanded="false">${models.length > 1 ? `${models.length} models` : models[0] ? esc(models[0]) : 'Auto'} ▾</button><div class="vb-model-sheet" id="vb-model-sheet" role="dialog" aria-label="Choose models" hidden><div class="vb-model-sheet-head"><strong>Choose a model</strong><button type="button" id="vb-model-close" aria-label="Close model list">✕</button></div><label class="vb-model-compare"><input type="checkbox" id="vb-model-compare"> Compare models</label><div id="vb-model-list"><p>Loading models…</p></div><details><summary>Settings</summary><label>System prompt<textarea id="vb-system-prompt" maxlength="4000"></textarea></label><label>Temperature<input id="vb-temperature" type="number" min="0" max="2" step="0.1" value="1"></label></details><p class="vb-model-floor">The floor holds on every model: <a href="https://openvibe.network/rules">the rules</a></p></div></div><div class="vb-preview" id="vb-preview" hidden></div><div class="vb-progress" data-vb-progress hidden></div>`, tools: attach + modes,
+        top: `<div class="vb-files" id="vb-files" data-vb-files hidden></div><div class="vb-model-picker"><button type="button" class="vb-model-chip" id="vb-model-chip" aria-haspopup="dialog" aria-expanded="false">${models.length > 1 ? `${models.length} models` : models[0] ? esc(models[0]) : 'Auto'} ▾</button><div class="vb-model-sheet" id="vb-model-sheet" role="dialog" aria-label="Choose models" hidden><div class="vb-model-sheet-head"><strong>Choose a model</strong><button type="button" id="vb-model-close" aria-label="Close model list">✕</button></div><label class="vb-model-compare"><input type="checkbox" id="vb-model-compare"> Compare models</label><div id="vb-model-list"><p>Loading models…</p></div><details><summary>Settings</summary><label>System prompt<textarea id="vb-system-prompt" maxlength="4000"></textarea></label><label>Temperature<input id="vb-temperature" type="number" min="0" max="2" step="0.1" value="1"></label></details><p class="vb-model-floor">The floor holds on every model: <a href="https://openvibe.network/rules">the rules</a></p></div></div><div class="vb-preview" id="vb-preview" hidden></div><div class="vb-progress" data-vb-progress hidden></div>`, tools: attach + modes,
         // Stop is drawn hidden: vibe.js shows it while Vibe writes, and it keeps what was written so far.
         stopAction: signedIn ? '' : null,
         foot: `<p class="vb-fine">${fine}</p>`,

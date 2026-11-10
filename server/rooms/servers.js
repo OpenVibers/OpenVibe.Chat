@@ -330,6 +330,9 @@ async function setRole(server, actor, targetUserId, role) {
             : role === 'none' && current ? 'server_kick'
                 : role !== current ? `server_role_${role}` : null;
     if (action) await db.logModerationAction({ scope_type: 'server', scope_id: server.slug, actor_user_id: actor.id, target_user_id: target.id, action_type: action, details: { from: current, to: role } });
+    if (current !== role && current !== 'blocked' && role !== 'blocked' && role !== 'none' && target.id !== actor.id) {
+        await require('../chat/activity').roleGiven({ targetUserId: target.id, actor, role, serverId: server.id });
+    }
     return role === 'none' ? null : role;
 }
 
@@ -475,6 +478,24 @@ async function createInvite(server, actor, { max_uses = null, expires_hours = nu
         [code, server.id, actor.id, actor.subject_id || null, uses, expires]);
     return publicInvite(await db.get('SELECT * FROM chat_server_invites WHERE code = ?', [code]));
 }
+/**
+ * Invite one person (not just a link anyone may use): a single-use invite, and an activity row for them so the
+ * invite is waiting in their Activity. Managers, and mods in a public server, as createInvite; the person must not
+ * already be in the server.
+ */
+async function invitePerson(server, actor, targetUserId) {
+    const a = await access(server, actor);
+    if (!(a.manage || (a.moderate && server.visibility === 'public'))) fail(403, 'servers.not_admin', 'Only the server\'s owner and admins invite people');
+    const target = await ctx.getUserById(Number(targetUserId));
+    if (!target) fail(404, 'servers.no_user', 'No such person');
+    const current = await roleIn(server.id, target.id);
+    if (current === 'blocked') fail(403, 'servers.blocked', 'They are banned from this server');
+    if (current) fail(409, 'servers.already_member', 'They are already in this server');
+    const invite = await createInvite(server, actor, { max_uses: 1, expires_hours: 168 });
+    await require('../chat/activity').serverInvite({ userId: target.id, actor, server, code: invite.code });
+    return invite;
+}
+
 async function invites(server) {
     return (await db.all('SELECT * FROM chat_server_invites WHERE server_id = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT 100', [server.id])).map(publicInvite);
 }
@@ -501,7 +522,7 @@ async function archive(server, actor) {
 module.exports = {
     bySlug, byId, roleIn, access, channelAccess, publicServer, publicChannel, channels, channelBySlug,
     create, list, join, leave, setRole, members, update, createChannel, updateChannel, deleteChannel,
-    createInvite, invites, revokeInvite, inviteByCode, archive,
+    createInvite, invitePerson, invites, revokeInvite, inviteByCode, archive,
     selfRolesOf, hasOnboarding, memberRoles, setMemberRoles,
     featured, setFeatured,
     SLUG_RE, ROLES, RANK, MAX_SERVERS_PER_OWNER, MAX_CHANNELS, OFFICIAL_SLUG, MAX_RULES, MAX_SELF_ROLES,

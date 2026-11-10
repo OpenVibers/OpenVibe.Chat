@@ -18,12 +18,14 @@ const ui = require('./ui');
 const { ICONS: IC } = require('./icons');
 const rooms = require('../rooms/rooms');
 const shell = require('./shell');
+const { insightBlock } = require('./insight-block');
 const servers = require('../rooms/servers');
 const ctx = require('../live-context');
 
 const LIVE = 'https://openvibe.live';
 const RANK_TITLE = { owner: 'Owner', admin: 'Admins', mod: 'Moderators', member: 'Members' };
 const ROLE_NAME = { owner: 'owner', admin: 'admin', mod: 'moderator', member: 'member', blocked: 'banned' };
+const YOURS = { owner: 'You own it', admin: 'You are an admin', mod: 'You moderate it', member: 'You are in it' };
 const YOU_ARE = { owner: 'the owner', admin: 'an admin', mod: 'a moderator', member: 'a member' };
 const SEARCH_ICON = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M10.5 4a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zM20 20l-4.8-4.8"/></svg>';
 const VOICE_ICON = '<svg class="oc-ico" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 9v6h4l5 4V5L7 9H3zm13.5 3a4.5 4.5 0 0 0-2.5-4v8a4.5 4.5 0 0 0 2.5-4zM14 3.2v2.1a7 7 0 0 1 0 13.4v2.1a9 9 0 0 0 0-17.6z"/></svg>';
@@ -84,7 +86,7 @@ function mountServerPages(router, h) {
         const card = (sv) => {
             const isMember = yours.has(sv.slug);
             const join = isMember
-                ? `<a class="oc-button oc-button--quiet" href="/s/${esc(sv.slug)}">Open</a>`
+                ? `<p class="oc-card-go"><a class="oc-button oc-button--quiet" href="/s/${esc(sv.slug)}">Open</a><a class="oc-icon-btn oc-card-more" href="/s/${esc(sv.slug)}" aria-label="More about ${esc(sv.name)}" title="More"${shell.serverData(shell.railServers([sv])[0])}>${IC.more}</a></p>`
                 : (me ? `<form method="post" action="/s/${esc(sv.slug)}/join"><button type="submit">Join</button></form>`
                     : `<a class="oc-button" href="/auth/login?next=${encodeURIComponent(`/s/${sv.slug}`)}">Sign in to join</a>`);
             return `<article class="oc-card oc-server-card">
@@ -92,7 +94,7 @@ function mountServerPages(router, h) {
 <span class="oc-srv-icon oc-srv-icon--row" style="--oc-hue:${hueOf(sv.slug)}" aria-hidden="true">${esc(initials(sv.name))}</span>
 <h3>${esc(sv.name)}${sv.official ? ' <span class="oc-badge oc-badge-official">official</span>' : ''}${sv.category ? ` <span class="oc-badge">${esc(sv.category)}</span>` : ''}</h3>
 <p class="oc-card-line">${esc(sv.description || 'A server on OpenVibe.Chat.')}</p>
-<p class="oc-muted oc-card-meta">${Number(sv.members) || 0} member${Number(sv.members) === 1 ? '' : 's'}${online[sv.slug] ? ` · ${online[sv.slug]} online` : ''}</p>
+<p class="oc-muted oc-card-meta">${isMember && YOURS[sv.role] ? `<span class="oc-card-yours">${YOURS[sv.role]}</span> · ` : ''}${Number(sv.members) || 0} member${Number(sv.members) === 1 ? '' : 's'}${online[sv.slug] ? ` · ${online[sv.slug]} online` : ''}</p>
 ${join}</article>`;
         };
         const startCard = `<article class="oc-card oc-server-card oc-server-card--new"><h3>Start a server</h3><p class="oc-card-line">A template, a name and a picture: under ten seconds.</p><a class="oc-button" href="#oc-new-server">Start a server</a></article>`;
@@ -132,7 +134,7 @@ ${mine.length ? `<ul class="oc-side-list">${mine.map((sv) => `<li class="oc-row"
             actor, shell: true, title: 'Explore servers', path: '/servers', active: 'servers', robots: 'index, follow', footer: 'none', upload: require('../rooms/pictures').enabled(), scripts: require('../rooms/pictures').enabled() ? ['picture-upload.js'] : [],
             description: 'Servers on OpenVibe.Chat: a place for a group, with text and voice channels, roles and invites.',
             body: shell.shell({
-                rail: shell.rail({ explore: true, dmUnread: me ? await require('../chat/dm').getTotalUnread(me.id) : 0, servers: mine.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                rail: shell.rail({ explore: true, dmUnread: me ? await require('../chat/dm').getTotalUnread(me.id) : 0, servers: shell.railServers(mine) }),
                 side, sideLabel: 'Your servers',
                 main: `${ui.head({ title: 'Explore servers', sub: `${listed.length} server${listed.length === 1 ? '' : 's'}` })}
 <form class="oc-find" method="get" action="/servers" role="search">${IC.search}<label for="oc-server-q" class="oc-sr">Find a server</label><input id="oc-server-q" name="q" value="" placeholder="Find a server" autocomplete="off"><button type="submit" class="oc-send" aria-label="Find" title="Find">${IC.search}</button></form>
@@ -216,7 +218,7 @@ ${sheet}`,
                 const replyForm = me && post && data.viewer && data.viewer.can_reply ? `<form class="oc-form" method="post" action="/s/${esc(server.slug)}/${esc(pick.slug)}/forum/${esc(post.slug)}/replies"><label>Reply <textarea name="body" maxlength="40000" rows="4" required></textarea></label><button class="ovk-btn ovk-btn--primary" type="submit">Reply</button></form>` : '';
                 const modForm = me && post && data.viewer && data.viewer.can_moderate ? `<form class="oc-form" method="post" action="/s/${esc(server.slug)}/${esc(pick.slug)}/forum/${esc(post.slug)}/state"><label><input type="checkbox" name="pinned" value="true"${post.pinned ? ' checked' : ''}> Pinned</label><label><input type="checkbox" name="locked" value="true"${post.locked ? ' checked' : ''}> Locked</label><button class="ovk-btn ovk-btn--quiet" type="submit">Save moderation</button></form>` : '';
                 const shellBody = shell.shell({
-                    rail: shell.rail({ servers: mine.map((s) => ({ slug: s.slug, name: s.name, unread: s.unread, active: s.slug === server.slug })), dmUnread }),
+                    rail: shell.rail({ servers: shell.railServers(mine, server.slug), dmUnread }),
                     side: shell.sideServer({ server: { ...server, official: server.slug === servers.OFFICIAL_SLUG }, can, me: !!me,
                         categories: [{ name: 'Forum channels', channels: chans.filter((c) => c.kind === 'forum').map((c) => ({ kind: c.kind, name: c.name, slug: c.slug, href: `/s/${server.slug}/${c.slug}` })) },
                             { name: 'Other channels', channels: chans.filter((c) => c.kind !== 'forum').map((c) => ({ kind: c.kind, name: c.name, slug: c.slug, href: `/s/${server.slug}/${c.slug}` })) }], occupants: {},
@@ -231,7 +233,8 @@ ${sheet}`,
                 return await page(req, res, err.status || 503, { actor, shell: true, title: 'Forum unavailable', path: req.path, active: 'servers', robots: 'noindex', body: `<h1>Forum unavailable</h1><p>${esc(err.message)}</p><p><a href="/s/${esc(server.slug)}">${esc(server.name)}</a></p>` });
             }
         }
-        const msgs = await rooms.history(room, { limit: 60 });
+        const roomPage = await rooms.historyPage(room, { limit: 50 });
+        const msgs = roomPage.messages.slice().reverse();
         if (me && rcan.role) await rooms.markRead(room, me);
         const mine = me ? (await servers.list(me)).mine : [];
         const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
@@ -256,7 +259,7 @@ ${sheet}`,
         let composer;
         const back = `/s/${server.slug}/${pick.slug}`;
         if (!me) composer = `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${encodeURIComponent(back)}">Sign in with OpenVibe</a> to join the conversation.</p>`;
-        else if (rcan.post) composer = `<form class="oc-compose" method="post" action="${esc(back)}" id="oc-compose"><label for="oc-input" class="oc-sr">Message ${isVoice ? '' : '#'}${esc(room.name)}</label><textarea id="oc-input" name="message" maxlength="2000" rows="2" required placeholder="Message ${isVoice ? '' : '#'}${esc(room.name)}"></textarea><button type="submit">Send</button></form>${pictureComposer ? pictureComposer(room, back) : ''}`;
+        else if (rcan.post) composer = shell.composer({ action: back, label: `Message ${isVoice ? '' : '#'}${room.name}`, placeholder: `Message ${isVoice ? '' : '#'}${room.name}`, add: pictureComposer ? pictureComposer(room, back) : '' });
         else if (!can.member) composer = `<form method="post" action="/s/${esc(server.slug)}/join"><button type="submit">Join ${esc(server.name)}</button></form>`;
         else composer = notice('error', 'You cannot write here right now.');
         const ais = require('../rooms/ai-members').enabled() ? (await require('../rooms/ai-members').list(room)).filter((a) => Number(a.enabled)) : [];
@@ -288,18 +291,20 @@ ${sheet}`,
         // request, and the channel's own URL when the request named it. `back` stays the channel URL the composer
         // and the sign-in link post to (POST /s/:slug/:channel).
         const canonicalPath = req.params.channel ? back : `/s/${server.slug}`;
+        const insight = room ? await require('../chat/room-insight').room(room, { enabled: rooms.insightOn(room) }).catch(() => null) : null;
+        const insightHtml = insight ? insightBlock(insight) : '';
         await page(req, res, 200, {
             actor, shell: true, footer: 'none', title: `${isVoice ? (isStage ? 'Stage · ' : '') : '#'}${room.name} · ${server.name}`, path: canonicalPath, active: 'servers', upload: require('../rooms/pictures').enabled(), scripts: require('../rooms/pictures').enabled() ? ['picture-upload.js'] : [],
             robots: server.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
             description: server.description || `${server.name}, a server on OpenVibe.Chat with ${server.member_count} member${Number(server.member_count) === 1 ? '' : 's'}.`,
             page: {
-                view: 'room', room: room.slug, back: `/s/${server.slug}`, kind: room.kind, pics: require('../rooms/pictures').enabled() ? require('../rooms/pictures').publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0,
+                view: 'room', room: room.slug, back: `/s/${server.slug}`, kind: room.kind, pics: require('../rooms/pictures').enabled() ? require('../rooms/pictures').publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, historyMore: roomPage.more,
                 me: me ? me.id : null, moderate: rcan.moderate, post: rcan.post, role: rcan.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: rcan.join, talk: rcan.talk } } : {}),
             },
             body: shell.shell({
                 rail: shell.rail({
-                    servers: mine.map((s) => ({ slug: s.slug, name: s.name, unread: s.unread, active: s.slug === server.slug })),
+                    servers: shell.railServers(mine, server.slug),
                     dmUnread,
                 }),
                 side: shell.sideServer({
@@ -315,13 +320,13 @@ ${sheet}`,
                     you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
                 }),
                 sideLabel: server.name,
-                main: `${shell.channelHeader({ name: room.name, kind: isStage ? 'stage' : isVoice ? 'voice' : 'text', topic: room.topic, members: true })}
+                main: `${shell.channelHeader({ name: room.name, kind: isStage ? 'stage' : isVoice ? 'voice' : 'text', topic: room.topic, members: true, extra: insightHtml })}
 ${invitePanel}
 <span class="oc-live" id="oc-live" hidden>● live</span>
 ${isStage ? `<section class="oc-stage" aria-label="Stage"><h2>${esc(room.topic || 'Stage')}</h2><p>Stage audio uses this server voice channel. Audience members join muted.</p><div id="oc-stage-speakers">Speakers and raised hands load when the stage is live.</div></section>` : ''}
 ${aiHere}${errorOf(req)}
 ${isVoice ? callPanel(room, rcan, me) : ''}
-<ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages in ${esc(room.name)}">${msgs.map((m) => roomMessage(m, rcan, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${isVoice ? 'The voice channel\'s chat is empty.' : `This is the start of #${esc(room.name)}.`}</li>`}</ol>
+<ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages in ${esc(room.name)}"><li id="oc-history-state" class="oc-muted" hidden aria-live="polite"></li>${msgs.map((m) => roomMessage(m, rcan, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${isVoice ? 'The voice channel\'s chat is empty.' : `This is the start of #${esc(room.name)}.`}</li>`}</ol>
 ${composer}`,
                 mainLabel: `${isVoice ? (isStage ? 'Stage: ' : '') : '#'}${room.name}`,
                 members: shell.membersColumn({ groups: roleGroups }),
@@ -379,7 +384,7 @@ ${composer}`,
     async function serverRail(me, activeSlug) {
         const mine = me ? (await servers.list(me)).mine : [];
         const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
-        return shell.rail({ dmUnread, servers: mine.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread, active: sv.slug === activeSlug })) });
+        return shell.rail({ dmUnread, servers: shell.railServers(mine, activeSlug) });
     }
 
     router.get('/s/:slug/welcome', async (req, res) => {

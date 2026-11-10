@@ -195,8 +195,8 @@ t('the site: directory, a server page, settings by rank, an invite page, /r/<cha
     assert.strictEqual(r.status, 200);
     assert.match(r.text, /class="oc-app"/, 'the app shell');
     assert.match(r.text, /aria-label="Chat destinations"/);
-    assert.match(r.text, /title="Home"/);
-    assert.match(r.text, /title="Vibe"/);
+    assert.match(r.text, /<span class="oc-rail-label">Home<\/span>/);
+    assert.match(r.text, /<span class="oc-rail-label">Vibe<\/span>/);
     assert.match(r.text, /class="oc-col oc-col-members"/, 'the members column');
     assert.match(r.text, /aria-current="page"[^>]*>.*general/s);
     assert.match(r.text, /Voice channels/);

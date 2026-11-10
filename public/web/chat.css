@@ -155,7 +155,8 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-ring-answer { background: var(--oc-ok-fill); color: #06281c; }
 .oc-ring-gone { color: var(--oc-muted); }
 @media (max-width: 520px) { .oc-ring { left: 16px; right: 16px; max-width: none; } }
-@media (prefers-reduced-motion: no-preference) { .oc-ring:not(.oc-ring-gone) { animation: oc-ring-in .25s ease-out; } @keyframes oc-ring-in { from { transform: translateY(12px); opacity: 0; } } }
+.oc-ring:not(.oc-ring-gone) { animation: oc-ring-in .25s ease-out; }
+@keyframes oc-ring-in { from { transform: translateY(12px); opacity: 0; } }
 .oc-tools { display: block; margin-top: 8px; }
 .oc-blocked { margin-top: 20px; }
 .oc-blocked summary { cursor: pointer; color: var(--oc-muted); }
@@ -419,7 +420,6 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-task-cancelled { opacity: .7; }
 .oc-task-full p, .oc-task-details { overflow-wrap: anywhere; }
 @keyframes oc-work { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
-@media (prefers-reduced-motion: reduce) { .oc-task-running .oc-task-state { animation: none; } }
 /* On a phone the conversation comes first and the queue follows it, without its how-to (the composer's @vibe says it). */
 @media (max-width: 900px) { .oc-ws { grid-template-columns: minmax(0, 1fr); } .oc-queue { position: static; max-height: none; } }
 @media (max-width: 560px) { .oc-queue-how { display: none; } }
@@ -483,7 +483,6 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-tp-running { color: var(--oc-accent); border-color: color-mix(in srgb, var(--oc-accent) 45%, transparent); }
 .oc-tp-running .oc-i { animation: oc-breathe 1.2s ease-in-out infinite; }   /* running: it breathes, never spins */
 @keyframes oc-breathe { 50% { opacity: .35; transform: scale(.82); } }
-@media (prefers-reduced-motion: reduce) { .oc-tp-running .oc-i { animation: none; } }
 .oc-tp-says { margin: 0; }
 .oc-tp-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 6px 0 0; }
 .oc-tp-facts div { padding: 8px 12px; border-radius: 12px; background: var(--oc-panel); border: 1px solid var(--oc-line); min-width: 0; }
@@ -531,14 +530,40 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
   .oc-js .oc-msg.oc-sel .oc-del button { visibility: visible; }
   .oc-msg.oc-sel { background: var(--oc-panel-2); }
 }
-.oc-dock { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-.oc-dock > .oc-compose { flex: 1 1 0; min-width: 0; }
-.oc-dock > .oc-pic-compose { margin: 0; order: 0; }
+/* ── The composer (shell.js composer): one box. The text is in it, Add is on its left where the place takes
+   pictures, Send on its right; what is being added waits in the tray above the text. The box takes the focus ring,
+   not the text inside it. Send is lit while there is something to send (chat-shell.js .is-empty). The picture panel
+   opens above the box; without the script its own button stays and Add is not shown. ── */
+.oc-dock { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.oc-dock > .oc-compose { display: block; min-width: 0; }
+.oc-compose-box { border: 1px solid var(--oc-line); border-radius: 26px; background: var(--oc-bg); transition: border-color .15s ease, box-shadow .15s ease; }
+.oc-compose-box:focus-within { border-color: color-mix(in srgb, var(--oc-accent) 65%, var(--oc-line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--oc-accent) 16%, transparent); }
+.oc-compose-row { display: flex; align-items: flex-end; gap: 2px; padding: 5px; }
+.oc-compose-box textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 40vh; margin: 0; padding: 9px 8px; border: 0; border-radius: 14px; background: transparent; line-height: 1.4; resize: none; field-sizing: content; }
+.oc-compose-box textarea:focus-visible { outline: 0; }
+.oc-compose-row > textarea:first-child { padding-left: 14px; }
+.oc-compose-add { display: none; place-items: center; width: 40px; height: 40px; flex: none; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--oc-muted); cursor: pointer; transition: background-color .15s ease, color .15s ease, transform .22s cubic-bezier(.2, .9, .3, 1.2); }
+.oc-js .oc-compose-add { display: grid; }
+.oc-compose-add:hover { background: var(--oc-panel-2); color: var(--oc-text); }
+.oc-compose-add[aria-expanded="true"] { transform: rotate(45deg); background: color-mix(in srgb, var(--oc-accent) 18%, transparent); color: var(--oc-accent); }
+.oc-compose-add .oc-i { width: 22px; height: 22px; }
+.oc-compose-box .oc-send { width: 40px; height: 40px; border: 0; background: var(--oc-accent); color: var(--oc-on-accent); transition: background-color .15s ease, color .15s ease, transform .2s cubic-bezier(.2, .9, .3, 1.3); }
+.oc-compose.is-empty .oc-compose-box .oc-send { background: var(--oc-panel-2); color: var(--oc-muted); transform: scale(.9); }
+.oc-compose-box .oc-send:active { transform: scale(.92); }
+.oc-compose-tray { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 10px 2px; }
+.oc-compose-tray[hidden] { display: none; }
+.oc-dock > .oc-pic-compose { order: -1; margin: 0; }
 .oc-dock > .oc-pic-compose > summary { list-style: none; width: 44px; height: 44px; }
 .oc-dock > .oc-pic-compose > summary::-webkit-details-marker { display: none; }
-.oc-dock > .oc-pic-compose[open] { order: 2; flex: 1 1 100%; }
-.oc-dock > .oc-pic-compose[open] > summary { color: var(--oc-accent); }
-.oc-compose textarea { min-height: 44px; max-height: 40vh; border-radius: 22px; padding: 10px 16px; resize: none; field-sizing: content; }
+.oc-js .oc-dock > .oc-pic-compose > summary, .oc-js .oc-dock > .oc-pic-compose:not([open]) { display: none; }
+.oc-dock > .oc-pic-compose[open] { padding: 14px; border: 1px solid var(--oc-line); border-radius: 18px; background: var(--oc-panel); animation: oc-add-rise .2s ease; }
+.oc-dock > .oc-pic-compose .oc-pic-form { margin: 0; max-width: none; }
+@keyframes oc-add-rise { from { opacity: 0; transform: translateY(calc(8px * var(--ov-move, 1))); } }
+@media (max-width: 760px) {
+  .oc-compose-row { padding: 3px; }
+  .oc-compose-add, .oc-compose-box .oc-send { width: 44px; height: 44px; }
+  .oc-compose-box textarea { min-height: 44px; padding-top: 11px; padding-bottom: 11px; }
+}
 .oc-send { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 50%; flex: none; }
 .oc-send .oc-i { width: 20px; height: 20px; stroke-width: 2.4; }
 /* The conversation takes the screen's height (header, notes and composer around it), not a fixed box. */
@@ -608,7 +633,6 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-keyrow { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; margin: 4px 0 12px; }
 .oc-keyrow .oc-i { vertical-align: -.2em; }
 .oc-danger-row { display: block; margin: 0 14px 14px; }
-@media (prefers-reduced-motion: reduce) { .oc-fold > summary > .oc-i { transition: none; } }
 /* A code block people copy (a feed's setup): its copy button in the corner, and never taller than a screenful. */
 .oc-snip { position: relative; }
 .oc-snip > .oc-icon-btn { position: absolute; top: 6px; right: 6px; z-index: 1; width: 34px; height: 34px; background: var(--oc-panel); border-color: var(--oc-line); }
@@ -622,6 +646,16 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-pop-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 10px; border-radius: 8px; background: transparent; color: var(--oc-text); font-weight: 600; text-align: left; }
 .oc-pop-item:hover { background: var(--oc-panel-2); }
 .oc-pop-item.oc-danger { color: var(--oc-red); }
+/* A room's AI insight (server/web/pages.js insightBlock): plain text, topics and a short timeline. Only
+   the parts a popover needs to stay readable on a phone; its look is the designer's. */
+.oc-insight-pop { width: min(380px, calc(100vw - 32px)); max-height: min(70vh, 560px); overflow-y: auto; }
+.oc-insight-pop > p { margin: 6px 8px; }
+.oc-insight-topics, .oc-insight-timeline { list-style: none; margin: 8px; padding: 0; font-size: .88rem; }
+.oc-insight-topics { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(92px, 100%), 1fr)); gap: 4px; }
+.oc-insight-topics li { padding: 3px 8px; border: 1px solid var(--oc-line); border-radius: 999px; }
+.oc-insight-timeline { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.oc-insight-timeline time { margin-right: 6px; color: var(--oc-muted); font-variant-numeric: tabular-nums; }
+.oc-insight-meta { font-size: .78rem; }
 .oc-row-lock { display: inline-flex; color: var(--oc-muted); flex: none; }
 .oc-row-lock .oc-i { width: .9em; height: .9em; }
 
@@ -659,7 +693,6 @@ div.oc-set-row { cursor: default; }
 .oc-set-save button { width: 100%; min-height: 46px; border-radius: 12px; }
 .oc-aikey .oc-ai-form { max-width: none; }
 @media (min-width: 720px) { .oc-set-save button { width: auto; min-width: 200px; } }
-@media (prefers-reduced-motion: reduce) { .oc-switch, .oc-switch::after { transition: none; } }
 /* Room settings: the room's form, its members (a row each, the role a small select that saves), and folded extras. */
 .oc-set-form { padding: 4px 14px 14px; }
 .oc-set-note { margin: 0; padding: 0 14px 10px; font-size: .86rem; }

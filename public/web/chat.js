@@ -67,9 +67,19 @@
   };
   function presenceState(p) { if (!p) return null; var s = p.live ? 'live' : String(p.state || ''); return PRESENCE[s] ? s : null; }
   function presenceLine(p) { var s = presenceState(p); return s ? PRESENCE[s].label + (p.status_text ? ' \u00b7 ' + String(p.status_text).slice(0, 80) : '') : ''; }
+  // A channel link never carries a section: openvibe.live/@name#about is the channel page (ask 285).
+  function channelHref(href) {
+    if (typeof href !== 'string') return href;
+    var u; try { u = new URL(href, 'https://openvibe.live'); } catch (_) { return href; }
+    if (u.origin !== 'https://openvibe.live' || !/^\/@[A-Za-z0-9_]{3,24}\/?$/.test(u.pathname)) return href;
+    var clean = '/@' + u.pathname.slice(2).replace(/\/$/, '');
+    return /^https:\/\//i.test(href) ? 'https://openvibe.live' + clean : clean;
+  }
   function presenceHref(p) {
     var href = p && (p.channel_url || p.url);
-    return typeof href === 'string' && (/^https:\/\//i.test(href) || /^\/(?!\/)/.test(href)) ? href : null;
+    if (typeof href !== 'string') return null;
+    href = channelHref(href);
+    return (/^https:\/\//i.test(href) || /^\/(?!\/)/.test(href)) ? href : null;
   }
   function setPresenceLine(box, p, username) {
     if (!box) return;
@@ -156,7 +166,44 @@
     box.appendChild(body);
     return box;
   }
-  function addCard(li, m) { var c = linkCard(m && m.card); if (c) li.appendChild(c); }
+  // An address preview (server/chat/link-previews.js): the picture when there is one, the title as the link, the
+  // description, and by/LIVE for OpenVibe's own kinds. Every field is data: textContent, and https only for links
+  // and pictures (openvibe.media for the picture).
+  var EMBED_KINDS = ['link', 'video', 'image', 'live', 'picture', 'design', 'post', 'profile', 'game'];
+  function embedCard(e) {
+    if (!e || typeof e !== 'object' || typeof e.title !== 'string' || !e.title) return null;
+    var url = httpsHref(e.url);
+    var box = el('div', 'oc-card'); box.dataset.kind = EMBED_KINDS.indexOf(e.kind) >= 0 ? e.kind : 'link';
+    var img = typeof e.image === 'string' && /^https:\/\/openvibe\.media\/[^\s"'<>]+$/.test(e.image) ? httpsHref(e.image) : null;
+    if (img) {
+      var picLink = el('a', 'oc-card-pic'); picLink.href = url || img; picLink.target = '_blank'; picLink.rel = 'noopener nofollow';
+      var picture = document.createElement('img'); picture.src = img; picture.alt = ''; picture.loading = 'lazy'; picture.decoding = 'async';
+      picLink.appendChild(picture); box.appendChild(picLink);
+    }
+    var body = el('div', 'oc-card-body');
+    if (url) { var title = el('a', 'oc-card-title', e.title); title.href = url; title.target = '_blank'; title.rel = 'noopener nofollow'; body.appendChild(title); }
+    else body.appendChild(el('span', 'oc-card-title', e.title));
+    if (typeof e.description === 'string' && e.description) body.appendChild(el('p', 'oc-card-line', e.description));
+    if (typeof e.by === 'string' && e.by) body.appendChild(el('p', 'oc-card-line', 'by ' + e.by));
+    if (e.live === true) { var live = el('p', 'oc-card-note'); live.appendChild(el('span', 'oc-badge oc-badge-mod', 'LIVE')); body.appendChild(live); }
+    box.appendChild(body);
+    return box;
+  }
+  function addCard(li, m) {
+    if (m && Array.isArray(m.embeds) && m.embeds.length) {
+      m.embeds.slice(0, 3).forEach(function (e) { var c = embedCard(e); if (c) li.appendChild(c); });
+      return;
+    }
+    var c = linkCard(m && m.card); if (c) li.appendChild(c);
+  }
+  // A preview that landed after its message: replace the line's cards with the finished list.
+  function updateEmbeds(id, embeds) {
+    if (!feed || !Array.isArray(embeds) || !embeds.length) return;
+    var li = feed.querySelector('[data-id="' + Number(id) + '"]');
+    if (!li) return;
+    Array.prototype.forEach.call(li.querySelectorAll('.oc-card'), function (c) { c.remove(); });
+    addCard(li, { embeds: embeds });
+  }
 
   // Display only (the server decides who may do what): the same badges the page renders.
   var BADGES = { admin: ['oc-badge oc-badge-staff', 'staff'], global_mod: ['oc-badge oc-badge-mod', 'mod'] };
@@ -168,7 +215,11 @@
     var stick = nearBottom();
     removeEmpty();
     feed.appendChild(li);
-    while (feed.children.length > 300) feed.removeChild(feed.firstChild);
+    while (feed.children.length > 300) {
+      var oldest = feed.querySelector('[data-id]');
+      if (!oldest) break;
+      oldest.remove();
+    }
     if (stick) toBottom();
   }
   function showError(text) {
@@ -235,6 +286,11 @@
   function startGlobal() {
     var live = document.getElementById('oc-live');
     var ws = null, delay = 1000, opened = false;
+    var historyState = document.getElementById('oc-history-state');
+    window.OvChatHistory.attach(feed, historyState, function (before) {
+      return fetch('/api/chat/global/history?before=' + encodeURIComponent(before) + '&limit=50', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; });
+    }, globalItem, cfg.historyMore);
     // A workspace room's queue (server/web/workspace-pages.js): its panel reloads when the socket says it changed.
     var queueBox = document.getElementById('oc-queue'), queueTimer = null;
     function refreshQueue() {
@@ -262,6 +318,8 @@
         if (m.type === 'chat' && m.is_global) {
           if (m.id) latest = Math.max(latest, Number(m.id));
           append(globalItem(m), m.id);
+        } else if (m.type === 'chat_embeds' && m.id) {
+          updateEmbeds(m.id, m.embeds);
         } else if (m.type === 'delete-messages' && Array.isArray(m.ids || m.message_ids)) {
           removeIds(m.ids || m.message_ids);
         } else if (m.type === 'error' && m.message) {
@@ -283,7 +341,7 @@
         if (!ws || ws.readyState !== 1) return;           // not connected: the form posts as without JavaScript
         e.preventDefault();
         ws.send(JSON.stringify({ type: 'chat', message: text }));
-        input.value = '';
+        input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true }));
         input.focus();
       });
     }
@@ -301,6 +359,10 @@
   }
   function startDm() {
     var base = '/api/dm/conversations/' + encodeURIComponent(cfg.conversation);
+    window.OvChatHistory.attach(feed, document.getElementById('oc-history-state'), function (before) {
+      return fetch(base + '/messages?before=' + encodeURIComponent(before) + '&limit=50', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; });
+    }, dmItem, cfg.historyMore);
     function poll() {
       if (document.hidden) return;
       fetch(base + '/messages?after=' + latest + '&limit=100', { credentials: 'same-origin' })
@@ -343,7 +405,7 @@
           .then(function (x) {
             if (!x.ok) { showError((x.d && x.d.error) || 'Could not send'); return; }
             if (x.d && x.d.message) { latest = Math.max(latest, Number(x.d.message.id) || 0); append(dmItem(x.d.message), x.d.message.id); }
-            input.value = ''; input.focus();
+            input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus();
           })
           .catch(function () { form.submit(); })
           .then(function () { if (btn) btn.disabled = false; });
@@ -434,6 +496,10 @@
     var live = document.getElementById('oc-live');
     var ws = null, delay = 1000, opened = false;
     var api = '/api/chat/rooms/' + encodeURIComponent(cfg.room);
+    window.OvChatHistory.attach(feed, document.getElementById('oc-history-state'), function (before) {
+      return fetch(api + '/messages?before=' + encodeURIComponent(before) + '&limit=50', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; });
+    }, roomItem, cfg.historyMore);
     function catchUpRoom() {
       return fetch(api + '/messages?after=' + latest + '&limit=200', { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; })
@@ -454,6 +520,8 @@
           refreshQueue();
         } else if (m.type === 'room_ai_typing' && m.room === cfg.room) {
           showThinking(m.name);
+        } else if (m.type === 'room_message_embeds' && m.room === cfg.room) {
+          updateEmbeds(m.id, m.embeds);
         } else if (m.type === 'room_message_deleted' && m.room === cfg.room) {
           var x = feed.querySelector('[data-id="' + m.id + '"]'); if (x) x.remove();
         } else if (m.type === 'room_error' && m.message) {
@@ -477,7 +545,7 @@
         if (!ws || ws.readyState !== 1) return;
         e.preventDefault();
         ws.send(JSON.stringify({ type: 'room_message', message: text }));
-        input.value = ''; input.focus();
+        input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus();
       });
     }
     if (feed) feed.addEventListener('submit', function (e) {

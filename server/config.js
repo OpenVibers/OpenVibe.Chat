@@ -97,6 +97,16 @@ module.exports = {
         baseUrl: strip(process.env.CHAT_PARTY_URL || (isProduction ? 'https://openvibe.party' : `http://localhost:${port}`)),
         redirectUri: process.env.CHAT_PARTY_OAUTH_REDIRECT_URI || `${strip(process.env.CHAT_PARTY_URL || (isProduction ? 'https://openvibe.party' : `http://localhost:${port}`))}/auth/callback`,
         scope: 'profile theme',
+        // OpenVibe's own computers for party desktops (server/rooms/party-pool.js). The switch is the owner's, in
+        // party_pool_settings (off until the owner turns it on at openvibe.party/pool); CHAT_PARTY_POOL=1 is the
+        // operator override for a development box. The windows are the idle release and the line's lifetime.
+        pool: {
+            enabled: bool(process.env.CHAT_PARTY_POOL, false),
+            idleMs: int(process.env.CHAT_PARTY_POOL_IDLE_MS, 10 * 60_000),
+            queueMs: int(process.env.CHAT_PARTY_POOL_QUEUE_MS, 30 * 60_000),
+            maxPerActor: int(process.env.CHAT_PARTY_POOL_MAX_PER_ACTOR, 2),
+            maxQueue: int(process.env.CHAT_PARTY_POOL_MAX_QUEUE, 50),
+        },
     },
     // Pictures in rooms and channels (server/rooms/pictures.js): uploaded to OpenVibe.Pics as the person (their own
     // Network token) through MediaHub on this host, and shown inline. Off without CHAT_PICS_INTERNAL_URL.
@@ -228,6 +238,8 @@ module.exports = {
         vibe: process.env.CHAT_VIBE !== '0',
         // C3's explicit "do it for me" task modes (Actor-backed Research, Agent and Code); site owner opt-in.
         vibeDoIt: bool(process.env.CHAT_VIBE_DO_IT_ENABLED, false),
+        // C3 web search in Vibe's composer (the existing Search Fabric tool and cited results); owner enables it explicitly.
+        vibeWebSearch: bool(process.env.CHAT_VIBE_WEB_SEARCH_ENABLED, false),
         vibeRepliesPerDay: Math.max(1, int(process.env.CHAT_VIBE_REPLIES_PER_DAY, 100)),
     },
     bench: {

@@ -105,7 +105,9 @@ t('Call rings the other person (a direct row) and opens the call page with the r
     assert.match(mine.text, /<script src="\/web\/call\.js\?v=[^"]+" defer><\/script>/);
     assert.match(mine.text, new RegExp(`href="/messages/${conv}"`), 'back to the conversation');
     assert.match(mine.text, /<meta name="robots" content="noindex, nofollow">/);
-    assert.deepStrictEqual(pageJson(mine.text).call, { channel: channelId, join: true, talk: true, auto: true, ring: { id: Number(bob.id), name: 'Bob' } });
+    assert.deepStrictEqual(pageJson(mine.text).call, { channel: channelId, join: true, talk: true, ring: { id: Number(bob.id), name: 'Bob' } });
+    assert.match(mine.text, /<button type="button" id="oc-call-join" hidden>Turn on microphone<\/button>/);
+    assert.match(mine.text, /oc-call-join-note/);
 
     const his = await req('GET', `/call/${encodeURIComponent(channelId)}`, { headers: cookie(bob) });
     assert.strictEqual(his.status, 200);
@@ -166,14 +168,16 @@ t('ring.js: a ring shows Answer and Decline; answering tells the caller and open
 t('call.js on the caller\'s page: ringing until the answer; a decline, busy or no answer leaves the call', async () => {
     const signed = `ov_token=${encodeURIComponent(alice.token)}`;
     for (const [status, text] of [['declined', 'Bob declined the call.'], ['busy', 'Bob is in another call.'], ['no-answer', 'No answer from Bob.']]) {
-        const s = runScript('call.js', { view: 'call', call: { channel: 'user-1-abc', join: true, talk: true, auto: true, ring: { id: 2, name: 'Bob' } } }, { docCookie: signed });
+        const s = runScript('call.js', { view: 'call', call: { channel: 'user-1-abc', join: true, talk: true, ring: { id: 2, name: 'Bob' } } }, { docCookie: signed });
         const chat = s.sockets.find((x) => /\/ws\/chat$/.test(x.url));
         assert.ok(chat, 'the caller listens for the answer on /ws/chat');
         chat.onopen();
         assert.deepStrictEqual(chat.sent[0], { type: 'join', token: alice.token });
+        assert.ok(!s.sockets.some((x) => /\/ws\/call/.test(x.url)), 'the page open asks for nothing: no call socket yet');
+        s.byId['oc-call-join'].handlers.click();
         await tick(); await tick();
         const call = s.sockets.find((x) => /\/ws\/call\?channelId=user-1-abc$/.test(x.url));
-        assert.ok(call, 'and joins its call as the page opens');
+        assert.ok(call, 'and joins its call on the Turn on microphone press');
         call.onopen();
         call.onmessage({ data: JSON.stringify({ type: 'welcome', peerId: 'p1', participants: [{ peerId: 'p1', displayName: 'Alice' }] }) });
         assert.strictEqual(s.byId['oc-call-status'].textContent, 'Ringing Bob…');
@@ -184,8 +188,9 @@ t('call.js on the caller\'s page: ringing until the answer; a decline, busy or n
         assert.strictEqual(s.byId['oc-call-status'].textContent, text);
         assert.ok(chat.closed && call.closed, `${status}: the call is left and the ring socket closed`);
     }
-    const s = runScript('call.js', { view: 'call', call: { channel: 'user-1-abc', join: true, talk: true, auto: true, ring: { id: 2, name: 'Bob' } } }, { docCookie: signed });
+    const s = runScript('call.js', { view: 'call', call: { channel: 'user-1-abc', join: true, talk: true, ring: { id: 2, name: 'Bob' } } }, { docCookie: signed });
     const chat = s.sockets[0];
+    s.byId['oc-call-join'].handlers.click();
     await tick(); await tick();
     const call = s.sockets.find((x) => /\/ws\/call/.test(x.url));
     call.onmessage({ data: JSON.stringify({ type: 'welcome', peerId: 'p1', participants: [{ peerId: 'p1' }] }) });

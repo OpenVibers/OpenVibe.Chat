@@ -273,6 +273,8 @@
 @media (min-width: 1180px) { .vbk .vbc-phone { display: none !important; } }
 @media (max-width: 1179px) { .vbk .vbc-wide { display: none !important; } }
 
+/* Files attached to a Vibe message: the shared upload kit's rows sit above the composer (vibe.js). */
+.vb-files { display: grid; gap: 8px; margin: 0 0 8px; }
 /* The shared picker in a sheet over the Vibe composer. */
 /* Add a file: the kit's sheet (a bottom sheet on a phone), a little narrower than its 560px on a computer. */
 .ovk-sheet.vb-upload { width: min(440px, 100vw); }

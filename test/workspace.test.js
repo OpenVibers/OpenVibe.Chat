@@ -82,7 +82,7 @@ t('a quick task runs on Actor as the person who asked; its result comes back fro
         assert.deepStrictEqual(r.body.task.sources, ['https://example.com/a', 'https://example.com/b'], 'only http(s) links');
         assert.strictEqual(r.body.task.cost_usd, 0.0031);
         const msgs = (await api('GET', '/rooms/staff/messages', staff)).body.messages;
-        const last = msgs[msgs.length - 1];
+        const last = msgs[0];
         assert.ok(last.ai_member_id && /^✅ Done: "Why does the Live home load slowly on phones" \(asked by Mia\)/.test(last.message), last.message);
         assert.match(last.message, /Three large images block the first paint\./);
         assert.match(last.message, new RegExp(`/r/staff/tasks/${task.id}$`));
@@ -108,7 +108,7 @@ t('code work waits for a worker: claim, report, the room hears it', async () => 
     assert.strictEqual(r.status, 200, r.text);
     assert.strictEqual(r.body.task.status, 'succeeded');
     const msgs = (await api('GET', '/rooms/staff/messages', staff)).body.messages;
-    assert.match(msgs[msgs.length - 1].message, /^✅ Done: "Add a dark favicon to Tools"[\s\S]*https:\/\/github\.com\/OpenVibers\/OpenVibe\.Tools\/pull\/1/);
+    assert.match(msgs[0].message, /^✅ Done: "Add a dark favicon to Tools"[\s\S]*https:\/\/github\.com\/OpenVibers\/OpenVibe\.Tools\/pull\/1/);
     // The agent's step (design 2026-11-07): claim and report are its two changes, one row each. The payload is a
     // generated title, an outcome and a link: never the task's title (the person's words) or its result.
     const steps = (await h.db.getDb().prepare('SELECT envelope FROM service_outbox ORDER BY id').all())

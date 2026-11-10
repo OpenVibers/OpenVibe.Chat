@@ -128,10 +128,10 @@ const listSection = (id, title, more, rows) => `<section class="oc-home-sec oc-h
 function streamsSection(a, app) {
     if (!a.streams.length) return '';
     if (app) {
-        return listSection('oc-h-streams', 'Stream chats', `<a href="${LIVE}/">Who is live</a>`, a.streams.map((s) => row(`${LIVE}/@${esc(s.username)}`, s.display_name, ui.initials(s.display_name), s.live ? '<span class="oc-badge oc-badge-live">Live</span>' : '',
+        return listSection('oc-h-streams', 'Stream chats', `<a href="${LIVE}/">Who is live</a>`, a.streams.map((s) => row(`${LIVE}/@${esc(s.username)}`, '@' + s.username, ui.initials(s.display_name || s.username), s.live ? '<span class="oc-badge oc-badge-live">Live</span>' : '',
             s.live && s.title ? esc(s.title) : `${s.messages ? `${plural(s.messages, 'message', 'messages')} this week` : ''}${s.last ? `${s.messages ? ' · ' : ''}last ${esc(ago(s.last))}` : ''}`)));
     }
-    const item = (s) => `<li><a class="oc-stream" href="${LIVE}/@${esc(s.username)}"><span class="oc-stream-name"><strong>${esc(s.display_name)}</strong>${s.live ? ' <span class="oc-badge oc-badge-live">Live now</span>' : ''}</span>
+    const item = (s) => `<li><a class="oc-stream" href="${LIVE}/@${esc(s.username)}"><span class="oc-stream-name"><strong>@${esc(s.username)}</strong>${s.live ? ' <span class="oc-badge oc-badge-live">Live now</span>' : ''}</span>
 <span class="oc-muted">${s.live && s.title ? `${esc(s.title)}${s.messages ? ' · ' : ''}` : ''}${s.messages ? `${plural(s.messages, 'message', 'messages')} from ${plural(s.people, 'person', 'people')} this week` : ''}${s.last && !s.live ? ` · last ${esc(ago(s.last))}` : ''}</span></a></li>`;
     return `<section class="oc-home-sec" aria-labelledby="oc-h-streams"><div class="oc-home-head"><h2 id="oc-h-streams">Stream chats on OpenVibe.Live</h2><a href="${LIVE}/">Who is live</a></div>
 <p class="oc-muted">Every channel on OpenVibe.Live has its own chat, run by OpenVibe.Chat. The busiest this week:</p>
