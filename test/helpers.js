@@ -99,6 +99,10 @@ async function boot({ env = {} } = {}) {
     // Presence for the Network endpoint Chat reads (network.presence.read). Tests set rows here; the
     // visibility rule itself is Network's and is tested there, so the stub answers the subjects asked for.
     const netPresence = { rows: new Map(), calls: [] };
+    // The consent check (network.consent@1, capability network.consent.read): Chat's room insight asks
+    // which authors allowed ai.train on kind chat. Tests put subjects in h.consent.allowed; h.consent.down
+    // makes the call fail, which must leave everyone out (fail closed).
+    const netConsent = { allowed: new Set(), calls: [], down: false };
     const network = http.createServer(async (req, res) => {
         const raw = await new Promise((r) => { let s = ''; req.on('data', (c) => { s += c; }); req.on('end', () => r(s)); });
         res.setHeader('Content-Type', 'application/json');
@@ -112,6 +116,18 @@ async function boot({ env = {} } = {}) {
             const subjects = String(url.searchParams.get('subjects') || '').split(',').filter(Boolean);
             netPresence.calls.push({ for: forSubject, subjects });
             return res.end(JSON.stringify({ presence: subjects.map((s) => netPresence.rows.get(s)).filter(Boolean) }));
+        }
+        if (req.url === '/internal/consent/check') {
+            const auth = String(req.headers.authorization || '');
+            const v = auth.startsWith('Bearer ') ? serviceAuth.verifyServiceToken(auth.slice(7), { publicKey: keys.publicKey, issuer: ISS, audience: 'openvibe.network' }) : { ok: false, code: 'token.missing' };
+            if (!v.ok) { res.statusCode = 401; return res.end(JSON.stringify({ error: v.code })); }
+            if (!(v.claims.cap || []).includes('network.consent.read')) { res.statusCode = 403; return res.end(JSON.stringify({ error: 'capability.denied' })); }
+            if (netConsent.down) { req.socket.destroy(); return; }
+            let body = {}; try { body = JSON.parse(raw || '{}'); } catch { body = {}; }
+            netConsent.calls.push(body);
+            const allowed = {};
+            for (const s of Array.isArray(body.subjects) ? body.subjects : []) allowed[s] = netConsent.allowed.has(s);
+            return res.end(JSON.stringify({ purpose: body.purpose, kind: body.kind, allowed, checked_at: new Date().toISOString() }));
         }
         const mm = /^\/internal\/modules\/([^/?]+)\/([^/?]+)$/.exec(req.url);
         if (mm) return modulesRoute(req, res, raw, decodeURIComponent(mm[1]), decodeURIComponent(mm[2]));
@@ -313,6 +329,7 @@ async function boot({ env = {} } = {}) {
 
     const h = {
         tmp, keys, live, network, liveServer, tokenRequests, serviceToken, ISS, netModules, netPresence,
+        consent: netConsent,
         userSeq: 0,
         /** Add a Live user (projection row) with a browser token; returns { id, token, ...row }. */
         addUser(username, { role = 'user', subject = null, created_at = sqliteNow(-30 * 86400e3), apiScopes = null, is_owner = 0, display_name = null } = {}) {
