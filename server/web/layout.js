@@ -162,7 +162,6 @@ ${INSTALL_LINKS}
 <link rel="stylesheet" href="${asset('chat.css')}">
 ${o.shell ? `<link rel="stylesheet" href="${asset('chat-shell.css')}">` : ''}
 <link rel="stylesheet" href="${ovServe.url('items.css')}">
-${o.upload ? `<link rel="stylesheet" href="${ovServe.url('ov-upload.css')}">` : ''}
 ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` : ''}
 ${o.upload ? `<link rel="stylesheet" href="${ovServe.url('ov-upload.css')}">` : ''}
 ${(o.inlineStyles || []).map((css) => `<style>${css}</style>`).join('\n')}
@@ -171,7 +170,6 @@ ${o.app || o.appStyle ? `<link rel="stylesheet" href="${asset(o.appStyle || 'vib
 ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
 ${o.partyHome ? `<link rel="stylesheet" href="${asset('party-home.css')}">` : ''}
 ${o.party ? `<link rel="stylesheet" href="${ovServe.url('player.css')}">\n<link rel="stylesheet" href="${asset('party.css')}">\n<script src="${ovServe.url('player.js')}" defer></script>\n<script src="${ovServe.url('ov-sync.js')}" defer></script>\n<script src="${asset('party-providers.js')}" defer></script>\n<script src="${asset('party-provider-sync.js')}" defer></script>\n<script src="${asset('party.js')}" defer></script>` : ''}
-${o.upload ? `<script src="${ovServe.url('ov-upload.js')}" defer></script>` : ''}
 ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join('\n')}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>
