@@ -281,3 +281,61 @@ t('a moderator removes any preview; another member may not', async () => {
 });
 
 t.run(async () => { previews._reset(); await h.close(); });
+
+// ── Part 4: privacy in direct messages ───────────────────────────────────────────────────────────────────────
+
+t('a DM with link previews on for both people gains a preview', async () => {
+    previews._setLookup((host, options, callback) => callback(null, [{ address: '93.184.216.34', family: 4 }]));
+    previews._setRequest(async () => type(page('<meta property="og:title" content="A DM story">')));
+    const made = await h.http('POST', '/api/dm/conversations', { token: alice.token, body: { user_ids: [bob.id] } });
+    assert.strictEqual(made.status, 200, made.text);
+    const sent = await h.http('POST', `/api/dm/conversations/${made.body.conversation.id}/messages`, { token: alice.token, body: { message: 'look https://93.184.216.34/dm-both-on' } });
+    assert.strictEqual(sent.status, 200, sent.text);
+    assert.deepStrictEqual(sent.body.message.embeds, [], 'the send answer starts empty; the job fills it');
+    await previews.idle();
+    const got = await h.http('GET', `/api/dm/conversations/${made.body.conversation.id}/messages`, { token: bob.token });
+    const message = got.body.messages.find((m) => m.id === sent.body.message.id);
+    assert.strictEqual(message.embeds.length, 1, got.text);
+    assert.strictEqual(message.embeds[0].title, 'A DM story');
+});
+
+t('a DM with link previews off on one side fetches nothing and gains none', async () => {
+    const previewSettings = require('../server/chat/dm-preview-settings');
+    const made = await h.http('POST', '/api/dm/conversations', { token: alice.token, body: { user_ids: [bob.id] } });
+    const id = made.body.conversation.id;
+    assert.strictEqual(await previewSettings.enabledFor(bob.id), true, 'on by default');
+    await previewSettings.setEnabled(bob.id, false);
+    let called = false;
+    previews._setRequest(async () => { called = true; return type(page('<meta property="og:title" content="Must not fetch">')); });
+    const sent = await h.http('POST', `/api/dm/conversations/${id}/messages`, { token: alice.token, body: { message: 'https://93.184.216.34/dm-one-off' } });
+    assert.strictEqual(sent.status, 200, sent.text);
+    await previews.idle();
+    assert.strictEqual(called, false, 'one side off: the address is never fetched');
+    const got = await h.http('GET', `/api/dm/conversations/${id}/messages`, { token: alice.token });
+    assert.deepStrictEqual(got.body.messages.find((m) => m.id === sent.body.message.id).embeds, []);
+    await previewSettings.setEnabled(bob.id, true);
+});
+
+t('a private address in a DM is refused before any fetch', async () => {
+    previews._setLookup((host, options, callback) => callback(null, [{ address: '10.0.0.1', family: 4 }]));
+    let called = false;
+    previews._setRequest(async () => { called = true; return type(page('<meta property="og:title" content="Private">')); });
+    const made = await h.http('POST', '/api/dm/conversations', { token: alice.token, body: { user_ids: [bob.id] } });
+    const sent = await h.http('POST', `/api/dm/conversations/${made.body.conversation.id}/messages`, { token: alice.token, body: { message: 'https://private.example/dm-secret' } });
+    await previews.idle();
+    assert.strictEqual(called, false, 'the egress check refuses it');
+    const got = await h.http('GET', `/api/dm/conversations/${made.body.conversation.id}/messages`, { token: alice.token });
+    assert.deepStrictEqual(got.body.messages.find((m) => m.id === sent.body.message.id).embeds, []);
+    previews._setLookup(null);
+});
+
+t('markup in a DM preview title stays text', async () => {
+    previews._setLookup((host, options, callback) => callback(null, [{ address: '93.184.216.34', family: 4 }]));
+    previews._setRequest(async () => type(page('<meta property="og:title" content="&lt;b&gt;not bold&lt;/b&gt;">')));
+    const made = await h.http('POST', '/api/dm/conversations', { token: alice.token, body: { user_ids: [bob.id] } });
+    const sent = await h.http('POST', `/api/dm/conversations/${made.body.conversation.id}/messages`, { token: alice.token, body: { message: 'https://93.184.216.34/dm-markup' } });
+    await previews.idle();
+    const got = await h.http('GET', `/api/dm/conversations/${made.body.conversation.id}/messages`, { token: alice.token });
+    const embed = got.body.messages.find((m) => m.id === sent.body.message.id).embeds[0];
+    assert.strictEqual(embed.title, '<b>not bold</b>', 'the words are data; a renderer escapes them');
+});
