@@ -66,12 +66,26 @@ function presenceOrder(presence) {
     const state = presenceState(presence);
     return state === 'online' || state === 'live' ? 0 : state === 'away' || state === 'dnd' ? 1 : 2;
 }
+/**
+ * A channel link never carries a section: openvibe.live/@name#about is the channel page, and the address a live
+ * presence link hands over is /@name (ask 285). A relative /@name stays relative; any other link is untouched.
+ */
+function channelHref(href) {
+    if (typeof href !== 'string') return href;
+    let u;
+    try { u = new URL(href, 'https://openvibe.live'); } catch { return href; }
+    if (u.origin !== 'https://openvibe.live' || !/^\/@[A-Za-z0-9_]{3,24}\/?$/.test(u.pathname)) return href;
+    const clean = `/@${u.pathname.slice(2).replace(/\/$/, '')}`;
+    return /^https:\/\//i.test(href) ? `https://openvibe.live${clean}` : clean;
+}
+
 /** "Online", "Live now" and — when there is one — " · their status line". Nothing for offline. */
 function presenceLine(presence, { liveHref = null } = {}) {
     const state = presenceState(presence);
     if (!state) return '';
     const label = esc(PRESENCE[state].label);
-    const href = typeof liveHref === 'string' && (/^https:\/\//i.test(liveHref) || /^\/(?!\/)/.test(liveHref)) ? liveHref : null;
+    const cleaned = channelHref(liveHref);
+    const href = typeof cleaned === 'string' && (/^https:\/\//i.test(cleaned) || /^\/(?!\/)/.test(cleaned)) ? cleaned : null;
     const shown = state === 'live' && href ? `<a href="${esc(href)}">${label}</a>` : label;
     return `${shown}${presence.status_text ? ` · ${esc(String(presence.status_text).slice(0, 80))}` : ''}`;
 }
