@@ -118,8 +118,14 @@ t('chat history: global page and cursor delta, deleted and expired rows hidden',
     await h.db.run("UPDATE chat_messages SET auto_delete_at = '2000-01-01 00:00:00' WHERE id = ?", [ids[2]]);
     const page = await h.http('GET', '/api/chat/global/history?limit=10');
     const got = page.body.messages.map((m) => m.message);
-    assert.deepStrictEqual(got.filter((x) => /^g\d$/.test(x)), ['g0', 'g3', 'g4']);
+    assert.deepStrictEqual(got.filter((x) => /^g\d$/.test(x)), ['g4', 'g3', 'g0']);
     assert.strictEqual(page.body.latest_id, ids[4]);
+    const firstPage = await h.http('GET', '/api/chat/global/history?limit=2');
+    assert.strictEqual(firstPage.body.more, true);
+    assert.deepStrictEqual(firstPage.body.messages.map((m) => m.id), [ids[4], ids[3]]);
+    const older = await h.http('GET', `/api/chat/global/history?before=${ids[3]}&limit=2`);
+    assert.strictEqual(older.body.more, false);
+    assert.deepStrictEqual(older.body.messages.map((m) => m.id).filter((id) => ids.includes(id)), [ids[0]]);
     const delta = await h.http('GET', `/api/chat/global/history?after_id=${ids[3]}`);
     assert.deepStrictEqual(delta.body.messages.map((m) => m.message), ['g4']);
     assert.strictEqual(delta.body.complete, true);
