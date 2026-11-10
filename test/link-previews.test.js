@@ -280,4 +280,78 @@ t('a moderator removes any preview; another member may not', async () => {
     assert.deepStrictEqual(removed.body.embeds, []);
 });
 
+// ── Own kinds through each service's public API, never a page fetch ─────────────────────────────────────────
+
+t('Pics, Community and Network resolve through their public APIs, never their pages', async () => {
+    process.env.CHAT_LINK_PICS_URL = 'https://93.184.216.34';
+    process.env.CHAT_LINK_COMMUNITY_URL = 'https://93.184.216.34';
+    process.env.CHAT_LINK_NETWORK_URL = 'https://93.184.216.34';
+    previews._setLookup((host, options, callback) => callback(null, [{ address: '93.184.216.34', family: 4 }]));
+    const calls = [];
+    previews._setRequest(async (url) => {
+        calls.push(url);
+        if (url.includes('/api/v1/images/abcd2345')) {
+            return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+                title: 'Harbour at dusk', description: 'Boats and a red sky', width: 1200, height: 800, state: 'active',
+                links: { direct: 'https://openvibe.pics/i/abcd2345.jpg' },
+            }) };
+        }
+        if (url.includes('/api/v1/spaces/feedback/threads/hello-post')) {
+            return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+                thread: { title: 'A Community post', author: { username: 'alice', display_name: 'Alice' } },
+                posts: [{ body_markdown: 'Hello **world**', attachments: [{ url: 'https://openvibe.media/att/1.jpg' }] }],
+            }) };
+        }
+        if (url.includes('/api/v1/profiles/alice')) {
+            return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+                profile: { username: 'alice', display_name: 'Alice', bio: 'Builder of things', avatar_url: 'https://openvibe.network/avatar/alice?s=160' },
+            }) };
+        }
+        return { status: 404, headers: {}, body: '' };
+    });
+    await new Promise((r) => setTimeout(r, 10500));   // the room's per-person posting budget
+    const sent = await h.http('POST', `/api/chat/rooms/${room.slug}/messages`, { token: alice.token, body: {
+        message: 'https://openvibe.pics/i/abcd2345 https://openvibe.community/s/feedback/t/hello-post https://openvibe.network/@alice',
+    } });
+    assert.strictEqual(sent.status, 201, sent.text);
+    await previews.idle();
+    const got = await h.http('GET', `/api/chat/rooms/${room.slug}/messages`, { token: alice.token });
+    const embeds = got.body.messages.find((m) => m.id === sent.body.message.id).embeds;
+    assert.deepStrictEqual(embeds.map((e) => e.kind), ['picture', 'post', 'profile']);
+    assert.strictEqual(embeds[0].title, 'Harbour at dusk');
+    assert.strictEqual(embeds[0].width, 1200);
+    assert.strictEqual(embeds[0].image, null, 'a Pics file is not on Media: never hot-linked');
+    assert.strictEqual(embeds[1].title, 'A Community post');
+    assert.strictEqual(embeds[1].by, 'alice');
+    assert.strictEqual(embeds[1].image, 'https://openvibe.media/att/1.jpg');
+    assert.strictEqual(embeds[2].title, 'Alice');
+    assert.strictEqual(embeds[2].by, 'alice');
+    assert.strictEqual(embeds[2].image, null, 'a Network avatar is not on Media: left out');
+    assert.deepStrictEqual(calls, [
+        'https://93.184.216.34/api/v1/images/abcd2345',
+        'https://93.184.216.34/api/v1/spaces/feedback/threads/hello-post',
+        'https://93.184.216.34/api/v1/profiles/alice',
+    ], 'each service is asked through its API, never its page');
+});
+
+t('a Games creator world resolves through the public API; a built-in Play title has no public read and is not fetched', async () => {
+    process.env.CHAT_LINK_GAMES_URL = 'https://93.184.216.34';
+    const calls = [];
+    previews._setRequest(async (url) => {
+        calls.push(url);
+        if (url.includes('/api/worlds/w0123456789')) {
+            return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+                id: 'w0123456789', title: 'Sky world', summary: 'Build in the clouds', owner: 'alice', plays: 12,
+            }) };
+        }
+        return { status: 200, headers: { 'content-type': 'text/html' }, body: '<meta property="og:title" content="Should not be read">' };
+    });
+    const world = await previews.previewOf('https://openvibe.games/worlds/w0123456789');
+    assert.strictEqual(world.kind, 'game');
+    assert.strictEqual(world.title, 'Sky world');
+    assert.strictEqual(world.by, 'alice');
+    assert.strictEqual(await previews.previewOf('https://openvibe.games/play?game=scraplandia'), null, 'the built-in Play title has no public game read');
+    assert.deepStrictEqual(calls, ['https://93.184.216.34/api/worlds/w0123456789'], 'the /play page is never read');
+});
+
 t.run(async () => { previews._reset(); await h.close(); });

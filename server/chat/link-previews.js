@@ -34,7 +34,7 @@ const MAX_DESCRIPTION = 300;
 const MAX_SITE = 80;
 const MAX_JOBS = 2;
 const MAX_QUEUE = 200;
-const KINDS = ['link', 'video', 'image', 'live'];
+const KINDS = ['link', 'video', 'image', 'live', 'picture', 'design', 'post', 'profile', 'game'];
 const USER_AGENT = 'OpenVibe-Chat-LinkPreview/1 (+https://openvibe.chat)';
 const PREVIEWS_ON = String(process.env.CHAT_LINK_PREVIEWS || '').toLowerCase() !== 'off';
 
@@ -217,8 +217,13 @@ function baseOf(value, production) {
         return u.protocol === 'https:' || u.protocol === 'http:' ? raw : '';
     } catch { return ''; }
 }
-const liveBase = () => baseOf(process.env.CHAT_LINK_LIVE_URL, 'https://openvibe.live');
-const videoBase = () => baseOf(process.env.CHAT_LINK_VIDEO_URL, 'https://openvibe.video');
+const baseFor = (name, production) => () => baseOf(process.env[name], production);
+const liveBase = baseFor('CHAT_LINK_LIVE_URL', 'https://openvibe.live');
+const videoBase = baseFor('CHAT_LINK_VIDEO_URL', 'https://openvibe.video');
+const picsBase = baseFor('CHAT_LINK_PICS_URL', 'https://openvibe.pics');
+const communityBase = baseFor('CHAT_LINK_COMMUNITY_URL', 'https://openvibe.community');
+const networkBase = baseFor('CHAT_LINK_NETWORK_URL', 'https://openvibe.network');
+const gamesBase = baseFor('CHAT_LINK_GAMES_URL', 'https://openvibe.games');
 
 /** What an address on one of our sites asks that site for, or null for host/path shapes we do not know. */
 function ownLink(u) {
@@ -233,6 +238,22 @@ function ownLink(u) {
         if (u.pathname === '/watch' && /^[A-Za-z0-9_-]{11}$/.test(String(u.searchParams.get('v') || ''))) return { site, page: u.href };
         if (/^\/[vc]\/[0-9]{1,12}$/.test(u.pathname)) return { site, page: u.href };
         return { site };
+    }
+    if (site === 'picture') {
+        const m = /^\/i\/([2-9a-km-zA-HJ-NP-Z]{8})(?:\.[A-Za-z0-9]+)?\/?$/.exec(u.pathname);
+        return m ? { site, slug: m[1] } : { site };
+    }
+    if (site === 'post') {
+        const m = /^\/s\/([^/]{1,80})\/t\/([^/]{1,200})\/?$/.exec(u.pathname);
+        return m ? { site, space: decodeURIComponent(m[1]), thread: decodeURIComponent(m[2]) } : { site };
+    }
+    if (site === 'profile') {
+        const m = /^\/@([A-Za-z0-9_.-]{1,40})\/?$/.exec(u.pathname);
+        return m ? { site, username: m[1] } : { site };
+    }
+    if (site === 'game') {
+        const m = /^\/worlds\/(w[0-9a-z]{10})\/?$/.exec(u.pathname);
+        return m ? { site, world: m[1] } : { site };
     }
     return { site };
 }
@@ -286,6 +307,104 @@ async function videoPreview(url, page) {
         by: textOf(item.channel, 80),
         live: false,
     };
+}
+
+/** A Pics picture (/i/<slug>, no page fetch): Pics' public image read. Its file lives on openvibe.pics, not Media,
+ *  so the picture itself is left out (a page's image is never hot-linked); the title and size still make a card. */
+async function picturePreview(url, slug) {
+    const base = picsBase();
+    if (!base) return null;
+    const item = await readJsonUrl(`${base}/api/v1/images/${encodeURIComponent(slug)}`);
+    if (!item || typeof item !== 'object' || item.state === 'removed') return null;
+    const title = textOf(item.title || item.alt || 'A picture on OpenVibe.Pics', MAX_TITLE);
+    if (!title) return null;
+    return {
+        url,
+        site_name: 'OpenVibe.Pics',
+        title,
+        description: textOf(item.description || item.alt, MAX_DESCRIPTION),
+        image: imageOf(item.links && item.links.direct),
+        kind: 'picture',
+        width: intOf(item.width),
+        height: intOf(item.height),
+    };
+}
+
+/** A Community thread (/s/<space>/t/<slug>, no page fetch): Community's public thread read, with its first post. */
+async function communityPreview(url, space, thread) {
+    const base = communityBase();
+    if (!base) return null;
+    const item = await readJsonUrl(`${base}/api/v1/spaces/${encodeURIComponent(space)}/threads/${encodeURIComponent(thread)}`);
+    const found = item && item.thread;
+    if (!found || typeof found !== 'object') return null;
+    const title = textOf(found.title, MAX_TITLE);
+    if (!title) return null;
+    const first = Array.isArray(item.posts) && item.posts[0] ? item.posts[0] : null;
+    const attachments = first && Array.isArray(first.attachments) ? first.attachments : [];
+    const media = attachments.map((a) => imageOf(a && a.url)).find(Boolean) || null;
+    const author = found.author || {};
+    const by = textOf(author.username || author.display_name, 80);
+    const preview = {
+        url,
+        site_name: 'OpenVibe.Community',
+        title,
+        description: textOf(first && first.body_markdown, MAX_DESCRIPTION),
+        image: media,
+        kind: 'post',
+        width: 0,
+        height: 0,
+    };
+    if (by) preview.by = by;
+    return preview;
+}
+
+/** A Network profile (/@name, no page fetch): Network's public profile read. Its avatar is served by Network, not
+ *  Media, so it is left out; the name and bio still make a card. */
+async function profilePreview(url, username) {
+    const base = networkBase();
+    if (!base) return null;
+    const item = await readJsonUrl(`${base}/api/v1/profiles/${encodeURIComponent(username)}`);
+    const profile = item && item.profile;
+    if (!profile || typeof profile !== 'object') return null;
+    const title = textOf(profile.display_name || profile.username || username, MAX_TITLE);
+    if (!title) return null;
+    const preview = {
+        url,
+        site_name: 'OpenVibe.Network',
+        title,
+        description: textOf(profile.bio, MAX_DESCRIPTION),
+        image: imageOf(profile.avatar_url),
+        kind: 'profile',
+        width: 0,
+        height: 0,
+    };
+    const by = textOf(profile.username || username, 80);
+    if (by) preview.by = by;
+    return preview;
+}
+
+/** A Games creator world (/worlds/<id>, no page fetch): Games' public world read. The built-in Play titles have no
+ *  public game read of their own, so a /play address stays unpreviewed rather than read as a page. */
+async function gamePreview(url, world) {
+    const base = gamesBase();
+    if (!base) return null;
+    const item = await readJsonUrl(`${base}/api/worlds/${encodeURIComponent(world)}`);
+    if (!item || typeof item !== 'object') return null;
+    const title = textOf(item.title, MAX_TITLE);
+    if (!title) return null;
+    const preview = {
+        url,
+        site_name: 'OpenVibe.Games',
+        title,
+        description: textOf(item.summary, MAX_DESCRIPTION),
+        image: null,
+        kind: 'game',
+        width: 0,
+        height: 0,
+    };
+    const by = textOf(item.owner, 80);
+    if (by) preview.by = by;
+    return preview;
 }
 
 /** One GET, https only, through the egress lookup, no redirects followed here, at most FETCH_TIMEOUT_MS and MAX_BYTES. */
@@ -351,8 +470,12 @@ async function fetchFollowing(url) {
 async function readUrl(url) {
     const own = ownLink(new URL(url));
     if (own) {
-        if (own.username) return await livePreview(url, own.username);
-        if (own.page) return await videoPreview(url, own.page);
+        if (own.site === 'live' && own.username) return await livePreview(url, own.username);
+        if (own.site === 'video' && own.page) return await videoPreview(url, own.page);
+        if (own.site === 'picture' && own.slug) return await picturePreview(url, own.slug);
+        if (own.site === 'post' && own.space && own.thread) return await communityPreview(url, own.space, own.thread);
+        if (own.site === 'profile' && own.username) return await profilePreview(url, own.username);
+        if (own.site === 'game' && own.world) return await gamePreview(url, own.world);
         return null;
     }
     const oembed = oembedFor(new URL(url));
