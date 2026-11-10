@@ -352,6 +352,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     app.use('/api/chat/support', require('./inbox/routes').support);
     // Feeds (server/feeds/): live activity (vibe coding) published with a feed's key, shown in rooms, on Live, anywhere.
     app.use('/api/chat/feeds', require('./feeds/routes'));
+    app.use('/api/chat/servers', require('./chat/server-emojis'));
     app.use('/api/chat/servers', require('./rooms/server-routes'));
     // Channel moderators & moderation settings (/api/chat/channels/:id/…): before /api/chat too.
     app.use('/api/chat/channels', require('./chat/channel-mod-routes'));

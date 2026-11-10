@@ -182,6 +182,7 @@ module.exports = {
     // Custom emotes (Live's /api/emotes moved here, plan T3 step 1). Uploaded image bytes go to
     // OpenVibe.Media (media, below); the limits and provider cache TTLs are Live's own values.
     emotes: {
+        serverEmojiEnabled: bool(process.env.CHAT_SERVER_EMOJI_ENABLED, false),
         maxSizeKb: int(process.env.MAX_EMOTE_SIZE_KB, 2048),
         maxPerUser: int(process.env.MAX_EMOTES_PER_USER, 30),
         maxPerChannel: int(process.env.MAX_EMOTES_PER_CHANNEL, 30),
