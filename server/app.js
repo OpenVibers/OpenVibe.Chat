@@ -353,6 +353,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // Feeds (server/feeds/): live activity (vibe coding) published with a feed's key, shown in rooms, on Live, anywhere.
     app.use('/api/chat/feeds', require('./feeds/routes'));
     app.use('/api/chat/servers', require('./rooms/server-routes'));
+    app.use('/api/chat/commands', require('./chat/slash-commands').router);
     // Channel moderators & moderation settings (/api/chat/channels/:id/…): before /api/chat too.
     app.use('/api/chat/channels', require('./chat/channel-mod-routes'));
     // ICE servers for call rooms (STUN, and TURN with credentials when TURN_URL is set): server/net/turn.js.

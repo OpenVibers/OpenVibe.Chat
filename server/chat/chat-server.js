@@ -1934,6 +1934,13 @@ class ChatServer {
         const args = parts.slice(1).join(' ');
         const argParts = parts.slice(1);
 
+        // The composer's command set (registry, autocomplete and the commands it added) is a
+        // default-off owner switch: with it off they are unknown like any other command.
+        if (!config.slashCommands.enabled && (cmd === 'shrug' || cmd === 'mute')) {
+            this.sendTo(ws, { type: 'system', message: `Unknown command: /${cmd}. Type /help for a list.` });
+            return;
+        }
+
         switch (cmd) {
             case 'ai': {
                 // /ai pause|resume|mute <bot>|unmute <bot>|status — channel mods + owner only.
@@ -2068,6 +2075,20 @@ class ChatServer {
                 });
                 break;
             }
+
+            case 'shrug': {
+                const content = `${args ? `${args} ` : ''}¯\\_(ツ)_/¯`;
+                if (await this._commandTextBlocked(ws, client, content)) break;
+                const username = client.user?.display_name || client.anonId;
+                await this._broadcastToRoom(client, { type:'chat', username, core_username:client.user?.username || null,
+                    user_id:client.user?.id || null, role:client.user?.role || 'anon', message:content,
+                    timestamp:new Date().toISOString() });
+                break;
+            }
+
+            case 'mute':
+                this.handleModAction(ws, client, 'timeout', `${args} 300`);
+                break;
 
             case 'ban':
                 this.handleModAction(ws, client, 'ban', args);

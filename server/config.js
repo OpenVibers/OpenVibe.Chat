@@ -106,6 +106,7 @@ module.exports = {
         maxBytes: int(process.env.CHAT_PICS_MAX_BYTES, 20 * 1024 * 1024),
     },
     cookies: { secure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : isProduction },
+    slashCommands: { enabled: bool(process.env.CHAT_SLASH_COMMANDS_ENABLED, false) },
 
     // OpenVibe.Live — users, streams, channels, bans and every side effect chat triggers.
     live: {
