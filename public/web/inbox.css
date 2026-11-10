@@ -87,9 +87,6 @@
 .ib-screen button { justify-self: end; padding: 4px 10px; border-radius: 999px; border: 1px solid #374151; background: transparent; color: #e5e7eb; font: inherit; font-size: .8rem; cursor: pointer; }
 
 /* The shared picker in a sheet for the inbox's reply box. */
-dialog.ib-upload { width: min(420px, 94vw); padding: 16px; border: 1px solid var(--oc-line); border-radius: 16px; background: var(--oc-panel); color: var(--oc-text); }
-dialog.ib-upload::backdrop { background: rgba(0, 0, 0, .45); }
-.ib-upload-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
-.ib-upload-head h2 { margin: 0; font-size: 1rem; }
-.ib-upload-head button { border: 0; background: transparent; color: inherit; font: inherit; font-size: 1.2rem; cursor: pointer; padding: 4px 8px; }
+/* Send a picture: the kit's sheet (a bottom sheet on a phone), a little narrower than its 560px on a computer. */
+.ovk-sheet.ib-upload { width: min(440px, 100vw); }
 [data-ib-progress] { margin-top: 8px; }
