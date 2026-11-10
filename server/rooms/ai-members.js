@@ -282,7 +282,7 @@ function workspacePrompt(member, room) {
 }
 
 /** The member's instructions for chat.member.turn (the same rules as AI's chat.member.reply template, plus tools). */
-function systemPrompt(member, room) {
+function systemPrompt(member, room, roomMemory = '') {
     if (Number(room.workspace) === 1) return workspacePrompt(member, room);
     return [
         `You are ${member.name}, an AI member of the chat room "${String(room.name || room.slug).slice(0, 120)}" on OpenVibe.Chat. The people in the room added you to their conversation.`,
@@ -295,6 +295,7 @@ function systemPrompt(member, room) {
         '- Never invent facts about the people, their plans or their things beyond what the messages, notes, context and tools say. When you do not know, say so and ask.',
         '- You can only write in this chat and use these tools. Do not claim to have done anything else (bought, booked, sent, saved, set a reminder).',
         '- No threats, nothing sexual involving minors, and never anyone\'s private details. Swearing in jest is fine if the room does it.',
+        roomMemory ? `What this room remembers between conversations (shared notes, use when they help, do not recite them):\n${roomMemory}` : '',
     ].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
 }
 
@@ -321,7 +322,7 @@ async function answerWithTools({ room, member, context, transcript, askedBy, tex
     const tz = timezoneOf(timezone);
     const prompt = userPrompt({ member, context, transcript, askedBy, text });
     const messages = [
-        { role: 'system', content: vibe ? vibePrompt(member, askedBy, memory, { timezone: tz, ownTools: tools.some((t) => t.function && t.function.name === 'my_day') }) : systemPrompt(member, room) },
+        { role: 'system', content: vibe ? vibePrompt(member, askedBy, memory, { timezone: tz, ownTools: tools.some((t) => t.function && t.function.name === 'my_day') }) : systemPrompt(member, room, await require('./memory').forPrompt(room).catch(() => '')) },
         // Pictures the person sent (picturesFor): the model sees them with the text.
         { role: 'user', content: images.length ? [{ type: 'text', text: `${prompt}\n\n(${images.length === 1 ? 'The picture they sent is' : 'The pictures they sent are'} attached.)` }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] : prompt },
     ];
