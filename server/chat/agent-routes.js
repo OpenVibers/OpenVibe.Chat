@@ -56,10 +56,10 @@ router.get('/:roomId/digest', room.guard('chat.agent_digest.read'), async (req, 
             res.set('Retry-After', '20');
             return res.status(429).json({ error: 'The digest was read a moment ago', code: 'agent_digest.too_soon' });
         }
-        const out = await room.digest(row, { since, now });
         // A caller acknowledges this watermark only after its run reports/ends. Until then the durable read cursor
         // does not advance, so a failed run can fetch the same messages again.
         const watermark = await db.get('SELECT COALESCE(MAX(id), 0) AS id FROM room_messages WHERE room_id = ? AND is_deleted = 0', [row.id]);
+        const out = await room.digest(row, { since, now });
         res.set('OpenVibe-Read-Through', String(Number(watermark && watermark.id) || 0));
         await db.run(
             `INSERT INTO agent_room_reads (room_id, reader, last_read_at_ms, updated_at)
