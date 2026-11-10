@@ -369,7 +369,21 @@ async function messageById(id) {
     return row;
 }
 
-/** Messages oldest → newest: the newest page, one before `before`, or everything after `after`. */
+/** A bounded page, newest first. `before` is an exclusive message ID cursor. */
+async function historyPage(room, { before = null, limit = 50 } = {}) {
+    const lim = Math.min(100, Math.max(1, Number(limit) || 50));
+    const params = [room.id];
+    let where = 'm.room_id = ? AND m.is_deleted = 0';
+    if (before != null) { where += ' AND m.id < ?'; params.push(Number(before) || 0); }
+    params.push(lim + 1);
+    const rows = await db.all(`${MSG_SELECT} WHERE ${where} ORDER BY m.id DESC LIMIT ?`, params);
+    const more = rows.length > lim;
+    rows.length = Math.min(rows.length, lim);
+    await linkCards.hydrate(rows, 'room_messages');
+    return { messages: rows, more };
+}
+
+/** Existing internal callers get chronological arrays; external paged readers use historyPage. */
 async function history(room, { before = null, after = null, limit = 60 } = {}) {
     const lim = Math.min(200, Math.max(1, Number(limit) || 60));
     const rows = after != null
@@ -558,7 +572,7 @@ module.exports = {
     LIMITS,
     isWorkspace, isStaffRoom,
     postAsAi,
-    ensureSchema, create, list, bySlug, access, join, leave, post, history, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
+    ensureSchema, create, list, bySlug, access, join, leave, post, history, historyPage, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
     attach, detach, attachments, joinRoleOf, unreadTotal, isStaff, siteBanned, POSTERS, TALKERS,
     RoomError, SLUG_RE, KINDS, ROLES, KIND_ROLES, JOIN_ROLE, JOIN_ROLES_CALL, ATTACH_SERVICES, _reset,
 };

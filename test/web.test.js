@@ -269,12 +269,14 @@ const runClient = (file, page, docCookie) => {
     function WebSocket(url) { this.url = url; this.readyState = 1; this.sent = []; sockets.push(this); }
     WebSocket.prototype.send = function (d) { this.sent.push(JSON.parse(d)); };
     WebSocket.prototype.close = function () {};
-    require('vm').runInNewContext(require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'web', file), 'utf8'), {
+    const context = {
         window: { __OV_PAGE: { chat: page }, RTCPeerConnection: function () {}, WebSocket, addEventListener() {} },
         WebSocket, navigator: {}, location: { protocol: 'https:', host: 'openvibe.chat' },
         document: { cookie: docCookie, hidden: false, getElementById: element, createElement: () => element(null), addEventListener() {} },
         fetch: async () => ({ ok: false }), setTimeout: () => 0, setInterval: () => 0,
-    });
+    };
+    if (file === 'chat.js') require('vm').runInNewContext(require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'web', 'chat-history.js'), 'utf8'), context);
+    require('vm').runInNewContext(require('fs').readFileSync(require('path').join(__dirname, '..', 'public', 'web', file), 'utf8'), context);
     return { sockets, listeners };
 };
 

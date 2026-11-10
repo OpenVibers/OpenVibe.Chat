@@ -176,7 +176,8 @@ ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>
 <script src="${ovServe.url('footer.js')}" defer></script>
-${o.script ? `<script src="${asset('chat.js')}" defer></script>` : ''}
+${o.script ? `<script src="${asset('chat-history.js')}" defer></script>
+<script src="${asset('chat.js')}" defer></script>` : ''}
 ${o.shell ? `<script src="${asset('chat-shell.js')}" defer></script>` : ''}
 ${o.callScript ? `<script src="${asset('call.js')}" defer></script>` : ''}
 ${o.ringScript ? `<script src="${asset('ring.js')}" defer></script>` : ''}
