@@ -20,6 +20,7 @@
  */
 const db = require('../db/database');
 const linkCards = require('./link-cards');
+const linkPreviews = require('./link-previews');
 
 const PAGE_MEMO_MS = 2000;
 const MAX_LIMIT = 500;
@@ -133,6 +134,7 @@ async function page(room, { limit, before, channelUsername, decorate } = {}) {
     const rows = page.rows;
     const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows.map((x) => ({ ...x }));
     await linkCards.hydrate(messages, 'chat_messages');
+    await linkPreviews.attach(messages, 'chat');
     return { messages, latest_id: latestIdOf(rows), more: page.more };
 }
 
@@ -150,6 +152,7 @@ async function delta(room, { afterId, limit, channelUsername, decorate } = {}) {
     if (!complete) rows = rows.slice(0, lim);
     const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows.map((x) => ({ ...x }));
     await linkCards.hydrate(messages, 'chat_messages');
+    await linkPreviews.attach(messages, 'chat');
     return { messages, latest_id: latestIdOf(rows) || after, complete, deleted_ids: await deletedIds(room, after) };
 }
 

@@ -49,6 +49,7 @@ const ctx = require('../live-context');
 const wordFilter = require('../chat/word-filter');
 const permissions = require('../auth/permissions');
 const linkCards = require('../chat/link-cards');
+const linkPreviews = require('../chat/link-previews');
 
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{1,30}[a-z0-9])$/;
 const RESERVED = new Set(['global', 'new', 'rooms', 'settings', 'messages', 'updates', 'auth', 'api', 'admin', 'staff', 'help', 'system', 'ice-servers']);
@@ -319,6 +320,8 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
     });
     const row = await messageById(id);
     if (pending) linkCards.fillLater('room_messages', id, pending);
+    // General address previews are a background job: the message and its response never wait on another site.
+    linkPreviews.schedule({ scope: 'room', messageId: id, text: message, room: { id: room.id, slug: room.slug } });
     // Activity: the people this names, and the person it answers (server/chat/activity.js). A failure here never
     // takes a message back.
     const activity = require('../chat/activity');
@@ -350,6 +353,7 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null } = {
         await announceMessage(room, { subject_id: null, username: member.handle, display_name: member.name }, Number(r.lastInsertRowid), message, now);
         return Number(r.lastInsertRowid);
     });
+    linkPreviews.schedule({ scope: 'room', messageId: id, text: message, room: { id: room.id, slug: room.slug } });
     return await messageById(id);
 }
 
@@ -365,6 +369,7 @@ async function messageById(id) {
     if (row) {
         row.attachments = messageFiles.attachmentRefs(messageFiles.filesOf(row));
         await linkCards.hydrate([row], 'room_messages');
+        await linkPreviews.attach([row], 'room');
     }
     return row;
 }
@@ -380,6 +385,7 @@ async function historyPage(room, { before = null, limit = 50 } = {}) {
     const more = rows.length > lim;
     rows.length = Math.min(rows.length, lim);
     await linkCards.hydrate(rows, 'room_messages');
+    await linkPreviews.attach(rows, 'room');
     return { messages: rows, more };
 }
 
@@ -393,6 +399,7 @@ async function history(room, { before = null, after = null, limit = 60 } = {}) {
             : await db.all(`${MSG_SELECT} WHERE m.room_id = ? AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT ?`, [room.id, lim]);
     for (const row of rows) row.attachments = messageFiles.attachmentRefs(messageFiles.filesOf(row));
     await linkCards.hydrate(rows, 'room_messages');
+    await linkPreviews.attach(rows, 'room');
     return after != null ? rows : rows.reverse();
 }
 
