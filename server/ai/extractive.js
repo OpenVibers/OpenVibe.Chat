@@ -33,7 +33,10 @@ function _timeline(rows, now) {
         .map((r) => {
             const label = _oneLine(r.message, 80);
             if (!label || _PLACEHOLDER.test(label)) return null;
-            return { label, detail: _oneLine(r.username || r.channel_username || '', 120), mins_ago: _minsAgo(r.timestamp || r.created_at, now) };
+            return {
+                label, detail: _oneLine(r.username || r.channel_username || '', 120), mins_ago: _minsAgo(r.timestamp || r.created_at, now),
+                kind: r.message_type && r.message_type !== 'chat' ? 'event' : 'message', message_id: r.id == null ? null : Number(r.id),
+            };
         })
         .filter(Boolean);
 }
