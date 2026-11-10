@@ -42,6 +42,17 @@ t('an old summary is quiet: no text, no topics, the timeline stays', async () =>
     assert.strictEqual(shaped.timeline[0].kind, 'moment');
 });
 
+t('a room with insight off says off, with no text and no timeline', async () => {
+    const now = sqliteNow();
+    const shaped = roomInsight._shape({
+        overview: 'was once here', window_end: now, updated_at: now, people: 2, window_message_count: 3,
+    }, [{ ts: now, label: 'a moment', detail: 'old' }], false);
+    assert.strictEqual(shaped.state, 'off');
+    assert.strictEqual(shaped.overview.text, '');
+    assert.deepStrictEqual(shaped.overview.topics, []);
+    assert.deepStrictEqual(shaped.timeline, []);
+});
+
 t('no row at all is quiet, and the route module is a router', async () => {
     const shaped = roomInsight._shape(null, []);
     assert.strictEqual(shaped.state, 'quiet');
