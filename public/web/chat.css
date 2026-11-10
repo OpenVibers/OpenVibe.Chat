@@ -530,14 +530,40 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
   .oc-js .oc-msg.oc-sel .oc-del button { visibility: visible; }
   .oc-msg.oc-sel { background: var(--oc-panel-2); }
 }
-.oc-dock { display: flex; align-items: flex-end; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-.oc-dock > .oc-compose { flex: 1 1 0; min-width: 0; }
-.oc-dock > .oc-pic-compose { margin: 0; order: 0; }
+/* ── The composer (shell.js composer): one box. The text is in it, Add is on its left where the place takes
+   pictures, Send on its right; what is being added waits in the tray above the text. The box takes the focus ring,
+   not the text inside it. Send is lit while there is something to send (chat-shell.js .is-empty). The picture panel
+   opens above the box; without the script its own button stays and Add is not shown. ── */
+.oc-dock { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.oc-dock > .oc-compose { display: block; min-width: 0; }
+.oc-compose-box { border: 1px solid var(--oc-line); border-radius: 26px; background: var(--oc-bg); transition: border-color .15s ease, box-shadow .15s ease; }
+.oc-compose-box:focus-within { border-color: color-mix(in srgb, var(--oc-accent) 65%, var(--oc-line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--oc-accent) 16%, transparent); }
+.oc-compose-row { display: flex; align-items: flex-end; gap: 2px; padding: 5px; }
+.oc-compose-box textarea { flex: 1; min-width: 0; min-height: 40px; max-height: 40vh; margin: 0; padding: 9px 8px; border: 0; border-radius: 14px; background: transparent; line-height: 1.4; resize: none; field-sizing: content; }
+.oc-compose-box textarea:focus-visible { outline: 0; }
+.oc-compose-row > textarea:first-child { padding-left: 14px; }
+.oc-compose-add { display: none; place-items: center; width: 40px; height: 40px; flex: none; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--oc-muted); cursor: pointer; transition: background-color .15s ease, color .15s ease, transform .22s cubic-bezier(.2, .9, .3, 1.2); }
+.oc-js .oc-compose-add { display: grid; }
+.oc-compose-add:hover { background: var(--oc-panel-2); color: var(--oc-text); }
+.oc-compose-add[aria-expanded="true"] { transform: rotate(45deg); background: color-mix(in srgb, var(--oc-accent) 18%, transparent); color: var(--oc-accent); }
+.oc-compose-add .oc-i { width: 22px; height: 22px; }
+.oc-compose-box .oc-send { width: 40px; height: 40px; border: 0; background: var(--oc-accent); color: var(--oc-on-accent); transition: background-color .15s ease, color .15s ease, transform .2s cubic-bezier(.2, .9, .3, 1.3); }
+.oc-compose.is-empty .oc-compose-box .oc-send { background: var(--oc-panel-2); color: var(--oc-muted); transform: scale(.9); }
+.oc-compose-box .oc-send:active { transform: scale(.92); }
+.oc-compose-tray { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 10px 2px; }
+.oc-compose-tray[hidden] { display: none; }
+.oc-dock > .oc-pic-compose { order: -1; margin: 0; }
 .oc-dock > .oc-pic-compose > summary { list-style: none; width: 44px; height: 44px; }
 .oc-dock > .oc-pic-compose > summary::-webkit-details-marker { display: none; }
-.oc-dock > .oc-pic-compose[open] { order: 2; flex: 1 1 100%; }
-.oc-dock > .oc-pic-compose[open] > summary { color: var(--oc-accent); }
-.oc-compose textarea { min-height: 44px; max-height: 40vh; border-radius: 22px; padding: 10px 16px; resize: none; field-sizing: content; }
+.oc-js .oc-dock > .oc-pic-compose > summary, .oc-js .oc-dock > .oc-pic-compose:not([open]) { display: none; }
+.oc-dock > .oc-pic-compose[open] { padding: 14px; border: 1px solid var(--oc-line); border-radius: 18px; background: var(--oc-panel); animation: oc-add-rise .2s ease; }
+.oc-dock > .oc-pic-compose .oc-pic-form { margin: 0; max-width: none; }
+@keyframes oc-add-rise { from { opacity: 0; transform: translateY(calc(8px * var(--ov-move, 1))); } }
+@media (max-width: 760px) {
+  .oc-compose-row { padding: 3px; }
+  .oc-compose-add, .oc-compose-box .oc-send { width: 44px; height: 44px; }
+  .oc-compose-box textarea { min-height: 44px; padding-top: 11px; padding-bottom: 11px; }
+}
 .oc-send { display: inline-grid; place-items: center; width: 44px; height: 44px; padding: 0; border-radius: 50%; flex: none; }
 .oc-send .oc-i { width: 20px; height: 20px; stroke-width: 2.4; }
 /* The conversation takes the screen's height (header, notes and composer around it), not a fixed box. */

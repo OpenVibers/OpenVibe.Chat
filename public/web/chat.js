@@ -283,7 +283,7 @@
         if (!ws || ws.readyState !== 1) return;           // not connected: the form posts as without JavaScript
         e.preventDefault();
         ws.send(JSON.stringify({ type: 'chat', message: text }));
-        input.value = '';
+        input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true }));
         input.focus();
       });
     }
@@ -343,7 +343,7 @@
           .then(function (x) {
             if (!x.ok) { showError((x.d && x.d.error) || 'Could not send'); return; }
             if (x.d && x.d.message) { latest = Math.max(latest, Number(x.d.message.id) || 0); append(dmItem(x.d.message), x.d.message.id); }
-            input.value = ''; input.focus();
+            input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus();
           })
           .catch(function () { form.submit(); })
           .then(function () { if (btn) btn.disabled = false; });
@@ -477,7 +477,7 @@
         if (!ws || ws.readyState !== 1) return;
         e.preventDefault();
         ws.send(JSON.stringify({ type: 'room_message', message: text }));
-        input.value = ''; input.focus();
+        input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus();
       });
     }
     if (feed) feed.addEventListener('submit', function (e) {

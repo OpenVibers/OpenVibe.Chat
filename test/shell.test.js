@@ -43,8 +43,8 @@ t('the shell: the rail, the side column, the members column and the bottom bar',
     assert.strictEqual(r.status, 200);
     assert.match(r.text, /class="oc-app"/, 'the shell');
     assert.match(r.text, /<nav class="oc-rail" aria-label="Chat destinations">/, 'the rail');
-    assert.match(r.text, /title="Home"/);
-    assert.match(r.text, /title="Vibe"/);
+    assert.match(r.text, /<span class="oc-rail-label">Home<\/span>/);
+    assert.match(r.text, /<span class="oc-rail-label">Vibe<\/span>/);
     assert.match(r.text, /class="oc-rail-icon oc-rail-add" href="\/servers#oc-new-server"/, 'Add a server');
     assert.match(r.text, /class="oc-rail-icon oc-rail-explore"/, 'Explore');
     assert.match(r.text, /class="oc-side"/, 'the side column');
@@ -58,8 +58,40 @@ t('the shell: the rail, the side column, the members column and the bottom bar',
     assert.match(r.text, /"label":"Home","href":"\/messages"/);
     assert.match(r.text, /"label":"Servers","href":"\/servers"/);
     assert.match(r.text, /"label":"Vibe","href":"\/vibe"/);
-    assert.match(r.text, /"label":"Activity","href":"\/notifications"/);
+    assert.match(r.text, /"label":"Activity","href":"\/activity"/, 'Activity is a page that exists');
     assert.match(r.text, /"label":"You","href":"\/settings"/);
+    assert.match(r.text, /"label":"Servers","href":"\/servers","icon":"fa-people-group"/, 'Servers is not the globe: that is Global chat');
+    // Every place on the rail carries its name; a server carries what its sheet says (hold it, or right-click it).
+    assert.match(r.text, /class="oc-rail-icon oc-rail-server is-active" href="\/s\/saturday-raiders"[^>]* data-oc-server="saturday-raiders" data-oc-name="Saturday Raiders" data-oc-role="owner" data-oc-members="2"/, 'the open server, with your rank in it');
+    assert.match(r.text, /<span class="oc-rail-label">Saturday Raiders<\/span>/, 'its name, not its initials alone');
+    assert.match(r.text, /<button type="button" class="oc-rail-menu" data-oc-panel="side" aria-expanded="false"[^>]*>.*<span class="oc-rail-label">Channels<\/span><\/button>/, 'the list button says what it lists');
+    assert.match(r.text, /<template id="oc-srv-sheet"><dialog class="oc-ssheet"/, "a server's sheet, once a page");
+    assert.ok(/data-s="settings"/.test(r.text) && /data-s="delete"/.test(r.text) && !/data-s="leave"/.test(r.text), 'the owner: settings and delete, and no leave (an owner cannot leave)');
+    const asBob = await page(`/s/${slug}`, bob);
+    assert.ok(/data-s="leave"/.test(asBob.text) && !/data-s="settings"/.test(asBob.text) && !/data-s="delete"/.test(asBob.text), 'a member: leave, and not a word about settings or deleting');
+    // One composer: a box, Send on its right; no picture store in this run, so no Add.
+    assert.match(r.text, /<form class="oc-compose" method="post" action="\/s\/saturday-raiders\/general" id="oc-compose">/);
+    assert.match(r.text, /<div class="oc-compose-box"><div class="oc-compose-tray" data-oc-tray hidden><\/div>/);
+    assert.match(r.text, /<textarea id="oc-input" name="message" maxlength="2000" rows="1" required placeholder="Message #general"><\/textarea><button type="submit" class="oc-send" aria-label="Send"/);
+});
+
+t('Activity: what is waiting for you, and nothing waiting said as that', async () => {
+    let r = await page('/activity', bob);
+    assert.strictEqual(r.status, 200);
+    assert.match(r.text, /<h1[^>]*>Activity<\/h1>/);
+    assert.match(r.text, /You are all caught up/, 'nothing waiting is said as that');
+    assert.match(r.text, /href="\/messages">Open your messages<\/a>/);
+    assert.ok(!/href="\/notifications"/.test(r.text), 'nothing links to the page that never was');
+    // Dee writes in the server Bob joined: it is waiting for Bob, under the server, by channel.
+    const sent = await fetch(`${h.base}/s/saturday-raiders/general`, { method: 'POST', redirect: 'manual', headers: { cookie: `ov_token=${dee.token}`, 'content-type': 'application/x-www-form-urlencoded' }, body: 'message=raid+at+nine' });
+    assert.strictEqual(sent.status, 303);
+    r = await page('/activity', bob);
+    assert.match(r.text, /In your servers <span class="oc-muted">1<\/span>/);
+    assert.match(r.text, /class="oc-act-server-head" href="\/s\/saturday-raiders"/);
+    assert.match(r.text, /<a class="oc-chan is-unread" href="\/s\/saturday-raiders\/general">/);
+    assert.ok(!/You are all caught up/.test(r.text));
+    const out = await page('/activity', null);
+    assert.ok(out.status !== 404 && /Sign in/.test(out.text) && !/In your servers/.test(out.text), 'signed out: the way to sign in, and nothing of anyone');
 });
 
 t('Home: the DMs and the people you talk to down the side', async () => {
@@ -102,6 +134,8 @@ t('Explore: the chips, the cards and the Start sheet', async () => {
     assert.match(r.text, /class="oc-chips"/);
     for (const c of ['Gaming', 'Streams', 'Dev', 'Art', 'Music', 'Study', 'AI']) assert.match(r.text, new RegExp(`>${c}</a>`), `the ${c} chip`);
     assert.match(r.text, /oc-server-card/, 'the servers as cards');
+    assert.match(r.text, /<span class="oc-card-yours">You own it<\/span> · 2 members/, 'your rank in a server you are in');
+    assert.match(r.text, /class="oc-icon-btn oc-card-more" href="\/s\/saturday-raiders" aria-label="More about Saturday Raiders"/, 'and the way to its sheet');
     assert.match(r.text, /id="oc-new-server"/, 'the Start sheet');
     for (const [id, name] of [['friends', 'Friends'], ['gaming', 'Gaming group'], ['streams', 'Stream community'], ['study', 'Study group'], ['creators', 'Creators'], ['blank', 'Blank']]) {
         assert.match(r.text, new RegExp(`value="${id}"`), `the ${name} template`);
