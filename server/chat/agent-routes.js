@@ -57,18 +57,44 @@ router.get('/:roomId/digest', room.guard('chat.agent_digest.read'), async (req, 
             return res.status(429).json({ error: 'The digest was read a moment ago', code: 'agent_digest.too_soon' });
         }
         const out = await room.digest(row, { since, now });
+        // A caller acknowledges this watermark only after its run reports/ends. Until then the durable read cursor
+        // does not advance, so a failed run can fetch the same messages again.
+        const watermark = await db.get('SELECT COALESCE(MAX(id), 0) AS id FROM room_messages WHERE room_id = ? AND is_deleted = 0', [row.id]);
+        res.set('OpenVibe-Read-Through', String(Number(watermark && watermark.id) || 0));
         await db.run(
-            `INSERT INTO agent_room_reads (room_id, reader, last_read_at, last_message_id, last_read_at_ms, updated_at)
-             VALUES (?, ?, now(), ?, ?, now())
-             ON CONFLICT (room_id, reader) DO UPDATE SET last_read_at = now(), last_message_id = EXCLUDED.last_message_id,
-                 last_read_at_ms = EXCLUDED.last_read_at_ms, updated_at = now()`,
-            [row.id, reader, Number(cursor && cursor.last_message_id) || 0, now]
+            `INSERT INTO agent_room_reads (room_id, reader, last_read_at_ms, updated_at)
+             VALUES (?, ?, ?, now())
+             ON CONFLICT (room_id, reader) DO UPDATE SET last_read_at_ms = EXCLUDED.last_read_at_ms, updated_at = now()`,
+            [row.id, reader, now]
         );
         res.set('Cache-Control', 'no-store');
         res.json(out);
     } catch (err) {
         console.error('[Chat] the digest failed:', err.message);
         res.status(500).json({ error: 'The digest could not be made', code: 'agent_digest.failed' });
+    }
+});
+
+/** Advance the durable read cursor after the caller's run has reported or ended. */
+router.post('/:roomId/digest/ack', room.guard('chat.agent_digest.read'), async (req, res) => {
+    try {
+        const row = await loadRoom(req, res);
+        if (!row) return;
+        const through = Number(req.body && req.body.through);
+        if (!Number.isSafeInteger(through) || through < 0) return res.status(422).json({ error: 'A valid read watermark is required', code: 'agent_digest.invalid_watermark' });
+        const reader = String(req.principal.sub || '');
+        const max = await db.get('SELECT COALESCE(MAX(id), 0) AS id FROM room_messages WHERE room_id = ?', [row.id]);
+        if (through > Number(max && max.id || 0)) return res.status(422).json({ error: 'The read watermark is beyond this room', code: 'agent_digest.invalid_watermark' });
+        await db.run(`INSERT INTO agent_room_reads (room_id, reader, last_read_at, last_message_id, updated_at)
+            VALUES (?, ?, now(), ?, now())
+            ON CONFLICT (room_id, reader) DO UPDATE SET
+                last_read_at = CASE WHEN EXCLUDED.last_message_id >= agent_room_reads.last_message_id THEN now() ELSE agent_room_reads.last_read_at END,
+                last_message_id = GREATEST(agent_room_reads.last_message_id, EXCLUDED.last_message_id), updated_at = now()`,
+        [row.id, reader, through]);
+        res.set('Cache-Control', 'no-store').json({ read_through: through });
+    } catch (err) {
+        console.error('[Chat] the digest acknowledgement failed:', err.message);
+        res.status(500).json({ error: 'The digest acknowledgement could not be saved', code: 'agent_digest.ack_failed' });
     }
 });
 
