@@ -52,6 +52,8 @@ function embedHtml(inbox) {
 <title>Chat with ${esc(inbox.name)}</title>
 <meta name="robots" content="noindex, nofollow">
 <link rel="stylesheet" href="${asset('embed.css')}">
+<link rel="stylesheet" href="/shared/ov-upload.css">
+<script src="/shared/ov-upload.js" defer></script>
 <script src="${asset('vibe-md.js')}" defer></script>
 <script src="${asset('support-call.js')}" defer></script>
 <script src="${asset('embed.js')}" defer></script>
@@ -64,9 +66,10 @@ function embedHtml(inbox) {
 <ol class="em-thread" id="em-thread" aria-live="polite"><li class="em-msg em-them"><small>${esc(inbox.name)}</small><div class="em-bubble">${esc(inbox.greeting)}</div></li></ol>
 <div class="em-handoff"><button type="button" id="em-person" hidden>Talk to a person</button></div>
 <form class="em-composer" id="em-form"><label class="em-sr" for="em-input" hidden>Your message</label>
-${pictures.enabled() ? '<button type="button" class="em-attach" id="em-attach" aria-label="Send a picture" title="Send a picture"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg></button><input type="file" id="em-file" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" hidden>' : ''}
+${pictures.enabled() ? '<button type="button" class="em-attach" id="em-attach" aria-label="Send a picture" title="Send a picture"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5-9 9"/></svg></button>' : ''}
 <textarea id="em-input" rows="1" maxlength="4000" placeholder="Write a message" aria-label="Your message"></textarea>
 <button type="submit" aria-label="Send">&#8593;</button></form>
+${pictures.enabled() ? `<dialog class="em-upload" data-em-upload-dialog aria-labelledby="em-upload-h"><div class="em-upload-head"><h2 id="em-upload-h">Send a picture</h2><button type="button" data-em-upload-close aria-label="Close">✕</button></div><div data-em-upload data-accept="image/jpeg,image/png,image/gif,image/webp,image/avif"></div><div data-em-progress hidden></div></dialog>` : ''}
 <p class="em-foot">Chat by <a href="https://openvibe.chat" target="_blank" rel="noopener">OpenVibe</a>${Number(inbox.ai_enabled) ? ' · Vibe can get things wrong' : ''}<span id="em-account"></span></p>
 </div>
 <noscript><p style="padding:16px">This chat needs JavaScript.</p></noscript>
@@ -172,7 +175,7 @@ ${list}
             mainLabel: current ? `Conversation with ${current.visitor_name || 'a visitor'}` : inbox.name,
         })}</div>`;
         await page(req, res, 200, {
-            actor, shell: true, kit: true, appStyle: 'inbox.css', scripts: ['support-call.js', 'inbox.js'], active: 'inbox', path: `/inbox/${inbox.id}`, title: `${current ? `${current.visitor_name || 'Visitor'} · ` : ''}${inbox.name} · Inbox`, robots: 'noindex, nofollow', footer: 'none', body,
+            actor, shell: true, kit: true, upload: pictures.enabled(), appStyle: 'inbox.css', scripts: ['support-call.js', 'inbox.js'], active: 'inbox', path: `/inbox/${inbox.id}`, title: `${current ? `${current.visitor_name || 'Visitor'} · ` : ''}${inbox.name} · Inbox`, robots: 'noindex, nofollow', footer: 'none', body,
             page: { view: 'inbox', inbox: inbox.id, conversation: current ? current.id : null, call: !!(current && inboxes.convShape(current).call), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me, filter, saved: saved.map((r) => ({ shortcut: r.shortcut, body: r.body })) },
         });
     });
@@ -248,7 +251,7 @@ ${list}
 
     // The reply box: the kit's composer, with a picture, a translation and the call above it while one is open.
     function replyBox({ inbox, current, actor, saved }) {
-        const pic = pictures.enabled() ? `<label class="ovt-btn ib-pic-btn" title="Send a picture"><input type="file" id="ib-pic" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" hidden>${thread.icon('attach')}<span class="ovt-sr">Send a picture</span></label>` : '';
+        const pic = pictures.enabled() ? `<button type="button" class="ovt-btn ib-pic-btn" id="ib-pic" title="Send a picture" aria-label="Send a picture">${thread.icon('attach')}<span class="ovt-sr">Send a picture</span></button><dialog class="ib-upload" data-ib-upload-dialog aria-labelledby="ib-upload-h"><div class="ib-upload-head"><h2 id="ib-upload-h">Send a picture</h2><button type="button" data-ib-upload-close aria-label="Close">✕</button></div><div data-ib-upload data-accept="image/jpeg,image/png,image/gif,image/webp,image/avif"></div><div data-ib-progress hidden></div></dialog>` : '';
         const tr = `<label class="ib-tr-pick" hidden><span>Translate my reply into</span> <select id="ib-tr-to"><option value="">a language…</option>${TR_LANGS.map(([v, l]) => `<option value="${v}">${l}</option>`).join('')}</select></label>`;
         const call = `<figure class="ib-screen" id="ib-screen" hidden><figcaption id="ib-screen-who"></figcaption><video id="ib-screen-video" autoplay playsinline muted></video><button type="button" id="ib-screen-full">Full screen</button></figure><div class="ib-callbar" id="ib-callbar" role="group" aria-label="Voice call" hidden><span class="ib-call-text" id="ib-call-text"></span><button type="button" id="ib-call-join" hidden>Join the call</button><button type="button" id="ib-call-mute" aria-pressed="false" hidden>Mute</button><button type="button" class="ib-call-end" id="ib-call-end">End call</button></div>`;
         return call + thread.composer({
