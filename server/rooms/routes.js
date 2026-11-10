@@ -228,7 +228,8 @@ router.post('/:slug/messages/:id/react', requireAuth, reactLimit, async (req, re
     const message = await db.get('SELECT id, user_id, message, is_deleted FROM room_messages WHERE id = ? AND room_id = ?', [Number(req.params.id) || 0, room.id]);
     if (!message || message.is_deleted) return res.status(404).json({ error: 'No such message', code: 'rooms.no_message' });
     try {
-        if (!(await rooms.access(room, req.user)).read) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
+        const access = await rooms.access(room, req.user);
+        if (!access.read || !access.role) return res.status(404).json({ error: 'No such room', code: 'rooms.not_found' });
         const existing = await db.get('SELECT reaction FROM room_message_reactions WHERE message_id = ? AND user_id = ?', [message.id, req.user.id]);
         if (existing && existing.reaction === reaction) {
             await db.run('DELETE FROM room_message_reactions WHERE message_id = ? AND user_id = ?', [message.id, req.user.id]);

@@ -24,7 +24,7 @@ const networkBlocks = require('./network-blocks');
 
 const KINDS = Object.freeze(['mention', 'reply', 'reaction', 'server_invite', 'friend_accept', 'role']);
 const REACTIONS = Object.freeze(['thumbsup', 'thumbsdown', 'heart', 'laugh', 'surprised', 'sad']);
-const HANDLE_RE = /@([A-Za-z0-9_]{3,24})/g;
+const HANDLE_RE = /(^|[^\w@])@([A-Za-z0-9_]{3,24})(?![\w])/g;
 const MAX_EXCERPT = 200;
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
@@ -32,7 +32,7 @@ const MAX_MENTIONS = 10;
 
 const handleSet = (text) => {
     const out = new Set();
-    for (const m of String(text || '').matchAll(HANDLE_RE)) out.add(String(m[1]).toLowerCase());
+    for (const m of String(text || '').matchAll(HANDLE_RE)) out.add(String(m[2]).toLowerCase());
     return out;
 };
 const excerptOf = (text) => {
