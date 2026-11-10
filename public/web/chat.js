@@ -67,9 +67,19 @@
   };
   function presenceState(p) { if (!p) return null; var s = p.live ? 'live' : String(p.state || ''); return PRESENCE[s] ? s : null; }
   function presenceLine(p) { var s = presenceState(p); return s ? PRESENCE[s].label + (p.status_text ? ' \u00b7 ' + String(p.status_text).slice(0, 80) : '') : ''; }
+  // A channel link never carries a section: openvibe.live/@name#about is the channel page (ask 285).
+  function channelHref(href) {
+    if (typeof href !== 'string') return href;
+    var u; try { u = new URL(href, 'https://openvibe.live'); } catch (_) { return href; }
+    if (u.origin !== 'https://openvibe.live' || !/^\/@[A-Za-z0-9_]{3,24}\/?$/.test(u.pathname)) return href;
+    var clean = '/@' + u.pathname.slice(2).replace(/\/$/, '');
+    return /^https:\/\//i.test(href) ? 'https://openvibe.live' + clean : clean;
+  }
   function presenceHref(p) {
     var href = p && (p.channel_url || p.url);
-    return typeof href === 'string' && (/^https:\/\//i.test(href) || /^\/(?!\/)/.test(href)) ? href : null;
+    if (typeof href !== 'string') return null;
+    href = channelHref(href);
+    return (/^https:\/\//i.test(href) || /^\/(?!\/)/.test(href)) ? href : null;
   }
   function setPresenceLine(box, p, username) {
     if (!box) return;
