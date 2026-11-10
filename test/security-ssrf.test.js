@@ -131,6 +131,7 @@ t('ratchet: every file that makes an outbound request itself is reviewed', () =>
         'server/web/party-pages.js': 'OpenVibe.Video (fixed: https://openvibe.video, or a test\'s CHAT_PARTY_VIDEO_URL), fixed /api/v1/video/watchable paths; a pasted link is only a query parameter, never fetched; redirects refused, 2.5 s, cached a minute',
         'server/rooms/radio.js': 'OpenVibe.Download Radio catalogue (fixed https origin, or a test\'s CHAT_RADIO_URL); track ids match rad_ ULIDs, redirects refused, 2.5 s',
         'server/chat/link-cards.js': 'OpenVibe.Video and OpenVibe.Actor (fixed https origins, or a test\'s CHAT_LINK_VIDEO_URL / CHAT_LINK_ACTOR_URL), fixed paths (a watchable lookup, /voices/<id>.json, /skills/<slug>.json); a pasted link is a query parameter or a path segment only, never fetched; redirects refused, 2.5 s, cached a minute',
+        'server/chat/link-previews.js': 'an address a person wrote: https only, assertPublicUrl on every hop and safeLookup on the connection, at most two redirects each judged, 4 s and 512 KiB caps, no cookies; YouTube/Vimeo oEmbed on fixed origins; OpenVibe\'s own sites resolve through fixed public APIs and are never page-fetched',
         'server/web/room-embed-pages.js': 'not the server: the sign-in window\'s own script posts to /embed/bind on this same site',
     };
     const root = path.join(__dirname, '..');
