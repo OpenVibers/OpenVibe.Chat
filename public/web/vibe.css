@@ -276,9 +276,6 @@
 /* Files attached to a Vibe message: the shared upload kit's rows sit above the composer (vibe.js). */
 .vb-files { display: grid; gap: 8px; margin: 0 0 8px; }
 /* The shared picker in a sheet over the Vibe composer. */
-dialog.vb-upload { width: min(440px, 94vw); padding: 16px; border: 1px solid var(--oc-line); border-radius: 16px; background: var(--oc-panel); color: var(--oc-text); }
-dialog.vb-upload::backdrop { background: rgba(0, 0, 0, .45); }
-.vb-upload-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
-.vb-upload-head h2 { margin: 0; font-size: 1rem; }
-.vb-upload-head button { border: 0; background: transparent; color: inherit; font: inherit; font-size: 1.2rem; cursor: pointer; padding: 4px 8px; }
+/* Add a file: the kit's sheet (a bottom sheet on a phone), a little narrower than its 560px on a computer. */
+.ovk-sheet.vb-upload { width: min(440px, 100vw); }
 [data-vb-progress] { max-width: var(--vb-col); margin: 0 auto 8px; }

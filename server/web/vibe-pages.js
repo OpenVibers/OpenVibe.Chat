@@ -204,7 +204,7 @@ function composer({ slug, signedIn, enabled, prefill = '', engine = null, models
     const label = pics ? 'Add a picture or a file' : 'Attach a file';
     const attach = signedIn && enabled
         ? `<button class="ovt-btn vb-attach" type="button" data-vb-attach aria-label="${label}" title="${label}">${ICON.attach}</button>
-<dialog class="vb-upload" data-vb-upload-dialog aria-labelledby="vb-upload-h"><div class="vb-upload-head"><h2 id="vb-upload-h">${label}</h2><button type="button" class="vb-upload-close" data-vb-upload-close aria-label="Close">✕</button></div><div data-vb-upload data-accept=""></div></dialog>`
+<dialog class="ovk-sheet vb-upload" data-vb-upload-dialog aria-labelledby="vb-upload-h"><div class="ovk-sheet-head" data-ov-sheet-head><h2 id="vb-upload-h">${label}</h2><button type="button" class="ovk-icon-btn" data-vb-upload-close aria-label="Close">${thread.icon('close')}</button></div><div class="ovk-sheet-body"><div data-vb-upload data-accept=""></div></div></dialog>`
         : '';
     const modes = `<fieldset class="vb-modes" aria-label="What Vibe does with it">${MODES.map(([value, label, hint, placeholder], i) => `<label title="${esc(hint)}"><input type="radio" name="mode" value="${value}" data-placeholder="${esc(placeholder)}"${i ? '' : ' checked'}><span>${label}</span></label>`).join('')}</fieldset>`;
     const fine = !enabled ? 'Vibe is resting right now. Try again later.' : engine && engine.own ? `Vibe thinks with ${esc(engine.you)} (<a href="/settings#oc-ai-key">change</a>). It can get things wrong: check what matters.` : 'Vibe can get things wrong. Check what matters.';
