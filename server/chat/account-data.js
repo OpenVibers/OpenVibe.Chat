@@ -51,6 +51,7 @@ const EXPORTS = [
     ['rooms_owned.json', `SELECT * FROM rooms WHERE (owner_subject = ANY(@s) OR owner_id = ANY(@ids)) AND server_id IS NULL ORDER BY id DESC LIMIT ${LIMIT}`],
     ['servers_owned.json', `SELECT * FROM chat_servers WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['server_memberships.json', `SELECT m.server_id, s.slug, s.name, m.role, m.roles, m.joined_at FROM chat_server_members m JOIN chat_servers s ON s.id = m.server_id WHERE m.user_id = ANY(@ids) ORDER BY m.joined_at DESC LIMIT ${LIMIT}`],
+    ['stage_speaker_actions.json', `SELECT room_id, user_id, hand_raised, invited_by, updated_at FROM chat_stage_speakers WHERE user_id = ANY(@ids) OR invited_by = ANY(@ids) ORDER BY updated_at DESC LIMIT ${LIMIT}`],
     ['server_invites_made.json', `SELECT code, server_id, uses, max_uses, expires_at, revoked_at, created_at FROM chat_server_invites WHERE created_by_subject = ANY(@s) OR created_by = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['calls.json', `SELECT * FROM calls WHERE created_by_subject = ANY(@s) OR target_subject = ANY(@s) OR created_by = ANY(@ids) OR target_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['blocks.json', `SELECT * FROM network_blocks WHERE blocker_subject = ANY(@s) ORDER BY updated_at DESC, blocked_subject DESC LIMIT ${LIMIT}`],
@@ -123,6 +124,8 @@ const ERASE_FIRST = [
     ['room_attachments', 'DELETE FROM room_attachments WHERE attached_by_subject = ANY(@s)'],
 ];
 const ERASE_AFTER_ROOMS = [
+    ['stage_speaker_roles', 'DELETE FROM chat_stage_speakers WHERE user_id = ANY(@ids)'],
+    [null, 'UPDATE chat_stage_speakers SET invited_by = NULL WHERE invited_by = ANY(@ids)'],
     ['calls', 'DELETE FROM calls WHERE created_by_subject = ANY(@s) OR target_subject = ANY(@s) OR created_by = ANY(@ids) OR target_user_id = ANY(@ids)'],
     ['blocks', 'DELETE FROM network_blocks WHERE blocker_subject = ANY(@s) OR blocked_subject = ANY(@s)'],
     ['blocks', 'DELETE FROM dm_blocks WHERE blocker_subject_id = ANY(@s) OR blocker_id = ANY(@ids) OR blocked_id = ANY(@ids)'],
