@@ -23,7 +23,7 @@
   if (data && data.party) {
     var v = data.party;
     data = {
-      slug: v.id, title: v.title, kind: v.kind, radio: v.radio || null, desktop: v.desktop || null, ended_at: v.ended_at || null, media: v.media, source_url: v.source_url, member: v.member,
+      slug: v.id, title: v.title, kind: v.kind, radio: v.radio || null, music: v.music || null, desktop: v.desktop || null, ended_at: v.ended_at || null, media: v.media, source_url: v.source_url, member: v.member,
       server_time_ms: data.server_time_ms,
       host: { subject: v.host, name: v.host_name || null },
       members: (v.members || []).map(function (m) { return { subject: m.subject, name: m.name }; }),
@@ -35,7 +35,7 @@
 
   var slug = root.getAttribute('data-party') || data.slug;
   var region = function (name) { return root.querySelector('[data-party-' + name + ']'); };
-  var stage = region('stage'), people = region('people'), chat = region('chat'), remote = region('remote'), invite = region('invite');
+  var stage = region('stage'), people = region('people'), chat = region('chat'), remote = region('remote'), invite = region('invite'), musicBox = region('music');
   var REACTIONS = ['😂', '😮', '🔥', '❤️', '👏'];
   var DRIFT_SHOWN_MS = 1000;
   var self = data.self || null;                     // { subject, name } for a signed-in member
@@ -44,10 +44,11 @@
   (data.members || []).forEach(function (m) { if (m && m.subject) names[m.subject] = m.name || 'Someone'; });
   if (data.host && data.host.subject) names[data.host.subject] = data.host.name || names[data.host.subject] || 'The host';
   if (self && self.subject) names[self.subject] = self.name || names[self.subject] || 'You';
-  var isRadio = data.kind === 'radio', isDesktop = data.kind === 'desktop', radio = data.radio || null, guestListening = false;
+  var isRadio = data.kind === 'radio', isDesktop = data.kind === 'desktop', radio = data.radio || null, music = data.music || null, guestListening = false;
   var serverOffset = Number(data.server_time_ms) ? Number(data.server_time_ms) - Date.now() : 0;
   var bestClockRtt = Infinity;
   var catalogue = [];
+  var musicAudio = null, musicNeedsTap = false, MUSIC_VOLUME_KEY = 'ov-party-volume', musicVolume = 0.8;
   var lease = data.lease || null, clock = data.clock || null, asked = null, everPlayed = !!(clock && (!clock.paused || clock.position_ms > 0));
   var away = {};                                    // subject -> when they left (their seat waits a minute)
   var ws = null, sync = null, delay = 1000, latest = 0, joined = false;
@@ -79,6 +80,25 @@
   // join, which comes straight back to this link (its key included). Nothing that would only fail is drawn: no remote,
   // no reactions, no composer, no count of who is watching, no socket (it answered "No such room").
   var guest = !token();
+  // Each person's volume is this browser's, not the room's: remember it, and never send it.
+  try {
+    var savedVolume = localStorage.getItem(MUSIC_VOLUME_KEY);
+    if (savedVolume !== null) {
+      var savedNumber = Number(savedVolume);
+      if (Number.isFinite(savedNumber) && savedNumber >= 0 && savedNumber <= 1) musicVolume = savedNumber;
+    }
+  } catch (e) { /* storage blocked */ }
+  if (musicBox && !isRadio) {
+    musicAudio = el('audio', 'pt-music-audio');
+    musicAudio.preload = 'auto';
+    musicAudio.setAttribute('playsinline', '');
+    musicAudio.volume = musicVolume;
+    musicAudio.addEventListener('ended', function () {
+      if (music && music.track && !music.paused && iHold()) musicAction('ended', { expected_id: music.track.id });
+    });
+    musicAudio.addEventListener('loadedmetadata', applyMusic);
+    musicAudio.addEventListener('canplay', applyMusic);
+  }
   var joinHref = '/auth/login?next=' + encodeURIComponent(location.pathname + location.search);
   function joinLink(cls, text) { var a = el('a', cls, text); a.href = joinHref; return a; }
   if (guest) root.classList.add('is-guest');
@@ -177,6 +197,7 @@
   paintDesktopLayout();
   if (providerInfo) stage.appendChild(refusal);
   if (!guest) stage.appendChild(bar);
+  if (musicBox) stage.appendChild(musicBox);   // under the room's controls, not above its title
   if (isRadio) {
     var radioBox = el('section', 'pt-radio');
     radioBox.setAttribute('aria-label', 'OpenVibe Radio queue');
@@ -336,6 +357,151 @@
       text.appendChild(el('p', 'pt-np-artist', mayChangeQueue() ? 'Pick a track below to start the music.' : 'The music starts when the host picks a track.'));
     }
     np.appendChild(text);
+  }
+
+  // ── listening together in the room ──────────────────────────────────────────
+  // The room's remote starts OpenVibe Radio; Chat keeps the timeline and every page follows it. The volume slider is
+  // this person's own (this browser's), and this page never sends it anywhere.
+  function musicTargetMs() {
+    if (!music || !music.track) return 0;
+    var base = Math.max(0, Number(music.position_ms) || 0);
+    if (!music.paused) base += Math.max(0, Date.now() + serverOffset - (Number(music.at_ms) || Date.now()));
+    return base;
+  }
+  function timeLabel(iso) {
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  }
+  function applyMusic() {
+    if (!musicAudio) return;
+    if (!music || !music.track || !safeHref(music.track.audio_url)) {
+      musicAudio.pause();
+      musicAudio.removeAttribute('src');
+      delete musicAudio.dataset.src;
+      musicNeedsTap = false;
+      return;
+    }
+    if (musicAudio.dataset.src !== music.track.audio_url) {
+      musicAudio.dataset.src = music.track.audio_url;
+      musicAudio.src = music.track.audio_url;
+    }
+    var target = musicTargetMs() / 1000;
+    if (musicAudio.readyState >= 1 && Number.isFinite(musicAudio.duration) && musicAudio.duration > 0 && target > musicAudio.duration - 0.25)
+      target = Math.max(0, musicAudio.duration - 0.25);
+    if (musicAudio.readyState >= 1 && Math.abs(musicAudio.currentTime - target) > 1.5) {
+      try { musicAudio.currentTime = target; } catch (e) { /* metadata is still loading */ }
+    }
+    if (music.paused) { musicAudio.pause(); musicNeedsTap = false; return; }
+    var played = musicAudio.play();
+    if (played && played.then) played.then(function () {
+      if (musicNeedsTap) { musicNeedsTap = false; paintMusic(); }
+    }, function () {
+      // The browser wants a gesture before it plays sound: say so, do not pretend the room is audible.
+      if (!musicNeedsTap) { musicNeedsTap = true; paintMusic(); }
+    });
+    else musicNeedsTap = false;
+  }
+  function musicAction(action, body) {
+    var headers = { 'Content-Type': 'application/json' }, t = token();
+    if (t) headers.Authorization = 'Bearer ' + t;
+    fetch('/api/chat/parties/' + encodeURIComponent(slug) + '/music/' + action, {
+      method: 'POST', headers: headers, credentials: 'same-origin', body: JSON.stringify(body || {}),
+    }).then(function (r) {
+      return r.json().then(function (v) { if (!r.ok) throw new Error(v.error || v.code || 'The room’s music did not change'); return v; });
+    }).then(function (v) {
+      music = v.music || null;
+      applyMusic(); paintMusic();
+    }).catch(function (e) { flash(e.message); });
+  }
+  function paintMusic() {
+    if (!musicBox || isRadio) return;
+    var control = !guest && !!(self && iHold());
+    musicBox.textContent = '';
+    if (!music || !music.track) {
+      musicBox.hidden = !control;
+      if (!control) return;
+      musicBox.appendChild(el('h2', 'pt-h', 'Listen together'));
+      musicBox.appendChild(el('p', 'pt-music-note', 'Play OpenVibe Radio in the room: its licensed catalogue, in step for everyone, with the volume your own.'));
+      if (catalogue.length) {
+        var form = el('form', 'pt-music-start');
+        var pick = el('select');
+        pick.setAttribute('aria-label', 'Choose a Radio track');
+        var placeholder = el('option', null, 'Choose a Radio track'); placeholder.value = ''; pick.appendChild(placeholder);
+        catalogue.forEach(function (t) { var option = el('option', null, t.title + ' · ' + t.artist); option.value = t.id; pick.appendChild(option); });
+        var playTrack = el('button', 'pt-remote-btn', 'Play this track'); playTrack.type = 'submit';
+        form.appendChild(pick); form.appendChild(playTrack);
+        form.addEventListener('submit', function (event) {
+          event.preventDefault();
+          if (pick.value) musicAction('play', { track_id: pick.value });
+        });
+        musicBox.appendChild(form);
+        var radioButton = el('button', 'pt-remote-btn is-quiet', 'Start OpenVibe Radio');
+        radioButton.type = 'button';
+        radioButton.addEventListener('click', function () { musicAction('play', { station: true }); });
+        musicBox.appendChild(radioButton);
+      } else {
+        musicBox.appendChild(el('p', 'pt-music-note', 'OpenVibe Radio has no published tracks yet.'));
+      }
+      return;
+    }
+    musicBox.hidden = false;
+    var nowBox = el('div', 'pt-music-now');
+    var copy = el('div', 'pt-music-copy');
+    copy.appendChild(el('p', 'pt-h', 'Playing in the room'));
+    var title = el('p', 'pt-music-title');
+    title.appendChild(el('strong', null, music.track.title));
+    title.appendChild(document.createTextNode(' · ' + music.track.artist));
+    copy.appendChild(title);
+    var by = el('p', 'pt-music-by');
+    var starter = music.started_by && self && music.started_by === self.subject ? 'you'
+      : (music.started_by_name || (music.started_by ? nameOf(music.started_by) : 'someone'));
+    by.appendChild(document.createTextNode((starter === 'you' ? 'Started by you' : 'Started by ' + starter) + (timeLabel(music.started_at) ? ' · since ' + timeLabel(music.started_at) : '')));
+    copy.appendChild(by);
+    var proof = el('p', 'pt-music-proof');
+    proof.appendChild(outLink(licenceLabel(music.track.licence), music.track.licence_url));
+    if (safeHref(music.track.source_url)) { proof.appendChild(document.createTextNode(' · ')); proof.appendChild(outLink('Original source', music.track.source_url)); }
+    if (music.track.ai_made) proof.appendChild(document.createTextNode(' · AI-made music'));
+    copy.appendChild(proof);
+    nowBox.appendChild(copy);
+    if (musicAudio) nowBox.appendChild(musicAudio);
+    musicBox.appendChild(nowBox);
+    var controls = el('div', 'pt-music-actions');
+    var volume = el('label', 'pt-music-volume');
+    volume.appendChild(document.createTextNode('Your volume'));
+    var range = el('input');
+    range.type = 'range'; range.min = '0'; range.max = '100'; range.step = '1';
+    range.value = String(Math.round(musicVolume * 100));
+    range.setAttribute('aria-label', 'Your volume');
+    range.addEventListener('input', function () {
+      musicVolume = Math.max(0, Math.min(1, Number(range.value) / 100));
+      if (musicAudio) musicAudio.volume = musicVolume;
+      try { localStorage.setItem(MUSIC_VOLUME_KEY, String(musicVolume)); } catch (e) { /* storage blocked */ }
+    });
+    volume.appendChild(range);
+    controls.appendChild(volume);
+    if (musicNeedsTap) {
+      var tap = el('button', 'pt-remote-btn', 'Tap to listen');
+      tap.type = 'button';
+      tap.addEventListener('click', function () { musicNeedsTap = false; applyMusic(); paintMusic(); });
+      controls.appendChild(tap);
+    }
+    if (control) {
+      var toggle = el('button', 'pt-remote-btn is-quiet', music.paused ? 'Resume for everyone' : 'Pause for everyone');
+      toggle.type = 'button';
+      toggle.addEventListener('click', function () { musicAction(music.paused ? 'resume' : 'pause'); });
+      controls.appendChild(toggle);
+      if (music.station) {
+        var next = el('button', 'pt-remote-btn is-quiet', 'Next track');
+        next.type = 'button';
+        next.addEventListener('click', function () { musicAction('next', { expected_id: music.track.id }); });
+        controls.appendChild(next);
+      }
+      var stop = el('button', 'pt-remote-btn is-quiet', 'Stop the music');
+      stop.type = 'button';
+      stop.addEventListener('click', function () { musicAction('stop'); });
+      controls.appendChild(stop);
+    }
+    musicBox.appendChild(controls);
   }
 
   function paintRadio() {
@@ -548,7 +714,12 @@
     if (guest) { paintVeil(); return; }
     if (!window.WebSocket) { paintVeil(); return; }
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
-    ws.onopen = function () { delay = 1000; send({ type: 'join_room', room: slug, token: token() }); paintVeil(); };
+    ws.onopen = function () {
+      delay = 1000;
+      send({ type: 'join_room', room: slug, token: token() });
+      send({ type: 'time', t0: Date.now(), id: 'music' });
+      paintVeil();
+    };
     ws.onmessage = function (ev) {
       var m;
       try { m = JSON.parse(ev.data); } catch (e) { return; }
@@ -558,7 +729,16 @@
         if (m.subject && !self) self = { subject: m.subject, name: names[m.subject] || 'You' };
         if (!isDesktop && !sync && window.OVSync && video) sync = window.OVSync.attach(video, { room: slug, socket: ws, self: self && self.subject });
         catchUp();
-        paintRadio();
+        paintRadio(); paintMusic(); applyMusic();
+      } else if (m.type === 'time' && Number.isFinite(Number(m.t_server)) && Number.isFinite(Number(m.t0))) {
+        // NTP-style: the smallest round trip gives the best estimate of the server's clock, which is the
+        // one the room's music timeline is written against.
+        var rtt = Date.now() - Number(m.t0);
+        if (rtt >= 0 && rtt < bestClockRtt) {
+          bestClockRtt = rtt;
+          serverOffset = Number(m.t_server) - (Number(m.t0) + Date.now()) / 2;
+          applyMusic();
+        }
       } else if (!isDesktop && m.type === 'sync' && m.state) {
         clock = m.state;
         if (!clock.paused || clock.position_ms > 0) everPlayed = true;
@@ -576,6 +756,10 @@
         before.forEach(function (s) { if ((lease.watchers || []).indexOf(s) < 0) away[s] = Date.now(); });
         (lease.watchers || []).forEach(function (s) { delete away[s]; });
         if (iHold() || holder().kind !== 'person' || (asked && holder().subject === asked)) asked = null;
+        paintMusic();
+      } else if (m.type === 'music') {
+        music = m.state || null;
+        applyMusic(); paintMusic();
       } else if (m.type === 'lease.request' && m.request && m.request.requester) {
         if (iHold()) asked = m.request.requester.subject;
       } else if (m.type === 'room_message' && m.message) {
@@ -609,6 +793,12 @@
       if (d > DRIFT_SHOWN_MS) providerClock(clock, false);
     }
     drift.hidden = !(clock && !clock.paused && d > DRIFT_SHOWN_MS);
+    // The room's music is kept on its second too: seek only past 1.5 s, so ordinary playback never stutters.
+    if (musicAudio && music && music.track && !music.paused && !musicAudio.paused && musicAudio.readyState >= 1) {
+      var want = musicTargetMs() / 1000;
+      if (Number.isFinite(musicAudio.duration) && musicAudio.duration > 0) want = Math.min(want, Math.max(0, musicAudio.duration - 0.25));
+      if (Math.abs(musicAudio.currentTime - want) > 1.5) { try { musicAudio.currentTime = want; } catch (e) { /* metadata */ } }
+    }
     // A seat waits a minute; after it, the person is simply not here.
     var now = Date.now(), changed = false;
     Object.keys(away).forEach(function (s) { if (now - away[s] > 60000) { delete away[s]; changed = true; } });
@@ -625,9 +815,35 @@
     if (t) headers.Authorization = 'Bearer ' + t;
     fetch('/api/chat/parties/' + encodeURIComponent(slug), { headers: headers, credentials: 'same-origin' })
       .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (v) { if (v && v.party) { data.desktop = v.party.desktop; data.ended_at = v.party.ended_at; paintDesktopLayout(); paintVeil(); } })
+      .then(function (v) {
+        if (!v || !v.party) return;
+        data.desktop = v.party.desktop; data.ended_at = v.party.ended_at;
+        if (v.party.music !== undefined) {
+          var before = music && music.seq, after = v.party.music || null;
+          music = after;
+          if ((after && after.seq) !== before) { applyMusic(); paintMusic(); }
+        }
+        paintDesktopLayout(); paintVeil();
+      })
       .catch(function () { /* the page keeps its last known state */ });
   }, 4000);
+  if (guest && !isRadio && musicBox) {
+    setInterval(function () {
+      var key = null;
+      try { key = new URLSearchParams(location.search).get('k') || localStorage.getItem('ov-party-key:' + slug); } catch (e) { /* storage blocked */ }
+      var sentAt = Date.now();
+      fetch('/api/chat/parties/' + encodeURIComponent(slug) + (key ? '?k=' + encodeURIComponent(key) : ''), { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (v) {
+          if (!v || !v.party) return;
+          var rtt = Date.now() - sentAt;
+          if (Number(v.server_time_ms) && rtt < bestClockRtt) { bestClockRtt = rtt; serverOffset = Number(v.server_time_ms) - (sentAt + Date.now()) / 2; }
+          var before = music && music.seq, after = v.party.music || null;
+          music = after;
+          if ((after && after.seq) !== before) { applyMusic(); paintMusic(); }
+        }).catch(function () { /* retry next poll */ });
+    }, 3000);
+  }
   if (isRadio && guest) {
     setInterval(function () {
       var key = null;
@@ -646,8 +862,8 @@
         }).catch(function () { /* retry next poll */ });
     }, 3000);
   }
-  if (isRadio && !guest) fetch('/api/chat/parties/radio/tracks').then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (v) { catalogue = v && v.tracks || []; paintRadio(); }).catch(function () { /* retry on refresh */ });
+  if (!guest) fetch('/api/chat/parties/radio/tracks').then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (v) { catalogue = v && v.tracks || []; paintRadio(); paintMusic(); }).catch(function () { /* retry on refresh */ });
 
   // ── invite ───────────────────────────────────────────────────────────────────
   if (invite && !guest) {
@@ -669,6 +885,6 @@
     invite.appendChild(ib);
   }
 
-  paintVeil(); paintRemote(); paintPeople(); paintRadio();
+  paintVeil(); paintRemote(); paintPeople(); paintRadio(); paintMusic(); applyMusic();
   connect();
 })();
