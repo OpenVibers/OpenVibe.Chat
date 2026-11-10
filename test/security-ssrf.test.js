@@ -121,6 +121,7 @@ t('ratchet: every file that makes an outbound request itself is reviewed', () =>
         'server/chat/account-data.js': 'Network internal API (configured), fixed paths: export parts and deletion confirmations',
         'server/prefs/network-modules.js': 'Network user modules (configured)',
         'server/presence.js': 'Network internal presence (configured internal URL), fixed /internal/presence path, the subject list in the query, a service token, 1.5 s, held 30 s',
+        'server/net/consent.js': 'Network internal consent check (configured internal URL), fixed /internal/consent/check path, up to 500 subject ids in the body (never a URL), a service token, 5 s, fail-closed',
         'server/chat/routes.js': 'GIF providers (fixed hosts)',
         'server/chat/emotes-routes.js': 'FFZ / BTTV / 7TV emote providers (fixed hosts, hardcoded URLs)',
         'server/chat/soundboard-service.js': '101soundboards (host allowlist; audio via safeLookup)',
@@ -130,6 +131,7 @@ t('ratchet: every file that makes an outbound request itself is reviewed', () =>
         'server/web/party-pages.js': 'OpenVibe.Video (fixed: https://openvibe.video, or a test\'s CHAT_PARTY_VIDEO_URL), fixed /api/v1/video/watchable paths; a pasted link is only a query parameter, never fetched; redirects refused, 2.5 s, cached a minute',
         'server/rooms/radio.js': 'OpenVibe.Download Radio catalogue (fixed https origin, or a test\'s CHAT_RADIO_URL); track ids match rad_ ULIDs, redirects refused, 2.5 s',
         'server/chat/link-cards.js': 'OpenVibe.Video and OpenVibe.Actor (fixed https origins, or a test\'s CHAT_LINK_VIDEO_URL / CHAT_LINK_ACTOR_URL), fixed paths (a watchable lookup, /voices/<id>.json, /skills/<slug>.json); a pasted link is a query parameter or a path segment only, never fetched; redirects refused, 2.5 s, cached a minute',
+        'server/chat/link-previews.js': 'an address a person wrote: https only, assertPublicUrl on every hop and safeLookup on the connection, at most two redirects each judged, 4 s and 512 KiB caps, no cookies; YouTube/Vimeo oEmbed on fixed origins; OpenVibe\'s own sites resolve through fixed public APIs and are never page-fetched',
         'server/web/room-embed-pages.js': 'not the server: the sign-in window\'s own script posts to /embed/bind on this same site',
     };
     const root = path.join(__dirname, '..');

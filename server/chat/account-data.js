@@ -95,6 +95,8 @@ const EXPORTS = [
     // Co-pilot rooms (S5): the polls they voted in, and their reactions to room messages.
     ['agent_room_votes.json', `SELECT poll_id, option_id, voted_at FROM agent_room_poll_votes WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['room_reactions.json', `SELECT message_id, reaction, created_at FROM room_message_reactions WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
+    // What happened to them in Chat, and what their own actions caused (server/chat/activity.js).
+    ['activity.json', `SELECT id, kind, actor_user_id, actor_username, room_id, server_id, conversation_id, message_id, parent_id, scope, excerpt, reaction, role, created_at, read_at FROM chat_activity WHERE user_id = ANY(@ids) OR actor_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
 ];
 
 async function exportPart(d, subject) {
@@ -144,6 +146,7 @@ const ERASE_AFTER_ROOMS = [
     ['vibe_asks', 'DELETE FROM vibe_asks WHERE user_id = ANY(@ids)'],
     ['agent_room_votes', 'DELETE FROM agent_room_poll_votes WHERE user_id = ANY(@ids)'],
     ['room_reactions', 'DELETE FROM room_message_reactions WHERE user_id = ANY(@ids)'],
+    ['activity', 'DELETE FROM chat_activity WHERE user_id = ANY(@ids) OR actor_user_id = ANY(@ids)'],
     ['vibe_deliveries', 'DELETE FROM vibe_deliveries WHERE user_id = ANY(@ids)'],
     // Friends and conversation view preferences from the Chat app shell.
     ['dm_contacts', 'DELETE FROM dm_contacts WHERE user_id = ANY(@ids) OR contact_id = ANY(@ids)'],

@@ -61,7 +61,8 @@ t('a message with a file stores the reference and Vibe\'s turn carries it to AI'
     assert.equal(turns[0].input.files.length, 1);
     assert.equal(turns[0].input.files[0].id, file.id);
     const history = await h.http('GET', `/api/chat/rooms/${slug}/messages`, { token: ann.token });
-    assert.deepEqual(history.body.messages[0].files.map((f) => f.id), [file.id], 'the message keeps the reference');
+    const withFile = history.body.messages.find((m) => (m.files || []).some((f) => f.id === file.id));
+    assert.ok(withFile, 'the message keeps the reference');
 });
 
 t('the composer page carries the attachment tray and the shared upload kit', async () => {

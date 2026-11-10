@@ -77,7 +77,7 @@ t('@pantry answers with the recent messages and the room\'s notes, live, attribu
     assert.deepStrictEqual([call.input.ai_name, call.input.persona, call.input.room], ['Pantry', 'A cheerful cook', 'Our Kitchen']);
     assert.deepStrictEqual(call.o.attribution, { service: 'chat', type: 'room', id: String(reply.message.room_id), label: 'Our Kitchen' });
     const hist = (await api('GET', '/our-kitchen/messages', ann)).body.messages;
-    assert.strictEqual(hist[hist.length - 1].display_name, 'Pantry', 'the history names it');
+    assert.strictEqual(hist[0].display_name, 'Pantry', 'the history names it');
     bobWs.close();
 });
 
@@ -96,7 +96,7 @@ t('no answer without a mention, to itself, or past the room\'s day; mentions are
     try {
         await api('POST', '/our-kitchen/messages', ann, { message: '@pantry again?' });
         await settle();
-        const last = (await api('GET', '/our-kitchen/messages', ann)).body.messages.pop();
+        const last = (await api('GET', '/our-kitchen/messages', ann)).body.messages[0];
         assert.match(last.message, /my limit/, 'past the day\'s cap it says so instead of calling AI');
         assert.strictEqual(calls.length, before);
     } finally { config.ai.memberRepliesPerDay = keep; }
@@ -116,7 +116,7 @@ t('AI is resting: the member says so in AI\'s own words instead of a generic fai
     aiClient._setClient({ runs: { create: async () => ({ run: { status: 'failed', error: { code: 'ai.resting', detail: 'AI is resting for a moment' } } }) } });
     await api('POST', '/our-kitchen/messages', ann, { message: '@pantry one more question?' });
     await settle(300);
-    const last = (await api('GET', '/our-kitchen/messages', ann)).body.messages.pop();
+    const last = (await api('GET', '/our-kitchen/messages', ann)).body.messages[0];
     assert.match(last.message, /AI is resting for a moment/, last.message);
     assert.ok(!/could not answer just now/.test(last.message), last.message);
 });

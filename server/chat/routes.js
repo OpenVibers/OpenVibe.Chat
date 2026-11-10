@@ -518,12 +518,13 @@ router.get('/filters/friendly', (req, res) => {
 
 router.get('/global/history', optionalAuth, async (req, res) => {
     try {
-        const limit = req.query.limit;
+        const askedLimit = parseInt(req.query.limit, 10);
+        const limit = Math.min(Number.isFinite(askedLimit) && askedLimit > 0 ? askedLimit : 50, 100);
         const before = req.query.before;
         const afterId = req.query.after_id;
         const channelUsername = String(req.query.username || '').trim();
         // after_id = cursor read: only what the caller has not seen (oldest→newest, PK range scan).
-        // Anything else = a page: the newest rows, optionally before a timestamp.
+        // Anything else = a page: the newest rows, optionally before an exclusive message id.
         const out = afterId != null
             ? await historyStore.delta('global', { afterId, limit, channelUsername })
             : await historyStore.page('global', { limit, before, channelUsername });

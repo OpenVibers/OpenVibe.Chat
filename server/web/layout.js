@@ -58,14 +58,16 @@ function links(o) {
 }
 
 function navConfig(o, config, site = {}, siteLinks = null) {
+    const counts = o.counts || {};
     return {
         service: site.service || 'chat',
         apiBase: NETWORK_URL,
         links: (siteLinks || site.links || links(o)).map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: o.active === l.key })),
-        history: { type: 'page', title: o.title || site.name || SITE_NAME },
+        history: { type: 'conversation', title: o.title || site.name || SITE_NAME, image_url: o.historyImage || null, private: !!o.private, mature: !!o.mature },
         // The phone's bottom bar (Shared's app bar, appbar.js): Home, Servers, Vibe, Activity and You — one
         // bar for every OpenVibe app (the plan, 2026-11-09, stage V2).
-        appBar: require('./shell').APP_BAR.map((l) => ({ ...l, active: o.active === l.page })),
+        // The Activity place carries a dot while something in it is unread (Shared's appbar.js draws `dot`).
+        appBar: require('./shell').APP_BAR.map(({ dot, ...l }) => ({ ...l, ...(dot ? { dot: !!counts.activity } : {}), active: o.active === l.page })),
         silentLogin: `${config.web.baseUrl}/auth/login?silent=1&next={url}`,
         sessionUrl: '/auth/me',
         loginUrl: `/auth/login?next=${encodeURIComponent(o.path || '/')}`,
@@ -175,7 +177,8 @@ ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join
 <script src="${ovServe.url('navbar.js')}" defer></script>
 ${String(o.body || '').includes('data-ov-machines') ? '<script src="/shared/machines.js" defer></script>' : ''}
 <script src="${ovServe.url('footer.js')}" defer></script>
-${o.script ? `<script src="${asset('chat.js')}" defer></script>` : ''}
+${o.script ? `<script src="${asset('chat-history.js')}" defer></script>
+<script src="${asset('chat.js')}" defer></script>` : ''}
 ${o.shell ? `<script src="${asset('chat-shell.js')}" defer></script>` : ''}
 ${o.callScript ? `<script src="${asset('call.js')}" defer></script>` : ''}
 ${o.ringScript ? `<script src="${asset('ring.js')}" defer></script>` : ''}

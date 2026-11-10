@@ -21,6 +21,7 @@ const db = require('../db/database');
 const rooms = require('./rooms');
 const syncClock = require('./sync-clock');
 const controlLease = require('./control-lease');
+const pool = require('./party-pool');
 
 const AGENT_STREAM_RE = /^ags_[0-9A-HJKMNP-TV-Z]{26}$/;
 const VOD_RE = /^\d{1,16}$/;
@@ -98,7 +99,13 @@ function joinUrl(row, kind, rawSecret = null) {
     return rawSecret ? `${base}?k=${encodeURIComponent(rawSecret)}` : base;
 }
 
-function view(row, party, { rawSecret = null, now = Date.now() } = {}) {
+/** The plain line a Link-hosted party's page shows for where it runs. */
+const LINK_WHERE = Object.freeze({
+    state: 'link', machine: null, queue_position: null,
+    line: "Runs on the host's computer through OpenVibe Link.",
+});
+
+function view(row, party, { rawSecret = null, now = Date.now(), where } = {}) {
     const kind = kindOfParty(party);
     return {
         id: row.slug,
@@ -110,6 +117,9 @@ function view(row, party, { rawSecret = null, now = Date.now() } = {}) {
         ...(kind === 'desktop' ? { desktop: {
             hosting: party.desktop_hosting, state: party.desktop_state, layout: party.desktop_layout || 'watch',
             url: party.desktop_state === 'ready' ? party.desktop_share_url : null,
+            // Where this party's computer runs: the pool's hold (named machine, or its place in line), or the
+            // host's own Link machine. The page draws one plain line from it; the data is here for the API/SDK.
+            where: where || (party.desktop_hosting === 'link' ? LINK_WHERE : null),
         } } : {}),
         host: party.host_subject,
         title: row.name,
@@ -134,7 +144,7 @@ async function detail(row, party, { user = null, key = null, now = Date.now() } 
     if (!member && !keyMatches(party, key)) return null;
     const host = await db.get('SELECT username, display_name FROM ctx_users WHERE subject_id = ? LIMIT 1', [party.host_subject]);
     const out = {
-        ...view(row, party, { now }),
+        ...view(row, party, { now, ...(kindOfParty(party) === 'desktop' ? { where: await pool.where(party.room_id) } : {}) }),
         host_name: host ? (host.display_name || host.username) : null,
         member,
     };
@@ -149,6 +159,11 @@ async function detail(row, party, { user = null, key = null, now = Date.now() } 
         }
     }
     if (kindOfParty(party) === 'radio') out.radio = await require('./radio').state(row, party, { user, key });
+    // A watch party or a shared computer can play OpenVibe Radio beside what it watches: the room's own music
+    // timeline (server/rooms/party-music.js), visible to every member and to a holder of the link's secret.
+    if (kindOfParty(party) === 'media' || kindOfParty(party) === 'desktop') {
+        out.music = await require('./party-music').state(row, { now });
+    }
     return out;
 }
 
@@ -167,18 +182,32 @@ async function createDesktop(user, { title = 'Shared computer', desktop_hosting:
     if (!user) fail(401, 'party.sign_in', 'Sign in to start a shared computer');
     if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(user.subject_id || ''))) fail(409, 'party.no_subject', 'This account has no OpenVibe subject yet; sign in again');
     if (hosting !== 'link' && hosting !== 'openvibe') fail(422, 'party.hosting', 'Choose your computer or an OpenVibe computer');
-    if (hosting === 'openvibe') fail(503, 'party.no_openvibe_machine', 'No OpenVibe machine is free right now');
-    if (!/^lnk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(nodeId || ''))) fail(422, 'party.machine', 'Choose one of your Link computers');
+    if (hosting === 'link' && !/^lnk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(nodeId || ''))) fail(422, 'party.machine', 'Choose one of your Link computers');
     const name = titleOf(title);
     const raw = secret();
     const slug = `party-${crypto.randomBytes(4).toString('hex')}`;
-    const room = await rooms.create(user, { name: name.slice(0, 40), slug, kind: 'party', visibility: 'private', topic: name, party: true });
-    await db.run(`INSERT INTO room_parties (room_id, agent_stream_id, vod_id, host_user_id, host_subject, mode, playing, listed, join_secret_hash, party_kind, desktop_hosting, desktop_state, desktop_node_id)
-        VALUES (?, NULL, NULL, ?, ?, 'live', false, false, ?, 'desktop', ?, 'waiting', ?)`,
-        [room.id, user.id, user.subject_id, sha256(raw), hosting, nodeId]);
-    await controlLease.take({ id: room.id, slug }, user.subject_id, { watchers: [] });
+    // An OpenVibe party asks the pool before the room exists: a machine is held for this slug, or the party is
+    // given a place in line. A failure here (the switch is off, no machine is registered, the person's own limit)
+    // starts no room at all. A Link party never touches the pool.
+    const placed = hosting === 'openvibe' ? await pool.place({ actor: user.subject_id, slug }) : null;
+    let room;
+    try {
+        room = await rooms.create(user, { name: name.slice(0, 40), slug, kind: 'party', visibility: 'private', topic: name, party: true });
+        await db.run(`INSERT INTO room_parties (room_id, agent_stream_id, vod_id, host_user_id, host_subject, mode, playing, listed, join_secret_hash, party_kind, desktop_hosting, desktop_state, desktop_node_id)
+            VALUES (?, NULL, NULL, ?, ?, 'live', false, false, ?, 'desktop', ?, 'waiting', ?)`,
+            [room.id, user.id, user.subject_id, sha256(raw), hosting, hosting === 'link' ? nodeId : null]);
+        if (placed) await pool.bind(placed.hold.id, room.id);
+        await controlLease.take({ id: room.id, slug }, user.subject_id, { watchers: [] });
+    } catch (err) {
+        if (placed) await pool.cancel(placed.hold.id, 'room_failed').catch(() => {});
+        throw err;
+    }
     const row = await bySlug(slug);
-    return { party: view(row, partyOf(row), { rawSecret: raw }), roomId: room.id, join_secret: raw };
+    return {
+        party: view(row, partyOf(row), { rawSecret: raw, ...(placed ? { where: await pool.where(room.id) } : {}) }),
+        roomId: room.id,
+        join_secret: raw,
+    };
 }
 
 async function createAgentStream(user, { agent_stream_id: agentStreamId, vod_id: vodId = null, title, listed = false } = {}) {
@@ -234,7 +263,7 @@ async function createMedia(user, { media, source_url: sourceUrl = null, title, l
 }
 
 async function bySlug(slug) {
-    const row = await db.get('SELECT r.*, p.room_id AS party_room_id, p.agent_stream_id, p.vod_id, p.host_user_id, p.host_subject, p.mode, p.position_s, p.playing, p.position_at, p.listed, p.join_secret_hash, p.ended_at, p.created_at AS party_created_at, p.party_kind, p.media, p.source_url, p.radio_track, p.desktop_hosting, p.desktop_state, p.desktop_layout, p.desktop_node_id, p.desktop_share_id, p.desktop_share_url FROM rooms r JOIN room_parties p ON p.room_id = r.id WHERE r.slug = ?', [String(slug || '').toLowerCase()]);
+    const row = await db.get('SELECT r.*, p.room_id AS party_room_id, p.agent_stream_id, p.vod_id, p.host_user_id, p.host_subject, p.mode, p.position_s, p.playing, p.position_at, p.listed, p.join_secret_hash, p.ended_at, p.created_at AS party_created_at, p.party_kind, p.media, p.source_url, p.radio_track, p.music_state, p.music_version, p.desktop_hosting, p.desktop_state, p.desktop_layout, p.desktop_node_id, p.desktop_share_id, p.desktop_share_url FROM rooms r JOIN room_parties p ON p.room_id = r.id WHERE r.slug = ?', [String(slug || '').toLowerCase()]);
     return row || null;
 }
 
@@ -245,6 +274,7 @@ function partyOf(row) {
         position_s: row.position_s, playing: row.playing, position_at: row.position_at, listed: row.listed,
         join_secret_hash: row.join_secret_hash, ended_at: row.ended_at, created_at: row.party_created_at,
         party_kind: row.party_kind || 'agent_stream', media: row.media, source_url: row.source_url, radio_track: row.radio_track,
+        music_state: row.music_state, music_version: row.music_version,
         desktop_hosting: row.desktop_hosting, desktop_state: row.desktop_state, desktop_layout: row.desktop_layout, desktop_node_id: row.desktop_node_id,
         desktop_share_id: row.desktop_share_id, desktop_share_url: row.desktop_share_url,
     } : null;
@@ -318,9 +348,10 @@ async function count(agentStreamId) {
 
 async function end(row, party, user) {
     if (!user || Number(user.id) !== Number(party.host_user_id)) fail(403, 'party.not_host', 'Only the host ends the party');
-    await db.run("UPDATE room_parties SET ended_at = now(), playing = false, desktop_state = CASE WHEN party_kind = 'desktop' THEN 'stopped' ELSE desktop_state END WHERE room_id = ? AND ended_at IS NULL", [party.room_id]);
+    await db.run("UPDATE room_parties SET ended_at = now(), playing = false, music_state = NULL, music_version = music_version + 1, desktop_state = CASE WHEN party_kind = 'desktop' THEN 'stopped' ELSE desktop_state END WHERE room_id = ? AND ended_at IS NULL", [party.room_id]);
+    if (party.party_kind === 'desktop') await pool.releaseRoom(party.room_id, 'ended');
     const fresh = await bySlug(row.slug);
-    return view(fresh, partyOf(fresh));
+    return view(fresh, partyOf(fresh), { where: await pool.where(party.room_id) });
 }
 
 async function setDesktopLayout(row, party, user, layout) {
@@ -329,7 +360,7 @@ async function setDesktopLayout(row, party, user, layout) {
     if (layout !== 'watch' && layout !== 'listen') fail(422, 'party.layout', 'Choose Watch or Listen');
     await db.run('UPDATE room_parties SET desktop_layout = ? WHERE room_id = ? AND ended_at IS NULL', [layout, party.room_id]);
     const fresh = await bySlug(row.slug);
-    return view(fresh, partyOf(fresh));
+    return view(fresh, partyOf(fresh), { where: await pool.where(party.room_id) });
 }
 
 module.exports = {

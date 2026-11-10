@@ -8,25 +8,40 @@
 .oc-app > .oc-col-members { overflow: hidden; border-left: 0; }
 .oc-app.is-members > .oc-col-members { overflow-y: auto; border-left: 1px solid var(--oc-line); }
 
-/* ── The rail (72 px): Home, Vibe, your servers, then Add and Explore ── */
-.oc-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0; background: var(--oc-bg); border-right: 1px solid var(--oc-line); overflow-y: auto; scrollbar-width: none; }
+/* ── The rail (72 px on a computer): every place is a tile that carries its name. Home, Global and Vibe, your
+   servers in their own colours (the colour a server has in every list), then New and Explore. A bar beside the tile
+   says where you are: a short one under the pointer, the full one at the open place. The name follows the pointer's
+   tile (chat-shell.js .oc-rail-tip); on a phone it is written beside the tile (below). ── */
+.oc-rail { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 0; background: var(--oc-bg); border-right: 1px solid var(--oc-line); overflow-y: auto; scrollbar-width: none; }
 .oc-rail::-webkit-scrollbar { display: none; }
-.oc-rail-icon { position: relative; display: grid; place-items: center; width: 48px; height: 48px; flex: 0 0 auto; border-radius: 50%; background: var(--oc-panel-2); color: var(--oc-text); font-weight: 800; font-size: .95rem; letter-spacing: .02em; text-decoration: none; transition: border-radius .15s ease, background-color .15s ease; }
-.oc-rail-icon:hover, .oc-rail-icon:focus-visible { border-radius: 16px; }
-.oc-rail-icon.is-active { border-radius: 16px; background: var(--oc-panel-2); }
-.oc-rail .oc-rail-icon.is-active::before { content: ''; position: absolute; left: -12px; top: 10px; bottom: 10px; width: 4px; border-radius: 0 4px 4px 0; background: var(--oc-text); }
-.oc-rail-home, .oc-rail-vibe { background: var(--oc-panel-2); }
-.oc-rail-home .oc-i, .oc-rail-vibe .oc-i { width: 22px; height: 22px; }
+.oc-rail-icon { position: relative; flex: 0 0 auto; margin: 0; padding: 0; border: 0; background: none; color: var(--oc-text); font: inherit; text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.oc-rail-icon { display: grid; place-items: center; width: 72px; height: 48px; }
+.oc-rail-icon[data-oc-server] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.oc-rail-tile { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--oc-panel-2); color: var(--oc-text); font-weight: 800; font-size: .95rem; letter-spacing: .02em; transition: border-radius .18s ease, background-color .18s ease, color .18s ease, transform .16s ease; }
+.oc-rail-tile .oc-i { width: 22px; height: 22px; }
+.oc-rail-icon:hover .oc-rail-tile, .oc-rail-icon:focus-visible .oc-rail-tile, .oc-rail-icon.is-active .oc-rail-tile { border-radius: 16px; }
+.oc-rail-icon:active .oc-rail-tile { transform: scale(.94); }
+.oc-rail-icon:focus-visible { outline: 0; }
+.oc-rail-icon:focus-visible .oc-rail-tile { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+.oc-rail-icon::before { content: ''; position: absolute; left: 0; top: 50%; width: 4px; height: 0; border-radius: 0 4px 4px 0; background: var(--oc-text); transform: translateY(-50%); transition: height .18s ease; }
+.oc-rail-icon:hover::before, .oc-rail-icon:focus-visible::before { height: 16px; }
+.oc-rail-icon.is-active::before { height: 32px; }
+.oc-rail-home:hover .oc-rail-tile, .oc-rail-global:hover .oc-rail-tile, .oc-rail-vibe:hover .oc-rail-tile, .oc-rail-explore:hover .oc-rail-tile { background: color-mix(in srgb, var(--oc-accent) 24%, var(--oc-panel-2)); }
+.oc-rail-home.is-active .oc-rail-tile, .oc-rail-global.is-active .oc-rail-tile, .oc-rail-vibe.is-active .oc-rail-tile, .oc-rail-explore.is-active .oc-rail-tile { background: var(--oc-accent); color: var(--oc-on-accent); }
+.oc-rail-server .oc-rail-tile { background: hsl(var(--oc-hue, 215) 52% 34%); color: #fff; }
+.oc-rail-server:hover .oc-rail-tile { background: hsl(var(--oc-hue, 215) 56% 40%); }
+.oc-rail-add .oc-rail-tile { color: var(--oc-ok); }
+.oc-rail-add:hover .oc-rail-tile { background: var(--oc-ok-fill); color: #06210f; }
+.oc-rail-explore .oc-rail-tile { color: var(--oc-accent); }
+.oc-rail-explore .oc-rail-tile .oc-i { width: 20px; height: 20px; }
 .oc-rail-divider { width: 32px; height: 2px; flex: 0 0 2px; border-radius: 2px; background: var(--oc-line); }
-.oc-rail-dot { position: absolute; right: -6px; bottom: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--oc-red); color: #1a0505; font-size: .66rem; font-weight: 800; line-height: 18px; text-align: center; }
-.oc-rail-add { background: var(--oc-panel-2); color: var(--oc-ok); font-size: 1.5rem; font-weight: 500; }
-.oc-rail-explore { background: var(--oc-panel-2); color: var(--oc-accent); }
-.oc-rail-add:hover, .oc-rail-explore:hover { background: var(--oc-panel); }
-.oc-rail-explore .oc-i { width: 20px; height: 20px; }
+.oc-rail-dot { position: absolute; right: 8px; bottom: -3px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--oc-red-fill); color: #1a0505; font-size: .66rem; font-weight: 800; line-height: 18px; text-align: center; box-shadow: 0 0 0 3px var(--oc-bg); }
+.oc-rail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.oc-rail-more { display: none; }
+.oc-rail-tip { position: fixed; z-index: 60; transform: translate(-4px, -50%); padding: 6px 10px; border-radius: 8px; background: var(--oc-text); color: var(--oc-bg); font-size: .84rem; font-weight: 700; line-height: 1.2; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .12s ease, transform .12s ease; }
+.oc-rail-tip.is-on { opacity: 1; transform: translate(0, -50%); }
 
-/* On a phone the side column opens from the rail: this button. */
-.oc-rail-menu { display: none; place-items: center; width: 44px; height: 44px; flex: 0 0 auto; border: 0; border-radius: 50%; background: var(--oc-panel-2); color: var(--oc-text); cursor: pointer; }
-.oc-rail-menu .oc-i { width: 20px; height: 20px; }
+/* On a phone the side column opens from the strip: this button, with the word for what it lists. */
 
 /* ── The side column (240 px) ── */
 .oc-side { display: flex; flex-direction: column; min-width: 0; padding: 12px 8px 0; overflow-y: auto; border-right: 1px solid var(--oc-line); background: var(--oc-bg); }
@@ -113,14 +128,49 @@
 @media (max-width: 760px) {
   /* The shell takes what the navbar and the app bar leave, so a channel fills the screen and its composer sits at the
      bottom, above the app bar (the body keeps --ovnav-appbar-h of padding for it). */
-  .oc-app { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr);
-    height: calc(100dvh - var(--ovnav-h, 56px) - var(--ovnav-appbar-h, 0px)); min-height: 360px; }
+  .oc-app { height: calc(100dvh - var(--ovnav-h, 56px) - var(--ovnav-appbar-h, 0px)); min-height: 360px; }
   .oc-page { padding: 14px 16px 20px; }
   .oc-app.is-members { grid-template-columns: minmax(0, 1fr); }
-  .oc-rail-menu { display: grid; }
-  .oc-app > .oc-rail { flex-direction: row; justify-content: flex-start; gap: 10px; padding: 8px 10px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--oc-line); min-width: 0; }
+  /* Two levels (11-10; the strip of places across the top is gone). The list level: the rail of places down the left,
+     upright, and beside it the list for the place chosen, with the app's bar at the bottom. A conversation: the whole
+     screen under the site's bar, the way back first in its head, the composer at the bottom edge; no rail, no bottom
+     bar. A page that is not a conversation (Explore, Activity, settings) keeps the rail beside it. */
+  .oc-app { grid-template-columns: 68px minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .oc-app:not(:has(> .oc-rail)) { grid-template-columns: minmax(0, 1fr); }
+  .oc-app > .oc-rail { flex-direction: column; align-items: center; justify-content: flex-start; gap: 10px; padding: 12px 0 16px; overflow: hidden auto; scrollbar-width: none; border: 0; border-right: 1px solid var(--oc-line); min-width: 0; background: color-mix(in srgb, var(--oc-bg) 70%, #000); }
+  .oc-app > .oc-rail::-webkit-scrollbar { display: none; }
+  .oc-rail-icon { position: relative; display: grid; place-items: center; flex: none; width: 48px; height: 48px; padding: 0; border: 0; border-radius: 0; background: none; }
+  .oc-rail-icon::before { content: none; }
+  .oc-rail-tile, .oc-rail-icon:hover .oc-rail-tile, .oc-rail-icon:focus-visible .oc-rail-tile { width: 48px; height: 48px; border-radius: 50%; font-size: .9rem; transition: border-radius .2s ease, background-color .2s ease, transform .12s ease; }
+  .oc-rail-icon.is-active .oc-rail-tile { border-radius: 16px; }
+  .oc-rail-icon:active .oc-rail-tile { transform: scale(.94); }
+  .oc-rail-icon:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; border-radius: 16px; }
+  .oc-rail-tile .oc-i { width: 22px; height: 22px; }
+  .oc-rail-label, .oc-rail-more { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  .oc-rail-icon.is-active::after { content: ""; position: absolute; left: -10px; top: 50%; width: 4px; height: 30px; margin-top: -15px; border-radius: 0 4px 4px 0; background: var(--oc-text); }
+  .oc-rail-dot { position: absolute; right: -2px; bottom: -2px; margin: 0; box-shadow: 0 0 0 3px var(--oc-bg); }
+  .oc-rail-divider { width: 28px; height: 2px; flex: 0 0 2px; border-radius: 2px; }
+  .oc-rail-tip { display: none; }
+  /* A conversation (the middle column has a composer) takes the whole width and the bottom bar's place. */
+  .oc-app:has(> .oc-col-main > :is(.oc-dock, .oc-compose)):not([data-oc-panel="side"]) { grid-template-columns: minmax(0, 1fr); }
+  .oc-app:has(> .oc-col-main > :is(.oc-dock, .oc-compose)):not([data-oc-panel="side"]) > .oc-rail { display: none; }
+  html:has(.oc-app:not([data-oc-panel="side"]) > .oc-col-main > :is(.oc-dock, .oc-compose)) { --ovnav-appbar-h: 0px !important; }
+  html:has(.oc-app:not([data-oc-panel="side"]) > .oc-col-main > :is(.oc-dock, .oc-compose)) .ovnav-appbar { display: none !important; }
+  /* The messages take all the room between the head and the composer (chat.css capped them at 62% of the screen, for
+     the page that had three bars round it). */
+  .oc-app > .oc-col-main > .oc-feed { flex: 1 1 0; min-height: 0; max-height: none; }
+  .oc-app > .oc-col-main > .oc-dock { padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px)); }
+  /* Its head: the way back, the name over one line about it, the tools. One row. */
+  .oc-col-main > .oc-chan-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; grid-template-rows: auto auto; align-items: center; gap: 0 4px; min-height: 52px; padding: 4px 6px 4px 2px; }
+  .oc-chan-head > .oc-tolist { grid-column: 1; grid-row: 1 / 3; }
+  .oc-chan-head > .oc-chan-title { grid-column: 2; grid-row: 1; align-self: end; margin: 0; font-size: 1.04rem; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .oc-chan-head > .oc-chan-topic { grid-column: 2; grid-row: 2; align-self: start; font-size: .76rem; line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .oc-chan-head > .oc-chan-title:not(:has(~ .oc-chan-topic)) { grid-row: 1 / 3; align-self: center; }
+  .oc-chan-head > .oc-chan-tools { grid-column: 3; grid-row: 1 / 3; display: inline-flex; align-items: center; gap: 0; margin: 0; }
+  .oc-chan-head .oc-live { font-size: 0; margin-right: 4px; }
+  .oc-chan-head .oc-live::first-letter { font-size: .7rem; }
+  .oc-app .oc-tolist { display: inline-grid; }
   .oc-app > .oc-side, .oc-app > .oc-col-main, .oc-app > .oc-col-members { min-width: 0; }
-  .oc-app .oc-rail .oc-rail-icon.is-active::before { left: 9px; right: 9px; top: auto; bottom: -8px; width: auto; height: 4px; border-radius: 4px 4px 0 0; }
   .oc-app > .oc-side, .oc-app > .oc-col-members { display: none; }
   .oc-app[data-oc-panel="side"] > .oc-side { display: flex; border-right: 0; }
   .oc-app[data-oc-panel="members"] > .oc-col-members { display: block; border-left: 0; }
@@ -131,6 +181,10 @@
   .oc-chan { min-height: 44px; }
   .oc-side-list .oc-row > a, .oc-side-list .oc-row > span { min-height: 44px; }
 }
+
+/* Home, Vibe and Servers are the bottom bar's on a phone. That bar is drawn by a script, so the strip leaves them out
+   wherever scripts run, from the first paint (a strip that waited to see the bar showed three chips and took them
+   away). Without scripts there is no bottom bar and the strip keeps all of them. */
 
 /* A friend row is a button that opens the conversation; the form posts the username. */
 .oc-side-list .oc-row form { width: 100%; }
@@ -254,3 +308,91 @@ fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
 .oc-app .ovt-main { min-height: 0; height: 100%; }
 .oc-app .ovt-scroll { overflow-y: auto; min-height: 0; }
 .oc-app .ovt-head, .oc-app .ovt-dock { position: static; }
+
+/* ── A server's sheet: what it is, your rank in it, and what you may do with it. Hold a server (or right-click it),
+   tap the open server's chip again, or the three dots on its card. A card in the middle on a computer; on a phone it
+   rises from the bottom edge. ── */
+.oc-ssheet { width: min(380px, calc(100vw - 24px)); max-height: min(560px, calc(100dvh - 24px)); margin: auto; padding: 0; border: 1px solid var(--oc-line); border-radius: 18px; background: var(--oc-panel); color: var(--oc-text); box-shadow: 0 24px 60px rgba(0, 0, 0, .5); overflow-y: auto; }
+.oc-ssheet:focus { outline: 0; }
+.oc-ssheet::backdrop { background: rgba(4, 8, 16, .58); }
+.oc-ssheet[open] { animation: oc-ssheet-in .22s cubic-bezier(.2, .9, .3, 1.12); }
+@keyframes oc-ssheet-in { from { opacity: 0; transform: translateY(calc(14px * var(--ov-move, 1))) scale(.98); } }
+.oc-ssheet [hidden] { display: none !important; }
+.oc-ssheet-head { display: flex; align-items: center; gap: 12px; padding: 16px 10px 14px 16px; }
+.oc-ssheet-head .oc-srv-icon { width: 48px; height: 48px; border-radius: 15px; font-size: 1rem; }
+.oc-ssheet-id { flex: 1; min-width: 0; }
+.oc-ssheet-id h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; font-size: 1.1rem; line-height: 1.25; overflow-wrap: anywhere; }
+.oc-ssheet-id h2 .oc-badge { margin: 0; }
+.oc-ssheet-id p { margin: 3px 0 0; font-size: .88rem; }
+.oc-ssheet-close { flex: none; align-self: flex-start; }
+.oc-ssheet-list { display: grid; gap: 2px; padding: 6px 8px 10px; border-top: 1px solid var(--oc-line); }
+.oc-ssheet-list form { margin: 0; }
+.oc-ssheet .oc-pop-item { min-height: 48px; border: 0; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+.oc-ssheet .oc-pop-item .oc-i { width: 20px; height: 20px; color: var(--oc-muted); }
+.oc-ssheet .oc-pop-item b { display: block; font-weight: 600; }
+.oc-ssheet .oc-pop-item small { display: block; font-size: .8rem; font-weight: 400; color: var(--oc-muted); }
+.oc-ssheet-danger > summary { list-style: none; color: var(--oc-red); }
+.oc-ssheet-danger > summary::-webkit-details-marker { display: none; }
+.oc-ssheet .oc-ssheet-danger > summary .oc-i { color: currentColor; }
+.oc-ssheet-confirm { margin: 2px 0 4px; padding: 12px; border-radius: 12px; background: color-mix(in srgb, var(--oc-red-fill) 11%, transparent); }
+.oc-ssheet-confirm p { margin: 0 0 10px; font-size: .92rem; }
+.oc-ssheet-confirm .oc-ssheet-go { display: flex; gap: 8px; margin: 0; }
+.oc-ssheet-go button { flex: 1; min-height: 44px; }
+@media (max-width: 760px) {
+  .oc-ssheet { width: 100%; max-width: none; max-height: 86dvh; margin: auto 0 0; border-width: 1px 0 0; border-radius: 22px 22px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .oc-ssheet[open] { animation: oc-ssheet-up .26s cubic-bezier(.2, .9, .3, 1.06); }
+  .oc-ssheet::before { content: ''; display: block; width: 40px; height: 4px; margin: 8px auto -4px; border-radius: 4px; background: var(--oc-line); }
+}
+@keyframes oc-ssheet-up { from { opacity: .6; transform: translateY(calc(100% * var(--ov-move, 1))); } }
+
+/* A server's card where you are in it: your rank in words, Open, and the three dots for its sheet. */
+.oc-card-yours { color: var(--oc-text); font-weight: 700; }
+.oc-card > .oc-card-go { display: flex; gap: 8px; margin: 6px 14px 0; }
+.oc-card-go > .oc-button { flex: 1; text-align: center; }
+.oc-card-go > .oc-card-more { flex: none; border: 1px solid var(--oc-line); border-radius: 10px; color: var(--oc-text); }
+
+/* ── Activity: what is waiting for you, by kind; nothing waiting is said as that ── */
+.oc-act-sec { margin: 0 0 18px; }
+.oc-act-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; }
+.oc-act-who { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.oc-act-row button { min-height: 40px; flex: none; }
+.oc-act-servers, .oc-act-chans { list-style: none; margin: 0; padding: 0; }
+.oc-act-servers { display: grid; gap: 10px; }
+.oc-act-server { padding: 6px; border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel); }
+.oc-act-server-head { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 4px 8px; border-radius: 10px; color: var(--oc-text); text-decoration: none; }
+.oc-act-server-head:hover { background: var(--oc-panel-2); }
+.oc-act-server-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-act-chans { display: grid; gap: 1px; }
+.oc-act-server .oc-act-chans { padding-left: 42px; }
+.oc-act-clear { display: grid; justify-items: center; gap: 6px; max-width: 420px; margin: 9vh auto 0; text-align: center; }
+.oc-act-clear-mark { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: color-mix(in srgb, var(--oc-ok-fill) 16%, transparent); color: var(--oc-ok); animation: oc-act-pop .42s cubic-bezier(.2, .9, .3, 1.4) both; }
+.oc-act-clear-mark .oc-i { width: 30px; height: 30px; stroke-width: 2.4; }
+.oc-act-clear h2 { margin: 8px 0 0; font-size: 1.2rem; }
+.oc-act-clear p { margin: 0; }
+.oc-act-clear .oc-act-clear-go { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+.oc-act-clear-go .oc-button { min-height: 44px; display: inline-flex; align-items: center; }
+@keyframes oc-act-pop { from { opacity: 0; transform: scale(calc(1 - .4 * var(--ov-move, 1))); } }
+
+/* The way to the list is a phone's; on a computer the list is beside the conversation. */
+.oc-tolist { display: none; }
+
+/* ── Messages, grouped by who said them ────────────────────────────────────────────────────────────────────────────
+   A run of messages from one person within a few minutes is one group: their mark, their name, where it was sent from
+   and the time once; the next lines are just the words (their time shows on a press). A line says when the day changes. */
+.oc-feed.is-grouped { padding: 4px 0 10px; }
+.oc-feed.is-grouped > .oc-msg { position: relative; display: block; margin: 0; padding: 1px 14px 1px 62px; line-height: 1.42; border: 0; }
+.oc-feed.is-grouped > .oc-msg.is-first { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; margin-top: 14px; }
+.oc-feed.is-grouped > .oc-msg.is-first::before { content: attr(data-initial); position: absolute; left: 14px; top: 1px; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; font-size: .92rem; font-weight: 800; color: var(--oc-text); background: color-mix(in srgb, var(--nc, var(--oc-accent)) 34%, var(--oc-panel-2)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nc, var(--oc-accent)) 50%, transparent); }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-name { order: 1; font-weight: 750; }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-where { order: 2; font-size: .74rem; padding: 1px 7px; border-radius: 999px; color: var(--oc-muted); background: color-mix(in srgb, var(--oc-text) 7%, transparent); text-decoration: none; }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-time { order: 3; font-size: .72rem; color: var(--oc-muted); }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-text { order: 4; flex: 1 0 100%; }
+.oc-feed.is-grouped > .oc-msg.is-cont > :is(.oc-name, .oc-where) { display: none; }
+.oc-feed.is-grouped > .oc-msg.is-cont > .oc-time { position: absolute; left: 8px; top: 4px; width: 46px; text-align: right; font-size: .66rem; color: var(--oc-muted); opacity: 0; transition: opacity .12s ease; }
+.oc-feed.is-grouped > .oc-msg.is-cont:is(:hover, :active, :focus-within) > .oc-time { opacity: 1; }
+.oc-feed.is-grouped > .oc-msg:is(:hover, :active) { background: color-mix(in srgb, var(--oc-text) 3.5%, transparent); }
+.oc-feed.is-grouped > .oc-msg .oc-text { overflow-wrap: anywhere; }
+.oc-feed.is-grouped > .oc-day { display: flex; align-items: center; gap: 12px; margin: 18px 14px 4px; font-size: .74rem; font-weight: 700; color: var(--oc-muted); list-style: none; }
+.oc-feed.is-grouped > .oc-day::before, .oc-feed.is-grouped > .oc-day::after { content: ""; flex: 1; height: 1px; background: var(--oc-line); }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-time { display: inline; margin: 0; }
+.oc-feed.is-grouped > .oc-msg.is-cont > .oc-time { display: block; margin: 0; }

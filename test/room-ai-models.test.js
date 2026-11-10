@@ -109,11 +109,11 @@ t('@sage answers through the key (a credentialed run); outside the room\'s daily
         assert.ok(run, 'a run went out');
         assert.deepStrictEqual([run.workflow, run.credential], ['chat.member.reply', { subject: h.live.users.get(ann.id).subject_id }]);
         assert.strictEqual(run.attribution.type, 'room');
-        let last = (await api('GET', '/rooms/model-night/messages', bob)).body.messages.pop();
+        let last = (await api('GET', '/rooms/model-night/messages', bob)).body.messages[0];
         assert.deepStrictEqual([last.display_name, last.message], ['Sage', 'From gpt-4.1-mini: hello Bob']);
         await api('POST', '/rooms/model-night/messages', bob, { message: '@pip hi' });
         await settle();
-        last = (await api('GET', '/rooms/model-night/messages', bob)).body.messages.pop();
+        last = (await api('GET', '/rooms/model-night/messages', bob)).body.messages[0];
         assert.match(last.message, /my limit/, 'OpenVibe\'s model keeps the room\'s cap');
         assert.strictEqual(shared.length, 0);
     } finally { config.ai.memberRepliesPerDay = keep; }

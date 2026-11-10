@@ -12,7 +12,8 @@
  *                             POST /messages/:id/block blocks the other person of a 1:1 conversation;
  *                             POST /messages/:id/call rings them (the call-user route) and opens /call/<channel>
  *   GET  /call/:channel       a 1:1 call's page (its caller and the people it invited): public/web/call.js joins
- *                             it, and while the caller waits it says ringing until the answer comes
+ *                             it only when the person presses "Turn on microphone", and while the caller waits
+ *                             it says ringing until the answer comes
  *   GET  /rooms, /r/:slug     rooms: community, call (a voice/video call in the page, public/web/call.js)
  *                             and system (staff announcements); /r/:slug/settings for moderators
  *   GET  /settings            your portable chat settings (Network module chat.preferences); POST saves
@@ -38,6 +39,7 @@ const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
 const cache = require('openvibe-shared/cache-policy');
 const { renderPage, contentSecurityPolicy, assetVersion, esc, SITE_NAME } = require('./layout');
+const { insightBlock } = require('./insight-block');
 const { createSessionRoutes } = require('./session');
 const { createDiscoveryRoutes, homeJsonLd } = require('./discovery');
 const home = require('./home');
@@ -124,13 +126,13 @@ function globalMessage(m) {
     const name = fx ? `<span class="ov-fx ${fx}">${esc(m.display_name || m.username || m.anon_id || 'someone')}</span>` : esc(m.display_name || m.username || m.anon_id || 'someone');
     const who = handle ? `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(handle)}" style="--nc:${esc(/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? m.profile_color : 'inherit')}">${hatHtml(m)}${name}</a>` : `<span class="oc-name oc-anon">${name}</span>`;
     const where = m.stream_channel ? ` <a class="oc-where" href="${LIVE}/@${encodeURIComponent(m.stream_channel)}" title="Sent from ${esc(m.stream_channel)}'s channel">@${esc(m.stream_channel)}</a>` : '';
-    return `<li class="oc-msg" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who}${roleBadge(m.role)}${where} <span class="oc-text">${linkify(m.message)}</span>${ui.linkCard(m.card)}</li>`;
+    return `<li class="oc-msg" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who}${roleBadge(m.role)}${where} <span class="oc-text">${linkify(m.message)}</span>${ui.messageCards(m)}</li>`;
 }
 function dmMessage(m, me, view = 'room') {
     const t = hhmm(m.created_at);
     const mine = me && m.sender_id === me.id;
-    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div>${ui.linkCard(m.card)}<time class="oc-bubble-time" datetime="${t.iso}">${t.text}</time></li>`;
-    return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${ui.linkCard(m.card)}</li>`;
+    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div>${ui.messageCards(m)}<time class="oc-bubble-time" datetime="${t.iso}">${t.text}</time></li>`;
+    return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${ui.messageCards(m)}</li>`;
 }
 // Vibe, OpenVibe's assistant, as a room's AI member (one click on the room's settings; a person's own chats with it are
 // server/rooms/vibe.js): how it should be in a group.
@@ -184,6 +186,7 @@ function createWebRoutes({ config }) {
             messages: await n(async () => await dm.getTotalUnread(actor.user.id)),
             rooms: await n(async () => await rooms.unreadTotal(actor.user)),
             servers: await n(async () => await rooms.unreadTotal(actor.user, { servers: true })),
+            activity: await n(async () => await require('../chat/activity').unreadCount(actor.user)),
         };
     };
     // Under the global room on the front page: what openvibe.chat is for (openvibe-shared/showcase), each card a real
@@ -211,7 +214,7 @@ function createWebRoutes({ config }) {
         res.status(status).set('Cache-Control', o.cache || cache.htmlHeaders({ private: true })).set('Content-Security-Policy', contentSecurityPolicy(nonce)).type('html')
             .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: await countsOf(actor), nonce, ringScript: actor.kind === 'user' && !!(config.calls && config.calls.enabled), ...o }));
     };
-    const needUser = async (req, res) => {
+    const needUser = async (req, res, { status = 401 } = {}) => {
         const actor = await viewerOf(req);
         if (actor.kind === 'user') return actor;
         // A gated page answers here, noindex, instead of redirecting to Network sign-in: a crawler that
@@ -225,7 +228,7 @@ function createWebRoutes({ config }) {
         // The visible link goes back to the path only. A query string on a private page holds words that must
         // never come back in an anonymous response — the security suite reads every 401 body for the private
         // room's words, and echoing ?q= here put them there (SEO-7 review, 2026-10-29).
-        await page(req, res, 401, {
+        await page(req, res, status, {
             actor, title: 'Sign in to continue', path: req.path, active: null, footer: 'compact', robots: 'noindex, nofollow',
             body: `<h1>Sign in to continue</h1>
 <p class="oc-muted">This page is for OpenVibe accounts. Sign in and you come straight back here.</p>
@@ -250,7 +253,7 @@ function createWebRoutes({ config }) {
     // ── Global chat ──
     router.get('/', async (req, res) => {
         const actor = await viewerOf(req);
-        const { messages, latest_id } = await historyStore.page('global', { limit: 60 });
+        const { messages, latest_id, more: historyMore } = await historyStore.page('global', { limit: 50 });
         // Not the lines of people this reader blocked on the network (chat/network-blocks.js).
         const hidden = actor.kind === 'user' ? await require('../chat/network-blocks').blockedUserIds(actor.user) : new Set();
         // And not what OpenVibe's global room does not show of other rooms' lines (chat/global-standard.js).
@@ -271,10 +274,14 @@ function createWebRoutes({ config }) {
             }
         } catch { /* the names stay plain */ }
         const composer = actor.kind === 'user'
-            ? (actor.user.is_banned ? notice('error', 'Your account is banned from chat.') : `<div class="oc-dock"><form class="oc-compose" method="post" action="/send" id="oc-compose"><label for="oc-input" class="oc-sr">Message to everyone</label><textarea id="oc-input" name="message" maxlength="500" rows="1" required placeholder="Message everyone on OpenVibe"></textarea><button type="submit" class="oc-send" aria-label="Send" title="Send">${IC.send}</button></form></div>`)
+            ? (actor.user.is_banned ? notice('error', 'Your account is banned from chat.') : shell.composer({ action: '/send', label: 'Message to everyone', placeholder: 'Message everyone on OpenVibe', max: 500 }))
             : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=%2F">Sign in with OpenVibe</a> to chat. Anyone can read along.</p>`;
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const signedIn = actor.kind === 'user';
+        // The room's AI insight (server/chat/room-insight.js): a local read of the stored summary, so the page
+        // never waits on OpenVibe.AI. Public like the room: signed out too.
+        const insight = await require('../chat/room-insight').global().catch(() => null);
+        const insightHtml = insight ? insightBlock(insight) : '';
         // Around the room: the real activity (server/web/home.js, read once a minute). Someone signed in gets the app: the
         // room first at the screen's height, Ask Vibe in one line, compact lists, and no introduction or questions (those,
         // the hero and the full footer, are for people who are new here, and for search).
@@ -294,7 +301,7 @@ function createWebRoutes({ config }) {
         ].filter((pane) => pane.html);
         const explore = pickBlock({ key: 'explore', label: 'Explore OpenVibe.Chat', head: 'Explore OpenVibe.Chat', panes });
         const inlineStyles = [];
-        const feedList = `<ol class="oc-feed${signedIn ? ' oc-srv-feed' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${shown.map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>`;
+        const feedList = `<ol class="oc-feed${signedIn ? ' oc-srv-feed' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages"><li id="oc-history-state" class="oc-muted" hidden aria-live="polite"></li>${shown.slice().reverse().map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>`;
         // Someone signed in gets the app shell (the plan, 2026-11-09, stage V2): Global chat is a destination on the
         // rail, the side column is Home's, and the feed fills the middle with the composer at its foot.
         const shellBody = signedIn ? await (async () => {
@@ -314,10 +321,10 @@ function createWebRoutes({ config }) {
             const contacts = await require('../chat/contacts').of(me.id);
             const mineServers = (await require('../rooms/servers').list(me)).mine;
             return shell.shell({
-                rail: shell.rail({ global: true, dmUnread: dms.reduce((n, d) => n + d.unread, 0), servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                rail: shell.rail({ global: true, dmUnread: dms.reduce((n, d) => n + d.unread, 0), servers: shell.railServers(mineServers) }),
                 side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
-                main: `<header class="oc-chan-head"><h1 id="oc-h" class="oc-chan-title">Global chat</h1><span class="oc-muted oc-chan-topic">Everyone on OpenVibe${home.peopleLine(activity)}</span><span class="oc-chan-tools"><span class="oc-live" id="oc-live" hidden>● live</span><a class="oc-icon-btn" href="/vibe" aria-label="Chat with Vibe" title="Chat with Vibe">${IC.spark}</a><a class="oc-icon-btn" href="/settings" aria-label="Chat settings" title="Chat settings">${IC.gear}</a></span></header>
+                main: `<header class="oc-chan-head">${shell.toList}<h1 id="oc-h" class="oc-chan-title">Global chat</h1><span class="oc-muted oc-chan-topic">Everyone on OpenVibe${home.peopleLine(activity)}</span><span class="oc-chan-tools"><span class="oc-live" id="oc-live" hidden>● live</span><a class="oc-icon-btn" href="/vibe" aria-label="Chat with Vibe" title="Chat with Vibe">${IC.spark}</a><a class="oc-icon-btn" href="/settings" aria-label="Chat settings" title="Chat settings">${IC.gear}</a></span>${insightHtml}</header>
 ${error}
 ${feedList}
 ${composer}`,
@@ -329,7 +336,7 @@ ${composer}`,
             description: 'Chat with everyone on OpenVibe, start a server with text and voice channels, message friends and call them. Free and open source.',
             // The same JSON-LD for every reader (discovery.test.js): the questions are the site's, shown to visitors.
             jsonLd: [...homeJsonLd(config), sharedSeo.jsonLd.faq(home.FAQ)],
-            page: { view: 'global', latest: latest_id, signedIn, me: signedIn ? actor.user.username : null },
+            page: { view: 'global', latest: latest_id, historyMore, signedIn, me: signedIn ? actor.user.username : null },
             shell: signedIn, footer: signedIn ? 'none' : 'full',
             body: signedIn ? shellBody : `<header class="oc-hero">
 <h1>Chat with everyone on OpenVibe, or start your own server</h1>
@@ -340,6 +347,7 @@ ${parts.vibe}
 <section class="oc-room" aria-labelledby="oc-h">
 <h2 id="oc-h">Global chat</h2>
 <p class="oc-muted">One room for everyone on OpenVibe: streamers, viewers and players, from every site. <span class="oc-live" id="oc-live" hidden>● live</span></p>
+${insightHtml}
 ${error}
 ${feedList}
 ${composer}
@@ -366,12 +374,92 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
     // ── Direct messages ──
     const dmApi = require('../chat/dm-routes');
     const { ICONS: IC } = require('./icons');
+    /**
+     * The Global room's AI insight, plain markup behind the head's AI button (plan 2026-11-10, part 1).
+     * Server-rendered, so it reads without JavaScript; no JavaScript is needed to open it either (<details>).
+     * The look is Fable's: this is only text, topics and the recent timeline in kit classes.
+     */
+    const insightBlock = (insight) => {
+        const o = insight.overview || {};
+        const topics = (o.topics || []).slice(0, 8);
+        const events = (insight.timeline || []).slice(0, 6);
+        const ready = insight.state === 'ready' && !!o.text;
+        const when = o.updated_at ? ui.when(o.updated_at) : null;
+        const meta = [o.people ? `${o.people} ${o.people === 1 ? 'person' : 'people'}` : '', o.messages ? `${o.messages} messages` : '', when && when.text ? `updated ${when.text}` : ''].filter(Boolean);
+        return `<details class="oc-more oc-insight"><summary class="oc-icon-btn" aria-label="AI overview of this room" title="AI overview">${IC.spark}</summary><div class="oc-pop oc-insight-pop">`
+            + (ready ? `<p>${esc(o.text)}</p>` : '<p class="oc-muted">Quiet right now: there is nothing new to summarise.</p>')
+            + (topics.length ? `<ul class="oc-insight-topics">${topics.map((t) => `<li>${esc(t.label)} <span class="oc-muted">${Number(t.count) || 0}</span></li>`).join('')}</ul>` : '')
+            + (events.length ? `<ol class="oc-insight-timeline">${events.map((e) => `<li><time>${esc(ui.when(e.at).text || '')}</time> <strong>${esc(e.title)}</strong>${e.text ? ` <span class="oc-muted">${esc(e.text)}</span>` : ''}</li>`).join('')}</ol>` : '')
+            + (meta.length ? `<p class="oc-muted oc-insight-meta">${esc(meta.join(' · '))}</p>` : '')
+            + '</div></details>';
+    };
     /** One conversation in a list: initials, name and time on one line, the last message under it, unread marked. */
     const convRow = ({ href, title, preview, at, unread = 0, badge = '', personPresence = null, avatarUrl = '' }) => {
         const t = ui.when(at);
         return `<li class="oc-row${unread ? ' oc-unread' : ''}"><a href="${esc(href)}">${ui.initials(title, personPresence, { avatarUrl })}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(title)}</strong>${badge}${t.text ? `<time datetime="${t.iso}">${esc(t.text)}</time>` : ''}</span>`
             + `<span class="oc-row-sub">${esc(preview)}${unread ? `<span class="oc-dot" aria-label="${unread} new">${unread > 9 ? '9+' : unread}</span>` : ''}</span></span></a></li>`;
     };
+    // ── Activity (the bottom bar's fourth place): what is waiting for you, in one page. People who asked to be your
+    // friend, conversations with something new, and the channels and rooms with unread messages, each a row that opens
+    // the place. Nothing waiting is said as that, with the two places most people go next. ──
+    router.get('/activity', async (req, res) => {
+        // 200 signed out too: Activity is a page people can be sent to, with the way to sign in in it.
+        const actor = await needUser(req, res, { status: 200 }); if (!actor) return;
+        const me = actor.user;
+        const serversApi = require('../rooms/servers');
+        const convs = await dm.getConversations(me.id);
+        const participants = await Promise.all(convs.map((c) => dm.getParticipants(c.id)));
+        await presence.attachTo(me.subject_id, participants.flat());
+        const dms = convs.map((c, i) => {
+            const others = participants[i].filter((p) => p.id !== me.id);
+            return {
+                id: c.id, title: c.name || others.map((p) => p.display_name || p.username).join(', ') || 'Just you',
+                preview: c.last_message ? String(c.last_message).slice(0, 120) : 'No messages yet', at: c.last_message_at,
+                unread: Number(c.unread_count) || 0, presence: others.length === 1 ? others[0].presence : null,
+                avatarUrl: others.length === 1 ? others[0].avatar_url : '',
+            };
+        });
+        const unread = dms.reduce((n, d) => n + d.unread, 0);
+        const mineServers = (await serversApi.list(me)).mine;
+        const contacts = await require('../chat/contacts').of(me.id);
+        // The channels with something new, by server (a dozen servers at most: the rest are on the Servers page).
+        const busy = mineServers.filter((sv) => sv.unread).slice(0, 12);
+        const busyChannels = await Promise.all(busy.map(async (sv) => {
+            try { return (await serversApi.channels(await serversApi.bySlug(sv.slug), me)).filter((ch) => ch.unread); } catch { return []; }
+        }));
+        const myRooms = (await require('../rooms/rooms').list(me)).mine.filter((r) => r.unread);
+        const requests = contacts.requests || [];
+        const requestRows = requests.map((r) => `<li class="oc-row oc-act-row"><span class="oc-act-who">${ui.initials(r.display_name || r.username || '?', null, { avatarUrl: r.avatar_url })}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(r.display_name || r.username || '?')}</strong></span><span class="oc-row-sub">@${esc(r.username || '')} asked to be your friend</span></span></span><form class="oc-inline" method="post" action="/messages/contacts/${Number(r.id)}/accept"><button type="submit">Accept</button></form></li>`);
+        const convRows = dms.filter((d) => d.unread).map((d) => convRow({ href: `/messages/${d.id}`, title: d.title, preview: d.preview, at: d.at, unread: d.unread, personPresence: d.presence, avatarUrl: d.avatarUrl }));
+        const serverBlocks = busy.map((sv, i) => `<li class="oc-act-server"><a class="oc-act-server-head" href="/s/${esc(sv.slug)}">${ui.serverMark(sv)}<strong>${esc(sv.name)}</strong></a>
+<ul class="oc-act-chans">${busyChannels[i].map((ch) => `<li><a class="oc-chan is-unread" href="/s/${esc(sv.slug)}/${esc(ch.slug)}">${ch.kind === 'voice' ? IC.voice : '<span class="oc-chan-hash" aria-hidden="true">#</span>'}<span class="oc-chan-name">${esc(ch.name)}</span><span class="oc-chan-dot" aria-label="${ch.unread} unread">${ch.unread > 99 ? '99+' : ch.unread}</span></a></li>`).join('')}</ul></li>`);
+        const roomRows = myRooms.map((r) => `<li><a class="oc-chan is-unread" href="/r/${esc(r.slug)}"><span class="oc-chan-hash" aria-hidden="true">#</span><span class="oc-chan-name">${esc(r.name)}</span><span class="oc-chan-dot" aria-label="${r.unread} unread">${r.unread > 99 ? '99+' : r.unread}</span></a></li>`);
+        const section = (id, title, n, inner) => (n ? `<section class="oc-act-sec" aria-labelledby="${id}"><h2 class="oc-list-head" id="${id}">${title} <span class="oc-muted">${n}</span></h2>${inner}</section>` : '');
+        const waiting = requests.length + convRows.length + busy.length + roomRows.length;
+        // What happened to this person, above what is waiting for them (server/web/activity.js). Opening the page
+        // reads it: the rows below still show what was new on this visit.
+        const happened = await require('./activity').whatHappened(me);
+        const body = waiting
+            ? [
+                section('oc-act-requests', 'Friend requests', requests.length, `<ul class="oc-list">${requestRows.join('')}</ul>`),
+                section('oc-act-convs', 'New messages', convRows.length, `<ul class="oc-list">${convRows.join('\n')}</ul>`),
+                section('oc-act-servers', 'In your servers', busy.length, `<ul class="oc-act-servers">${serverBlocks.join('')}</ul>`),
+                section('oc-act-rooms', 'In your rooms', roomRows.length, `<ul class="oc-act-chans oc-act-rooms">${roomRows.join('')}</ul>`),
+            ].join('\n')
+            : `<section class="oc-act-clear"><span class="oc-act-clear-mark" aria-hidden="true">${IC.check}</span><h2>You are all caught up</h2><p class="oc-muted">New messages, friend requests and unread channels show up here.</p><p class="oc-act-clear-go"><a class="oc-button" href="/messages">Open your messages</a><a class="oc-button oc-button--quiet" href="/servers">Find a server</a></p></section>`;
+        await page(req, res, 200, {
+            actor, shell: true, title: 'Activity', path: '/activity', active: 'activity', robots: 'noindex, nofollow', footer: 'none',
+            body: shell.shell({
+                rail: shell.rail({ dmUnread: unread, servers: shell.railServers(mineServers), list: 'Chats' }),
+                side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
+                sideLabel: 'Home',
+                main: `${ui.head({ title: 'Activity', sub: waiting ? 'What is waiting for you' : 'Nothing is waiting for you' })}\n${happened}\n${body}`,
+                mainLabel: 'Activity',
+                page: true,
+            }),
+        });
+    });
+
     router.get('/messages', async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         const me = actor.user;
@@ -413,7 +501,7 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
             actor, shell: true, title: 'Messages', path: '/messages', active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'none',
             page: { view: 'inbox', unread, me: me.id },
             body: shell.shell({
-                rail: shell.rail({ home: true, dmUnread: unread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                rail: shell.rail({ home: true, dmUnread: unread, servers: shell.railServers(mineServers) }),
                 side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
                 main: `${ui.head({ title: 'Messages', sub: `<span id="oc-inbox-status" aria-live="polite">${unread ? `${unread} unread` : 'All caught up'}</span>`, actions: [`<details class="oc-new-picker"><summary class="oc-icon-btn" aria-label="New message" title="New message">${IC.pencil}<span>New</span></summary><div class="oc-new-pop"><label for="oc-people-search">Find someone</label><input id="oc-people-search" type="search" minlength="2" autocomplete="off" placeholder="Search people"><ul id="oc-people-results" aria-live="polite">${recentPicker || '<li class="oc-muted">Search by name or username</li>'}</ul></div></details>`] })}${error}${done}
@@ -483,7 +571,8 @@ ${blockedList}`,
         await presence.attachTo(me.subject_id, others);
         const conv = await dm.getConversation(id);
         const title = (conv && conv.name) || others.map((p) => p.display_name || p.username).join(', ') || 'Conversation';
-        const msgs = (await dm.getMessages(id, 60)).slice().sort((a, b) => a.id - b.id);
+        const dmPage = await dm.getMessagesPage(id, { limit: 50 });
+        const msgs = dmPage.messages.slice().reverse();
         const savedView = await db.get('SELECT view FROM dm_view_preferences WHERE user_id = ? AND conversation_id = ?', [me.id, id]).catch(() => null);
         const viewKind = others.length <= 1 ? 'one_to_one' : 'group';
         const viewDefaults = await require('../chat/view-defaults').of(me.id);
@@ -501,7 +590,7 @@ ${blockedList}`,
         const liveHref = otherPresence && (otherPresence.channel_url || otherPresence.url);
         const subLine = other ? (ui.presenceLine(otherPresence, { liveHref }) || `@${esc(other.username || '')}`) : `${others.length + 1} people`;
         const avatar = other ? ui.initials(other.display_name || other.username || '?', otherPresence, { large: true, id: 'oc-dm-avatar', avatarUrl: other.avatar_url }) : '';
-        let composer = `<div class="oc-dock"><form class="oc-compose" method="post" action="/messages/${id}" id="oc-compose"><label for="oc-input" class="oc-sr">Reply</label><textarea id="oc-input" name="message" maxlength="2000" rows="1" required placeholder="Write a message"></textarea><button type="submit" class="oc-send" aria-label="Send" title="Send">${IC.send}</button></form></div>`;
+        let composer = shell.composer({ action: `/messages/${id}`, label: 'Reply', placeholder: 'Write a message' });
         if (iBlocked) composer = `${notice('error', `You blocked ${other.display_name || other.username}. Neither of you can message the other.`)}<form class="oc-inline" method="post" action="/messages/unblock/${Number(other.id)}"><input type="hidden" name="back" value="/messages/${id}"><button type="submit">Unblock ${otherName}</button></form>`;
         else if (closed) composer = notice('error', 'You cannot message this person.');
         // Blocking is in the conversation's "more" menu: one tap on an icon in the header should never block someone.
@@ -527,13 +616,13 @@ ${blockedList}`,
         const dmUnread = dms.reduce((n, d) => n + (d.current ? 0 : d.unread), 0);
         await page(req, res, 200, {
             actor, shell: true, title, path: `/messages/${id}`, active: 'messages', robots: 'noindex, nofollow', script: true, footer: 'none',
-            page: { view: 'dm', conversation: id, messageView: view, latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me.id, other: other ? { id: other.id, username: other.username || '' } : null },
+            page: { view: 'dm', conversation: id, messageView: view, latest: msgs.length ? msgs[msgs.length - 1].id : 0, historyMore: dmPage.more, me: me.id, other: other ? { id: other.id, username: other.username || '' } : null },
             body: shell.shell({
-                rail: shell.rail({ home: true, dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                rail: shell.rail({ home: true, dmUnread, servers: shell.railServers(mineServers) }),
                 side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
                 main: `${ui.head({ title: esc(title), sub: `<span id="oc-dm-status">${subLine}</span>`, avatar, back: { href: '/messages', label: 'All messages' }, actions: [callForm, tools].filter(Boolean) })}${error}
-<ol class="oc-feed oc-room-feed${view === 'bubbles' ? ' oc-bubbles' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => dmMessage(m, me, view)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
+<ol class="oc-feed oc-room-feed${view === 'bubbles' ? ' oc-bubbles' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages"><li id="oc-history-state" class="oc-muted" hidden aria-live="polite"></li>${msgs.map((m) => dmMessage(m, me, view)).join('\n') || '<li class="oc-empty oc-muted">No messages yet.</li>'}</ol>
 ${composer}`,
                 mainLabel: title,
             }),
@@ -581,13 +670,14 @@ ${composer}`,
             : '<li class="oc-muted">Nobody is in the call yet.</li>';
         await page(req, res, 200, {
             actor, title, path: `/call/${ch.id}`, active: 'messages', robots: 'noindex, nofollow', callScript: true,
-            page: { view: 'call', me: me.id, call: { channel: ch.id, join: true, talk: true, auto: true, ring: ringing ? { id: Number(ringing.id), name: nameOf(ringing) } : null } },
+            page: { view: 'call', me: me.id, call: { channel: ch.id, join: true, talk: true, ring: ringing ? { id: Number(ringing.id), name: nameOf(ringing) } : null } },
             body: `<p><a href="${backLink}">← Back to the conversation</a></p>
 <section class="oc-call oc-call-page" aria-labelledby="oc-call-h" id="oc-call">
 <h1 id="oc-call-h">${esc(title)} <span class="oc-muted oc-call-count" id="oc-call-count">${ch.participantCount ? `· ${ch.participantCount} in` : ''}</span></h1>
 <p class="oc-muted" id="oc-call-how">A voice call, peer to peer: your microphone goes only to the people in it.</p>
 <ul class="oc-call-people" id="oc-call-people">${people}</ul>
-<p class="oc-call-controls"><button type="button" id="oc-call-join" hidden>Join the call</button> <button type="button" id="oc-call-mute" hidden aria-pressed="false">Mute</button> <button type="button" id="oc-call-leave" hidden>Leave the call</button></p>
+<p class="oc-call-controls"><button type="button" id="oc-call-join" hidden>Turn on microphone</button> <button type="button" id="oc-call-mute" hidden aria-pressed="false">Mute</button> <button type="button" id="oc-call-leave" hidden>Leave the call</button></p>
+<p class="oc-muted oc-call-join-note">Join the voice call with the people listed above. Nothing is asked until you press it.</p>
 <p class="oc-muted oc-call-status" id="oc-call-status" role="status" aria-live="polite"></p>
 <noscript><p class="oc-muted">A call needs JavaScript.</p></noscript>
 </section>`,
@@ -645,7 +735,7 @@ ${composer}`,
         await page(req, res, 200, {
             actor, title: 'Chat settings', path: '/settings', active: 'settings', robots: 'noindex, nofollow', shell: true, footer: 'none',
             body: shell.shell({
-                rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                rail: shell.rail({ dmUnread, servers: shell.railServers(mineServers) }),
                 side: shell.sideSettings({ items: sections, you: { name: actor.user.display_name || actor.user.username, status: 'Online', avatarUrl: actor.user.avatar_url || '' } }),
                 sideLabel: 'Settings',
                 main: `${ui.head({ title: 'Settings', sub: 'Saved to your account: here, in Live chat and on every device' })}${saved}${error}
@@ -787,7 +877,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
     // A picture sent from the room's form (server/rooms/pictures.js): one image, kept in memory only until Pics has it.
     const pictureForm = require('multer')({ storage: require('multer').memoryStorage(), limits: { fileSize: (require('../config').pics.maxBytes || 20 * 1024 * 1024), files: 1, fields: 4 } }).single('picture');
     /** The "Add a picture" form under a room's or channel's composer (rooms where the person may post). */
-    const pictureComposer = (room, back) => (pictures.enabled() ? `<details class="oc-pic-compose"><summary class="oc-icon-btn" aria-label="Add a picture" title="Add a picture">${ICONS.image}</summary>
+    const pictureComposer = (room, back) => (pictures.enabled() ? `<details class="oc-pic-compose" id="oc-add-panel"><summary class="oc-icon-btn" aria-label="Add a picture" title="Add a picture">${ICONS.image}</summary>
 <form class="oc-form oc-pic-form" method="post" action="/r/${esc(room.slug)}/picture" data-room="${esc(room.slug)}" data-picture-upload-form>
 <input type="hidden" name="back" value="${esc(back)}">
 <div class="oc-field oc-field--wide"><span>Picture</span>
@@ -845,7 +935,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
             : `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)}`;
         // An AI member writes Markdown (lists, bold, links): vibe-md.js escapes every character first, then marks it up.
         const text = ai ? `<div class="oc-text vb-md">${md.render(m.message)}</div>` : `<span class="oc-text">${linkify(m.message)}</span>`;
-        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${ai ? '' : pictures.pageHtml(m.message)}${ui.linkCard(m.card)}${del}</li>`;
+        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${ai ? '' : pictures.pageHtml(m.message)}${ui.messageCards(m)}${del}</li>`;
     };
     const applyRoomChange = async (room) => await roomRoutes.applyRoomChange(room);
 
@@ -896,7 +986,7 @@ ${create}
             actor, title: 'Rooms', path: '/rooms', active: 'rooms', robots: 'index, follow', shell: true, footer: 'none',
             description: 'Chat and call rooms on OpenVibe: start one about anything, invite people, or join a public room.',
             body: shell.shell({
-                rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                rail: shell.rail({ dmUnread, servers: shell.railServers(mineServers) }),
                 side: sideRooms,
                 sideLabel: 'Rooms',
                 main: content,
@@ -966,13 +1056,14 @@ ${people}
         if (room.server_id) return res.redirect(302, await channelUrl(room));
         // A person's own Vibe chat opens in the Vibe app (its links in task pages and messages name /r/<slug>).
         if (me && Number(room.assistant) === 1 && await require('../rooms/vibe').ownChat(room.slug, me)) return res.redirect(302, `/vibe/${encodeURIComponent(room.slug)}`);
-        const msgs = await rooms.history(room, { limit: 60 });
+        const roomPage = await rooms.historyPage(room, { limit: 50 });
+        const msgs = roomPage.messages.slice().reverse();
         if (me && can.role) await rooms.markRead(room, me);
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const joinLabel = room.kind === 'system' ? 'Follow these announcements' : 'Join this room';
         let composer;
         if (!me) composer = `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${encodeURIComponent(`/r/${room.slug}`)}">Sign in with OpenVibe</a> to join the conversation.</p>`;
-        else if (can.post) composer = `<div class="oc-dock">${room.kind === 'system' ? '' : pictureComposer(room, `/r/${room.slug}`)}<form class="oc-compose" method="post" action="/r/${esc(room.slug)}" id="oc-compose"><label for="oc-input" class="oc-sr">Message to ${esc(room.name)}</label><textarea id="oc-input" name="message" maxlength="2000" rows="1" required placeholder="${room.kind === 'system' ? 'Post an announcement' : 'Write a message'}"></textarea><button type="submit" class="oc-send" aria-label="Send" title="Send">${ICONS.send}</button></form></div>`;
+        else if (can.post) composer = shell.composer({ action: `/r/${room.slug}`, label: `Message to ${room.name}`, placeholder: room.kind === 'system' ? 'Post an announcement' : 'Write a message', add: room.kind === 'system' ? '' : pictureComposer(room, `/r/${room.slug}`) });
         else if (!can.role) composer = `<form method="post" action="/r/${esc(room.slug)}/join"><button type="submit">${joinLabel}</button></form>`;
         else if (room.kind === 'system') composer = `<p class="oc-muted">Announcements from OpenVibe staff. You will see new ones counted in Rooms.</p>`;
         else if (can.role === 'viewer') composer = `<p class="oc-muted">You can read this room but not write in it (viewer).</p>`;
@@ -994,6 +1085,8 @@ ${people}
         const work = rooms.isWorkspace(room) ? await require('../rooms/workspace').list(room, me, { limit: 40 }) : null;
         const aiHere = ais.length ? `<p class="oc-ai-here">${ICONS.spark}<span>${ais.map((a) => `<strong>${esc(a.name)}</strong> <span class="oc-muted oc-ai-model">(${esc(aiMembers.modelOf(a))})</span>`).join(', ')} ${ais.length > 1 ? 'are' : 'is'} here: write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask</span></p>` : '';
         const memberCount = (await rooms.publicRoom(room)).members;
+        const insight = await require('../chat/room-insight').room(room, { enabled: rooms.insightOn(room) }).catch(() => null);
+        const insightHtml = insight ? insightBlock(insight) : '';
         // A public room's own line when it has one long enough to read as a description; otherwise its name, size
         // and what the page is for. Escaped by the layout's head builder like every other description.
         const topic = typeof room.topic === 'string' ? room.topic.trim() : '';
@@ -1006,21 +1099,21 @@ ${people}
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady, feedView: !!feed,
             footer: 'none', shell: true, upload: pictures.enabled(), scripts: [...(ais.length ? ['vibe-md.js'] : []), ...(pictures.enabled() ? ['picture-upload.js'] : [])],
             description,
-            page: { view: 'room', room: room.slug, kind: room.kind, pics: pictures.enabled() ? pictures.publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
+            page: { view: 'room', room: room.slug, kind: room.kind, pics: pictures.enabled() ? pictures.publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, historyMore: roomPage.more, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: can.join, talk: can.talk } } : {}) },
             body: shell.shell({
-                rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                rail: shell.rail({ dmUnread, servers: shell.railServers(mineServers) }),
                 side: shell.sideRooms({
                     mine: listed.mine.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private', current: r.slug === room.slug })),
                     public: listed.public.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private', current: r.slug === room.slug })),
                     you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
                 }),
                 sideLabel: 'Rooms',
-                main: `<header class="oc-room-head">
+            main: `<header class="oc-room-head">
 <a class="oc-icon-btn" href="/rooms" aria-label="All rooms" title="All rooms">${ICONS.back}</a>
 <div class="oc-room-id"><h1>${esc(room.name)}${room.visibility === 'private' ? `<span class="oc-room-lock" title="Private: only people invited read and post">${ICONS.lock}<span class="oc-sr">private</span></span>` : ''}${kindBadge(room)}</h1>
 <p class="oc-muted oc-room-sub">${room.topic && !isAgentRoom ? `${esc(room.topic)} · ` : ''}${memberCount} ${memberCount === 1 ? 'member' : 'members'}${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole} <span class="oc-live" id="oc-live" hidden>● live</span></p>${roomRules(room)}</div>
-<div class="oc-room-tools">${manage}${leave}</div>
+<div class="oc-room-tools">${manage}${leave}${insightHtml}</div>
 </header>
 ${isAgentRoom ? `<aside class="oc-agent-banner" role="note"><strong>Co-pilot room</strong> ${esc(require('../chat/agent-room').BANNER)}</aside>` : ''}
 ${agentPollView ? agentPollCard(room, agentPollView, can) : ''}
@@ -1028,7 +1121,7 @@ ${aiHere}${error}
 ${isCall ? callPanel(room, can, me) : ''}
 ${feed ? `<div class="fv oc-room-fv" data-feed="${esc(feed.id)}"></div>` : ''}
 ${work && room.screen_url && can.role ? `<details class="oc-screen" open><summary>Shared screen</summary><iframe src="${esc(room.screen_url)}" title="The room's shared screen" loading="lazy" referrerpolicy="no-referrer" allow="clipboard-write; fullscreen"></iframe></details>` : ''}
-${work ? '<div class="oc-ws"><div class="oc-ws-main">' : ''}<ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages">${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
+${work ? '<div class="oc-ws"><div class="oc-ws-main">' : ''}<ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages"><li id="oc-history-state" class="oc-muted" hidden aria-live="polite"></li>${msgs.map((m) => roomMessage(m, can, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${room.kind === 'system' ? 'No announcements yet.' : 'No messages yet. Say hello.'}</li>`}</ol>
 ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
                 mainLabel: room.name,
             }),
@@ -1165,7 +1258,7 @@ ${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}</details>` : '';
         const listedRooms = await rooms.list(actor.user);
         const dmUnread = await require('../chat/dm').getTotalUnread(actor.user.id);
         const roomShell = (main) => shell.shell({
-            rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+            rail: shell.rail({ dmUnread, servers: shell.railServers(mineServers) }),
             side: shell.sideRooms({
                 mine: listedRooms.mine.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private', current: r.slug === room.slug })),
                 public: listedRooms.public.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private', current: r.slug === room.slug })),
@@ -1177,6 +1270,9 @@ ${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}</details>` : '';
             return await page(req, res, 200, {
                 actor, title: `#${room.name}: AI members`, path: `/r/${room.slug}/settings`, active: 'servers', robots: 'noindex, nofollow', shell: true, footer: 'none',
                 body: roomShell(`${ui.head({ title: `AI members in #${esc(room.name)}`, back: { href: await channelUrl(room, '/settings'), label: 'Server settings' } })}${saved}${error}
+${can.manage ? `<section class="oc-set"><h2>AI insight</h2><form class="oc-form oc-set-form" method="post" action="/r/${esc(room.slug)}/settings">
+<input type="hidden" name="has_ai_insight" value="1"><label class="oc-set-row oc-set-inline"><span class="oc-set-text">Summarise this channel<small>An overview and timeline of the channel, written for someone arriving now. Only messages from people who allowed AI use of them are read.</small></span><input type="checkbox" class="oc-switch" name="ai_insight" value="1"${rooms.insightOn(room) ? ' checked' : ''}></label>
+<p><button type="submit">Save</button></p></form></section>` : ''}
 ${aiSection}`),
             });
         }
@@ -1199,6 +1295,7 @@ ${can.manage ? `<section class="oc-set"><h2>Room</h2><form class="oc-form oc-gri
 <label>Who can read <select name="visibility"><option value="public"${room.visibility === 'public' ? ' selected' : ''}>Anyone (public)</option><option value="private"${room.visibility === 'private' ? ' selected' : ''}>Members only (private)</option></select></label>
 ${room.kind === 'call' ? `<label>People who join <select name="join_role">${rooms.JOIN_ROLES_CALL.map((r) => `<option value="${r}"${r === addRole ? ' selected' : ''}>${{ speaker: 'can talk (speakers)', participant: 'listen and write (participants)', viewer: 'listen and read (viewers)' }[r]}</option>`).join('')}</select></label>` : ''}
 <label>Slow mode: seconds between messages (0 is off) <input name="slow_seconds" type="number" min="0" max="600" value="${Number(room.slow_seconds) || 0}"></label>
+<input type="hidden" name="has_ai_insight" value="1"><label class="oc-set-row oc-set-inline"><span class="oc-set-text">AI insight<small>An overview and timeline of this room, written for someone arriving now. Only messages from people who allowed AI use of them are read; a private room is off until you turn this on.</small></span><input type="checkbox" class="oc-switch" name="ai_insight" value="1"${rooms.insightOn(room) ? ' checked' : ''}></label>
 ${room.slug !== 'staff' && (room.kind || 'community') === 'community' && Number(room.assistant) !== 1 ? `<input type="hidden" name="has_workspace" value="1"><label class="oc-set-row oc-set-inline"><span class="oc-set-text">Work together here<small>A work queue beside the conversation, alerts from other systems and a shared screen</small></span><input type="checkbox" class="oc-switch" name="workspace" value="1"${rooms.isWorkspace(room) ? ' checked' : ''}></label>` : ''}
 ${rooms.isWorkspace(room) ? `<label>Shared screen <input name="screen_url" type="url" value="${esc(room.screen_url || '')}" placeholder="https://openvibe.bot/screen/…"> <span class="oc-muted oc-small">A screen share link from OpenVibe.Bot (a computer's owner makes it on its screen page). Members see the screen beside the conversation; with a "use" link they can click and type on it. Empty: no screen.</span></label>` : ''}
 <p><button type="submit">Save</button></p></form></section>` : ''}
@@ -1234,6 +1331,7 @@ ${attachList}`),
         const workspace = b.has_workspace ? [].concat(b.workspace || []).includes('1') : undefined;
         const updated = await rooms.update(room, actor.user, { name: b.name, topic: b.topic, visibility: b.visibility, slow_seconds: b.slow_seconds === undefined ? undefined : Number(b.slow_seconds), join_role: room.kind === 'call' ? b.join_role : undefined,
             ...(workspace !== undefined ? { workspace } : {}),
+            ...(b.has_ai_insight ? { ai_insight: b.ai_insight === '1' } : {}),
             ...(rooms.isWorkspace(room) && b.screen_url !== undefined ? { screen_url: b.screen_url } : {}) });
         // A room that just became a workspace gets Vibe, who runs and announces its work, when it has room for one more.
         if (workspace && !rooms.isWorkspace(room) && updated.workspace && aiMembers.enabled()) {
