@@ -39,6 +39,26 @@ function publicUrl(obj) {
 }
 
 /**
+ * A person's file for a Vibe turn: an UNLISTED Media object owned by them. Unlisted means not in any
+ * listing, but served by its unguessable Media id, which is what OpenVibe.AI reads a turn's file by
+ * reference (a private object would need a signed URL AI cannot mint). → ai.file@1 metadata only.
+ */
+async function uploadFile(buffer, { filename, mimeType, subject } = {}) {
+    if (!subject) throw new Error('uploadFile: subject (the person who owns the file) is required');
+    const obj = await objects().upload(buffer, { kind: 'file', visibility: 'unlisted', mimeType: mimeType || 'application/octet-stream', filename, subject });
+    return {
+        id: obj.id,
+        name: obj.filename || filename || 'file',
+        media_type: obj.mime_type || mimeType || 'application/octet-stream',
+        size: Number(obj.size_bytes) || buffer.length,
+        storage: { provider: 'media', key: obj.id },
+        access: { readers: [String(subject)] },
+        read: { method: 'not_readable', reason: 'Attached; AI has not read it yet.' },
+        role: 'input',
+    };
+}
+
+/**
  * Upload image bytes as a public Media object → { id, url }.
  * Shaped for the emote routes: `id` is stored as media_asset_id, `url` as media_url.
  */
@@ -53,4 +73,4 @@ async function deleteObject(id) {
     try { return await objects().delete(id); } catch (err) { console.warn(`[Media] delete ${id}: ${err.message}`); return false; }
 }
 
-module.exports = { uploadObject, deleteObject, publicUrl, APP, _setClient(c) { _objects = c; }, _reset() { _objects = null; } };
+module.exports = { uploadObject, uploadFile, deleteObject, publicUrl, APP, _setClient(c) { _objects = c; }, _reset() { _objects = null; } };

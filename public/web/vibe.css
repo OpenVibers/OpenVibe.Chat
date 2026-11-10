@@ -272,3 +272,6 @@
 .vbk .vbc-phone .vbc-body { max-height: min(45vh, 420px); overflow: auto; overscroll-behavior: contain; padding: 0 10px 10px; }
 @media (min-width: 1180px) { .vbk .vbc-phone { display: none !important; } }
 @media (max-width: 1179px) { .vbk .vbc-wide { display: none !important; } }
+
+/* Files attached to a Vibe message: the shared upload kit's rows sit above the composer (vibe.js). */
+.vb-files { display: grid; gap: 8px; margin: 0 0 8px; }

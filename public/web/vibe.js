@@ -22,9 +22,11 @@
   var room = cfg.room || null;
   var latest = Number(cfg.latest) || 0;
   var ws = null, delay = 1000, sending = false, waitTimer = null;
-  var fileInput = document.getElementById('vb-file');
   var previewEl = document.getElementById('vb-preview');
+  var filesTray = document.getElementById('vb-files');
+  var pickerRoot = document.getElementById('vb-file-picker');
   var picture = null;   // { file, url }: a picture waiting to go with the next message
+  var attachments = []; // { file, row, xhr, ref }: files waiting to go with the next message (Media references)
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var chosenModels = Array.isArray(cfg.models) ? cfg.models.slice(0, 3) : [];
   function persistModelChoice() {
@@ -118,8 +120,8 @@
 
   // ── The composer ──
   if (input) {
-    // A picture alone may be sent: Send wakes for it even with no words (the kit wakes it only for words).
-    input.addEventListener('input', function () { if (picture && sendBtn) sendBtn.disabled = false; });
+    // A picture or a file alone may be sent: Send wakes for it even with no words (the kit wakes it only for words).
+    input.addEventListener('input', function () { if ((picture || attachments.length) && sendBtn) sendBtn.disabled = false; });
     var saved = cfg.signedIn ? store(function (s) { var v = s.getItem(DRAFT); s.removeItem(DRAFT); return v; }) : null;
     if (saved && !input.value) { input.value = saved; changed(); }
     if (!('ontouchstart' in window)) input.focus();
@@ -134,35 +136,12 @@
     if (picture && picture.url) URL.revokeObjectURL(picture.url);
     picture = null;
     if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; }
-    if (fileInput) fileInput.value = '';
     if (input) input.required = true;
     changed();
   }
-  // A text file goes into the message itself, as a fenced block named after it, cut to what still fits in the box.
-  var TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|log|xml|ya?ml|toml|ini|html|css|m?js|ts|py|go|rs|java|c|h|cpp|rb|php|sh|sql)$/i;
-  function readText(file) {
-    if (file.size > 2 * 1024 * 1024) { notice('A text file can be up to 2 MB.'); return; }
-    var reader = new FileReader();
-    reader.onload = function () {
-      var text = String(reader.result || '').replace(/\r\n?/g, '\n').replace(/\u0000/g, '').trim();
-      if (!text) { notice('That file is empty.'); return; }
-      var name = String(file.name || 'file').replace(/[\r\n`]/g, '').slice(0, 80);
-      var before = input.value.trim();
-      var head = (before ? before + '\n\n' : '') + name + ':\n```\n';
-      var space = Number(input.getAttribute('maxlength') || 12000) - head.length - 5;
-      if (space < 200) { notice('The box is nearly full. Send what is there first.'); return; }
-      var cut = text.length > space;
-      input.value = head + (cut ? text.slice(0, space - 20) + '\n… (cut to fit)' : text) + '\n```';
-      changed(); input.focus();
-      if (cut) notice('The file was longer than a message: its first part is in the box.');
-    };
-    reader.onerror = function () { notice('That file could not be read.'); };
-    reader.readAsText(file);
-  }
   function choosePicture(file) {
     if (!file) return;
-    if (!PIC_TYPES.test(file.type) && (/^text\//.test(file.type) || file.type === 'application/json' || TEXT_EXT.test(file.name || ''))) { readText(file); if (fileInput) fileInput.value = ''; return; }
-    if (!PIC_TYPES.test(file.type) || !fileInput || !/image\//.test(fileInput.accept)) { notice('Send a JPEG, PNG, GIF, WebP or AVIF picture, or a text file.'); return; }
+    if (!PIC_TYPES.test(file.type)) { addAttachment(file); return; }
     if (file.size > 20 * 1024 * 1024) { notice('A picture can be up to 20 MB.'); return; }
     clearPicture();
     picture = { file: file, url: URL.createObjectURL(file) };
@@ -176,15 +155,96 @@
     if (sendBtn) sendBtn.disabled = false;
     input.focus();
   }
+  // ── Any file with the message, through the shared upload kit: each one is a kit row (name, size, remove)
+  //    and uploads to Media as the person (POST /api/chat/vibe/files). The message carries its Media reference;
+  //    Vibe's turn reads it (ai.file@1). Pictures pasted or picked as pictures keep the Pics path. ──
+  var MAX_FILES = 10;
+  var MAX_FILE_BYTES = 10 * 1024 * 1024;
+  var picker = null;
+  function filesChanged() {
+    if (filesTray) filesTray.hidden = !attachments.length;
+    if (attachments.length) form.classList.remove('is-empty');
+    changed();
+    if (attachments.length && sendBtn) sendBtn.disabled = false;
+  }
+  function findAttachment(file) {
+    for (var i = 0; i < attachments.length; i++) if (attachments[i].file === file) return attachments[i];
+    return null;
+  }
+  function dropAttachment(item) {
+    if (!item) return;
+    var i = attachments.indexOf(item);
+    if (i < 0) return;
+    attachments.splice(i, 1);
+    if (item.xhr) { try { item.xhr.abort(); } catch (_) {} }
+    if (item.row && item.row.parentNode) item.row.remove();
+    filesChanged();
+  }
+  function uploadAttachment(item) {
+    if (item.xhr) { try { item.xhr.abort(); } catch (_) {} }
+    var xhr = new XMLHttpRequest();
+    item.xhr = xhr;
+    xhr.open('POST', '/api/chat/vibe/files');
+    xhr.withCredentials = true;
+    xhr.setRequestHeader('Content-Type', item.file.type || 'application/octet-stream');
+    try { xhr.setRequestHeader('X-Filename', encodeURIComponent(item.file.name || 'file')); } catch (_) {}
+    function failed(message) {
+      if (item.meter) item.meter.update({ state: 'failed', message: message || 'The upload did not go through.' });
+      notice(message || 'The file did not upload. Try again.');
+    }
+    xhr.upload.onprogress = function (e) { if (e.lengthComputable && item.meter) item.meter.update({ state: 'sending', done: e.loaded, total: e.total }); };
+    xhr.onload = function () {
+      var body = null; try { body = JSON.parse(xhr.responseText || 'null'); } catch (_) { body = null; }
+      if (xhr.status < 200 || xhr.status >= 300 || !body || !body.file) return failed((body && body.error) || 'The file did not upload.');
+      item.ref = body.file;
+      if (item.meter) item.meter.update({ state: 'done', done: item.file.size, total: item.file.size });
+      filesChanged();
+    };
+    xhr.onerror = function () { failed('You seem to be offline. The file did not upload.'); };
+    if (item.meter) item.meter.update({ state: 'sending', done: 0, total: item.file.size });
+    xhr.send(item.file);
+  }
+  function addAttachmentItem(file) {
+    if (!file) return;
+    if (attachments.length >= MAX_FILES) { notice('Up to ' + MAX_FILES + ' files can go with a message.'); return; }
+    if (file.size > MAX_FILE_BYTES) { notice('A file can be up to 10 MB.'); return; }
+    if (!picker) return;
+    picker.add([file]);
+  }
+  function takeRow(file, row) {
+    var item = { file: file, row: row, ref: null, xhr: null, meter: null };
+    row.remove(); filesTray.appendChild(row); filesTray.hidden = false;
+    row.addEventListener('remove', function () { dropAttachment(item); });
+    var meterRoot = el('div', 'ov-upload__meter'); row.appendChild(meterRoot); row.classList.add('has-meter');
+    item.meter = window.OVUpload.progress(meterRoot, { compact: true, onRetry: function () { uploadAttachment(item); } });
+    attachments.push(item);
+    filesChanged();
+    uploadAttachment(item);
+  }
+  function clearAttachments() {
+    attachments.slice().forEach(function (item) { if (item.xhr) { try { item.xhr.abort(); } catch (_) {} } if (item.row && item.row.parentNode) item.row.remove(); });
+    attachments = [];
+    filesChanged();
+  }
+  function pendingFiles() { return attachments.some(function (a) { return !a.ref; }); }
   var attachBtn = app.querySelector('[data-vb-attach]');
-  if (attachBtn && fileInput) {
-    attachBtn.addEventListener('click', function () { fileInput.click(); });
-    fileInput.addEventListener('change', function () { choosePicture(fileInput.files && fileInput.files[0]); });
-    // A picture pasted into the composer goes the same way.
+  if (attachBtn && pickerRoot && filesTray && window.OVUpload) {
+    picker = window.OVUpload.picker(pickerRoot, {
+      label: 'Attach a file', accept: '', multiple: true,
+      onFile: takeRow,
+      onRemove: function (file) { var item = findAttachment(file); if (item) dropAttachment(item); }
+    });
+    pickerRoot.hidden = true;
+    attachBtn.addEventListener('click', function () { picker.input.click(); });
+    // A picture pasted into the composer keeps the picture path; any other pasted file attaches.
     input.addEventListener('paste', function (e) {
       var items = (e.clipboardData && e.clipboardData.files) || [];
-      if (items.length && PIC_TYPES.test(items[0].type)) { e.preventDefault(); choosePicture(items[0]); }
+      if (!items.length) return;
+      e.preventDefault();
+      if (PIC_TYPES.test(items[0].type)) choosePicture(items[0]); else addAttachmentItem(items[0]);
     });
+  } else if (attachBtn) {
+    attachBtn.hidden = true;
   }
 
   // ── The thread (the kit's markup: a turn is the person's message and the answer under it) ──
@@ -637,7 +697,7 @@
   if (form) form.addEventListener('submit', function (e) {
     if (e.submitter && e.submitter === stopBtn) { e.preventDefault(); return; }
     var text = input.value.trim();
-    if (!text && !picture) { e.preventDefault(); return; }
+    if (!text && !picture && !attachments.length) { e.preventDefault(); return; }
     if (form.dataset.signin) {
       // Signed out: the draft waits in this browser while they sign in, and comes back in the composer.
       e.preventDefault();
@@ -646,16 +706,20 @@
       return;
     }
     if (!window.fetch || sending) return;
+    var modeEl = form.querySelector('input[name="mode"]:checked'), mode = modeEl ? modeEl.value : 'chat';
+    if (mode !== 'chat' && attachments.length) { e.preventDefault(); notice('Files go with a Chat message. Switch to Chat.'); return; }
+    if (pendingFiles()) { e.preventDefault(); notice('Give the files a moment to finish uploading.'); return; }
+    if (picture && attachments.length) { e.preventDefault(); notice('Send the picture or the files, one at a time.'); return; }
     e.preventDefault();
     sending = true;
     var old = app.querySelector('.vb-live-notice'); if (old) old.remove();
     var sendingPicture = picture;
+    var sendingFiles = attachments.map(function (a) { return a.ref; });
     var mine = meTurn(text, null, sendingPicture && sendingPicture.url);
     threadEl().appendChild(mine);
     showWait(); toBottom();
-    input.value = ''; picture = null; if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; } if (fileInput) fileInput.value = ''; input.required = true; changed();
+    input.value = ''; picture = null; if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; } input.required = true; changed();
     var url, init;
-    var modeEl = form.querySelector('input[name="mode"]:checked'), mode = modeEl ? modeEl.value : 'chat';
     if (mode !== 'chat' && !sendingPicture) {
       // Research, Agent or Code: an agent task of this chat; Vibe says it is on it, and the result comes back here.
       url = room ? '/api/chat/vibe/' + encodeURIComponent(room) + '/ask' : '/api/chat/vibe';
@@ -666,7 +730,7 @@
       init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': sendingPicture.file.type, 'X-Caption': encodeURIComponent(text) }, body: sendingPicture.file };
     } else {
       url = room ? '/api/chat/rooms/' + encodeURIComponent(room) + '/messages' : '/api/chat/vibe';
-      init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, timezone: timezone() }) };
+      init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, timezone: timezone(), files: sendingFiles }) };
     }
     function putBack(msg) { mine.remove(); clearWait(); input.value = text; if (sendingPicture) choosePicture(sendingPicture.file); changed(); notice(msg); }
     fetch(url, init)
@@ -674,6 +738,7 @@
       .then(function (x) {
         if (!x.ok) { putBack((x.d && x.d.error) || 'That did not send. Try again.'); return; }
         if (x.d.message && x.d.message.id) { mine.setAttribute('data-me', String(x.d.message.id)); latest = Math.max(latest, Number(x.d.message.id)); }
+        clearAttachments();
         // A Research, Agent or Code task just became the chat's newest: its canvas is the one to draw from now on.
         if (x.d && x.d.task && !canvasWatch(x.d.task)) { canvas = null; canvasClear(); }
         if (!room && x.d.room) {
