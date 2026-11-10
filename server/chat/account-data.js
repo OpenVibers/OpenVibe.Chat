@@ -79,6 +79,7 @@ const EXPORTS = [
     ['dm_contacts.json', `SELECT user_id, contact_id, status, created_at FROM dm_contacts WHERE user_id = ANY(@ids) OR contact_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['dm_view_defaults.json', `SELECT kind, view FROM dm_view_defaults WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['dm_view_preferences.json', `SELECT conversation_id, view, updated_at FROM dm_view_preferences WHERE user_id = ANY(@ids) ORDER BY updated_at DESC LIMIT ${LIMIT}`],
+    ['dm_link_preview_settings.json', `SELECT enabled, updated_at FROM dm_link_preview_settings WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['inboxes_owned.json', `SELECT * FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['inbox_memberships.json', `SELECT * FROM inbox_members WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['inbox_replies.json', `SELECT * FROM inbox_messages WHERE author = 'agent' AND author_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
@@ -152,6 +153,7 @@ const ERASE_AFTER_ROOMS = [
     ['dm_contacts', 'DELETE FROM dm_contacts WHERE user_id = ANY(@ids) OR contact_id = ANY(@ids)'],
     ['dm_view_defaults', 'DELETE FROM dm_view_defaults WHERE user_id = ANY(@ids)'],
     ['dm_view_preferences', 'DELETE FROM dm_view_preferences WHERE user_id = ANY(@ids)'],
+    ['dm_link_preview_settings', 'DELETE FROM dm_link_preview_settings WHERE user_id = ANY(@ids)'],
     // Support inboxes (server/inbox/inbox.js): the inboxes they own go with every conversation in them; in others,
     // their replies stay for the visitor without their name, and their place on the team goes.
     [null, 'DELETE FROM inbox_translations WHERE message_id IN (SELECT m.id FROM inbox_messages m JOIN inbox_conversations c ON c.id = m.conversation_id JOIN inboxes i ON i.id = c.inbox_id WHERE i.owner_subject = ANY(@s) OR i.owner_id = ANY(@ids))'],
