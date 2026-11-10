@@ -130,6 +130,15 @@ t('the digest needs a service token that names the owner', async () => {
     const r = await h.http('GET', `/api/v1/rooms/${room.slug}/digest`, { token: ok });
     assert.strictEqual(r.status, 200, r.text);
     assert.ok(Array.isArray(r.body.items));
+    const through = Number(r.headers.get('openvibe-read-through'));
+    assert.ok(Number.isSafeInteger(through) && through >= 0, 'digest carries a cursor to acknowledge after the agent turn');
+    const ack = await h.http('POST', `/api/v1/rooms/${room.slug}/digest/ack`, { token: ok, body: { through } });
+    assert.strictEqual(ack.status, 200, ack.text);
+    assert.strictEqual(Number(ack.body.read_through), through);
+    const cursor = await db.get('SELECT last_message_id, last_read_at FROM agent_room_reads WHERE room_id = ? AND reader = ?', [room.id, ann.subject_id]);
+    assert.strictEqual(Number(cursor.last_message_id), through, 'only the explicit end-of-turn acknowledgement advances the cursor');
+    assert.ok(cursor.last_read_at);
+    assert.strictEqual((await h.http('POST', `/api/v1/rooms/${room.slug}/digest/ack`, { token: ok, body: { through: through + 10_000_000 } })).status, 422);
     assert.ok(agentRoom.READ_INTERVAL_MS > 0);
 });
 
