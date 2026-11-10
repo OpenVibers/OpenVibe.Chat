@@ -175,6 +175,7 @@ ${o.party ? `<link rel="stylesheet" href="${ovServe.url('player.css')}">\n<link 
 ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join('\n')}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>
+${String(o.body || '').includes('data-ov-machines') ? '<script src="/shared/machines.js" defer></script>' : ''}
 <script src="${ovServe.url('footer.js')}" defer></script>
 ${o.script ? `<script src="${asset('chat-history.js')}" defer></script>
 <script src="${asset('chat.js')}" defer></script>` : ''}

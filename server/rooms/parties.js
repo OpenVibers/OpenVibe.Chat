@@ -178,10 +178,11 @@ async function create(user, input = {}) {
     return await createAgentStream(user, input);
 }
 
-async function createDesktop(user, { title = 'Shared computer', desktop_hosting: hosting } = {}) {
+async function createDesktop(user, { title = 'Shared computer', desktop_hosting: hosting, desktop_node_id: nodeId } = {}) {
     if (!user) fail(401, 'party.sign_in', 'Sign in to start a shared computer');
     if (!/^usr_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(user.subject_id || ''))) fail(409, 'party.no_subject', 'This account has no OpenVibe subject yet; sign in again');
     if (hosting !== 'link' && hosting !== 'openvibe') fail(422, 'party.hosting', 'Choose your computer or an OpenVibe computer');
+    if (hosting === 'link' && !/^lnk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(nodeId || ''))) fail(422, 'party.machine', 'Choose one of your Link computers');
     const name = titleOf(title);
     const raw = secret();
     const slug = `party-${crypto.randomBytes(4).toString('hex')}`;
@@ -192,9 +193,9 @@ async function createDesktop(user, { title = 'Shared computer', desktop_hosting:
     let room;
     try {
         room = await rooms.create(user, { name: name.slice(0, 40), slug, kind: 'party', visibility: 'private', topic: name, party: true });
-        await db.run(`INSERT INTO room_parties (room_id, agent_stream_id, vod_id, host_user_id, host_subject, mode, playing, listed, join_secret_hash, party_kind, desktop_hosting, desktop_state)
-            VALUES (?, NULL, NULL, ?, ?, 'live', false, false, ?, 'desktop', ?, 'waiting')`,
-            [room.id, user.id, user.subject_id, sha256(raw), hosting]);
+        await db.run(`INSERT INTO room_parties (room_id, agent_stream_id, vod_id, host_user_id, host_subject, mode, playing, listed, join_secret_hash, party_kind, desktop_hosting, desktop_state, desktop_node_id)
+            VALUES (?, NULL, NULL, ?, ?, 'live', false, false, ?, 'desktop', ?, 'waiting', ?)`,
+            [room.id, user.id, user.subject_id, sha256(raw), hosting, hosting === 'link' ? nodeId : null]);
         if (placed) await pool.bind(placed.hold.id, room.id);
         await controlLease.take({ id: room.id, slug }, user.subject_id, { watchers: [] });
     } catch (err) {
