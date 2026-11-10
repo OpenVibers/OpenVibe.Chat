@@ -27,7 +27,8 @@ async function resolve(req, res) {
     if (!room || Number(room.assistant) === 1) { send(res, 404, { error: 'Room memory not found' }); return null; }
     if (!req.user) { send(res, 401, { error: 'Sign in to read what this room remembers' }); return null; }
     const access = await rooms.access(room, req.user);
-    if (!access.read) { send(res, 404, { error: 'Room memory not found' }); return null; }
+    // Members and staff only: memory is what the room keeps about its people, not the public feed.
+    if (!access.read || (!access.role && !access.moderate)) { send(res, 404, { error: 'Room memory not found' }); return null; }
     return { room, access };
 }
 

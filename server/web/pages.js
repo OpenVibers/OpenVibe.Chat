@@ -1323,7 +1323,7 @@ ${attachList}`),
         const room = await rooms.bySlug(req.params.slug);
         if (!room || Number(room.assistant) === 1) return res.redirect(303, '/rooms');
         const can = await rooms.access(room, actor.user);
-        if (!can.read) return res.redirect(303, '/rooms');
+        if (!can.read || (!can.role && !can.moderate)) return res.redirect(303, '/rooms');
         const memory = require('../rooms/memory');
         const entries = await memory.forRoom(room, { subject: actor.user.subject_id || null });
         const saved = req.query.saved ? notice('ok', 'Saved.') : '';
