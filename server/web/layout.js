@@ -63,7 +63,7 @@ function navConfig(o, config, site = {}, siteLinks = null) {
         service: site.service || 'chat',
         apiBase: NETWORK_URL,
         links: (siteLinks || site.links || links(o)).map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: o.active === l.key })),
-        history: { type: 'page', title: o.title || site.name || SITE_NAME },
+        history: { type: 'conversation', title: o.title || site.name || SITE_NAME, image_url: o.historyImage || null, private: !!o.private, mature: !!o.mature },
         // The phone's bottom bar (Shared's app bar, appbar.js): Home, Servers, Vibe, Activity and You — one
         // bar for every OpenVibe app (the plan, 2026-11-09, stage V2).
         // The Activity place carries a dot while something in it is unread (Shared's appbar.js draws `dot`).
