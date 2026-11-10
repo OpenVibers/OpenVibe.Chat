@@ -13,7 +13,11 @@
   var form = document.getElementById('em-form');
   var input = form.querySelector('textarea');
   var sendBtn = form.querySelector('button[type=submit]');
-  var attachBtn = document.getElementById('em-attach'), fileIn = document.getElementById('em-file');
+  var attachBtn = document.getElementById('em-attach');
+  var uploadDialog = document.querySelector('[data-em-upload-dialog]');
+  var uploadRoot = document.querySelector('[data-em-upload]');
+  var progressEl = document.querySelector('[data-em-progress]');
+  var uploadMeter = progressEl && window.OVUpload ? window.OVUpload.progress(progressEl) : null;
   var personBtn = document.getElementById('em-person');
   var stateEl = document.getElementById('em-state');
   var page = new URLSearchParams(location.search).get('page') || '';
@@ -231,11 +235,27 @@
     attachBtn.disabled = true; errorLine('');
     var caption = input.value.trim();
     var pending = el('li', 'em-msg em-me em-sending'); pending.appendChild(el('div', 'em-bubble', 'Sending a picture…')); thread.appendChild(pending); bottom();
-    fetch(api + '/picture', { method: 'POST', headers: headers({ 'Content-Type': file.type || 'application/octet-stream', 'X-Visitor-Token': token, 'X-Caption': encodeURIComponent(caption) }), body: file })
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: {} }; }); })
+    if (progressEl) progressEl.hidden = false;
+    if (uploadMeter) uploadMeter.update({ state: 'sending', done: 0, total: file.size });
+    new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', api + '/picture');
+      xhr.withCredentials = true;
+      var h = headers({ 'Content-Type': file.type || 'application/octet-stream', 'X-Visitor-Token': token, 'X-Caption': encodeURIComponent(caption) });
+      Object.keys(h).forEach(function (k) { xhr.setRequestHeader(k, h[k]); });
+      xhr.upload.onprogress = function (e) { if (e.lengthComputable && uploadMeter) uploadMeter.update({ state: 'sending', done: e.loaded, total: e.total }); };
+      xhr.onload = function () {
+        var d = null; try { d = JSON.parse(xhr.responseText || '{}'); } catch (_) { d = {}; }
+        resolve({ ok: xhr.status >= 200 && xhr.status < 300, d: d });
+      };
+      xhr.onerror = function () { reject(new Error('offline')); };
+      xhr.send(file);
+    })
       .then(function (x) {
         pending.remove();
-        if (!x.ok) { errorLine((x.d && x.d.error) || 'That picture did not send. Try again.'); return; }
+        if (!x.ok) { if (uploadMeter) uploadMeter.update({ state: 'failed', message: (x.d && x.d.error) || 'That picture did not send.' }); errorLine((x.d && x.d.error) || 'That picture did not send. Try again.'); return; }
+        if (uploadMeter) uploadMeter.update({ state: 'done', done: file.size, total: file.size });
+        if (progressEl) setTimeout(function () { progressEl.hidden = true; }, 800);
         if (caption) { input.value = ''; grow(); }
         render(x.d.message);
         var fresh = !conv || conv.id !== x.d.conversation.id;
@@ -243,15 +263,17 @@
         if (fresh) watch();
         if (conv.status === 'bot') showTyping('Vibe');
       })
-      .catch(function () { pending.remove(); errorLine('You seem to be offline.'); })
+      .catch(function () { pending.remove(); if (uploadMeter) uploadMeter.update({ state: 'failed', message: 'You seem to be offline.' }); errorLine('You seem to be offline.'); })
       .then(function () { attachBtn.disabled = false; });
   }
-  if (attachBtn && fileIn) {
+  if (attachBtn && uploadDialog && uploadRoot && window.OVUpload) {
+    window.OVUpload.picker(uploadRoot, { label: 'Choose a picture', accept: uploadRoot.getAttribute('data-accept') || 'image/*', onFile: function (file) { uploadDialog.close(); sendPicture(file); } });
     attachBtn.addEventListener('click', function () {
       if (!acctName) { errorLine('Sign in to send a picture: it goes to OpenVibe.Pics as you.'); if (!polling) signIn(); return; }
-      fileIn.click();
+      uploadDialog.showModal();
     });
-    fileIn.addEventListener('change', function () { var f = fileIn.files && fileIn.files[0]; fileIn.value = ''; sendPicture(f); });
+    var closeUpload = uploadDialog.querySelector('[data-em-upload-close]');
+    if (closeUpload) closeUpload.addEventListener('click', function () { uploadDialog.close(); });
   }
   // A voice call one of the team started (server/inbox/inbox.js startCall): a card in the thread to join it, peer to
   // peer through support-call.js with this visitor's token; "Not now" or hanging up ends it for everyone.

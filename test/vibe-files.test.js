@@ -69,7 +69,8 @@ t('the composer page carries the attachment tray and the shared upload kit', asy
     assert.equal(res.status, 200);
     const page = await res.text();
     assert.match(page, /id="vb-files"/);
-    assert.match(page, /id="vb-file-picker"/);
+    assert.match(page, /data-vb-upload-dialog/);
+    assert.match(page, /data-vb-upload/);
     assert.match(page, /data-vb-attach/);
     assert.match(page, /ov-upload\.(?:js|css)/);
 });

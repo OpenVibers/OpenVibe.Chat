@@ -102,7 +102,9 @@ t('a picture Pics refuses leaves no chat behind; another type is refused before 
 
 t('the composer offers the attachment control and the shared upload kit when pictures are on', async () => {
     const page = await (await fetch(`${h.base}/vibe`, { headers: { cookie: `ov_token=${ann.token}` } })).text();
-    assert.ok(page.includes('id="vb-file-picker"') && page.includes('data-vb-attach') && page.includes('ov-upload.js'));
+    assert.ok(page.includes('id="vb-files"') && page.includes('data-vb-attach') && page.includes('data-vb-upload'));
+    assert.ok(page.includes('/shared/ov-upload.js') && page.includes('/shared/ov-upload.css'));
+    assert.ok(!page.includes('id="vb-file"'), 'the hand-rolled file input is gone');
 });
 
 t.run(async () => { if (aiClient) aiClient._setClient(null); if (pics) await pics.close(); if (h && h.close) await h.close(); });

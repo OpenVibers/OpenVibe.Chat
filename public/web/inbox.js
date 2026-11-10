@@ -205,20 +205,42 @@
     body.appendChild(b);
   }
   if (thread) Array.prototype.forEach.call(thread.querySelectorAll('[data-author="visitor"]'), addTranslate);
-  var picIn = document.getElementById('ib-pic');
-  if (picIn && input) {
-    picIn.addEventListener('change', function () {
-      var f = picIn.files && picIn.files[0]; picIn.value = '';
-      if (!f) return;
-      var caption = input.value.trim();
-      fetch('/api/chat/inboxes/' + cfg.inbox + '/conversations/' + cfg.conversation + '/picture', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': f.type, 'X-Caption': encodeURIComponent(caption) }, body: f })
-        .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
-        .then(function (x) {
-          if (!x.ok) { window.alert((x.d && x.d.error) || 'That picture did not send.'); return; }
-          input.value = ''; input.dispatchEvent(new Event('input'));
-          appendToThread(x.d.message); touchList(cfg.conversation, x.d.message.body, 'open');
-        }).catch(function () { window.alert('You seem to be offline.'); });
-    });
+  var picBtn = document.getElementById('ib-pic');
+  var uploadDialog = document.querySelector('[data-ib-upload-dialog]');
+  var uploadRoot = document.querySelector('[data-ib-upload]');
+  var progressEl = document.querySelector('[data-ib-progress]');
+  var uploadMeter = progressEl && window.OVUpload ? window.OVUpload.progress(progressEl) : null;
+  function sendInboxPicture(f) {
+    if (!f) return;
+    var caption = input.value.trim();
+    if (progressEl) progressEl.hidden = false;
+    if (uploadMeter) uploadMeter.update({ state: 'sending', done: 0, total: f.size });
+    new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', '/api/chat/inboxes/' + cfg.inbox + '/conversations/' + cfg.conversation + '/picture');
+      xhr.withCredentials = true;
+      xhr.setRequestHeader('Content-Type', f.type);
+      xhr.setRequestHeader('X-Caption', encodeURIComponent(caption));
+      xhr.upload.onprogress = function (e) { if (e.lengthComputable && uploadMeter) uploadMeter.update({ state: 'sending', done: e.loaded, total: e.total }); };
+      xhr.onload = function () {
+        var d = null; try { d = JSON.parse(xhr.responseText || 'null'); } catch (_) { d = null; }
+        resolve({ ok: xhr.status >= 200 && xhr.status < 300, d: d });
+      };
+      xhr.onerror = function () { reject(new Error('offline')); };
+      xhr.send(f);
+    }).then(function (x) {
+      if (!x.ok) { if (uploadMeter) uploadMeter.update({ state: 'failed', message: (x.d && x.d.error) || 'That picture did not send.' }); window.alert((x.d && x.d.error) || 'That picture did not send.'); return; }
+      if (uploadMeter) uploadMeter.update({ state: 'done', done: f.size, total: f.size });
+      if (progressEl) setTimeout(function () { progressEl.hidden = true; }, 800);
+      input.value = ''; input.dispatchEvent(new Event('input'));
+      appendToThread(x.d.message); touchList(cfg.conversation, x.d.message.body, 'open');
+    }).catch(function () { if (uploadMeter) uploadMeter.update({ state: 'failed', message: 'You seem to be offline.' }); window.alert('You seem to be offline.'); });
+  }
+  if (picBtn && input && uploadDialog && uploadRoot && window.OVUpload) {
+    window.OVUpload.picker(uploadRoot, { label: 'Choose a picture', accept: uploadRoot.getAttribute('data-accept') || 'image/*', onFile: function (f) { uploadDialog.close(); sendInboxPicture(f); } });
+    picBtn.addEventListener('click', function () { uploadDialog.showModal(); });
+    var closeUpload = uploadDialog.querySelector('[data-ib-upload-close]');
+    if (closeUpload) closeUpload.addEventListener('click', function () { uploadDialog.close(); });
   }
   var trTo = document.getElementById('ib-tr-to');
   if (trTo && input) {

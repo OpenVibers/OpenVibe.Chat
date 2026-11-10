@@ -788,9 +788,13 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
     const pictureForm = require('multer')({ storage: require('multer').memoryStorage(), limits: { fileSize: (require('../config').pics.maxBytes || 20 * 1024 * 1024), files: 1, fields: 4 } }).single('picture');
     /** The "Add a picture" form under a room's or channel's composer (rooms where the person may post). */
     const pictureComposer = (room, back) => (pictures.enabled() ? `<details class="oc-pic-compose"><summary class="oc-icon-btn" aria-label="Add a picture" title="Add a picture">${ICONS.image}</summary>
-<form class="oc-form oc-pic-form" method="post" action="/r/${esc(room.slug)}/picture" enctype="multipart/form-data" data-room="${esc(room.slug)}">
+<form class="oc-form oc-pic-form" method="post" action="/r/${esc(room.slug)}/picture" data-room="${esc(room.slug)}" data-picture-upload-form>
 <input type="hidden" name="back" value="${esc(back)}">
-<label>Picture <input type="file" name="picture" accept="image/jpeg,image/png,image/gif,image/webp,image/avif" required></label>
+<div class="oc-field oc-field--wide"><span>Picture</span>
+<div data-picture-upload data-accept="image/jpeg,image/png,image/gif,image/webp,image/avif"></div>
+<p class="oc-muted" data-picture-status role="status" aria-live="polite"></p>
+<div data-picture-progress hidden></div>
+</div>
 <label>Caption <input name="caption" maxlength="500" placeholder="Say something about it (optional)"></label>
 <p class="oc-muted">It goes to <a href="${esc(pictures.publicUrl())}">OpenVibe.Pics</a> as yours (location and camera details removed), where you can delete it, and the room gets its link.</p>
 <p><button type="submit">Send picture</button></p></form></details>` : '');
@@ -1000,7 +1004,7 @@ ${people}
         const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
         await page(req, res, 200, {
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady, feedView: !!feed,
-            footer: 'none', shell: true, scripts: ais.length ? ['vibe-md.js'] : [],
+            footer: 'none', shell: true, upload: pictures.enabled(), scripts: [...(ais.length ? ['vibe-md.js'] : []), ...(pictures.enabled() ? ['picture-upload.js'] : [])],
             description,
             page: { view: 'room', room: room.slug, kind: room.kind, pics: pictures.enabled() ? pictures.publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: can.join, talk: can.talk } } : {}) },
