@@ -25,6 +25,7 @@ t('boot', async () => {
     aiClient = require('../server/ai/client');
     aiTools = require('../server/rooms/ai-tools');
     config = require('../server/config');
+    config.ai.vibeWebSearch = true; // enable the owner-gated Search Fabric tool for these fixtures
     ann = h.addUser('ann', { subject: ids.newId('user') });
     await h.ctx.upsertUser(h.live.users.get(ann.id));
     aiClient._setClient({
@@ -45,6 +46,11 @@ t('boot', async () => {
 t('the tool list and the runners: bounded, fair, refusing what is not theirs', async () => {
     const names = aiTools.definitions({}).map((d) => d.function.name);
     assert.deepStrictEqual(names, ['search_openvibe', 'read_page', 'current_time', 'roll_dice', 'pick_one'], 'no pantry for an unlinked member');
+    config.ai.vibeWebSearch = false;
+    assert.ok(!aiTools.definitions({ handle: 'vibe' }).some((d) => d.function.name === 'web_search'), 'the web tool is absent while its owner switch is off');
+    const refused = await aiTools.runWithResult('web_search', '{"query":"latest"}', { member: { handle: 'vibe' } });
+    assert.match(refused.text, /no tool called web_search/, 'the runner also enforces the owner switch');
+    config.ai.vibeWebSearch = true;
     // Both search tools take the Search Fabric's freshness window (10-30): "today" and "recently" reach Search.
     const schemaOf = (name) => aiTools.definitions({ handle: 'vibe' }).find((d) => d.function.name === name).function.parameters;
     for (const name of ['search_openvibe', 'web_search']) {
