@@ -208,4 +208,8 @@ t('a deleted message leaves the feed, and the page section renders who, what, wh
     assert.match(page.text, /page me @ann|page me/);
     assert.ok(page.text.indexOf('What happened') < page.text.indexOf('Friend requests') || !page.text.includes('Friend requests'), 'the feed is above the waiting sections');
     assert.strictEqual((await activity('GET', '/unread', ann)).body.unread, 0, 'opening /activity reads it');
+    const out = await web('/activity', null);
+    assert.strictEqual(out.status, 200, 'the page answers 200 signed out, with the way to sign in');
+    assert.match(out.text, /Sign in/);
+    assert.ok(!/What happened/.test(out.text), 'and nothing of anyone');
 });

@@ -212,7 +212,7 @@ function createWebRoutes({ config }) {
         res.status(status).set('Cache-Control', o.cache || cache.htmlHeaders({ private: true })).set('Content-Security-Policy', contentSecurityPolicy(nonce)).type('html')
             .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: await countsOf(actor), nonce, ringScript: actor.kind === 'user' && !!(config.calls && config.calls.enabled), ...o }));
     };
-    const needUser = async (req, res) => {
+    const needUser = async (req, res, { status = 401 } = {}) => {
         const actor = await viewerOf(req);
         if (actor.kind === 'user') return actor;
         // A gated page answers here, noindex, instead of redirecting to Network sign-in: a crawler that
@@ -226,7 +226,7 @@ function createWebRoutes({ config }) {
         // The visible link goes back to the path only. A query string on a private page holds words that must
         // never come back in an anonymous response — the security suite reads every 401 body for the private
         // room's words, and echoing ?q= here put them there (SEO-7 review, 2026-10-29).
-        await page(req, res, 401, {
+        await page(req, res, status, {
             actor, title: 'Sign in to continue', path: req.path, active: null, footer: 'compact', robots: 'noindex, nofollow',
             body: `<h1>Sign in to continue</h1>
 <p class="oc-muted">This page is for OpenVibe accounts. Sign in and you come straight back here.</p>
@@ -377,7 +377,8 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
     // friend, conversations with something new, and the channels and rooms with unread messages, each a row that opens
     // the place. Nothing waiting is said as that, with the two places most people go next. ──
     router.get('/activity', async (req, res) => {
-        const actor = await needUser(req, res); if (!actor) return;
+        // 200 signed out too: Activity is a page people can be sent to, with the way to sign in in it.
+        const actor = await needUser(req, res, { status: 200 }); if (!actor) return;
         const me = actor.user;
         const serversApi = require('../rooms/servers');
         const convs = await dm.getConversations(me.id);

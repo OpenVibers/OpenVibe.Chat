@@ -5,7 +5,7 @@
  * designed elsewhere; this only supplies the one section, and its look is the shared list's.
  *
  * Opening the page counts as reading it: the rows are taken first (so the newest ones still read as unread on this
- * visit), then the page's activity is marked read and the bottom bar's dot goes away on the next page.
+ * visit), then the rows shown are marked read and the bottom bar's dot goes away on the next page.
  */
 const { esc } = require('./layout');
 const ui = require('./ui');
@@ -44,8 +44,9 @@ async function whatHappened(user) {
     if (!user || !user.id) return '';
     const { items } = await activity.list(user, { limit: LIMIT });
     if (!items.length) return '';
-    // Seen now: the rows above keep their unread mark for this visit.
-    await activity.markRead(user, { all: true }).catch(() => {});
+    // Seen now: the rows above keep their unread mark for this visit. Only what this page showed is read; a
+    // longer feed keeps the rest unread for the next visit.
+    await activity.markRead(user, { ids: items.map((row) => row.id) }).catch(() => {});
     const rows = items.map((row) => {
         const who = row.actor.display_name || row.actor.username || 'Someone';
         const at = ui.when(row.at);
