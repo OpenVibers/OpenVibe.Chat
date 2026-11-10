@@ -12,7 +12,7 @@
  *   POST   /:slug/leave
  *   GET    /:slug/members               (moderators also see who is banned)
  *   POST   /:slug/members               moderators: { username | subject, role: admin | mod | member | blocked | none }
- *   POST   /:slug/channels              owner/admins: { name, kind: text | voice, topic? }
+ *   POST   /:slug/channels              owner/admins: { name, kind: text | voice | stage, topic? }
  *   PATCH  /:slug/channels/:channel     owner/admins: { name?, topic?, slow_seconds?, join_role?, move?: up | down }
  *   DELETE /:slug/channels/:channel     owner/admins (a server keeps one text channel)
  *   GET    /:slug/invites               owner/admins: the live invites
@@ -60,6 +60,26 @@ async function channelOf(req, res, server) {
     const room = await servers.channelBySlug(server, req.params.channel);
     if (!room) { res.status(404).json({ error: 'No such channel', code: 'servers.no_channel' }); return null; }
     return room;
+}
+async function stageChannel(req, res, server) {
+    const room = await channelOf(req, res, server);
+    if (!room) return null;
+    if (!room.stage_channel) { res.status(404).json({ error: 'No such stage channel', code: 'stage.not_found' }); return null; }
+    return room;
+}
+async function stageState(room) {
+    const session = await require('../db/database').get('SELECT topic, started_at, ended_at FROM chat_stage_sessions WHERE room_id = ?', [room.id]);
+    const speakers = await require('../db/database').all('SELECT user_id, hand_raised FROM chat_stage_speakers WHERE room_id = ? ORDER BY hand_raised DESC, updated_at', [room.id]);
+    const people = await Promise.all(speakers.map(async (p) => {
+        const user = await ctx.getUserById(Number(p.user_id));
+        return { user_id: Number(p.user_id), username: user && user.username || null, display_name: user && user.display_name || null, hand_raised: p.hand_raised };
+    }));
+    return { topic: session && session.topic || null, started_at: session && session.started_at || null, ended_at: session && session.ended_at || null,
+        speakers: people.filter((p) => !p.hand_raised), raised_hands: people.filter((p) => p.hand_raised) };
+}
+async function updateStageAccess(room) {
+    await roomRoutes().applyRoomChange(room);
+    try { chatServer().broadcastToRoom(room.id, { type: 'stage', room: room.slug, stage: await stageState(room) }); } catch { /* clients can refetch */ }
 }
 const canOf = (a) => ({ read: a.read, member: a.member, moderate: a.moderate, manage: a.manage, owner: a.owner });
 
@@ -139,6 +159,69 @@ router.post('/:slug/channels', requireAuth, manageLimit, async (req, res) => {
         const room = await servers.createChannel(server, req.user, { name: b.name, kind: b.kind || 'text', topic: b.topic });
         res.status(201).json({ channel: servers.publicChannel(room) });
     } catch (err) { send(res, err); }
+});
+
+router.get('/:slug/:channel/stage', optionalAuth, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await stageChannel(req, res, server); if (!room) return;
+    res.set('Cache-Control', cache.htmlHeaders({ private: true })).json({ stage: await stageState(room), can: canOf(await servers.channelAccess(room, req.user || null)) });
+});
+router.post('/:slug/:channel/stage/start', requireAuth, manageLimit, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await stageChannel(req, res, server); if (!room) return;
+    const can = await servers.access(server, req.user);
+    if (!can.moderate) return res.status(403).json({ error: 'Only moderators can start a stage', code: 'stage.not_mod' });
+    const db = require('../db/database');
+    const topic = String((req.body || {}).topic ?? room.topic ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 200) || null;
+    await db.run('UPDATE rooms SET topic = ? WHERE id = ?', [topic, room.id]);
+    await db.run('UPDATE chat_stage_sessions SET topic = ?, started_at = ov_now(), ended_at = NULL, updated_at = ov_now() WHERE room_id = ?', [topic, room.id]);
+    const fresh = await db.get('SELECT * FROM rooms WHERE id = ?', [room.id]);
+    await updateStageAccess(fresh);
+    res.json({ stage: await stageState(fresh) });
+});
+router.post('/:slug/:channel/stage/end', requireAuth, manageLimit, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await stageChannel(req, res, server); if (!room) return;
+    if (!(await servers.access(server, req.user)).moderate) return res.status(403).json({ error: 'Only moderators can end a stage', code: 'stage.not_mod' });
+    const db = require('../db/database');
+    await db.run('UPDATE chat_stage_sessions SET ended_at = ov_now(), updated_at = ov_now() WHERE room_id = ?', [room.id]);
+    await db.run('DELETE FROM chat_stage_speakers WHERE room_id = ?', [room.id]);
+    await updateStageAccess(room);
+    res.json({ stage: await stageState(room) });
+});
+router.post('/:slug/:channel/stage/hand', requireAuth, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await stageChannel(req, res, server); if (!room) return;
+    const role = await servers.roleIn(server.id, req.user.id);
+    if (!role || role === 'blocked') return res.status(403).json({ error: 'Join the server to raise your hand', code: 'stage.not_member' });
+    const db = require('../db/database');
+    const row = await db.get('SELECT started_at, ended_at FROM chat_stage_sessions WHERE room_id = ?', [room.id]);
+    if (!row || !row.started_at || row.ended_at) return res.status(409).json({ error: 'The stage is not live', code: 'stage.not_live' });
+    await db.run('INSERT INTO chat_stage_speakers (room_id, user_id, hand_raised) VALUES (?, ?, TRUE) ON CONFLICT (room_id, user_id) DO UPDATE SET hand_raised = TRUE, updated_at = ov_now()', [room.id, req.user.id]);
+    res.json({ stage: await stageState(room) });
+});
+router.post('/:slug/:channel/stage/invite', requireAuth, manageLimit, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await stageChannel(req, res, server); if (!room) return;
+    if (!(await servers.access(server, req.user)).moderate) return res.status(403).json({ error: 'Only moderators can invite speakers', code: 'stage.not_mod' });
+    const userId = Number((req.body || {}).user_id);
+    const role = await servers.roleIn(server.id, userId);
+    if (!Number.isSafeInteger(userId) || !role || role === 'blocked') return res.status(404).json({ error: 'No such server member', code: 'stage.no_member' });
+    const db = require('../db/database');
+    await db.run('INSERT INTO chat_stage_speakers (room_id, user_id, invited_by, hand_raised) VALUES (?, ?, ?, FALSE) ON CONFLICT (room_id, user_id) DO UPDATE SET invited_by = EXCLUDED.invited_by, hand_raised = FALSE, updated_at = ov_now()', [room.id, userId, req.user.id]);
+    await updateStageAccess(room);
+    res.json({ stage: await stageState(room) });
+});
+router.post('/:slug/:channel/stage/move-back', requireAuth, manageLimit, async (req, res) => {
+    const server = await readable(req, res); if (!server) return;
+    const room = await stageChannel(req, res, server); if (!room) return;
+    if (!(await servers.access(server, req.user)).moderate) return res.status(403).json({ error: 'Only moderators can move speakers back', code: 'stage.not_mod' });
+    const userId = Number((req.body || {}).user_id);
+    const db = require('../db/database');
+    const result = await db.run('DELETE FROM chat_stage_speakers WHERE room_id = ? AND user_id = ?', [room.id, userId]);
+    if (!result.changes) return res.status(404).json({ error: 'No such stage speaker', code: 'stage.no_speaker' });
+    await updateStageAccess(room);
+    res.json({ stage: await stageState(room) });
 });
 
 router.patch('/:slug/channels/:channel', requireAuth, manageLimit, async (req, res) => {
