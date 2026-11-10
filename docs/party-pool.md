@@ -13,7 +13,7 @@ The switch is the one row in `party_pool_settings`, written from `openvibe.party
 rank. It starts **off**. `CHAT_PARTY_POOL=1` is an operator override for a development box; the panel's value wins
 otherwise.
 
-The owner adds a machine with its Link principal (`lnk_…`, shown on `openvibe.network/machines`), a name, what it can
+The owner adds a machine with its Link principal (`lnk_…`, shown on the machines page at openvibe.link/machines), a name, what it can
 run (`desktop`, and optionally `browser`), and how many desktops it may host at once (`1–50`). The row is the
 machine's advertisement:
 
