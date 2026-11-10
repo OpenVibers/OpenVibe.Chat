@@ -127,8 +127,34 @@ function linkCard(card) {
     return `<div class="oc-card" data-kind="${esc(typeof card.kind === 'string' ? card.kind : 'link')}">${pic}<div class="oc-card-body">${head}${line ? `<p class="oc-card-line">${esc(line)}</p>` : ''}${note ? `<p class="oc-card-note">${esc(note)}</p>` : ''}${go}</div></div>`;
 }
 
+/**
+ * An address preview under a message (server/chat/link-previews.js): the picture when there is one, the address's
+ * title as the link, its description, and "by" and LIVE for OpenVibe's own kinds. Every field is data: escaped here.
+ */
+function embedCard(e) {
+    if (!e || typeof e !== 'object' || typeof e.title !== 'string' || !e.title) return '';
+    const href = cardHref(e.url);
+    const image = cardImage(e.image);
+    const kind = ['link', 'video', 'image', 'live', 'picture', 'design', 'post', 'profile', 'game'].includes(e.kind) ? e.kind : 'link';
+    const head = href
+        ? `<a class="oc-card-title" href="${esc(href)}" rel="noopener nofollow" target="_blank">${esc(e.title)}</a>`
+        : `<span class="oc-card-title">${esc(e.title)}</span>`;
+    const pic = image ? `<a class="oc-card-pic" href="${esc(href || image)}" rel="noopener nofollow" target="_blank"><img src="${esc(image)}" alt="" loading="lazy" decoding="async"></a>` : '';
+    const description = typeof e.description === 'string' && e.description ? `<p class="oc-card-line">${esc(e.description)}</p>` : '';
+    const by = typeof e.by === 'string' && e.by ? `<p class="oc-card-line">by ${esc(e.by)}</p>` : '';
+    const live = e.live === true ? '<p class="oc-card-note"><span class="oc-badge oc-badge-mod">LIVE</span></p>' : '';
+    return `<div class="oc-card" data-kind="${esc(kind)}">${pic}<div class="oc-card-body">${head}${description}${by}${live}</div></div>`;
+}
+
+/** A message's previews (up to three, in the order the addresses appeared), or its one known-link card when it has none. */
+function messageCards(m) {
+    if (!m || typeof m !== 'object') return '';
+    if (Array.isArray(m.embeds) && m.embeds.length) return m.embeds.slice(0, 3).map(embedCard).filter(Boolean).join('');
+    return linkCard(m.card);
+}
+
 const hueOf = (slug) => { let h = 0; for (const c of String(slug)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 const serverLetters = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 const serverMark = (s) => `<span class="oc-srv-icon oc-srv-icon--row" style="--oc-hue:${hueOf(s.slug)}" aria-hidden="true">${esc(serverLetters(s.name))}</span>`;
 
-module.exports = { head, when, initials, presenceState, presenceDot, presenceOrder, presenceLine, hueOf, serverLetters, serverMark, linkCard };
+module.exports = { head, when, initials, presenceState, presenceDot, presenceOrder, presenceLine, hueOf, serverLetters, serverMark, linkCard, embedCard, messageCards };

@@ -209,4 +209,19 @@ t('an own site with no resolver yet is neither page-fetched nor previewed', asyn
     assert.deepStrictEqual(got.body.messages.find((m) => m.id === sent.body.message.id).embeds, []);
 });
 
+t('the room page draws a preview with its text escaped, never as markup', async () => {
+    previews._setRequest(async () => type(page('<meta property="og:title" content="&lt;b&gt;bold title&lt;/b&gt;"><meta property="og:description" content="&lt;img src=x onerror=alert(1)&gt;">')));
+    const made = await h.http('POST', '/api/chat/rooms', { token: alice.token, body: { name: 'Markup room' } });
+    const sent = await h.http('POST', `/api/chat/rooms/${made.body.room.slug}/messages`, { token: alice.token, body: { message: 'https://93.184.216.34/draw-me' } });
+    assert.strictEqual(sent.status, 201, sent.text);
+    await previews.idle();
+    const res = await fetch(`${h.base}/r/${made.body.room.slug}`, { headers: { cookie: `ov_token=${alice.token}` } });
+    const html = await res.text();
+    assert.match(html, /<div class="oc-card" data-kind="link">/, 'the card markup is drawn');
+    assert.ok(html.includes('&lt;b&gt;bold title&lt;/b&gt;'), 'the title is escaped as text');
+    assert.ok(!html.includes('<b>bold title</b>'), 'never markup');
+    assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'), 'the description is escaped too');
+    assert.ok(!html.includes('<img src=x onerror='), 'never an injected tag');
+});
+
 t.run(async () => { previews._reset(); await h.close(); });
