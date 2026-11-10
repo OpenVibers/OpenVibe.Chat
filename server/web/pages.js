@@ -894,7 +894,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
     const roomRoutes = require('../rooms/routes');
     const roomsOrError = (fn) => async (req, res, next) => {
         try { return await fn(req, res, next); } catch (err) {
-            if (err instanceof rooms.RoomError) return res.redirect(303, `${req.roomBack || '/rooms'}?error=${encodeURIComponent(err.message)}`);
+            if (err instanceof rooms.RoomError || err instanceof require('../rooms/memory').MemoryError) return res.redirect(303, `${req.roomBack || '/rooms'}?error=${encodeURIComponent(err.message)}`);
             return next(err);
         }
     };
@@ -1275,7 +1275,8 @@ ${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}</details>` : '';
                 body: roomShell(`${ui.head({ title: `AI members in #${esc(room.name)}`, back: { href: await channelUrl(room, '/settings'), label: 'Server settings' } })}${saved}${error}
 ${can.manage ? `<section class="oc-set"><h2>AI insight</h2><form class="oc-form oc-set-form" method="post" action="/r/${esc(room.slug)}/settings">
 <input type="hidden" name="has_ai_insight" value="1"><label class="oc-set-row oc-set-inline"><span class="oc-set-text">Summarise this channel<small>An overview and timeline of the channel, written for someone arriving now. Only messages from people who allowed AI use of them are read.</small></span><input type="checkbox" class="oc-switch" name="ai_insight" value="1"${rooms.insightOn(room) ? ' checked' : ''}></label>
-<p><button type="submit">Save</button></p></form></section>` : ''}
+<p><button type="submit">Save</button></p></form>
+<p><a href="/r/${esc(room.slug)}/memory">What this channel remembers</a></p></section>` : ''}
 ${aiSection}`),
             });
         }
@@ -1301,7 +1302,8 @@ ${room.kind === 'call' ? `<label>People who join <select name="join_role">${room
 <input type="hidden" name="has_ai_insight" value="1"><label class="oc-set-row oc-set-inline"><span class="oc-set-text">AI insight<small>An overview and timeline of this room, written for someone arriving now. Only messages from people who allowed AI use of them are read; a private room is off until you turn this on.</small></span><input type="checkbox" class="oc-switch" name="ai_insight" value="1"${rooms.insightOn(room) ? ' checked' : ''}></label>
 ${room.slug !== 'staff' && (room.kind || 'community') === 'community' && Number(room.assistant) !== 1 ? `<input type="hidden" name="has_workspace" value="1"><label class="oc-set-row oc-set-inline"><span class="oc-set-text">Work together here<small>A work queue beside the conversation, alerts from other systems and a shared screen</small></span><input type="checkbox" class="oc-switch" name="workspace" value="1"${rooms.isWorkspace(room) ? ' checked' : ''}></label>` : ''}
 ${rooms.isWorkspace(room) ? `<label>Shared screen <input name="screen_url" type="url" value="${esc(room.screen_url || '')}" placeholder="https://openvibe.bot/screen/…"> <span class="oc-muted oc-small">A screen share link from OpenVibe.Bot (a computer's owner makes it on its screen page). Members see the screen beside the conversation; with a "use" link they can click and type on it. Empty: no screen.</span></label>` : ''}
-<p><button type="submit">Save</button></p></form></section>` : ''}
+<p><button type="submit">Save</button></p></form>
+<p><a href="/r/${esc(room.slug)}/memory">What this room remembers</a> <span class="oc-muted oc-small">— the notes the AI keeps between summaries; you can correct or remove them.</span></p></section>` : ''}
 <section class="oc-set" aria-labelledby="oc-members-h"><h2 id="oc-members-h">Members <span class="oc-count">${members.length}</span></h2>
 <p class="oc-muted oc-set-note">${esc(roleHelp(room.kind))}</p>
 <form class="oc-find oc-find-inset" method="post" action="/r/${esc(room.slug)}/members">${IC.plus}<label for="oc-invite" class="oc-sr">Add someone by their username</label><input id="oc-invite" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="Add by username" autocomplete="off"><select name="role" aria-label="Their role">${choices.filter((r) => r !== 'none' && r !== 'blocked').map((r) => roleOption(r, addRole)).join('')}</select><button type="submit" class="oc-send" aria-label="Add" title="Add">${IC.send}</button></form>
@@ -1318,6 +1320,101 @@ ${aiSection}
 ${attachList}`),
         });
     });
+
+    // ── What this room remembers (plan 2026-11-10, part 3): the summariser's shared notes, with where each
+    // one came from, a moderator's correction/removal and a person's own "forget mine". Plain markup. ──
+    router.get('/r/:slug/memory', async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || Number(room.assistant) === 1) return res.redirect(303, '/rooms');
+        const can = await rooms.access(room, actor.user);
+        if (!can.read || (!can.role && !can.moderate)) return res.redirect(303, '/rooms');
+        const memory = require('../rooms/memory');
+        const entries = await memory.forRoom(room, { subject: actor.user.subject_id || null });
+        const saved = req.query.saved ? notice('ok', 'Saved.') : '';
+        const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
+        const mineServers = (await require('../rooms/servers').list(actor.user)).mine;
+        const listed = await rooms.list(actor.user);
+        const dmUnread = await require('../chat/dm').getTotalUnread(actor.user.id);
+        const kindOptions = (cur) => ['topic', 'fact', 'decision', 'request'].map((k) => `<option value="${k}"${k === cur ? ' selected' : ''}>${k}</option>`).join('');
+        const entryView = (e) => `<li class="oc-card oc-memory-entry">
+<details class="oc-fold"><summary><span><span class="oc-badge">${esc(e.kind)}</span> ${esc(e.text)} <span class="oc-muted oc-small">${Number(e.confidence) || 0}% · learned ${esc(ui.when(e.learned_at).text || '')}</span></span>${IC.chevron}</summary>
+${e.sources.length ? `<ul class="oc-muted oc-small">${e.sources.map((m) => `<li><strong>${esc(m.author)}</strong> <time>${esc(ui.when(m.at).text || '')}</time>: ${esc(m.text)}</li>`).join('')}</ul>` : '<p class="oc-muted oc-small">Its source messages are gone.</p>'}
+${can.moderate ? `<form class="oc-form oc-grid-form" method="post" action="/r/${esc(room.slug)}/memory/${Number(e.id)}/edit">
+<label>Words <input name="text" maxlength="400" value="${esc(e.text)}"></label>
+<label>Kind <select name="kind">${kindOptions(e.kind)}</select></label>
+<label>Confidence <input name="confidence" type="number" min="0" max="100" value="${Number(e.confidence) || 0}"></label>
+<button type="submit">Save</button></form>
+<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/memory/${Number(e.id)}/remove"><button type="submit" class="oc-pill oc-pill-danger">${IC.trash}<span>Remove</span></button></form>`
+: e.mine ? `<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/memory/${Number(e.id)}/remove"><button type="submit" class="oc-link">Remove this (it came from my messages)</button></form>` : ''}
+</details></li>`;
+        const addForm = can.moderate ? `<section class="oc-set"><h2>Add something it should remember</h2><form class="oc-form oc-grid-form" method="post" action="/r/${esc(room.slug)}/memory">
+<label>What <input name="text" required minlength="3" maxlength="400" placeholder="The stream is on Fridays"></label>
+<label>Kind <select name="kind">${kindOptions('fact')}</select></label>
+<label>Confidence <input name="confidence" type="number" min="0" max="100" value="80"></label>
+<button type="submit">Add</button></form></section>` : '';
+        const forgetMine = entries.some((e) => e.mine) ? `<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/memory/forget-mine"><button type="submit" class="oc-link">Forget everything learned from my messages in this room</button></form>` : '';
+        const body = shell.shell({
+            rail: shell.rail({ dmUnread, servers: shell.railServers(mineServers) }),
+            side: shell.sideRooms({
+                mine: listed.mine.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private', current: r.slug === room.slug })),
+                public: listed.public.map((r) => ({ slug: r.slug, name: r.name, unread: r.unread, private: r.visibility === 'private', current: r.slug === room.slug })),
+                you: { name: actor.user.display_name || actor.user.username, status: 'Online', avatarUrl: actor.user.avatar_url || '' },
+            }),
+            sideLabel: 'Rooms',
+            main: `${ui.head({ title: 'What this room remembers', sub: room.name, back: { href: `/r/${room.slug}`, label: 'Back to the room' } })}${saved}${error}
+<p class="oc-muted">The notes the AI keeps about this room between summaries: running topics, standing facts, decisions and asks, each with the messages it came from. A moderator corrects or removes any; anyone can remove what was learned from their own messages.</p>
+${forgetMine}
+${addForm}
+${entries.length ? `<ul class="oc-list">${entries.map(entryView).join('')}</ul>` : '<p class="oc-muted">Nothing yet. The notes build up as the room talks and the summariser runs.</p>'}`,
+            mainLabel: 'What this room remembers',
+        });
+        await page(req, res, 200, {
+            actor, title: `What ${room.name} remembers`, path: `/r/${room.slug}/memory`, active: 'rooms', robots: 'noindex, nofollow', shell: true, footer: 'none',
+            body,
+        });
+    });
+
+    router.post('/r/:slug/memory', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}/memory`;
+        if (!(await rooms.access(room, actor.user)).moderate) return res.redirect(303, `/r/${room.slug}/memory?error=${encodeURIComponent('Only a moderator adds to the room\'s memory')}`);
+        const b = req.body || {};
+        await require('../rooms/memory').add(room, actor.user, { text: b.text, kind: b.kind, confidence: b.confidence });
+        return res.redirect(303, `/r/${room.slug}/memory?saved=1`);
+    }));
+
+    router.post('/r/:slug/memory/:id/edit', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}/memory`;
+        if (!(await rooms.access(room, actor.user)).moderate) return res.redirect(303, `/r/${room.slug}/memory?error=${encodeURIComponent('Only a moderator corrects the room\'s memory')}`);
+        const b = req.body || {};
+        await require('../rooms/memory').correct(room, actor.user, Number(req.params.id), { text: b.text, kind: b.kind, confidence: b.confidence });
+        return res.redirect(303, `/r/${room.slug}/memory?saved=1`);
+    }));
+
+    router.post('/r/:slug/memory/:id/remove', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}/memory`;
+        const can = await rooms.access(room, actor.user);
+        await require('../rooms/memory').remove(room, actor.user, Number(req.params.id), { canModerate: !!can.moderate });
+        return res.redirect(303, `/r/${room.slug}/memory?saved=1`);
+    }));
+
+    router.post('/r/:slug/memory/forget-mine', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}/memory`;
+        await require('../rooms/memory').removeMine(room, actor.user.subject_id);
+        return res.redirect(303, `/r/${room.slug}/memory?saved=1`);
+    }));
 
     function roleHelp(kind) {
         if (kind === 'call') return 'Speakers, moderators and the owner talk in the call; participants listen and write in the chat; viewers listen and read.';

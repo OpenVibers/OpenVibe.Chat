@@ -24,6 +24,7 @@ const db = require('../db/database');
 const aiClient = require('./client');
 const extractive = require('./extractive');
 const consent = require('../net/consent');
+const memory = require('../rooms/memory');
 
 // ── Tunables (Live's) ────────────────────────────────────────────────────────
 const TICK_MS = config.ai.tickMs;
@@ -254,7 +255,9 @@ async function _refreshRoom(room) {
     if (!rows.length) return false;
     const now = Date.now();
     const { label: windowLabel, start: windowStart } = _windowOf(rows, now);
-    const priorMemory = prior ? (prior.memory_json || '') : '';
+    // The room's memory is part of what the summariser reads: standing facts from earlier summaries.
+    const shared = await memory.forPrompt(room).catch(() => '');
+    const priorMemory = [prior ? (prior.memory_json || '') : '', shared].filter(Boolean).join('\n');
     let priorTl = [];
     try { priorTl = JSON.parse(prior ? (prior.timeline_json || '[]') : '[]'); } catch { priorTl = []; }
 
@@ -283,7 +286,18 @@ async function _refreshRoom(room) {
         people: _people(rows),
         topics_json: JSON.stringify(_topics(rows)),
     });
-    console.log(`[ChatAI] room ${room.slug} refreshed (${newCount} new, ${rows.length} consenting, window=${windowLabel})`);
+    // Keep what the summary learned about the room, with the messages it came from. A removed entry is not
+    // recreated (memory.remember skips known and removed text).
+    let remembered = 0;
+    if (parsed.memory) {
+        remembered = await memory.remember(room, {
+            memory: parsed.memory,
+            source_message_ids: rows.slice(-30).map((r) => r.id),
+            source_subjects: [...new Set(rows.map((r) => r.subject_id).filter(Boolean))],
+            confidence: 45,
+        }).catch((e) => { console.warn(`[ChatAI] room ${room.slug} memory:`, e.message); return 0; });
+    }
+    console.log(`[ChatAI] room ${room.slug} refreshed (${newCount} new, ${rows.length} consenting, ${remembered} remembered, window=${windowLabel})`);
     return true;
 }
 
