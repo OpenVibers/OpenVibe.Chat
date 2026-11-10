@@ -17,7 +17,7 @@ const turns = [];
 const actorCalls = [];
 let actorTask = { id: 'tsk_r1', state: 'queued' };
 const vibeApi = (method, path, u, body) => h.http(method, `/api/chat/vibe${path}`, { token: u && u.token, body });
-const messagesOf = async (slug, as = ann) => ((await h.http('GET', `/api/chat/rooms/${slug}/messages`, { token: as.token })).body.messages || []);
+const messagesOf = async (slug, as = ann) => ((await h.http('GET', `/api/chat/rooms/${slug}/messages`, { token: as.token })).body.messages || []).slice().reverse();
 const realFetch = globalThis.fetch;
 
 t('boot', async () => {

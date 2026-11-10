@@ -26,7 +26,7 @@ const web = async (method, path, u, fields) => {
 /** Vibe's answers in a chat, waiting until there are `n`. */
 async function answers(s, n) {
     for (let i = 0; i < 60; i++) {
-        const got = ((await rooms('GET', `/${s}/messages`, ann)).body.messages || []).filter((m) => m.ai_member_id);
+        const got = ((await rooms('GET', `/${s}/messages`, ann)).body.messages || []).slice().reverse().filter((m) => m.ai_member_id);
         if (got.length >= n) return got;
         await new Promise((r) => setTimeout(r, 50));
     }
