@@ -31,7 +31,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .oc-tabs a { color: var(--oc-muted); text-decoration: none; padding: 4px 10px; border-radius: 999px; }
 .oc-tabs a[aria-current="page"], .oc-tabs a:hover { color: var(--oc-text); background: var(--oc-panel); }
 .oc-account { font-size: 14px; color: var(--oc-muted); margin-left: auto; }
-.oc-main { max-width: 960px; margin: 0 auto; padding: 16px 16px 48px; overflow-wrap: anywhere; }
+.oc-main { max-width: 960px; margin: 0 auto; padding: 16px 16px 0; overflow-wrap: anywhere; }
 /* The front page's showcase section under the room: the page column already has the gutter. */
 .oc-main .sc-sec { padding-left: 0; padding-right: 0; margin-top: 40px; }
 h1 { font-size: 1.6rem; line-height: 1.25; margin: .3em 0 .2em; }
@@ -84,7 +84,7 @@ button[disabled] { opacity: .6; cursor: default; }
 .oc-ai-form:not(:has(select[name="provider"] option[value="node"]:checked)) .oc-if-node,
 .oc-ai-form:not(:has(select[name="provider"] option[value="openai"]:checked)) .oc-if-openai { display: none; }
 @media (max-width: 560px) {
-  .oc-main { padding: 12px 12px 40px; }
+  .oc-main { padding: 12px 12px 0; }
   .oc-feed { max-height: 60vh; }
   .oc-account { margin-left: 0; }
 }
