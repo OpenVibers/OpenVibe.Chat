@@ -50,7 +50,10 @@ async function until(fn, label) {
     for (let i = 0; i < 100; i++) { const v = await fn(); if (v) return v; await new Promise((r) => setTimeout(r, 50)); }
     throw new Error(`timed out: ${label}`);
 }
-const visitorMessages = async (token) => (await widget('GET', `/messages?token=${token}`)).body.messages;
+const visitorMessages = async (token) => {
+    const r = await widget('GET', `/messages?token=${token}`);
+    return (r.body && r.body.messages) || [];
+};
 
 t('boot', async () => {
     h = await boot({ env: { CHAT_WEB_URL: SITE, CHAT_INBOX_POSTS_PER_MINUTE: '500' } });
@@ -166,6 +169,133 @@ t('an outage is words the visitor reads, and nothing falls back to AI', async ()
         }, 'Vibe answers');
         const said = messages.find((x) => x.author === 'ai');
         assert.ok(said.body.includes('could not be reached'), `the outage in plain words: ${said.body}`);
+    } finally { actorModule._setActor(null); }
+});
+
+t('a visitor\'s own turn limit stops their turns, and says so in plain words', async () => {
+    const actor = fakeActor();
+    actorModule._setActor(actor);
+    const perHour = require('../server/config').inbox.visitorTurnsPerHour;
+    try {
+        const v = await widget('POST', '/visit', {});
+        const token = v.body.token;
+        // Ask until the limit is reached: the limit is inside Chat, so no turn is sent past it.
+        for (let i = 0; i < perHour; i++) {
+            await widget('POST', '/messages', { token, message: `question ${i}` });
+        }
+        await until(async () => {
+            const m = await visitorMessages(token);
+            return m.filter((x) => x.author === 'ai').length >= perHour ? m : null;
+        }, 'Vibe answers');
+        assert.strictEqual(actor.turns.length, perHour, 'the limit\'s worth of turns went to Actor');
+        // One more: the limit holds, and the visitor is told why.
+        await widget('POST', '/messages', { token, message: 'one more' });
+        const messages = await until(async () => {
+            const m = await visitorMessages(token);
+            return m.some((x) => x.author === 'system') ? m : null;
+        }, 'the limit says so');
+        assert.strictEqual(actor.turns.length, perHour, 'no turn went past the limit');
+        const said = messages.find((x) => x.author === 'system');
+        assert.ok(/asked a lot of questions/i.test(said.body), `the limit in plain words: ${said.body}`);
+    } finally { actorModule._setActor(null); }
+});
+
+t('a visitor\'s own day limit stops their turns too, and says so in plain words', async () => {
+    const actor = fakeActor();
+    actorModule._setActor(actor);
+    const config = require('../server/config');
+    const savedHour = config.inbox.visitorTurnsPerHour;
+    const savedDay = config.inbox.visitorTurnsPerDay;
+    // The day limit is the one that bites here: the hour limit is out of the way.
+    config.inbox.visitorTurnsPerHour = 1000;
+    config.inbox.visitorTurnsPerDay = 3;
+    try {
+        const v = await widget('POST', '/visit', {});
+        const token = v.body.token;
+        for (let i = 0; i < 3; i++) await widget('POST', '/messages', { token, message: `question ${i}` });
+        await until(async () => {
+            const m = await visitorMessages(token);
+            return m.filter((x) => x.author === 'ai').length >= 3 ? m : null;
+        }, 'Vibe answers');
+        assert.strictEqual(actor.turns.length, 3, 'the day limit\'s worth of turns went to Actor');
+        await widget('POST', '/messages', { token, message: 'one more' });
+        const messages = await until(async () => {
+            const m = await visitorMessages(token);
+            return m.some((x) => x.author === 'system') ? m : null;
+        }, 'the limit says so');
+        assert.strictEqual(actor.turns.length, 3, 'no turn went past the day limit');
+        const said = messages.find((x) => x.author === 'system');
+        assert.ok(/asked a lot of questions/i.test(said.body), `the limit in plain words: ${said.body}`);
+        assert.ok(/today/i.test(said.body), `and it says the day is the limit: ${said.body}`);
+    } finally { config.inbox.visitorTurnsPerHour = savedHour; config.inbox.visitorTurnsPerDay = savedDay; actorModule._setActor(null); }
+});
+
+t('the inbox\'s own daily cap stays the outer limit', async () => {
+    const actor = fakeActor();
+    actorModule._setActor(actor);
+    const config = require('../server/config');
+    const savedHour = config.inbox.visitorTurnsPerHour;
+    const savedDay = config.inbox.visitorTurnsPerDay;
+    // The visitor's own limits are out of the way: the inbox's daily cap is the one that bites.
+    config.inbox.visitorTurnsPerHour = 1000;
+    config.inbox.visitorTurnsPerDay = 1000;
+    const savedInboxCap = config.inbox.aiRepliesPerDay;
+    // The inbox's cap counts the answers of the whole inbox, including the ones earlier in this file: put it
+    // just above what has been used, so it is the cap that bites next.
+    const usedSoFar = Number((await h.db.get('SELECT replies FROM inbox_ai_usage WHERE inbox_id = ? AND day = ?', [inbox.id, new Date().toISOString().slice(0, 10)]) || {}).replies) || 0;
+    config.inbox.aiRepliesPerDay = usedSoFar + 2;
+    try {
+        // Two different visitors: the inbox's cap counts the answers of the whole inbox, not one visitor's.
+        const first = (await widget('POST', '/visit', {})).body.token;
+        await widget('POST', '/messages', { token: first, message: 'question one' });
+        await until(async () => {
+            const m = await visitorMessages(first);
+            return m.some((x) => x.author === 'ai') ? m : null;
+        }, 'Vibe answers');
+        const second = (await widget('POST', '/visit', {})).body.token;
+        await widget('POST', '/messages', { token: second, message: 'question two' });
+        await until(async () => {
+            const m = await visitorMessages(second);
+            return m.some((x) => x.author === 'ai') ? m : null;
+        }, 'Vibe answers again');
+        assert.strictEqual(actor.turns.length, 2, 'the inbox\'s cap worth of turns went to Actor');
+        // One more: the inbox's own cap holds, over the visitors' limits.
+        const third = (await widget('POST', '/visit', {})).body.token;
+        await widget('POST', '/messages', { token: third, message: 'question three' });
+        const messages = await until(async () => {
+            const m = await visitorMessages(third);
+            return m && m.some((x) => x.author === 'system') ? m : null;
+        }, 'the inbox cap says so');
+        assert.strictEqual(actor.turns.length, 2, 'no turn went past the inbox\'s cap');
+        const said = messages.find((x) => x.author === 'system');
+        assert.ok(/all it can today|answered a lot today/i.test(said.body), `the inbox's cap in plain words: ${said.body}`);
+    } finally {
+        config.inbox.visitorTurnsPerHour = savedHour;
+        config.inbox.visitorTurnsPerDay = savedDay;
+        config.inbox.aiRepliesPerDay = savedInboxCap;
+        actorModule._setActor(null);
+    }
+});
+
+t('one visitor\'s limit does not touch another visitor\'s turns', async () => {
+    const actor = fakeActor();
+    actorModule._setActor(actor);
+    const perHour = require('../server/config').inbox.visitorTurnsPerHour;
+    try {
+        const first = (await widget('POST', '/visit', {})).body.token;
+        for (let i = 0; i < perHour; i++) await widget('POST', '/messages', { token: first, message: `question ${i}` });
+        await until(async () => {
+            const m = await visitorMessages(first);
+            return m.filter((x) => x.author === 'ai').length >= perHour ? m : null;
+        }, 'Vibe answers');
+        const second = (await widget('POST', '/visit', {})).body.token;
+        const before = actor.turns.length;
+        await widget('POST', '/messages', { token: second, message: 'my own question' });
+        await until(async () => {
+            const m = await visitorMessages(second);
+            return m.some((x) => x.author === 'ai') ? m : null;
+        }, 'the second visitor is answered');
+        assert.strictEqual(actor.turns.length, before + 1, 'the other visitor\'s turn went through');
     } finally { actorModule._setActor(null); }
 });
 

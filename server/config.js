@@ -80,7 +80,11 @@ module.exports = {
         translationsPerDay: Math.max(0, int(process.env.CHAT_INBOX_TRANSLATIONS_PER_DAY, 300)),   // new translations an inbox a UTC day
         // What one inbox turn may cost on OpenVibe.Actor (one-engine slice). The turn is the visitor's when they are
         // signed in (their allowance pays for it) and Chat's own when they are not (Chat's cap).
-        actorPerTurnUsd: Math.max(0.001, Number(process.env.CHAT_INBOX_ACTOR_PER_TURN_USD) || 0.05) },
+        actorPerTurnUsd: Math.max(0.001, Number(process.env.CHAT_INBOX_ACTOR_PER_TURN_USD) || 0.05),
+        // How many turns one visitor's own widget session may ask for, in an hour and in a UTC day. Inside the
+        // inbox's own daily cap (aiRepliesPerDay), which stays the outer limit: one visitor cannot spend the day.
+        visitorTurnsPerHour: Math.max(1, int(process.env.CHAT_INBOX_VISITOR_TURNS_PER_HOUR, 10)),
+        visitorTurnsPerDay: Math.max(1, int(process.env.CHAT_INBOX_VISITOR_TURNS_PER_DAY, 40)) },
     // OpenVibe.Actor, the fallback for Vibe's web search when the Search Fabric is down (server/rooms/web-search.js):
     // tasks for the person, with Chat's own token.
     actor: { internalUrl: strip(process.env.CHAT_ACTOR_INTERNAL_URL || 'http://127.0.0.1:4950') },

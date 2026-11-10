@@ -531,7 +531,41 @@ async function markRead(inbox, conv) { await db.run('UPDATE inbox_conversations 
 
 const inFlight = new Set();
 const today = () => new Date().toISOString().slice(0, 10);
+/** The UTC hour the turn belongs to, so a visitor's hour is a window of its own. */
+const thisHour = () => new Date().toISOString().slice(0, 13);
 const HANDOFF_RE = /\[HANDOFF\]\s*$/;
+
+/**
+ * The visitor's own turn limit (one-engine slice): how many turns this visitor's widget session may ask for in an
+ * hour and in a day. The turn is counted when it is asked for, before it is sent, so a limit stops the cost rather
+ * than the bill. The visitor is their token, hashed: the table never keeps the token itself.
+ *
+ * → { refused: false } while there is room, or { refused: true, words } with what the visitor reads.
+ */
+async function visitorTurns(inbox, conv) {
+    const perHour = Math.max(1, Number(config.inbox.visitorTurnsPerHour) || 10);
+    const perDay = Math.max(1, Number(config.inbox.visitorTurnsPerDay) || 40);
+    const who = String(conv.visitor_token_hash || '');
+    if (!who) return { refused: false };
+    const windows = [[`h:${thisHour()}`, perHour, 'hour'], [`d:${today()}`, perDay, 'day']];
+    for (const [period, limit, of] of windows) {
+        const row = await db.get('SELECT turns FROM inbox_visitor_turns WHERE inbox_id = ? AND visitor_token_hash = ? AND period = ?', [inbox.id, who, period]);
+        if (Number((row || {}).turns || 0) >= limit) {
+            return {
+                refused: true,
+                words: of === 'hour'
+                    ? 'You have asked a lot of questions in the last hour. Please try again later, or ask for a person.'
+                    : 'You have asked a lot of questions today. Please try again tomorrow, or ask for a person.',
+            };
+        }
+    }
+    // The turn is about to be sent: it is counted now, once.
+    for (const [period] of windows) {
+        await db.run(`INSERT INTO inbox_visitor_turns (inbox_id, visitor_token_hash, period, turns) VALUES (?, ?, ?, 1)
+            ON CONFLICT (inbox_id, visitor_token_hash, period) DO UPDATE SET turns = inbox_visitor_turns.turns + 1`, [inbox.id, who, period]);
+    }
+    return { refused: false };
+}
 
 function inboxPrompt(inbox, { actions = false } = {}) {
     const urls = json(inbox.knowledge_urls, []);
@@ -604,6 +638,10 @@ async function aiAnswer(inbox, convId, deps = {}) {
     if (Number(conv.ai_replies) >= AI_PER_CONVERSATION) return await stop(`A person from ${inbox.name} will take it from here.`, 'This conversation is as long as Vibe can go. Start a new one any time.');
     const used = Number((await db.get('SELECT replies FROM inbox_ai_usage WHERE inbox_id = ? AND day = ?', [inbox.id, today()]) || {}).replies) || 0;
     if (used >= config.inbox.aiRepliesPerDay) return await stop(`Vibe has answered a lot today; a person from ${inbox.name} will reply here.`, 'Vibe has answered all it can today. Please try again tomorrow.');
+    // The visitor's own turn limit (one-engine slice): one visitor's session may not spend the whole day's answers
+    // while other visitors wait. It is inside the inbox's own daily cap above, which stays the outer limit.
+    const visitorLimit = await visitorTurns(inbox, conv);
+    if (visitorLimit.refused) return await stop(visitorLimit.words, visitorLimit.words);
     inFlight.add(convId);
     try {
         broadcaster(deps)(inbox.id, conv.id, { type: 'inbox_typing', inbox: inbox.id, conversation: conv.id, who: 'Vibe' });

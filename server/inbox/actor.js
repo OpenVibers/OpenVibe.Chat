@@ -114,6 +114,9 @@ function createActor({ fetchImpl = globalThis.fetch, now = () => Date.now() } = 
      *   tools        the registry tool names the run may call (an empty list answers with no tool calls)
      *   budgetUsd    what this one turn may cost
      *   conversation { product, id }: the product conversation this turn answers
+     *
+     * There is no tier here on purpose: the adult tier is for a person who confirmed they are 18 or older, and
+     * a support inbox's visitor is not that person. Chat never asks for it.
      */
     async function turn({ subject = null, task, tools = [], budgetUsd = null, conversation = null, idempotencyKey = null, model = null, waitMs: turnWaitMs = null } = {}) {
         const who = SUBJECT_RE.test(String(subject || '')) ? String(subject) : null;
