@@ -1,4 +1,5 @@
 'use strict';
+const messageFiles = require('./files');
 /**
  * Chat rooms (roadmap WS-I task 4): rooms people create on openvibe.chat, beside the global room and
  * the stream/channel rooms Live's chat already has. Three kinds:
@@ -267,7 +268,7 @@ async function announceDeleted(room, ids) {
     }
 }
 
-async function post(room, user, text, { now = Date.now(), ai = true, timezone = null, reply_to_id = null } = {}) {
+async function post(room, user, text, { now = Date.now(), ai = true, timezone = null, reply_to_id = null, files = [] } = {}) {
     const a = await access(room, user);
     if (!user) fail(401, 'rooms.sign_in', 'Sign in to chat');
     if (siteBanned(user)) fail(403, 'rooms.banned', 'Your account is banned from chat');
@@ -305,11 +306,12 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
     }
     const filtered = wordFilter.check(body);
     const message = filtered.safe ? body : filtered.filtered;
+    const attached = messageFiles.cleanFiles(files, user.subject_id || null);
     // The message's known OpenVibe link, with a second's budget: the card is stored on the row and arrives with the
     // broadcast when it is ready; a slower one fills the row later.
     const { card, pending } = await linkCards.forSend(message);
     const id = await db.tx(async () => {
-        const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, card, reply_to_id) VALUES (?, ?, ?, ?, ?, ?)', [room.id, user.id, user.subject_id || null, message, linkCards.toJson(card), replyToId]);
+        const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, card, reply_to_id, files) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb)', [room.id, user.id, user.subject_id || null, message, linkCards.toJson(card), replyToId, JSON.stringify(attached)]);
         await db.run('UPDATE rooms SET message_count = message_count + 1, last_message_at = ov_now() WHERE id = ?', [room.id]);
         await db.run('UPDATE room_members SET last_read_id = ?, last_seen_at = ov_now() WHERE room_id = ? AND user_id = ?', [r.lastInsertRowid, room.id, user.id]);
         await announceMessage(room, user, Number(r.lastInsertRowid), message, now);
@@ -352,7 +354,7 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null } = {
 }
 
 // A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
-const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.created_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model, m.reply_to_id,
+const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.reply_to_id, m.created_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle WHEN m.agent_stream THEN 'aiagent' ELSE u.username END AS username,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.name WHEN m.agent_stream THEN 'AI agent' ELSE u.display_name END AS display_name,
         m.agent_stream, u.profile_color, u.role AS user_role

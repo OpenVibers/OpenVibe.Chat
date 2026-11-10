@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Activity (migration 0060_chat_activity.sql, server/chat/activity.js): what happened to a person in Chat. A mention
+ * Activity (migration 0061_chat_activity.sql, server/chat/activity.js): what happened to a person in Chat. A mention
  * and a reply in a room, a reaction on a message, a server invite, an accepted friend request and a role given are
  * one row each with who, what, where and when; the API is newest first with a cursor and a kind filter, has an
  * unread count, and marks one or all read. A person only sees what they may still read (a room they were removed
@@ -192,4 +192,14 @@ t('a deleted message leaves the feed, and the page section renders who, what, wh
     assert.match(html, /#Activity Lab/);
     assert.match(html, /<time datetime=/);
     assert.strictEqual((await activity('GET', '/unread', ann)).body.unread, 0, 'opening the page reads it');
+
+    // The page itself: the section sits above the page's own sections.
+    await room('POST', `/${roomSlug}/messages`, bob, { message: 'page me @ann' });
+    let page = await web('/activity', ann);
+    assert.strictEqual(page.status, 200, page.text.slice(0, 300));
+    assert.match(page.text, /<h1[^>]*>Activity<\/h1>/);
+    assert.match(page.text, /What happened/);
+    assert.match(page.text, /page me @ann|page me/);
+    assert.ok(page.text.indexOf('What happened') < page.text.indexOf('Friend requests') || !page.text.includes('Friend requests'), 'the feed is above the waiting sections');
+    assert.strictEqual((await activity('GET', '/unread', ann)).body.unread, 0, 'opening /activity reads it');
 });

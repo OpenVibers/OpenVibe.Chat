@@ -109,7 +109,7 @@ function mountInboxPages(router, { page, viewerOf, needUser, sameSite, formLimit
         await page(req, res, 200, {
             actor, title: 'Inbox', path: '/inbox', active: 'inbox', robots: 'noindex, nofollow', shell: true, footer: 'none',
             body: shell.shell({
-                rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+                rail: shell.rail({ dmUnread, servers: shell.railServers(mineServers) }),
                 side: shell.sideInbox({ inboxes: mine, you: { name: actor.user.display_name || actor.user.username, status: 'Online', avatarUrl: actor.user.avatar_url || '' } }),
                 sideLabel: 'Inbox',
                 main: `<h1>Inbox</h1>
@@ -168,7 +168,7 @@ ${list}
         const mineServers = (await require('../rooms/servers').list(actor.user)).mine;
         const dmUnread = await require('../chat/dm').getTotalUnread(actor.user.id);
         const body = `<div class="ibk" id="ib" data-inbox="${esc(inbox.id)}" data-conv="${current ? esc(current.id) : ''}">${shell.shell({
-            rail: shell.rail({ dmUnread, servers: mineServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread })) }),
+            rail: shell.rail({ dmUnread, servers: shell.railServers(mineServers) }),
             side: conversationsRail({ inbox, list, filter, current, me, nameOf, waiting: counts.waiting }),
             sideLabel: 'Conversations',
             main: pane,

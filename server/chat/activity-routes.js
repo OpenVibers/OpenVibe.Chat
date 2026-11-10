@@ -1,6 +1,6 @@
 'use strict';
 /**
- * The Activity API (server/chat/activity.js, migration 0060_chat_activity.sql). Signed in only; every person sees
+ * The Activity API (server/chat/activity.js, migration 0061_chat_activity.sql). Signed in only; every person sees
  * their own activity and nothing else, and each read applies their current access (a room they left, a server
  * they were kicked from, a blocked person, a deleted message).
  *

@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Activity: what happened to a person in Chat (migration 0060_chat_activity.sql). One table of rows, one row per
+ * Activity: what happened to a person in Chat (migration 0061_chat_activity.sql). One table of rows, one row per
  * event, written when the event happens and read newest first by the person it happened to:
  *
  *   mention        @you in a room, a channel, a direct message or global chat
