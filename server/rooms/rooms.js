@@ -362,7 +362,10 @@ const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.file
     LEFT JOIN room_ai_members a ON a.id = m.ai_member_id`;
 async function messageById(id) {
     const row = await db.get(`${MSG_SELECT} WHERE m.id = ?`, [id]) || null;
-    if (row) await linkCards.hydrate([row], 'room_messages');
+    if (row) {
+        row.attachments = messageFiles.attachmentRefs(messageFiles.filesOf(row));
+        await linkCards.hydrate([row], 'room_messages');
+    }
     return row;
 }
 
@@ -374,6 +377,7 @@ async function history(room, { before = null, after = null, limit = 60 } = {}) {
         : before != null
             ? await db.all(`${MSG_SELECT} WHERE m.room_id = ? AND m.id < ? AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT ?`, [room.id, Number(before) || 0, lim])
             : await db.all(`${MSG_SELECT} WHERE m.room_id = ? AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT ?`, [room.id, lim]);
+    for (const row of rows) row.attachments = messageFiles.attachmentRefs(messageFiles.filesOf(row));
     await linkCards.hydrate(rows, 'room_messages');
     return after != null ? rows : rows.reverse();
 }
