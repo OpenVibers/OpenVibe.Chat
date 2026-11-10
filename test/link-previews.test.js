@@ -137,4 +137,76 @@ t('three addresses at most, and a redirect is followed only once it is judged pu
     assert.ok(calls.includes('https://93.184.216.34/target'));
 });
 
+t('a Live channel is a live kind from its public API, with no page fetch', async () => {
+    process.env.CHAT_LINK_LIVE_URL = 'https://93.184.216.34';
+    const calls = [];
+    previews._setRequest(async (url) => {
+        calls.push(url);
+        if (url.includes('/api/streams/channel/streamer')) {
+            return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+                channel: { username: 'streamer', display_name: 'The Streamer', bio: 'Live every Friday', avatar_url: 'https://openvibe.media/avatars/s.jpg' },
+                streams: [{ id: 7 }],
+            }) };
+        }
+        return { status: 404, headers: {}, body: '' };
+    });
+    const made = await h.http('POST', '/api/chat/rooms', { token: alice.token, body: { name: 'Live kinds' } });
+    const sent = await h.http('POST', `/api/chat/rooms/${made.body.room.slug}/messages`, { token: alice.token, body: { message: 'watch https://openvibe.live/@streamer tonight' } });
+    assert.strictEqual(sent.status, 201, sent.text);
+    await previews.idle();
+    const got = await h.http('GET', `/api/chat/rooms/${made.body.room.slug}/messages`, { token: alice.token });
+    const embed = got.body.messages.find((m) => m.id === sent.body.message.id).embeds[0];
+    assert.strictEqual(embed.kind, 'live');
+    assert.strictEqual(embed.title, 'The Streamer');
+    assert.strictEqual(embed.by, 'streamer');
+    assert.strictEqual(embed.live, true);
+    assert.strictEqual(embed.image, 'https://openvibe.media/avatars/s.jpg');
+    assert.deepStrictEqual(calls, ['https://93.184.216.34/api/streams/channel/streamer?pollOnly=1'], 'the page itself is never fetched');
+});
+
+t('an offline Live channel is the same kind with live: false', async () => {
+    previews._setRequest(async () => ({ status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({
+        channel: { username: 'quiet', display_name: 'Quiet Corner' }, streams: [],
+    }) }));
+    const made = await h.http('POST', '/api/chat/rooms', { token: alice.token, body: { name: 'Offline kind' } });
+    const sent = await h.http('POST', `/api/chat/rooms/${made.body.room.slug}/messages`, { token: alice.token, body: { message: 'https://openvibe.live/@quiet' } });
+    assert.strictEqual(sent.status, 201, sent.text);
+    await previews.idle();
+    const got = await h.http('GET', `/api/chat/rooms/${made.body.room.slug}/messages`, { token: alice.token });
+    const embed = got.body.messages.find((m) => m.id === sent.body.message.id).embeds[0];
+    assert.strictEqual(embed.kind, 'live');
+    assert.strictEqual(embed.live, false);
+});
+
+t('a Video watch page is resolved by Video and never page-fetched', async () => {
+    process.env.CHAT_LINK_VIDEO_URL = 'https://93.184.216.34';
+    const calls = [];
+    previews._setRequest(async (url) => {
+        calls.push(url);
+        return { status: 200, headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'Friday film', channel: 'ann', thumbnail_url: 'https://openvibe.media/vod/friday.jpg', duration_s: 3725 }) };
+    });
+    const made = await h.http('POST', '/api/chat/rooms', { token: alice.token, body: { name: 'Video kind' } });
+    const sent = await h.http('POST', `/api/chat/rooms/${made.body.room.slug}/messages`, { token: alice.token, body: { message: 'https://openvibe.video/watch?v=dQw4w9WgXcQ' } });
+    assert.strictEqual(sent.status, 201, sent.text);
+    await previews.idle();
+    const got = await h.http('GET', `/api/chat/rooms/${made.body.room.slug}/messages`, { token: alice.token });
+    const embed = got.body.messages.find((m) => m.id === sent.body.message.id).embeds[0];
+    assert.strictEqual(embed.kind, 'video');
+    assert.strictEqual(embed.title, 'Friday film');
+    assert.strictEqual(embed.by, 'ann');
+    assert.deepStrictEqual(calls, ['https://93.184.216.34/api/v1/video/watchable?url=https%3A%2F%2Fopenvibe.video%2Fwatch%3Fv%3DdQw4w9WgXcQ']);
+});
+
+t('an own site with no resolver yet is neither page-fetched nor previewed', async () => {
+    let called = false;
+    previews._setRequest(async () => { called = true; return { status: 200, headers: { 'content-type': 'text/html' }, body: '<meta property="og:title" content="Should not be read">' }; });
+    const made = await h.http('POST', '/api/chat/rooms', { token: alice.token, body: { name: 'Unreached kind' } });
+    const sent = await h.http('POST', `/api/chat/rooms/${made.body.room.slug}/messages`, { token: alice.token, body: { message: 'https://openvibe.pics/p/some-picture' } });
+    assert.strictEqual(sent.status, 201, sent.text);
+    await previews.idle();
+    assert.strictEqual(called, false);
+    const got = await h.http('GET', `/api/chat/rooms/${made.body.room.slug}/messages`, { token: alice.token });
+    assert.deepStrictEqual(got.body.messages.find((m) => m.id === sent.body.message.id).embeds, []);
+});
+
 t.run(async () => { previews._reset(); await h.close(); });
