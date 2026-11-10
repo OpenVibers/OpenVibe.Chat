@@ -85,6 +85,10 @@ t('the page: Pics links show as thumbnails linked to the picture\'s page; other 
     assert.match(r.text, /<a class="oc-pic" href="https:\/\/openvibe\.pics\/i\/[2-9a-km-zA-HJ-NP-Z]{8}"[^>]*><img src="https:\/\/openvibe\.pics\/i\/[2-9a-km-zA-HJ-NP-Z]{8}\/thumb\.webp"/);
     assert.strictEqual((r.text.match(/class="oc-pic"/g) || []).length, 1, 'only the Pics picture');
     assert.match(r.text, /Add a picture/);
+    assert.match(r.text, /data-picture-upload/);
+    assert.match(r.text, /\/shared\/ov-upload\.js/);
+    assert.match(r.text, /\/shared\/ov-upload\.css/);
+    assert.doesNotMatch(r.text, /input type="file" name="picture"/, 'the hand-rolled file input is gone');
     assert.match(r.text, /"pics":"https:\/\/openvibe\.pics"/, 'chat.js gets the Pics address for live messages');
     assert.doesNotMatch((await page('/r/photo-walk', cat)).text, /Add a picture/, 'only people who may post get the form');
 });

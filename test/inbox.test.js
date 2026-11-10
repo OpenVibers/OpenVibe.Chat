@@ -392,6 +392,7 @@ t('pictures: one of the people sends a picture (through OpenVibe.Pics as them); 
     assert.strictEqual((await send(outsider)).status, 404);
     const app = await fetch(`${h.base}/inbox/${inbox.id}?c=${cid}`, { headers: { cookie: `ov_token=${bob.token}` } }).then((x) => x.text());
     assert.ok(app.includes('class="oc-pic"') && app.includes('/thumb.webp') && app.includes('id="ib-pic"'), 'the people see it inline, and the reply box has a picture button');
+    assert.ok(app.includes('/shared/ov-upload.js') && app.includes('/shared/ov-upload.css') && app.includes('data-ib-upload'), 'the picture button opens the shared picker');
     const panel = await fetch(`${h.base}/embed/inbox/${inbox.id}`).then((x) => x.text());
     assert.ok(panel.includes('data-pics="https://openvibe.pics"'), 'the visitor\'s panel knows where pictures come from');
 });
@@ -462,7 +463,9 @@ t('a signed-in visitor sends a picture from the panel (through OpenVibe.Pics as 
     assert.ok((await page(`/inbox/${inbox.id}?c=${cid}`, bob)).includes('class="oc-pic"'), 'the people see it inline');
     assert.ok(!(await page(`/inbox/${inbox.id}?c=${pasted.body.conversation.id}`, bob)).includes('class="oc-pic"'), 'and the pasted link as text');
     assert.ok((await page(`/support/${cid}`, eve)).includes('class="oc-pic"'), 'the visitor sees it in their Messages too');
-    assert.ok((await fetch(`${h.base}/embed/inbox/${inbox.id}`).then((x) => x.text())).includes('id="em-attach"'), 'the panel has the picture button');
+    const panelHtml = await fetch(`${h.base}/embed/inbox/${inbox.id}`).then((x) => x.text());
+    assert.ok(panelHtml.includes('id="em-attach"'), 'the panel has the picture button');
+    assert.ok(panelHtml.includes('/shared/ov-upload.js') && panelHtml.includes('data-em-upload'), 'the panel uses the shared picker');
 });
 
 t('records: finished conversations go after the owner\'s retention, waiting and open ones never; the owner exports CSV and JSON', async () => {

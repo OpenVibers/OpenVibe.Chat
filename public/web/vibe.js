@@ -22,8 +22,10 @@
   var room = cfg.room || null;
   var latest = Number(cfg.latest) || 0;
   var ws = null, delay = 1000, sending = false, waitTimer = null;
-  var fileInput = document.getElementById('vb-file');
   var previewEl = document.getElementById('vb-preview');
+  var progressEl = document.querySelector('[data-vb-progress]');
+  var uploadDialog = document.querySelector('[data-vb-upload-dialog]');
+  var uploadRoot = document.querySelector('[data-vb-upload]');
   var picture = null;   // { file, url }: a picture waiting to go with the next message
   var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   var chosenModels = Array.isArray(cfg.models) ? cfg.models.slice(0, 3) : [];
@@ -134,7 +136,6 @@
     if (picture && picture.url) URL.revokeObjectURL(picture.url);
     picture = null;
     if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; }
-    if (fileInput) fileInput.value = '';
     if (input) input.required = true;
     changed();
   }
@@ -161,8 +162,8 @@
   }
   function choosePicture(file) {
     if (!file) return;
-    if (!PIC_TYPES.test(file.type) && (/^text\//.test(file.type) || file.type === 'application/json' || TEXT_EXT.test(file.name || ''))) { readText(file); if (fileInput) fileInput.value = ''; return; }
-    if (!PIC_TYPES.test(file.type) || !fileInput || !/image\//.test(fileInput.accept)) { notice('Send a JPEG, PNG, GIF, WebP or AVIF picture, or a text file.'); return; }
+    if (!PIC_TYPES.test(file.type) && (/^text\//.test(file.type) || file.type === 'application/json' || TEXT_EXT.test(file.name || ''))) { readText(file); return; }
+    if (!PIC_TYPES.test(file.type) || !uploadRoot || !/image\//.test(uploadRoot.getAttribute('data-accept') || '')) { notice('Send a JPEG, PNG, GIF, WebP or AVIF picture, or a text file.'); return; }
     if (file.size > 20 * 1024 * 1024) { notice('A picture can be up to 20 MB.'); return; }
     clearPicture();
     picture = { file: file, url: URL.createObjectURL(file) };
@@ -177,13 +178,36 @@
     input.focus();
   }
   var attachBtn = app.querySelector('[data-vb-attach]');
-  if (attachBtn && fileInput) {
-    attachBtn.addEventListener('click', function () { fileInput.click(); });
-    fileInput.addEventListener('change', function () { choosePicture(fileInput.files && fileInput.files[0]); });
+  if (attachBtn && uploadDialog && uploadRoot && window.OVUpload) {
+    var meter = progressEl ? window.OVUpload.progress(progressEl) : null;
+    window.OVUpload.picker(uploadRoot, {
+      label: 'Choose a picture or a text file', accept: uploadRoot.getAttribute('data-accept') || '', multiple: false,
+      onFile: function (file) { uploadDialog.close(); choosePicture(file); }
+    });
+    attachBtn.addEventListener('click', function () { uploadDialog.showModal(); });
+    var closeUpload = uploadDialog.querySelector('[data-vb-upload-close]');
+    if (closeUpload) closeUpload.addEventListener('click', function () { uploadDialog.close(); });
     // A picture pasted into the composer goes the same way.
     input.addEventListener('paste', function (e) {
       var items = (e.clipboardData && e.clipboardData.files) || [];
       if (items.length && PIC_TYPES.test(items[0].type)) { e.preventDefault(); choosePicture(items[0]); }
+    });
+  } else if (attachBtn) {
+    attachBtn.hidden = true;
+  }
+  function pictureRequest(url, file, headers) {
+    return new Promise(function (resolve, reject) {
+      var xhr = new XMLHttpRequest();
+      xhr.open('POST', url);
+      xhr.withCredentials = true;
+      Object.keys(headers || {}).forEach(function (k) { xhr.setRequestHeader(k, headers[k]); });
+      xhr.upload.onprogress = function (e) { if (e.lengthComputable && meter) meter.update({ state: 'sending', done: e.loaded, total: e.total }); };
+      xhr.onload = function () {
+        var body = null; try { body = JSON.parse(xhr.responseText || 'null'); } catch (_) { body = null; }
+        resolve({ ok: xhr.status >= 200 && xhr.status < 300, d: body });
+      };
+      xhr.onerror = function () { reject(new Error('The connection dropped.')); };
+      xhr.send(file);
     });
   }
 
@@ -653,7 +677,7 @@
     var mine = meTurn(text, null, sendingPicture && sendingPicture.url);
     threadEl().appendChild(mine);
     showWait(); toBottom();
-    input.value = ''; picture = null; if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; } if (fileInput) fileInput.value = ''; input.required = true; changed();
+    input.value = ''; picture = null; if (previewEl) { previewEl.textContent = ''; previewEl.hidden = true; } input.required = true; changed();
     var url, init;
     var modeEl = form.querySelector('input[name="mode"]:checked'), mode = modeEl ? modeEl.value : 'chat';
     if (mode !== 'chat' && !sendingPicture) {
@@ -668,9 +692,16 @@
       url = room ? '/api/chat/rooms/' + encodeURIComponent(room) + '/messages' : '/api/chat/vibe';
       init = { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, timezone: timezone() }) };
     }
-    function putBack(msg) { mine.remove(); clearWait(); input.value = text; if (sendingPicture) choosePicture(sendingPicture.file); changed(); notice(msg); }
-    fetch(url, init)
-      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: null }; }); })
+    function putBack(msg) { mine.remove(); clearWait(); input.value = text; if (sendingPicture) { choosePicture(sendingPicture.file); if (meter) meter.update({ state: 'failed', message: msg }); } changed(); notice(msg); }
+    var request;
+    if (sendingPicture) {
+      if (progressEl) progressEl.hidden = false;
+      if (meter) meter.update({ state: 'sending', done: 0, total: sendingPicture.file.size });
+      request = pictureRequest(url, sendingPicture.file, init.headers);
+    } else {
+      request = fetch(url, init).then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }, function () { return { ok: r.ok, d: null }; }); });
+    }
+    request
       .then(function (x) {
         if (!x.ok) { putBack((x.d && x.d.error) || 'That did not send. Try again.'); return; }
         if (x.d.message && x.d.message.id) { mine.setAttribute('data-me', String(x.d.message.id)); latest = Math.max(latest, Number(x.d.message.id)); }
@@ -688,7 +719,13 @@
         }
       })
       .catch(function () { putBack('You seem to be offline. Your message is back in the box.'); })
-      .then(function () { sending = false; });
+      .then(function () {
+        sending = false;
+        if (sendingPicture && meter) {
+          meter.update({ state: 'done', done: sendingPicture.file.size, total: sendingPicture.file.size });
+          if (progressEl) setTimeout(function () { progressEl.hidden = true; }, 900);
+        }
+      });
   });
 
   // Try again: Vibe's last answer goes and a new one is written (POST /api/chat/vibe/:slug/retry).
