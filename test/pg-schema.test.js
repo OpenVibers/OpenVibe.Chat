@@ -41,7 +41,7 @@ const INDEXES = [
     'idx_chat_ts_deleted', 'idx_chat_page_live', 'idx_chat_channel_user_ts', 'idx_chat_stream_ts', 'idx_emotes_channel_code', 'idx_chat_tl_dedup',
     'idx_calls_open', 'idx_ctx_users_subject', 'idx_ctx_users_username', 'idx_audio_requests_room_state', 'idx_events_outbox_unsent', 'service_outbox_due', 'service_outbox_sent',
     'idx_room_messages_room', 'idx_room_members_user', 'idx_network_blocks_blocked', 'idx_mod_actions_created',
-    'idx_dm_contacts_user',
+    'idx_dm_contacts_user', 'idx_rooms_forum_space',
     'chat_app_link_tokens_by_person', 'chat_app_link_tokens_expiry', 'chat_app_callbacks_by_chat', 'chat_app_callbacks_expiry',
 ];
 const MIRRORED = ['chat_messages', 'dm_conversations', 'dm_participants', 'dm_messages', 'dm_blocks', 'tts_voice_overrides',

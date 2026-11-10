@@ -46,7 +46,7 @@ t('the namespace publishes every voice field with owner words', async () => {
         assert.ok(/^https:\/\//.test(p['x-owner-input'].get_it_at), `${key} says where to get it`);
         assert.ok(p['x-required-for'], `${key} names the feature that waits on it`);
     }
-    assert.deepStrictEqual(Object.keys(props).sort(), ['amazon_polly_access_key_id', 'amazon_polly_region', 'amazon_polly_secret_access_key', 'google_cloud_service_account_json']);
+    assert.deepStrictEqual(Object.keys(props).sort(), ['amazon_polly_access_key_id', 'amazon_polly_region', 'amazon_polly_secret_access_key', 'forum_channels_enabled', 'google_cloud_service_account_json']);
     const region = props.amazon_polly_region;
     assert.ok(Array.isArray(region.enum) && region.enum.length >= 3);
     for (const v of region.enum) {
