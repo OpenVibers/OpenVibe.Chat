@@ -218,10 +218,13 @@ router.get('/conversations/:id/messages', async (req, res) => {
             return res.status(403).json({ error: 'Not a participant' });
         }
         const limit = Math.min(parseInt(req.query.limit) || 50, 100);
-        const before = parseInt(req.query.before) || null;
         const after = parseInt(req.query.after) || null;
-        const messages = (await dm.getMessages(convId, limit, before, after)).map(publicMessage);
-        res.json({ messages });
+        if (after != null) {
+            const messages = (await dm.getMessages(convId, limit, null, after)).map(publicMessage);
+            return res.json({ messages });
+        }
+        const page = await dm.getMessagesPage(convId, { limit, before: req.query.before ?? null });
+        res.json({ ...page, messages: page.messages.map(publicMessage) });
     } catch (err) {
         console.error('[DM] Get messages error:', err.message);
         res.status(500).json({ error: 'Failed to load messages' });
