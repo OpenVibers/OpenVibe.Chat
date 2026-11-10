@@ -216,7 +216,7 @@ router.post('/:slug/messages', requireAuth, postLimit, async (req, res) => {
     try {
         const message = await rooms.post(room, req.user, req.body && req.body.message, {
             timezone: req.body && req.body.timezone,
-            files: req.body && req.body.files,
+            files: require('./files').attachmentsFromBody(req.body),
             reply_to_id: req.body && req.body.reply_to_id,
         });
         chatServer().broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
