@@ -62,7 +62,7 @@ t('boot with the Radio catalogue', async () => {
 });
 
 t('a shared computer starts empty, and only the room’s remote holder can start its music', async () => {
-    const made = await api('POST', '/', ann, { desktop_hosting: 'link', title: 'Music room' });
+    const made = await api('POST', '/', ann, { desktop_hosting: 'link', desktop_node_id: ids.newId('link'), title: 'Music room' });
     assert.strictEqual(made.status, 201, made.text);
     party = made.body.party;
     key = made.body.join_secret;

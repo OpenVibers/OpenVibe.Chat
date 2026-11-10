@@ -803,7 +803,7 @@ ${offered ? notice('ok', `Save to let your AI members think with ${offered.model
 ${unreachable ? notice('error', 'OpenVibe.AI did not answer, so your key cannot be shown or changed right now.') : `${key ? `<p><strong>${esc(credentials.label(key))}</strong> <span class="oc-muted">· ${keyLine}${vibeOwn ? ' · Vibe thinks with it' : ''}</span></p>` : '<p class="oc-muted">No key yet.</p>'}
 <form class="oc-form oc-ai-form" method="post" action="/settings/ai-key">
 <label>Provider <select name="provider">${opt('openai', 'OpenAI or OpenAI-compatible', provider)}${opt('anthropic', 'Anthropic', provider)}${opt('link', 'A model on my own computer', provider)}</select></label>
-<label class="oc-if-node">Computer <input name="machine" maxlength="40" pattern="dev_[0-9A-Z]{26}" placeholder="dev_… (a model on your own computer only)" value="${esc(machineValue === 'any' ? '' : machineValue)}" autocomplete="off" spellcheck="false"></label>
+<div class="oc-if-node" data-ov-machines data-needs="models" data-name="machine" data-value="${esc(machineValue === 'any' ? '' : machineValue)}"></div>
 <label class="oc-check oc-if-node"><input type="checkbox" name="machine_any" value="1"${machineValue === 'any' ? ' checked' : ''}> Any of my computers that is on with this model (the fastest first, the next when one is busy)</label>
 <label class="oc-if-openai">Endpoint <input name="base_url" type="url" maxlength="300" inputmode="url" placeholder="https://openrouter.ai/api/v1 (leave empty for OpenAI itself)" value="${esc((key && key.base_url) || '')}"></label>
 <label>Model <input name="model" required maxlength="120" placeholder="gpt-4o-mini, or llama3.1:8b on your computer" value="${esc(modelValue)}" autocomplete="off" spellcheck="false"></label>

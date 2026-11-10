@@ -152,8 +152,9 @@ t('agent-stream parties are unchanged', async () => {
 });
 
 t('a desktop party gates members, claims one Link machine, and issues member tickets', async () => {
+    const nodeId = ids.newId('link');
     assert.strictEqual((await api('POST', '/parties', bob, { desktop_hosting: 'openvibe' })).status, 503);
-    const made = await api('POST', '/parties', bob, { desktop_hosting: 'link', title: 'Shared computer' });
+    const made = await api('POST', '/parties', bob, { desktop_hosting: 'link', desktop_node_id: nodeId, title: 'Shared computer' });
     assert.strictEqual(made.status, 201, made.text);
     const slug = made.body.party.id;
     assert.strictEqual(made.body.party.kind, 'desktop');
@@ -162,7 +163,6 @@ t('a desktop party gates members, claims one Link machine, and issues member tic
     const seen = await api('GET', `/parties/${slug}`, bob);
     assert.strictEqual(seen.body.party.lease.holder.subject, bob.subject_id);
     assert.strictEqual((await api('GET', `/parties/${slug}/desktop/ticket`, ann)).status, 404);
-    const nodeId = ids.newId('link');
     const now = Math.floor(Date.now() / 1000);
     const nodeToken = (owner) => serviceAuth.signServiceToken({ iss: h.ISS, sub: `link:${nodeId}`, actor_type: 'link', on_behalf_of: owner,
         aud: ['openvibe.chat'], cap: [], iat: now, exp: now + 300, jti: `party_${owner}` }, h.keys.privateKey);
@@ -317,6 +317,9 @@ t('the home offers OpenVibe.Video\'s latest, and a pasted watch page plays its f
         assert.match(home.text, /OpenVibe computers are not on yet/, 'the plain truth while the owner pool is off');
         assert.match(home.text, /name="desktop" value="link" class="pty-host"><strong>On my computer<\/strong>/, 'hosting on my computer is one of two plain choices');
         assert.match(home.text, /value="openvibe" class="pty-host" disabled aria-describedby="pty-openvibe-availability"/, 'On OpenVibe cannot be chosen while no OpenVibe machine is free');
+        const linkAsk = await raw('GET', '/new?desktop=link', { cookie: cookieOf(ann) });
+        assert.strictEqual(linkAsk.status, 200, linkAsk.text.slice(0, 300));
+        assert.match(linkAsk.text, /data-ov-machines[^>]*data-needs="browser"[^>]*data-name="machine"[^>]*data-principal-name="desktop_node_id"/, 'a party host comes from the Link machine picker');
 
         // A pasted watch page: the confirmation names it, and the party plays its file with the page as its source.
         const asks = await raw('GET', `/new?media=${encodeURIComponent(PAGE)}`, { cookie: cookieOf(ann) });
