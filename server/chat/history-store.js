@@ -3,7 +3,7 @@
  *
  * Rooms:  'global' | 'channel:<userId>'        (the stream route keeps its own scope logic)
  * Reads:
- *   page(room, { limit, before })      newest `limit` rows, oldest→newest — the first paint
+ *   page(room, { limit, before })      newest `limit` rows, newest→oldest — the first paint
  *   delta(room, { afterId, limit })    rows with id > afterId, oldest→newest — reopen, reconnect,
  *                                      tab focus. Cheap: a primary-key range scan, no reverse.
  *                                      Plus `deleted_ids` (deletedIds below): the rows at or under
@@ -98,11 +98,12 @@ function memoSet(key, value) {
 async function readPage(r, { limit, before, channelUsername }) {
     const { sql, params } = baseSql(r, { channelUsername });
     let q = sql;
-    if (before) { q += ' AND cm.timestamp < ?'; params.push(before); }
+    if (before) { q += ' AND cm.id < ?'; params.push(before); }
     // The page order is the primary key alone (plan T3 decision 2): ids are monotonic in insert order,
     // so this is the same order as before, and idx_chat_page_live serves it without a sort on PostgreSQL.
-    q += ' ORDER BY cm.id DESC LIMIT ?'; params.push(limit);
-    return (await db.all(q, params)).reverse();
+    q += ' ORDER BY cm.id DESC LIMIT ?'; params.push(limit + 1);
+    const rows = await db.all(q, params);
+    return { rows: rows.slice(0, limit), more: rows.length > limit };
 }
 
 async function readDelta(r, { afterId, limit, channelUsername }) {
@@ -114,8 +115,8 @@ async function readDelta(r, { afterId, limit, channelUsername }) {
 }
 
 /**
- * Newest rows of a room, oldest→newest.
- * @returns {{ messages: object[], latest_id: number }}
+ * Newest rows of a room, newest→oldest. `before` is an exclusive message id cursor.
+ * @returns {{ messages: object[], latest_id: number, more: boolean }}
  */
 async function page(room, { limit, before, channelUsername, decorate } = {}) {
     const r = parseRoom(room);
@@ -123,15 +124,16 @@ async function page(room, { limit, before, channelUsername, decorate } = {}) {
     // The newest row id is part of the memo key, so a memoised page can never miss a message:
     // one primary-key lookup instead of the five-table join for every repeat reader in the window.
     const key = !before ? `${room}|${lim}|${channelUsername || ''}|${await tipId()}` : null;
-    let rows = key ? memoGet(key) : null;
-    if (!rows) {
-        rows = await readPage(r, { limit: lim, before, channelUsername });
-        if (key) memoSet(key, rows);
+    let page = key ? memoGet(key) : null;
+    if (!page) {
+        page = await readPage(r, { limit: lim, before, channelUsername });
+        if (key) memoSet(key, page);
     }
     // Copies: the page memo holds the rows, and a refreshed card must not change what the next reader sees.
+    const rows = page.rows;
     const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows.map((x) => ({ ...x }));
     await linkCards.hydrate(messages, 'chat_messages');
-    return { messages, latest_id: latestIdOf(rows) };
+    return { messages, latest_id: latestIdOf(rows), more: page.more };
 }
 
 /**

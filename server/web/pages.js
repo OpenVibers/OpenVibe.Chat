@@ -251,7 +251,7 @@ function createWebRoutes({ config }) {
     // ── Global chat ──
     router.get('/', async (req, res) => {
         const actor = await viewerOf(req);
-        const { messages, latest_id } = await historyStore.page('global', { limit: 60 });
+        const { messages, latest_id } = await historyStore.page('global', { limit: 50 });
         // Not the lines of people this reader blocked on the network (chat/network-blocks.js).
         const hidden = actor.kind === 'user' ? await require('../chat/network-blocks').blockedUserIds(actor.user) : new Set();
         // And not what OpenVibe's global room does not show of other rooms' lines (chat/global-standard.js).
@@ -295,7 +295,7 @@ function createWebRoutes({ config }) {
         ].filter((pane) => pane.html);
         const explore = pickBlock({ key: 'explore', label: 'Explore OpenVibe.Chat', head: 'Explore OpenVibe.Chat', panes });
         const inlineStyles = [];
-        const feedList = `<ol class="oc-feed${signedIn ? ' oc-srv-feed' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages">${shown.map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>`;
+        const feedList = `<ol class="oc-feed${signedIn ? ' oc-srv-feed' : ''}" id="oc-feed" aria-live="polite" aria-label="Messages"><li id="oc-history-state" class="oc-muted" aria-live="polite"></li>${shown.slice().reverse().map(globalMessage).join('\n') || '<li class="oc-empty oc-muted">No messages yet. Say hello.</li>'}</ol>`;
         // Someone signed in gets the app shell (the plan, 2026-11-09, stage V2): Global chat is a destination on the
         // rail, the side column is Home's, and the feed fills the middle with the composer at its foot.
         const shellBody = signedIn ? await (async () => {
