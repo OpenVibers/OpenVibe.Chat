@@ -12,7 +12,7 @@ const { boot, suite } = require('./helpers');
 
 const t = suite('vibe modes');
 const SITE = 'https://openvibe.chat';
-let h, ann, bob, workspace;
+let h, ann, bob, workspace, config;
 const turns = [];
 const actorCalls = [];
 let actorTask = { id: 'tsk_r1', state: 'queued' };
@@ -22,6 +22,8 @@ const realFetch = globalThis.fetch;
 
 t('boot', async () => {
     h = await boot({ env: { CHAT_WEB_URL: SITE } });
+    config = require('../server/config');
+    config.ai.vibeDoIt = false;
     workspace = require('../server/rooms/workspace');
     workspace._setTokens({ getToken: async () => 'chat-actor-token' });
     require('../server/ai/client')._setClient({
@@ -40,6 +42,9 @@ t('boot', async () => {
 });
 
 t('Research in a new chat: a task on Actor as the person, Vibe says it is on it, no instant answer', async () => {
+    const disabled = await vibeApi('POST', '', ann, { message: 'Research this first', mode: 'research' });
+    assert.strictEqual(disabled.status, 503, 'the owner switch is off by default');
+    config.ai.vibeDoIt = true;
     const r = await vibeApi('POST', '', ann, { message: 'Compare the three cheapest cloud browsers for agents', mode: 'research' });
     assert.strictEqual(r.status, 201, r.text);
     const slug = r.body.room.slug;
@@ -151,6 +156,7 @@ t('refusals: an unknown mode, someone else\'s chat, no sign-in', async () => {
 });
 
 t('the composer shows the four modes, Chat chosen, each saying what it does', async () => {
+    config.ai.vibeDoIt = true;
     const page = await h.http('GET', '/vibe', { headers: { cookie: `ov_token=${ann.token}` } });
     assert.match(page.text, /<fieldset class="vb-modes" aria-label="What Vibe does with it">/);
     assert.match(page.text, /value="chat" data-placeholder="Message Vibe" checked><span>Chat<\/span>/);

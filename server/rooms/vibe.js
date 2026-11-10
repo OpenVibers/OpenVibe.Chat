@@ -139,6 +139,7 @@ const ON_IT = {
 };
 
 async function work(room, user, text, mode) {
+    if (!config.ai.vibeDoIt) fail(503, 'vibe.work_disabled', 'Do it for me is not enabled on this Chat server');
     const kind = MODES[String(mode || '')];
     if (!kind) fail(422, 'vibe.mode', 'Pick Chat, Research, Agent or Code');
     if (!isVibeRoom(room) || !user || Number(room.owner_id) !== Number(user.id)) fail(404, 'rooms.not_found', 'No such chat');
