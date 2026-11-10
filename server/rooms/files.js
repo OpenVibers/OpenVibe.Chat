@@ -40,8 +40,17 @@ function cleanOne(file, index, reader = null) {
 /** The files a message may carry (at most MAX_FILES), or [] when it has none. */
 function cleanFiles(files, reader = null) {
     if (!Array.isArray(files) || !files.length) return [];
-    if (files.length > MAX_FILES) throw new RoomError(413, 'rooms.files_too_many', `At most ${MAX_FILES} files can go with a message`);
+    if (files.length > MAX_FILES) {
+        const { RoomError } = require('./rooms');
+        throw new RoomError(413, 'rooms.files_too_many', `At most ${MAX_FILES} files can go with a message`);
+    }
     return files.map((f, i) => cleanOne(f, i, reader));
+}
+
+/** The message API calls these attachments; the AI pipeline keeps its historical `files` name. */
+function attachmentsFromBody(body) {
+    if (!body || typeof body !== 'object') return [];
+    return Array.isArray(body.attachments) ? body.attachments : (Array.isArray(body.files) ? body.files : []);
 }
 
 /** The files stored on a message row (jsonb comes back as an array; a text column is tolerated too). */
@@ -52,4 +61,4 @@ function filesOf(message) {
     return Array.isArray(files) ? files : [];
 }
 
-module.exports = { cleanFiles, filesOf, MAX_FILES };
+module.exports = { cleanFiles, filesOf, attachmentsFromBody, MAX_FILES };
