@@ -341,6 +341,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // The person's chat settings: the Network user modules Chat owns (server/prefs/stores.js).
     for (const [mount, router] of Object.entries(require('./prefs/routes').ROUTES)) app.use(`/api/chat/${mount}`, router);
     // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
+    app.use('/api/v1/rooms', require('./chat/room-insight-routes'));
     // The people of a Co-pilot room vote on the agent's poll (Agent Streams S5).
     app.use('/api/chat/rooms', require('./chat/agent-poll-routes'));
     // The chat plays queue of a room (Agent Streams S6): the votes and the moderators' hand.
