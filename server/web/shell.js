@@ -77,12 +77,10 @@ ${owns ? `<details class="oc-ssheet-danger" data-s="delete"><summary class="oc-p
  */
 function rail(o = {}) {
     const servers = o.servers || [];
-    const list = o.list || (o.home || o.global ? 'Chats' : servers.some((s) => s.active) ? 'Channels' : o.explore ? 'Yours' : 'Browse');
     const dot = (n) => (n ? `<span class="oc-rail-dot" aria-label="${n} unread">${n > 99 ? '99+' : n}</span>` : '');
     const place = (cls, href, name, inner, on, extra = '') => `<a class="oc-rail-icon ${cls}${on ? ' is-active' : ''}" href="${href}"${on ? ' aria-current="page"' : ''}><span class="oc-rail-tile" aria-hidden="true">${inner}</span><span class="oc-rail-label">${esc(name)}</span>${extra}</a>`;
     const server = (s) => `<a class="oc-rail-icon oc-rail-server${s.active ? ' is-active' : ''}" href="/s/${esc(s.slug)}" style="--oc-hue:${ui.hueOf(s.slug)}"${s.active ? ' aria-current="page"' : ''}${serverData(s)}><span class="oc-rail-tile" aria-hidden="true">${esc(ui.serverLetters(s.name))}</span><span class="oc-rail-label">${esc(s.name)}</span>${s.active ? `<span class="oc-rail-more" aria-hidden="true">${IC.chevron}</span>` : ''}${dot(s.unread)}</a>`;
     return `<nav class="oc-rail" aria-label="Chat destinations">
-<button type="button" class="oc-rail-menu" data-oc-panel="side" aria-expanded="false" title="Show the list">${IC.menu}<span class="oc-rail-label">${esc(list)}</span></button>
 ${place('oc-rail-home', '/messages', 'Home', IC.chat, o.home, dot(o.dmUnread))}
 ${place('oc-rail-global', '/', 'Global', IC.globe, o.global)}
 ${place('oc-rail-vibe', '/vibe', 'Vibe', IC.spark, o.vibe)}
@@ -257,10 +255,16 @@ ${groups.map((g) => `<section class="oc-members-sec"><h3 class="oc-side-group">$
  * The channel header: the channel's name and topic, and the buttons that work (the people, the server's menu).
  * o: { name, kind, topic, href, members, active }
  */
+/**
+ * The way from a conversation to the list (a phone's two levels: the list, then the conversation). It is the first
+ * thing in a conversation's head; on a computer the list is beside the conversation and this is not drawn.
+ */
+const toList = `<button type="button" class="oc-icon-btn oc-tolist" data-oc-panel="side" aria-label="All chats" title="All chats">${IC.back}</button>`;
+
 function channelHeader(o = {}) {
     const kind = o.kind === 'voice' ? IC.voice : '<span class="oc-chan-hash" aria-hidden="true">#</span>';
     return `<header class="oc-chan-head">
-<h2 id="oc-chan-h" class="oc-chan-title">${kind}${esc(o.name || '')}</h2>
+${toList}<h2 id="oc-chan-h" class="oc-chan-title">${kind}${esc(o.name || '')}</h2>
 ${o.topic ? `<span class="oc-muted oc-chan-topic">${esc(o.topic)}</span>` : ''}
 <span class="oc-chan-tools">
 <button type="button" class="oc-icon-btn oc-members-toggle" data-oc-panel="members" aria-label="Show the people" title="People" aria-pressed="false">${IC.members}</button>
@@ -282,4 +286,4 @@ ${o.members ? `<aside class="oc-col oc-col-members" aria-label="${esc(o.membersL
 </div>`;
 }
 
-module.exports = { APP_BAR, rail, railServers, serverData, composer, sideHome, sideServer, sideRooms, sideSettings, sideInbox, membersColumn, channelHeader, youBar, shell, personRow };
+module.exports = { APP_BAR, toList, rail, railServers, serverData, composer, sideHome, sideServer, sideRooms, sideSettings, sideInbox, membersColumn, channelHeader, youBar, shell, personRow };
