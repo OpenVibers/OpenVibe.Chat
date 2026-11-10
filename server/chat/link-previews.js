@@ -444,13 +444,13 @@ function settled() {
 }
 
 async function store(job, position, preview) {
-    if (!preview) {
-        await db.run('DELETE FROM link_previews WHERE message_scope = ? AND message_id = ? AND position = ?', [job.scope, job.messageId, position]).catch(() => {});
-        return;
-    }
+    // Nothing found is nothing written (a retry never leaves a stale preview); a removed row is a tombstone the job
+    // must not overwrite, so a preview removed while its job was still running never comes back.
+    if (!preview) return;
     await db.run(`INSERT INTO link_previews (message_scope, message_id, position, url, data) VALUES (?, ?, ?, ?, ?)
                   ON CONFLICT (message_scope, message_id, position)
-                  DO UPDATE SET url = EXCLUDED.url, data = EXCLUDED.data`,
+                  DO UPDATE SET url = EXCLUDED.url, data = EXCLUDED.data
+                  WHERE link_previews.removed_at IS NULL`,
         [job.scope, job.messageId, position, preview.url, JSON.stringify(preview)]);
 }
 
@@ -503,22 +503,34 @@ function schedule({ scope = 'room', messageId, text, room = null, onReady = null
     return job;
 }
 
+/**
+ * Take a preview back: one address (position) or all of them on the message. The author or a room moderator decides
+ * that in the route; the row stays as a tombstone so a running job cannot restore it. Returns the previews left.
+ */
+async function remove(scope, messageId, position = null, userId = null) {
+    const params = [userId || null, scope, Number(messageId) || 0];
+    let sql = 'UPDATE link_previews SET removed_at = ov_now(), removed_by = ? WHERE message_scope = ? AND message_id = ? AND removed_at IS NULL';
+    if (position != null) { sql += ' AND position = ?'; params.push(Number(position)); }
+    await db.run(sql, params);
+    return await embedsOf(scope, messageId);
+}
+
 /** The stored previews for one message, in the order their addresses appeared. */
 async function embedsOf(scope, messageId) {
-    const rows = await db.all('SELECT data FROM link_previews WHERE message_scope = ? AND message_id = ? ORDER BY position', [scope, Number(messageId) || 0]).catch(() => []);
+    const rows = await db.all('SELECT data FROM link_previews WHERE message_scope = ? AND message_id = ? AND removed_at IS NULL ORDER BY position', [scope, Number(messageId) || 0]).catch(() => []);
     return rows.map((r) => parsePreview(r.data)).filter(Boolean);
 }
 
 /** Put `embeds` on every row ([] when there are none yet), for the read the client makes. */
-async function attach(rows, scope = 'room') {
+async function attach(rows, scope = 'room', { enabled = true } = {}) {
     if (!Array.isArray(rows)) return rows;
     const list = rows.filter(Boolean);
     for (const row of list) row.embeds = [];
-    if (!list.length) return rows;
+    if (!enabled || !list.length) return rows;
     const ids = [...new Set(list.map((r) => Number(r.id)).filter((n) => n > 0))];
     if (!ids.length) return rows;
     const marks = ids.map(() => '?').join(',');
-    const records = await db.all(`SELECT message_id, data FROM link_previews WHERE message_scope = ? AND message_id IN (${marks}) ORDER BY message_id, position`,
+    const records = await db.all(`SELECT message_id, data FROM link_previews WHERE message_scope = ? AND message_id IN (${marks}) AND removed_at IS NULL ORDER BY message_id, position`,
         [scope, ...ids]).catch(() => []);
     const byId = new Map();
     for (const rec of records) {
@@ -534,7 +546,7 @@ async function attach(rows, scope = 'room') {
 
 module.exports = {
     addresses, normalizeUrl, textOf, decodeEntities, pageFields, previewFromResponse, previewFromOembed, imageOf,
-    previewOf, schedule, embedsOf, attach, idle, ownLink,
+    previewOf, schedule, embedsOf, attach, remove, idle, ownLink,
     CACHE_MS, MISS_MS, MAX_URLS, MAX_BYTES, FETCH_TIMEOUT_MS, MAX_REDIRECTS, PREVIEWS_ON,
     _setRequest(fn) { _request = fn || null; },
     _setLookup(fn) { _lookup = fn || null; },

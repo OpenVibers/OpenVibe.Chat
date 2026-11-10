@@ -37,6 +37,7 @@ const cache = require('openvibe-shared/cache-policy');
 const { requireAuth, optionalAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
+const linkPreviews = require('../chat/link-previews');
 const parties = require('./parties');
 const ctx = require('../live-context');
 const db = require('../db/database');
@@ -270,6 +271,30 @@ router.delete('/:slug/messages/:id', requireAuth, deleteLimit, async (req, res) 
         const id = await rooms.deleteMessage(room, req.user, parseInt(req.params.id, 10));
         chatServer().broadcastToRoom(room.id, { type: 'room_message_deleted', room: room.slug, id });
         res.json({ ok: true, id });
+    } catch (err) { send(res, err); }
+});
+
+/**
+ * A preview on a room message, taken back by its author or a room moderator (server/chat/link-previews.js): with a
+ * position, that one address; without, every preview on the line. The row becomes a tombstone, so a job still
+ * running cannot put it back.
+ */
+router.delete('/:slug/messages/:id/embeds/:position?', requireAuth, deleteLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try {
+        const id = parseInt(req.params.id, 10);
+        const message = await db.get('SELECT id, user_id FROM room_messages WHERE id = ? AND room_id = ?', [id, room.id]);
+        if (!message) throw new rooms.RoomError(404, 'rooms.no_message', 'No such message');
+        const a = await rooms.access(room, req.user);
+        if (Number(message.user_id) !== Number(req.user.id) && !a.moderate) throw new rooms.RoomError(403, 'rooms.embeds', 'Only the author or a room moderator removes a preview');
+        let position = null;
+        if (req.params.position != null) {
+            position = Number(req.params.position);
+            if (!Number.isInteger(position) || position < 0 || position > 2) throw new rooms.RoomError(422, 'rooms.embed_position', 'A preview is 0, 1 or 2');
+        }
+        const embeds = await linkPreviews.remove('room', id, position, req.user.id);
+        chatServer().broadcastToRoom(room.id, { type: 'room_message_embeds', room: room.slug, id, embeds });
+        res.json({ embeds });
     } catch (err) { send(res, err); }
 });
 

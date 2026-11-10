@@ -109,6 +109,7 @@ async function publicRoom(r, extra = {}) {
         id: r.id, slug: r.slug, name: r.name, topic: r.topic || null, kind: kindOf(r), visibility: r.visibility,
         ...(kindOf(r) === 'call' ? { join_role: joinRoleOf(r), call_channel: `room-${r.slug}` } : {}),
         slow_seconds: r.slow_seconds, message_count: r.message_count, last_message_at: r.last_message_at,
+        link_previews: r.link_previews !== false,
         created_at: r.created_at, members: (await db.get("SELECT COUNT(*) AS n FROM room_members WHERE room_id = ? AND role != 'blocked'", [r.id]) || {}).n || 0,
         ...(Number(r.assistant) === 1 ? { assistant: true } : {}),
         ...(isWorkspace(r) ? { workspace: true } : {}),
@@ -321,7 +322,7 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
     const row = await messageById(id);
     if (pending) linkCards.fillLater('room_messages', id, pending);
     // General address previews are a background job: the message and its response never wait on another site.
-    linkPreviews.schedule({ scope: 'room', messageId: id, text: message, room: { id: room.id, slug: room.slug } });
+    if (room.link_previews !== false) linkPreviews.schedule({ scope: 'room', messageId: id, text: message, room: { id: room.id, slug: room.slug } });
     // Activity: the people this names, and the person it answers (server/chat/activity.js). A failure here never
     // takes a message back.
     const activity = require('../chat/activity');
@@ -353,7 +354,7 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null } = {
         await announceMessage(room, { subject_id: null, username: member.handle, display_name: member.name }, Number(r.lastInsertRowid), message, now);
         return Number(r.lastInsertRowid);
     });
-    linkPreviews.schedule({ scope: 'room', messageId: id, text: message, room: { id: room.id, slug: room.slug } });
+    if (room.link_previews !== false) linkPreviews.schedule({ scope: 'room', messageId: id, text: message, room: { id: room.id, slug: room.slug } });
     return await messageById(id);
 }
 
@@ -369,7 +370,8 @@ async function messageById(id) {
     if (row) {
         row.attachments = messageFiles.attachmentRefs(messageFiles.filesOf(row));
         await linkCards.hydrate([row], 'room_messages');
-        await linkPreviews.attach([row], 'room');
+        const setting = await db.get('SELECT link_previews FROM rooms WHERE id = ?', [row.room_id]);
+        await linkPreviews.attach([row], 'room', { enabled: !setting || setting.link_previews !== false });
     }
     return row;
 }
@@ -385,7 +387,7 @@ async function historyPage(room, { before = null, limit = 50 } = {}) {
     const more = rows.length > lim;
     rows.length = Math.min(rows.length, lim);
     await linkCards.hydrate(rows, 'room_messages');
-    await linkPreviews.attach(rows, 'room');
+    await linkPreviews.attach(rows, 'room', { enabled: room.link_previews !== false });
     return { messages: rows, more };
 }
 
@@ -399,7 +401,7 @@ async function history(room, { before = null, after = null, limit = 60 } = {}) {
             : await db.all(`${MSG_SELECT} WHERE m.room_id = ? AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT ?`, [room.id, lim]);
     for (const row of rows) row.attachments = messageFiles.attachmentRefs(messageFiles.filesOf(row));
     await linkCards.hydrate(rows, 'room_messages');
-    await linkPreviews.attach(rows, 'room');
+    await linkPreviews.attach(rows, 'room', { enabled: room.link_previews !== false });
     return after != null ? rows : rows.reverse();
 }
 
@@ -473,7 +475,7 @@ function screenUrlOf(v) {
     return s;
 }
 
-async function update(room, actor, { name, topic, visibility, slow_seconds, join_role, screen_url, workspace } = {}, { fromServer = false, minName = 3 } = {}) {
+async function update(room, actor, { name, topic, visibility, slow_seconds, join_role, screen_url, workspace, link_previews } = {}, { fromServer = false, minName = 3 } = {}) {
     if (!(await access(room, actor)).manage) fail(403, 'rooms.not_owner', 'Only the owner changes the room');
     // A server's channel follows the server's visibility, and is changed through the server (servers.js).
     if (room.server_id && !fromServer && visibility != null && visibility !== room.visibility) fail(409, 'rooms.server_channel', 'A channel is as public as its server: change the server instead');
@@ -483,6 +485,7 @@ async function update(room, actor, { name, topic, visibility, slow_seconds, join
     if (visibility != null) { if (!['public', 'private'].includes(visibility)) fail(422, 'rooms.visibility', 'Visibility is public or private'); next.visibility = visibility; }
     if (Number(room.assistant) === 1 && next.visibility !== 'private') fail(409, 'vibe.private', 'A chat with Vibe stays private');
     if (slow_seconds != null) { const v = Number(slow_seconds); if (!Number.isInteger(v) || v < 0 || v > 600) fail(422, 'rooms.slow', 'Slow mode is 0 to 600 seconds'); next.slow_seconds = v; }
+    if (link_previews != null) next.link_previews = link_previews === true || link_previews === 1 || link_previews === '1' || link_previews === 'on';
     if (join_role != null && join_role !== '') {
         if (kindOf(room) !== 'call' || !JOIN_ROLES_CALL.includes(join_role)) fail(422, 'rooms.join_role', 'People join a call room as speakers, participants or viewers');
         next.join_role = join_role;
@@ -501,7 +504,7 @@ async function update(room, actor, { name, topic, visibility, slow_seconds, join
     if (screen_url !== undefined && isWorkspace(next)) next.screen_url = screenUrlOf(screen_url);
     else if (screen_url !== undefined && screen_url !== '' && screen_url !== null) fail(409, 'rooms.not_workspace', 'Only a workspace room shows a shared screen');
     await db.tx(async () => {
-        await db.run('UPDATE rooms SET name = ?, topic = ?, visibility = ?, slow_seconds = ?, join_role = ?, screen_url = ?, workspace = ? WHERE id = ?', [next.name, next.topic, next.visibility, next.slow_seconds, next.join_role == null ? null : next.join_role, next.screen_url == null ? null : next.screen_url, Number(next.workspace) === 1 ? 1 : 0, room.id]);
+        await db.run('UPDATE rooms SET name = ?, topic = ?, visibility = ?, slow_seconds = ?, join_role = ?, screen_url = ?, workspace = ?, link_previews = ? WHERE id = ?', [next.name, next.topic, next.visibility, next.slow_seconds, next.join_role == null ? null : next.join_role, next.screen_url == null ? null : next.screen_url, Number(next.workspace) === 1 ? 1 : 0, next.link_previews !== false, room.id]);
         // Public → private: everything the room published stops being replayable on the realtime plane.
         if (room.visibility === 'public' && next.visibility === 'private') {
             await announceDeleted(room, (await db.all('SELECT id FROM room_messages WHERE room_id = ? AND is_deleted = 0 ORDER BY id', [room.id])).map((r) => r.id));
