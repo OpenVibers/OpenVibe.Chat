@@ -37,7 +37,7 @@ t('export, then erase and confirm', async () => {
                 'chat_stage_speakers',
                 'ctx_channels', 'ctx_managed_streams', 'ctx_streams', 'dm_conversations', 'dm_contacts', 'dm_participants', 'dm_view_defaults', 'dm_view_preferences', 'emotes', 'inbox_actions',
                 'inbox_members', 'inbox_saved_replies', 'inbox_webhooks', 'pending_ip_messages', 'room_hooks', 'room_members', 'room_messages', 'agent_room_poll_votes', 'room_message_reactions', 'chat_activity',
-                'user_tags', 'vibe_asks', 'vibe_deliveries', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_usage', 'vibe_model_preferences', 'vibe_import_notices'],
+                'user_tags', 'vibe_asks', 'vibe_deliveries', 'vibe_canvases', 'vibe_canvas_versions', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_usage', 'vibe_model_preferences', 'vibe_import_notices'],
             exempt: {
                 account_data_events: 'the ledger of requests itself: which export and deletion Chat applied',
                 config_snapshots: 'D11 owner settings: created_by/activated_by is the acting administrator (usr_...) for the config audit trail; the values are network configuration, not the person\'s account data, and are kept for rollback/history',

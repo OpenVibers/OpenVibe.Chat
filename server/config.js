@@ -236,6 +236,8 @@ module.exports = {
         // Vibe, OpenVibe's assistant (server/rooms/vibe.js): on unless CHAT_VIBE=0 (it also needs AI members on); a person
         // gets this many answers a UTC day across all their Vibe chats.
         vibe: process.env.CHAT_VIBE !== '0',
+        // C3 editable Vibe canvases (versioned Chat artifacts); site owner opt-in.
+        vibeCanvas: bool(process.env.CHAT_VIBE_CANVAS_ENABLED, false),
         // C3's explicit "do it for me" task modes (Actor-backed Research, Agent and Code); site owner opt-in.
         vibeDoIt: bool(process.env.CHAT_VIBE_DO_IT_ENABLED, false),
         // C3 web search in Vibe's composer (the existing Search Fabric tool and cited results); owner enables it explicitly.
