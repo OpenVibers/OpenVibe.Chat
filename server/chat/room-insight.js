@@ -42,7 +42,9 @@ function _timeline(events) {
 }
 
 function _shape(row, events) {
-    const fresh = !!(row && row.overview && row.window_end && Date.now() - _time(row.window_end) < QUIET_AFTER_MS);
+    // A summary written from nobody's messages is not a read of the room: zero consenting people means
+    // quiet, however recent the row is (rows written before the consent filter carry no people count).
+    const fresh = !!(row && row.overview && Number(row.people) > 0 && row.window_end && Date.now() - _time(row.window_end) < QUIET_AFTER_MS);
     const state = fresh ? 'ready' : 'quiet';
     return {
         overview: {
