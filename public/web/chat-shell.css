@@ -8,25 +8,41 @@
 .oc-app > .oc-col-members { overflow: hidden; border-left: 0; }
 .oc-app.is-members > .oc-col-members { overflow-y: auto; border-left: 1px solid var(--oc-line); }
 
-/* ── The rail (72 px): Home, Vibe, your servers, then Add and Explore ── */
-.oc-rail { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 12px 0; background: var(--oc-bg); border-right: 1px solid var(--oc-line); overflow-y: auto; scrollbar-width: none; }
+/* ── The rail (72 px on a computer): every place is a tile that carries its name. Home, Global and Vibe, your
+   servers in their own colours (the colour a server has in every list), then New and Explore. A bar beside the tile
+   says where you are: a short one under the pointer, the full one at the open place. The name follows the pointer's
+   tile (chat-shell.js .oc-rail-tip); on a phone it is written beside the tile (below). ── */
+.oc-rail { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 0; background: var(--oc-bg); border-right: 1px solid var(--oc-line); overflow-y: auto; scrollbar-width: none; }
 .oc-rail::-webkit-scrollbar { display: none; }
-.oc-rail-icon { position: relative; display: grid; place-items: center; width: 48px; height: 48px; flex: 0 0 auto; border-radius: 50%; background: var(--oc-panel-2); color: var(--oc-text); font-weight: 800; font-size: .95rem; letter-spacing: .02em; text-decoration: none; transition: border-radius .15s ease, background-color .15s ease; }
-.oc-rail-icon:hover, .oc-rail-icon:focus-visible { border-radius: 16px; }
-.oc-rail-icon.is-active { border-radius: 16px; background: var(--oc-panel-2); }
-.oc-rail .oc-rail-icon.is-active::before { content: ''; position: absolute; left: -12px; top: 10px; bottom: 10px; width: 4px; border-radius: 0 4px 4px 0; background: var(--oc-text); }
-.oc-rail-home, .oc-rail-vibe { background: var(--oc-panel-2); }
-.oc-rail-home .oc-i, .oc-rail-vibe .oc-i { width: 22px; height: 22px; }
+.oc-rail-icon, .oc-rail-menu { position: relative; flex: 0 0 auto; margin: 0; padding: 0; border: 0; background: none; color: var(--oc-text); font: inherit; text-decoration: none; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.oc-rail-icon { display: grid; place-items: center; width: 72px; height: 48px; }
+.oc-rail-icon[data-oc-server] { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
+.oc-rail-tile { display: grid; place-items: center; width: 48px; height: 48px; border-radius: 50%; background: var(--oc-panel-2); color: var(--oc-text); font-weight: 800; font-size: .95rem; letter-spacing: .02em; transition: border-radius .18s ease, background-color .18s ease, color .18s ease, transform .16s ease; }
+.oc-rail-tile .oc-i { width: 22px; height: 22px; }
+.oc-rail-icon:hover .oc-rail-tile, .oc-rail-icon:focus-visible .oc-rail-tile, .oc-rail-icon.is-active .oc-rail-tile { border-radius: 16px; }
+.oc-rail-icon:active .oc-rail-tile { transform: scale(.94); }
+.oc-rail-icon:focus-visible { outline: 0; }
+.oc-rail-icon:focus-visible .oc-rail-tile { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+.oc-rail-icon::before { content: ''; position: absolute; left: 0; top: 50%; width: 4px; height: 0; border-radius: 0 4px 4px 0; background: var(--oc-text); transform: translateY(-50%); transition: height .18s ease; }
+.oc-rail-icon:hover::before, .oc-rail-icon:focus-visible::before { height: 16px; }
+.oc-rail-icon.is-active::before { height: 32px; }
+.oc-rail-home:hover .oc-rail-tile, .oc-rail-global:hover .oc-rail-tile, .oc-rail-vibe:hover .oc-rail-tile, .oc-rail-explore:hover .oc-rail-tile { background: color-mix(in srgb, var(--oc-accent) 24%, var(--oc-panel-2)); }
+.oc-rail-home.is-active .oc-rail-tile, .oc-rail-global.is-active .oc-rail-tile, .oc-rail-vibe.is-active .oc-rail-tile, .oc-rail-explore.is-active .oc-rail-tile { background: var(--oc-accent); color: var(--oc-on-accent); }
+.oc-rail-server .oc-rail-tile { background: hsl(var(--oc-hue, 215) 52% 34%); color: #fff; }
+.oc-rail-server:hover .oc-rail-tile { background: hsl(var(--oc-hue, 215) 56% 40%); }
+.oc-rail-add .oc-rail-tile { color: var(--oc-ok); }
+.oc-rail-add:hover .oc-rail-tile { background: var(--oc-ok-fill); color: #06210f; }
+.oc-rail-explore .oc-rail-tile { color: var(--oc-accent); }
+.oc-rail-explore .oc-rail-tile .oc-i { width: 20px; height: 20px; }
 .oc-rail-divider { width: 32px; height: 2px; flex: 0 0 2px; border-radius: 2px; background: var(--oc-line); }
-.oc-rail-dot { position: absolute; right: -6px; bottom: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--oc-red); color: #1a0505; font-size: .66rem; font-weight: 800; line-height: 18px; text-align: center; }
-.oc-rail-add { background: var(--oc-panel-2); color: var(--oc-ok); font-size: 1.5rem; font-weight: 500; }
-.oc-rail-explore { background: var(--oc-panel-2); color: var(--oc-accent); }
-.oc-rail-add:hover, .oc-rail-explore:hover { background: var(--oc-panel); }
-.oc-rail-explore .oc-i { width: 20px; height: 20px; }
+.oc-rail-dot { position: absolute; right: 8px; bottom: -3px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; background: var(--oc-red-fill); color: #1a0505; font-size: .66rem; font-weight: 800; line-height: 18px; text-align: center; box-shadow: 0 0 0 3px var(--oc-bg); }
+.oc-rail-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.oc-rail-more { display: none; }
+.oc-rail-tip { position: fixed; z-index: 60; transform: translate(-4px, -50%); padding: 6px 10px; border-radius: 8px; background: var(--oc-text); color: var(--oc-bg); font-size: .84rem; font-weight: 700; line-height: 1.2; white-space: nowrap; pointer-events: none; opacity: 0; transition: opacity .12s ease, transform .12s ease; }
+.oc-rail-tip.is-on { opacity: 1; transform: translate(0, -50%); }
 
-/* On a phone the side column opens from the rail: this button. */
-.oc-rail-menu { display: none; place-items: center; width: 44px; height: 44px; flex: 0 0 auto; border: 0; border-radius: 50%; background: var(--oc-panel-2); color: var(--oc-text); cursor: pointer; }
-.oc-rail-menu .oc-i { width: 20px; height: 20px; }
+/* On a phone the side column opens from the strip: this button, with the word for what it lists. */
+.oc-rail-menu { display: none; }
 
 /* ── The side column (240 px) ── */
 .oc-side { display: flex; flex-direction: column; min-width: 0; padding: 12px 8px 0; overflow-y: auto; border-right: 1px solid var(--oc-line); background: var(--oc-bg); }
@@ -117,10 +133,40 @@
     height: calc(100dvh - var(--ovnav-h, 56px) - var(--ovnav-appbar-h, 0px)); min-height: 360px; }
   .oc-page { padding: 14px 16px 20px; }
   .oc-app.is-members { grid-template-columns: minmax(0, 1fr); }
-  .oc-rail-menu { display: grid; }
-  .oc-app > .oc-rail { flex-direction: row; justify-content: flex-start; gap: 10px; padding: 8px 10px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--oc-line); min-width: 0; }
+  /* The strip: each place is a chip with its tile and its name, so nothing here is a letter to be guessed. The list
+     button is first, with the word for what it opens; then Global chat, your servers and New. The open place is the
+     filled chip (a server's in its own colour); the open server's chip carries a small arrow: tap it again, or hold
+     any server, for its sheet. Home, Vibe and Explore are the bottom bar's while that bar is there. */
+  .oc-app > .oc-rail { flex-direction: row; justify-content: flex-start; align-items: center; gap: 8px; padding: 8px 12px; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--oc-line); min-width: 0; scroll-padding-inline: 12px; overscroll-behavior-x: contain; }
+  .oc-app > .oc-rail::after { content: ''; position: sticky; right: -12px; order: 9; flex: 0 0 36px; align-self: stretch; margin-left: -44px; background: linear-gradient(90deg, transparent, var(--oc-bg)); pointer-events: none; opacity: 0; transition: opacity .15s ease; }
+  .oc-app > .oc-rail[data-fade="end"]::after, .oc-app > .oc-rail[data-fade="both"]::after { opacity: 1; }
+  .oc-rail-icon, .oc-rail-menu { display: inline-flex; align-items: center; gap: 8px; width: auto; height: 44px; padding: 0 14px 0 6px; border: 1px solid transparent; border-radius: 22px; background: var(--oc-panel-2); order: 2; transition: background-color .18s ease, border-color .18s ease, transform .12s ease; }
+  .oc-rail-icon:active, .oc-rail-menu:active { transform: scale(.97); }
+  .oc-rail-icon::before { content: none; }
+  .oc-rail-icon:focus-visible, .oc-rail-menu:focus-visible { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
+  .oc-rail-icon:focus-visible .oc-rail-tile { outline: 0; }
+  .oc-rail-tile, .oc-rail-icon:hover .oc-rail-tile, .oc-rail-icon:focus-visible .oc-rail-tile, .oc-rail-icon.is-active .oc-rail-tile { width: 32px; height: 32px; border-radius: 50%; font-size: .76rem; }
+  .oc-rail-icon:active .oc-rail-tile { transform: none; }
+  .oc-rail-home .oc-rail-tile, .oc-rail-global .oc-rail-tile, .oc-rail-vibe .oc-rail-tile, .oc-rail-add .oc-rail-tile, .oc-rail-explore .oc-rail-tile { background: color-mix(in srgb, var(--oc-text) 9%, transparent); }
+  .oc-rail-tile .oc-i { width: 18px; height: 18px; }
+  .oc-rail-label { position: static; width: auto; height: auto; max-width: 15ch; clip: auto; text-overflow: ellipsis; font-size: .9rem; font-weight: 650; color: var(--oc-muted); }
+  .oc-rail-icon.is-active { background: color-mix(in srgb, var(--oc-accent) 20%, var(--oc-panel-2)); border-color: color-mix(in srgb, var(--oc-accent) 55%, transparent); }
+  .oc-rail-icon.is-active .oc-rail-tile { background: var(--oc-accent); color: var(--oc-on-accent); }
+  .oc-rail-server.is-active { background: color-mix(in srgb, hsl(var(--oc-hue, 215) 60% 50%) 24%, var(--oc-panel-2)); border-color: hsl(var(--oc-hue, 215) 55% 55% / .7); }
+  .oc-rail-server .oc-rail-tile, .oc-rail-server.is-active .oc-rail-tile, .oc-rail-server:hover .oc-rail-tile { background: hsl(var(--oc-hue, 215) 52% 34%); color: #fff; }
+  .oc-rail-icon.is-active .oc-rail-label { color: var(--oc-text); }
+  .oc-rail-more { display: grid; place-items: center; margin: 0 -6px 0 -4px; color: var(--oc-muted); }
+  .oc-rail-more .oc-i { width: 16px; height: 16px; transform: rotate(90deg); }
+  .oc-rail-dot { position: static; margin: 0 -6px 0 -2px; box-shadow: none; }
+  /* The list button stays at the strip's start while the places scroll under it. */
+  .oc-rail-menu { order: 0; padding: 0 14px 0 12px; position: sticky; left: 0; z-index: 1; box-shadow: 0 0 0 8px var(--oc-bg), 14px 0 10px -2px var(--oc-bg); }
+  .oc-rail-menu .oc-i { width: 20px; height: 20px; }
+  .oc-rail-menu .oc-rail-label { color: var(--oc-text); }
+  .oc-app[data-oc-panel="side"] .oc-rail-menu { background: var(--oc-accent); color: var(--oc-on-accent); }
+  .oc-app[data-oc-panel="side"] .oc-rail-menu .oc-rail-label { color: inherit; }
+  .oc-rail-divider { order: 1; width: 1px; height: 24px; flex: 0 0 1px; }
+  .oc-rail-tip { display: none; }
   .oc-app > .oc-side, .oc-app > .oc-col-main, .oc-app > .oc-col-members { min-width: 0; }
-  .oc-app .oc-rail .oc-rail-icon.is-active::before { left: 9px; right: 9px; top: auto; bottom: -8px; width: auto; height: 4px; border-radius: 4px 4px 0 0; }
   .oc-app > .oc-side, .oc-app > .oc-col-members { display: none; }
   .oc-app[data-oc-panel="side"] > .oc-side { display: flex; border-right: 0; }
   .oc-app[data-oc-panel="members"] > .oc-col-members { display: block; border-left: 0; }
@@ -130,6 +176,13 @@
   .oc-col-main > .oc-compose, .oc-col-main > .oc-dock, .oc-col-main > .oc-signin { padding-left: 12px; padding-right: 12px; }
   .oc-chan { min-height: 44px; }
   .oc-side-list .oc-row > a, .oc-side-list .oc-row > span { min-height: 44px; }
+}
+
+/* Home, Vibe and Servers are the bottom bar's on a phone. That bar is drawn by a script, so the strip leaves them out
+   wherever scripts run, from the first paint (a strip that waited to see the bar showed three chips and took them
+   away). Without scripts there is no bottom bar and the strip keeps all of them. */
+@media (max-width: 760px) and (scripting: enabled) {
+  .oc-rail .oc-rail-home, .oc-rail .oc-rail-vibe, .oc-rail .oc-rail-explore { display: none; }
 }
 
 /* A friend row is a button that opens the conversation; the form posts the username. */
@@ -254,3 +307,67 @@ fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
 .oc-app .ovt-main { min-height: 0; height: 100%; }
 .oc-app .ovt-scroll { overflow-y: auto; min-height: 0; }
 .oc-app .ovt-head, .oc-app .ovt-dock { position: static; }
+
+/* ── A server's sheet: what it is, your rank in it, and what you may do with it. Hold a server (or right-click it),
+   tap the open server's chip again, or the three dots on its card. A card in the middle on a computer; on a phone it
+   rises from the bottom edge. ── */
+.oc-ssheet { width: min(380px, calc(100vw - 24px)); max-height: min(560px, calc(100dvh - 24px)); margin: auto; padding: 0; border: 1px solid var(--oc-line); border-radius: 18px; background: var(--oc-panel); color: var(--oc-text); box-shadow: 0 24px 60px rgba(0, 0, 0, .5); overflow-y: auto; }
+.oc-ssheet:focus { outline: 0; }
+.oc-ssheet::backdrop { background: rgba(4, 8, 16, .58); }
+.oc-ssheet[open] { animation: oc-ssheet-in .22s cubic-bezier(.2, .9, .3, 1.12); }
+@keyframes oc-ssheet-in { from { opacity: 0; transform: translateY(calc(14px * var(--ov-move, 1))) scale(.98); } }
+.oc-ssheet [hidden] { display: none !important; }
+.oc-ssheet-head { display: flex; align-items: center; gap: 12px; padding: 16px 10px 14px 16px; }
+.oc-ssheet-head .oc-srv-icon { width: 48px; height: 48px; border-radius: 15px; font-size: 1rem; }
+.oc-ssheet-id { flex: 1; min-width: 0; }
+.oc-ssheet-id h2 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 0; font-size: 1.1rem; line-height: 1.25; overflow-wrap: anywhere; }
+.oc-ssheet-id h2 .oc-badge { margin: 0; }
+.oc-ssheet-id p { margin: 3px 0 0; font-size: .88rem; }
+.oc-ssheet-close { flex: none; align-self: flex-start; }
+.oc-ssheet-list { display: grid; gap: 2px; padding: 6px 8px 10px; border-top: 1px solid var(--oc-line); }
+.oc-ssheet-list form { margin: 0; }
+.oc-ssheet .oc-pop-item { min-height: 48px; border: 0; font: inherit; font-weight: 600; text-decoration: none; cursor: pointer; }
+.oc-ssheet .oc-pop-item .oc-i { width: 20px; height: 20px; color: var(--oc-muted); }
+.oc-ssheet .oc-pop-item b { display: block; font-weight: 600; }
+.oc-ssheet .oc-pop-item small { display: block; font-size: .8rem; font-weight: 400; color: var(--oc-muted); }
+.oc-ssheet-danger > summary { list-style: none; color: var(--oc-red); }
+.oc-ssheet-danger > summary::-webkit-details-marker { display: none; }
+.oc-ssheet .oc-ssheet-danger > summary .oc-i { color: currentColor; }
+.oc-ssheet-confirm { margin: 2px 0 4px; padding: 12px; border-radius: 12px; background: color-mix(in srgb, var(--oc-red-fill) 11%, transparent); }
+.oc-ssheet-confirm p { margin: 0 0 10px; font-size: .92rem; }
+.oc-ssheet-confirm .oc-ssheet-go { display: flex; gap: 8px; margin: 0; }
+.oc-ssheet-go button { flex: 1; min-height: 44px; }
+@media (max-width: 760px) {
+  .oc-ssheet { width: 100%; max-width: none; max-height: 86dvh; margin: auto 0 0; border-width: 1px 0 0; border-radius: 22px 22px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .oc-ssheet[open] { animation: oc-ssheet-up .26s cubic-bezier(.2, .9, .3, 1.06); }
+  .oc-ssheet::before { content: ''; display: block; width: 40px; height: 4px; margin: 8px auto -4px; border-radius: 4px; background: var(--oc-line); }
+}
+@keyframes oc-ssheet-up { from { opacity: .6; transform: translateY(calc(100% * var(--ov-move, 1))); } }
+
+/* A server's card where you are in it: your rank in words, Open, and the three dots for its sheet. */
+.oc-card-yours { color: var(--oc-text); font-weight: 700; }
+.oc-card > .oc-card-go { display: flex; gap: 8px; margin: 6px 14px 0; }
+.oc-card-go > .oc-button { flex: 1; text-align: center; }
+.oc-card-go > .oc-card-more { flex: none; border: 1px solid var(--oc-line); border-radius: 10px; color: var(--oc-text); }
+
+/* ── Activity: what is waiting for you, by kind; nothing waiting is said as that ── */
+.oc-act-sec { margin: 0 0 18px; }
+.oc-act-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; }
+.oc-act-who { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.oc-act-row button { min-height: 40px; flex: none; }
+.oc-act-servers, .oc-act-chans { list-style: none; margin: 0; padding: 0; }
+.oc-act-servers { display: grid; gap: 10px; }
+.oc-act-server { padding: 6px; border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel); }
+.oc-act-server-head { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 4px 8px; border-radius: 10px; color: var(--oc-text); text-decoration: none; }
+.oc-act-server-head:hover { background: var(--oc-panel-2); }
+.oc-act-server-head strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.oc-act-chans { display: grid; gap: 1px; }
+.oc-act-server .oc-act-chans { padding-left: 42px; }
+.oc-act-clear { display: grid; justify-items: center; gap: 6px; max-width: 420px; margin: 9vh auto 0; text-align: center; }
+.oc-act-clear-mark { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 50%; background: color-mix(in srgb, var(--oc-ok-fill) 16%, transparent); color: var(--oc-ok); animation: oc-act-pop .42s cubic-bezier(.2, .9, .3, 1.4) both; }
+.oc-act-clear-mark .oc-i { width: 30px; height: 30px; stroke-width: 2.4; }
+.oc-act-clear h2 { margin: 8px 0 0; font-size: 1.2rem; }
+.oc-act-clear p { margin: 0; }
+.oc-act-clear .oc-act-clear-go { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 12px; }
+.oc-act-clear-go .oc-button { min-height: 44px; display: inline-flex; align-items: center; }
+@keyframes oc-act-pop { from { opacity: 0; transform: scale(calc(1 - .4 * var(--ov-move, 1))); } }
