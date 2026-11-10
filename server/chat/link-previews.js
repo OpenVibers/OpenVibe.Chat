@@ -34,7 +34,7 @@ const MAX_DESCRIPTION = 300;
 const MAX_SITE = 80;
 const MAX_JOBS = 2;
 const MAX_QUEUE = 200;
-const KINDS = ['link', 'video', 'image'];
+const KINDS = ['link', 'video', 'image', 'live'];
 const USER_AGENT = 'OpenVibe-Chat-LinkPreview/1 (+https://openvibe.chat)';
 const PREVIEWS_ON = String(process.env.CHAT_LINK_PREVIEWS || '').toLowerCase() !== 'off';
 
@@ -198,6 +198,96 @@ function oembedFor(url) {
     return null;
 }
 
+/**
+ * OpenVibe's own sites are first-class kinds and are never page-fetched: an address there is resolved through that
+ * service's public API, or its oEmbed where it has one. Windows whose service has no resolver yet return null (and
+ * are not page-fetched either): that is the list of kinds a later part adds.
+ */
+const OWN_HOSTS = new Map([
+    ['openvibe.live', 'live'], ['openvibe.video', 'video'], ['openvibe.pics', 'picture'],
+    ['openvibe.design', 'design'], ['openvibe.community', 'post'], ['openvibe.network', 'profile'],
+    ['openvibe.games', 'game'],
+]);
+
+function baseOf(value, production) {
+    const raw = String(value || (process.env.NODE_ENV === 'test' ? '' : production)).replace(/\/+$/, '');
+    if (!raw) return '';
+    try {
+        const u = new URL(raw);
+        return u.protocol === 'https:' || u.protocol === 'http:' ? raw : '';
+    } catch { return ''; }
+}
+const liveBase = () => baseOf(process.env.CHAT_LINK_LIVE_URL, 'https://openvibe.live');
+const videoBase = () => baseOf(process.env.CHAT_LINK_VIDEO_URL, 'https://openvibe.video');
+
+/** What an address on one of our sites asks that site for, or null for host/path shapes we do not know. */
+function ownLink(u) {
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    if (!OWN_HOSTS.has(host)) return null;
+    const site = OWN_HOSTS.get(host);
+    if (site === 'live') {
+        const m = /^\/@([A-Za-z0-9_]{3,24})(?:\/[^/]+)?\/?$/.exec(u.pathname);
+        return m ? { site, username: m[1] } : { site };
+    }
+    if (site === 'video') {
+        if (u.pathname === '/watch' && /^[A-Za-z0-9_-]{11}$/.test(String(u.searchParams.get('v') || ''))) return { site, page: u.href };
+        if (/^\/[vc]\/[0-9]{1,12}$/.test(u.pathname)) return { site, page: u.href };
+        return { site };
+    }
+    return { site };
+}
+
+async function readJsonUrl(url) {
+    const res = await fetchFollowing(url);
+    if (!res) return null;
+    try { return JSON.parse(String(res.body || '')); } catch { return null; }
+}
+
+/** A live channel (/@name, no page fetch): Live's public channel API says who and whether they are live now. */
+async function livePreview(url, username) {
+    const base = liveBase();
+    if (!base) return null;
+    const item = await readJsonUrl(`${base}/api/streams/channel/${encodeURIComponent(username)}?pollOnly=1`);
+    const channel = item && item.channel;
+    if (!channel || typeof channel !== 'object') return null;
+    const title = textOf(channel.display_name || channel.username || username, MAX_TITLE);
+    if (!title) return null;
+    return {
+        url,
+        site_name: 'OpenVibe.Live',
+        title,
+        description: textOf(channel.bio, MAX_DESCRIPTION),
+        image: imageOf(channel.avatar_url),
+        kind: 'live',
+        width: 0,
+        height: 0,
+        by: textOf(channel.username || username, 80),
+        live: Array.isArray(item.streams) ? item.streams.length > 0 : !!item.stream,
+    };
+}
+
+/** A Video watch page (no page fetch): Video's own watchable resolver. */
+async function videoPreview(url, page) {
+    const base = videoBase();
+    if (!base) return null;
+    const item = await readJsonUrl(`${base}/api/v1/video/watchable?url=${encodeURIComponent(page)}`);
+    if (!item || typeof item !== 'object') return null;
+    const title = textOf(item.title, MAX_TITLE);
+    if (!title) return null;
+    return {
+        url,
+        site_name: 'OpenVibe.Video',
+        title,
+        description: '',
+        image: imageOf(item.thumbnail_url),
+        kind: 'video',
+        width: 0,
+        height: 0,
+        by: textOf(item.channel, 80),
+        live: false,
+    };
+}
+
 /** One GET, https only, through the egress lookup, no redirects followed here, at most FETCH_TIMEOUT_MS and MAX_BYTES. */
 function requestOnce(url) {
     if (_request) return Promise.resolve(_request(url));
@@ -259,6 +349,12 @@ async function fetchFollowing(url) {
 
 /** Read one address: oEmbed when it is on the short allow-list, the page otherwise. A failure is no preview. */
 async function readUrl(url) {
+    const own = ownLink(new URL(url));
+    if (own) {
+        if (own.username) return await livePreview(url, own.username);
+        if (own.page) return await videoPreview(url, own.page);
+        return null;
+    }
     const oembed = oembedFor(new URL(url));
     if (oembed) {
         try {
@@ -281,7 +377,7 @@ function parsePreview(value) {
     if (typeof p === 'string') { try { p = JSON.parse(p); } catch { return null; } }
     if (!p || typeof p !== 'object' || Array.isArray(p)) return null;
     if (!KINDS.includes(p.kind) || typeof p.title !== 'string' || !p.title || typeof p.url !== 'string') return null;
-    return {
+    const preview = {
         url: p.url,
         site_name: textOf(p.site_name, MAX_SITE),
         title: textOf(p.title, MAX_TITLE),
@@ -291,6 +387,9 @@ function parsePreview(value) {
         width: intOf(p.width),
         height: intOf(p.height),
     };
+    if (p.by != null) preview.by = textOf(p.by, 80);
+    if (p.live === true || p.live === false) preview.live = p.live;
+    return preview;
 }
 
 async function cached(value) {
@@ -435,7 +534,7 @@ async function attach(rows, scope = 'room') {
 
 module.exports = {
     addresses, normalizeUrl, textOf, decodeEntities, pageFields, previewFromResponse, previewFromOembed, imageOf,
-    previewOf, schedule, embedsOf, attach, idle,
+    previewOf, schedule, embedsOf, attach, idle, ownLink,
     CACHE_MS, MISS_MS, MAX_URLS, MAX_BYTES, FETCH_TIMEOUT_MS, MAX_REDIRECTS, PREVIEWS_ON,
     _setRequest(fn) { _request = fn || null; },
     _setLookup(fn) { _lookup = fn || null; },
