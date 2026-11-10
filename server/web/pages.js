@@ -184,6 +184,7 @@ function createWebRoutes({ config }) {
             messages: await n(async () => await dm.getTotalUnread(actor.user.id)),
             rooms: await n(async () => await rooms.unreadTotal(actor.user)),
             servers: await n(async () => await rooms.unreadTotal(actor.user, { servers: true })),
+            activity: await n(async () => await require('../chat/activity').unreadCount(actor.user)),
         };
     };
     // Under the global room on the front page: what openvibe.chat is for (openvibe-shared/showcase), each card a real
@@ -211,7 +212,7 @@ function createWebRoutes({ config }) {
         res.status(status).set('Cache-Control', o.cache || cache.htmlHeaders({ private: true })).set('Content-Security-Policy', contentSecurityPolicy(nonce)).type('html')
             .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: await countsOf(actor), nonce, ringScript: actor.kind === 'user' && !!(config.calls && config.calls.enabled), ...o }));
     };
-    const needUser = async (req, res) => {
+    const needUser = async (req, res, { status = 401 } = {}) => {
         const actor = await viewerOf(req);
         if (actor.kind === 'user') return actor;
         // A gated page answers here, noindex, instead of redirecting to Network sign-in: a crawler that
@@ -225,7 +226,7 @@ function createWebRoutes({ config }) {
         // The visible link goes back to the path only. A query string on a private page holds words that must
         // never come back in an anonymous response — the security suite reads every 401 body for the private
         // room's words, and echoing ?q= here put them there (SEO-7 review, 2026-10-29).
-        await page(req, res, 401, {
+        await page(req, res, status, {
             actor, title: 'Sign in to continue', path: req.path, active: null, footer: 'compact', robots: 'noindex, nofollow',
             body: `<h1>Sign in to continue</h1>
 <p class="oc-muted">This page is for OpenVibe accounts. Sign in and you come straight back here.</p>
@@ -376,7 +377,8 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
     // friend, conversations with something new, and the channels and rooms with unread messages, each a row that opens
     // the place. Nothing waiting is said as that, with the two places most people go next. ──
     router.get('/activity', async (req, res) => {
-        const actor = await needUser(req, res); if (!actor) return;
+        // 200 signed out too: Activity is a page people can be sent to, with the way to sign in in it.
+        const actor = await needUser(req, res, { status: 200 }); if (!actor) return;
         const me = actor.user;
         const serversApi = require('../rooms/servers');
         const convs = await dm.getConversations(me.id);
@@ -408,6 +410,9 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
         const roomRows = myRooms.map((r) => `<li><a class="oc-chan is-unread" href="/r/${esc(r.slug)}"><span class="oc-chan-hash" aria-hidden="true">#</span><span class="oc-chan-name">${esc(r.name)}</span><span class="oc-chan-dot" aria-label="${r.unread} unread">${r.unread > 99 ? '99+' : r.unread}</span></a></li>`);
         const section = (id, title, n, inner) => (n ? `<section class="oc-act-sec" aria-labelledby="${id}"><h2 class="oc-list-head" id="${id}">${title} <span class="oc-muted">${n}</span></h2>${inner}</section>` : '');
         const waiting = requests.length + convRows.length + busy.length + roomRows.length;
+        // What happened to this person, above what is waiting for them (server/web/activity.js). Opening the page
+        // reads it: the rows below still show what was new on this visit.
+        const happened = await require('./activity').whatHappened(me);
         const body = waiting
             ? [
                 section('oc-act-requests', 'Friend requests', requests.length, `<ul class="oc-list">${requestRows.join('')}</ul>`),
@@ -422,7 +427,7 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
                 rail: shell.rail({ dmUnread: unread, servers: shell.railServers(mineServers), list: 'Chats' }),
                 side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
-                main: `${ui.head({ title: 'Activity', sub: waiting ? 'What is waiting for you' : 'Nothing is waiting for you' })}\n${body}`,
+                main: `${ui.head({ title: 'Activity', sub: waiting ? 'What is waiting for you' : 'Nothing is waiting for you' })}\n${happened}\n${body}`,
                 mainLabel: 'Activity',
                 page: true,
             }),

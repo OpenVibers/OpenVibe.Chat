@@ -30,7 +30,7 @@ const APP_BAR = [
     { label: 'Home', href: '/messages', icon: 'fa-comment-dots', page: 'messages' },
     { label: 'Servers', href: '/servers', icon: 'fa-people-group', page: 'servers' },   // not the globe: that is Global chat
     { label: 'Vibe', href: '/vibe', icon: 'fa-wand-magic-sparkles', page: 'vibe' },
-    { label: 'Activity', href: '/activity', icon: 'fa-bell', page: 'activity' },
+    { label: 'Activity', href: '/activity', icon: 'fa-bell', page: 'activity', dot: true },
     { label: 'You', href: '/settings', icon: 'fa-user', page: 'settings' },
 ];
 

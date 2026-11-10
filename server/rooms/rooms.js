@@ -268,7 +268,7 @@ async function announceDeleted(room, ids) {
     }
 }
 
-async function post(room, user, text, { now = Date.now(), ai = true, timezone = null, files = [] } = {}) {
+async function post(room, user, text, { now = Date.now(), ai = true, timezone = null, reply_to_id = null, files = [] } = {}) {
     const a = await access(room, user);
     if (!user) fail(401, 'rooms.sign_in', 'Sign in to chat');
     if (siteBanned(user)) fail(403, 'rooms.banned', 'Your account is banned from chat');
@@ -297,6 +297,13 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
             if (open) await polls.castVote({ poll: open, user, optionId: body.slice(1) });
         } catch { /* a vote that does not count is never a failed message */ }
     }
+    // What this answers, when the client sends a reply_to_id. It must be a live message of this same room.
+    const replyToId = Number(reply_to_id) || null;
+    let replyTo = null;
+    if (replyToId) {
+        replyTo = await db.get('SELECT id, user_id, message, is_deleted FROM room_messages WHERE id = ? AND room_id = ?', [replyToId, room.id]);
+        if (!replyTo || replyTo.is_deleted) fail(422, 'rooms.reply', 'That message is not here to reply to');
+    }
     const filtered = wordFilter.check(body);
     const message = filtered.safe ? body : filtered.filtered;
     const attached = messageFiles.cleanFiles(files, user.subject_id || null);
@@ -304,7 +311,7 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
     // broadcast when it is ready; a slower one fills the row later.
     const { card, pending } = await linkCards.forSend(message);
     const id = await db.tx(async () => {
-        const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, card, files) VALUES (?, ?, ?, ?, ?, ?::jsonb)', [room.id, user.id, user.subject_id || null, message, linkCards.toJson(card), JSON.stringify(attached)]);
+        const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, card, reply_to_id, files) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb)', [room.id, user.id, user.subject_id || null, message, linkCards.toJson(card), replyToId, JSON.stringify(attached)]);
         await db.run('UPDATE rooms SET message_count = message_count + 1, last_message_at = ov_now() WHERE id = ?', [room.id]);
         await db.run('UPDATE room_members SET last_read_id = ?, last_seen_at = ov_now() WHERE room_id = ? AND user_id = ?', [r.lastInsertRowid, room.id, user.id]);
         await announceMessage(room, user, Number(r.lastInsertRowid), message, now);
@@ -312,6 +319,11 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
     });
     const row = await messageById(id);
     if (pending) linkCards.fillLater('room_messages', id, pending);
+    // Activity: the people this names, and the person it answers (server/chat/activity.js). A failure here never
+    // takes a message back.
+    const activity = require('../chat/activity');
+    await activity.mentionsInRoom({ room, message: row, actor: user });
+    if (replyTo) await activity.replyInRoom({ room, message: row, parent: replyTo, actor: user });
     // The chat plays commands of an agent stream's room (Agent Streams S6): '!do', '!vote', and the
     // moderators' '!skip', '!remove' and '!pin'. They are handled after the message is out, so a request is
     // a message of the room and a thumbs up on it is a vote.
@@ -342,7 +354,7 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null } = {
 }
 
 // A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
-const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.created_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model,
+const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.reply_to_id, m.created_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle WHEN m.agent_stream THEN 'aiagent' ELSE u.username END AS username,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.name WHEN m.agent_stream THEN 'AI agent' ELSE u.display_name END AS display_name,
         m.agent_stream, u.profile_color, u.role AS user_role
@@ -421,6 +433,9 @@ async function setRole(room, actor, targetUserId, role) {
                     : role === 'speaker' && current !== 'speaker' ? 'room_speaker_add'
                         : current === 'speaker' && role !== 'speaker' ? 'room_speaker_remove' : null;
     if (action) await db.logModerationAction({ scope_type: 'room', scope_id: room.slug, actor_user_id: actor.id, target_user_id: targetUserId, action_type: action, details: { from: current, to: role } });
+    if (role !== 'blocked' && role !== 'none' && current !== role && Number(targetUserId) !== Number(actor.id)) {
+        await require('../chat/activity').roleGiven({ targetUserId, actor, role, roomId: room.id });
+    }
     return role;
 }
 
