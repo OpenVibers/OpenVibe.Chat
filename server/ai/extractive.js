@@ -41,16 +41,46 @@ function _timeline(rows, now) {
         .filter(Boolean);
 }
 
-/** The global overview: how much traffic, who and where, with a few representative lines. */
+// The words the window keeps coming back to (the same stop-list rule as the job's topics).
+const TOPIC_STOP = new Set(('the and for that this with you your are was were have has had not but all can '
+    + 'just from they them their there here what when who how why will would could should about into over than then '
+    + 'its it\'s i\'m dont don\'t im ive you\'re your\'re hes shes theyre we\'re thats whats lets get got like one '
+    + 'now out up off too very really some any more most much many also only even still back well good bad lol lmao '
+    + 'yeah yes nope ok okay hi hello hey thanks thank please bro dude guys guy chat room message messages people').split(' '));
+function _topics(rows, limit = 3) {
+    const counts = new Map();
+    for (const r of rows || []) {
+        const text = String((r && r.message) || '').toLowerCase()
+            .replace(/https?:\/\/\S+/g, ' ')
+            .replace(/:[a-z0-9_+-]+:/g, ' ')
+            .replace(/@[a-z0-9_.-]+/g, ' ');
+        for (const m of text.matchAll(/[a-z][a-z'’-]{2,}/g)) {
+            const word = m[0].replace(/['’-]+$/g, '');
+            if (word.length < 3 || TOPIC_STOP.has(word)) continue;
+            counts.set(word, (counts.get(word) || 0) + 1);
+        }
+    }
+    return [...counts.entries()].filter(([, c]) => c >= 2).sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, limit).map(([label]) => label);
+}
+
+/**
+ * The global overview, for someone arriving now: two sentences. The first says what the room is talking
+ * about (its most-mentioned words, or that it is quiet); the second says who is here and the latest line.
+ * This is the fallback when OpenVibe.AI does not answer; the AI template asks for the same two-sentence shape.
+ */
 function globalFrom(rows, { windowLabel = 'recent window', priorMemory = '', now = Date.now() } = {}) {
     const authors = new Set(rows.map((r) => r.username).filter(Boolean));
-    const rooms = new Set(rows.map((r) => r.channel_username || (r.is_global ? 'global' : null)).filter(Boolean));
     const sample = rows.slice(-3).map((r) => _oneLine(r.message, 120)).filter(Boolean);
-    const recent_overview = _clip(
-        `${rows.length} messages from ${authors.size} chatter${authors.size === 1 ? '' : 's'} in ${rooms.size || 1} room${rooms.size === 1 ? '' : 's'} during the ${windowLabel}.` +
-        (sample.length ? ` Latest: ${sample.join(' · ')}` : ''),
-        2000
-    );
+    const topics = _topics(rows);
+    const first = topics.length
+        ? `The talk is mostly about ${topics.join(', ')}.`
+        : `It is quiet in the room during the ${windowLabel}.`;
+    const people = authors.size;
+    const second = sample.length
+        ? `${people || rows.length} ${people === 1 ? 'person has' : 'people have'} been chatting; the latest line was “${sample[sample.length - 1]}”.`
+        : `${people} ${people === 1 ? 'person is' : 'people are'} here.`;
+    const recent_overview = _clip(`${first} ${second}`, 2000);
     return {
         recent_overview,
         memory: _clip(priorMemory || (sample[0] ? `Latest: ${sample[0]}` : ''), 1600),
