@@ -981,7 +981,7 @@ left OpenVibe.Sites, and this repository's vhost serves it.
 Part of the [OpenVibe network](https://openvibe.network). Built in the open by [OpenVibers](https://github.com/OpenVibers).
 
 <!-- versions:start -->
-- openvibe-contracts: v0.384.0
+- openvibe-contracts: v0.386.0
 - openvibe-sdk: v0.133.0
 - openvibe-shared: v4.179.0
 <!-- versions:end -->
