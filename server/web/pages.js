@@ -276,6 +276,10 @@ function createWebRoutes({ config }) {
             : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=%2F">Sign in with OpenVibe</a> to chat. Anyone can read along.</p>`;
         const error = req.query.error ? notice('error', String(req.query.error).slice(0, 200)) : '';
         const signedIn = actor.kind === 'user';
+        // The room's AI insight (server/chat/room-insight.js): a local read of the stored summary, so the page
+        // never waits on OpenVibe.AI. Public like the room: signed out too.
+        const insight = await require('../chat/room-insight').global().catch(() => null);
+        const insightHtml = insight ? insightBlock(insight) : '';
         // Around the room: the real activity (server/web/home.js, read once a minute). Someone signed in gets the app: the
         // room first at the screen's height, Ask Vibe in one line, compact lists, and no introduction or questions (those,
         // the hero and the full footer, are for people who are new here, and for search).
@@ -318,7 +322,7 @@ function createWebRoutes({ config }) {
                 rail: shell.rail({ global: true, dmUnread: dms.reduce((n, d) => n + d.unread, 0), servers: shell.railServers(mineServers) }),
                 side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
-                main: `<header class="oc-chan-head">${shell.toList}<h1 id="oc-h" class="oc-chan-title">Global chat</h1><span class="oc-muted oc-chan-topic">Everyone on OpenVibe${home.peopleLine(activity)}</span><span class="oc-chan-tools"><span class="oc-live" id="oc-live" hidden>● live</span><a class="oc-icon-btn" href="/vibe" aria-label="Chat with Vibe" title="Chat with Vibe">${IC.spark}</a><a class="oc-icon-btn" href="/settings" aria-label="Chat settings" title="Chat settings">${IC.gear}</a></span></header>
+                main: `<header class="oc-chan-head">${shell.toList}<h1 id="oc-h" class="oc-chan-title">Global chat</h1><span class="oc-muted oc-chan-topic">Everyone on OpenVibe${home.peopleLine(activity)}</span><span class="oc-chan-tools"><span class="oc-live" id="oc-live" hidden>● live</span><a class="oc-icon-btn" href="/vibe" aria-label="Chat with Vibe" title="Chat with Vibe">${IC.spark}</a><a class="oc-icon-btn" href="/settings" aria-label="Chat settings" title="Chat settings">${IC.gear}</a></span>${insightHtml}</header>
 ${error}
 ${feedList}
 ${composer}`,
@@ -341,6 +345,7 @@ ${parts.vibe}
 <section class="oc-room" aria-labelledby="oc-h">
 <h2 id="oc-h">Global chat</h2>
 <p class="oc-muted">One room for everyone on OpenVibe: streamers, viewers and players, from every site. <span class="oc-live" id="oc-live" hidden>● live</span></p>
+${insightHtml}
 ${error}
 ${feedList}
 ${composer}
@@ -367,6 +372,25 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
     // ── Direct messages ──
     const dmApi = require('../chat/dm-routes');
     const { ICONS: IC } = require('./icons');
+    /**
+     * The Global room's AI insight, plain markup behind the head's AI button (plan 2026-11-10, part 1).
+     * Server-rendered, so it reads without JavaScript; no JavaScript is needed to open it either (<details>).
+     * The look is Fable's: this is only text, topics and the recent timeline in kit classes.
+     */
+    const insightBlock = (insight) => {
+        const o = insight.overview || {};
+        const topics = (o.topics || []).slice(0, 8);
+        const events = (insight.timeline || []).slice(0, 6);
+        const ready = insight.state === 'ready' && !!o.text;
+        const when = o.updated_at ? ui.when(o.updated_at) : null;
+        const meta = [o.people ? `${o.people} ${o.people === 1 ? 'person' : 'people'}` : '', o.messages ? `${o.messages} messages` : '', when && when.text ? `updated ${when.text}` : ''].filter(Boolean);
+        return `<details class="oc-more oc-insight"><summary class="oc-icon-btn" aria-label="AI overview of this room" title="AI overview">${IC.spark}</summary><div class="oc-pop oc-insight-pop">`
+            + (ready ? `<p>${esc(o.text)}</p>` : '<p class="oc-muted">Quiet right now: there is nothing new to summarise.</p>')
+            + (topics.length ? `<ul class="oc-insight-topics">${topics.map((t) => `<li>${esc(t.label)} <span class="oc-muted">${Number(t.count) || 0}</span></li>`).join('')}</ul>` : '')
+            + (events.length ? `<ol class="oc-insight-timeline">${events.map((e) => `<li><time>${esc(ui.when(e.at).text || '')}</time> <strong>${esc(e.title)}</strong>${e.text ? ` <span class="oc-muted">${esc(e.text)}</span>` : ''}</li>`).join('')}</ol>` : '')
+            + (meta.length ? `<p class="oc-muted oc-insight-meta">${esc(meta.join(' · '))}</p>` : '')
+            + '</div></details>';
+    };
     /** One conversation in a list: initials, name and time on one line, the last message under it, unread marked. */
     const convRow = ({ href, title, preview, at, unread = 0, badge = '', personPresence = null, avatarUrl = '' }) => {
         const t = ui.when(at);

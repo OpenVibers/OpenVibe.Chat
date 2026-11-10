@@ -23,6 +23,7 @@ const config = require('../config');
 const db = require('../db/database');
 const aiClient = require('./client');
 const extractive = require('./extractive');
+const consent = require('../net/consent');
 
 // ── Tunables (Live's) ────────────────────────────────────────────────────────
 const TICK_MS = config.ai.tickMs;
@@ -96,7 +97,11 @@ function _stampAdditions(additions, fallbackTs, nowMs) {
         let ts = fallbackTs;
         const mins = Number(a && a.mins_ago);
         if (Number.isFinite(mins) && mins >= 0 && mins <= 43200) ts = _sqlTime(now - mins * 60000);
-        out.push({ ts, label, detail: _clip(a.detail || a.description || '', 240) });
+        const messageId = a && a.message_id != null && Number.isFinite(Number(a.message_id)) ? Number(a.message_id) : null;
+        out.push({
+            ts, label, detail: _clip(a.detail || a.description || '', 240),
+            kind: _clip(a && a.kind ? a.kind : 'moment', 20), message_id: messageId,
+        });
     }
     return out;
 }
@@ -114,6 +119,42 @@ function _cleanTimeline(arr) {
     return arr
         .filter(t => t && t.label && !_isPlaceholder(t.label))
         .sort((a, b) => _parseSqlTime(a.ts) - _parseSqlTime(b.ts));
+}
+
+// The words people keep coming back to in the window: a topic with how many messages mentioned it.
+// Extractive so the room read has topics even when the model wrote only prose.
+const TOPIC_STOP = new Set(('the and for that this with you your are was were have has had not but all can '
+    + 'just from they them their there here what when who how why will would could should about into over than then '
+    + 'its it\'s i\'m dont don\'t im ive you\'re your\'re hes shes theyre we\'re thats whats lets get got like one '
+    + 'now out up off too very really some any more most much many also only even still back well good bad lol lmao '
+    + 'yeah yes nope ok okay hi hello hey thanks thank please bro dude guys guy chat room message messages people').split(' '));
+function _topics(rows, limit = 8) {
+    const counts = new Map();
+    for (const r of rows || []) {
+        const text = String((r && r.message) || '').toLowerCase()
+            .replace(/https?:\/\/\S+/g, ' ')
+            .replace(/:[a-z0-9_+-]+:/g, ' ')
+            .replace(/@[a-z0-9_.-]+/g, ' ');
+        for (const m of text.matchAll(/[a-z][a-z'’-]{2,}/g)) {
+            const word = m[0].replace(/['’-]+$/g, '');
+            if (word.length < 3 || TOPIC_STOP.has(word)) continue;
+            counts.set(word, (counts.get(word) || 0) + 1);
+        }
+    }
+    return [...counts.entries()]
+        .filter(([, count]) => count >= 2)
+        .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+        .slice(0, limit)
+        .map(([label, count]) => ({ label: _clip(label, 40), count }));
+}
+/** How many different people wrote in the window (one per signed-in author, else per name). */
+function _people(rows) {
+    const seen = new Set();
+    for (const r of rows || []) {
+        const key = r && (r.user_id ? `u:${r.user_id}` : r.username ? `n:${String(r.username).toLowerCase()}` : null);
+        if (key) seen.add(key);
+    }
+    return seen.size;
 }
 
 // Chat is the only writer of the two summaries tables since the C-04 cutover: no authority gate.
@@ -138,8 +179,16 @@ async function _refreshGlobal() {
     const windowStart = _sqlTime(startMs);
     const windowLabel = _windowLabel(now - startMs);
 
-    const rows = await db.getChatMessagesForAi({ sinceTs: windowStart, order: 'desc', limit: MAX_BATCH_MESSAGES });
-    if (!rows.length) return false;
+    // The room's read includes only people who allowed AI use of their messages (network.consent@1,
+    // ai.train on kind chat). Anon and relay authors have no Network subject and are left out; when
+    // Network cannot answer, the check fails closed and this window is skipped.
+    const batch = await db.getChatMessagesForAi({ sinceTs: windowStart, order: 'desc', limit: MAX_BATCH_MESSAGES });
+    if (!batch.length) return false;
+    const rows = await consent.filterRows(batch);
+    if (!rows.length) {
+        console.log('[ChatAI] global window has no consenting messages; nothing summarised');
+        return false;
+    }
     const priorMemory = prior ? (prior.memory_json || '') : '';
     let priorTl = [];
     try { priorTl = JSON.parse(prior ? (prior.timeline_json || '[]') : '[]'); } catch { priorTl = []; }
@@ -165,8 +214,10 @@ async function _refreshGlobal() {
         window_label: windowLabel,
         window_start: windowStart,
         window_end: nowIso,
+        people: _people(rows),
+        topics_json: JSON.stringify(_topics(rows)),
     });
-    console.log(`[ChatAI] global refreshed (${newCount} new, window=${windowLabel}, ${rows.length} msgs)`);
+    console.log(`[ChatAI] global refreshed (${newCount} new, ${rows.length} consenting, window=${windowLabel})`);
     return true;
 }
 
@@ -438,7 +489,7 @@ async function getAnonInsight(anonId) {
 }
 
 module.exports = {
-    start, stop, _tick, _msgData,
+    start, stop, _tick, _msgData, _topics, _people,
     getGlobalInsight, getUserInsight, getRelayUserInsight, getAnonInsight,
     WORKFLOW_GLOBAL, WORKFLOW_PROFILE,
 };
