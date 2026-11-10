@@ -99,7 +99,7 @@ t('the form works without JavaScript, and goes back to where it was sent from', 
     assert.strictEqual(r.status, 303);
     assert.strictEqual(r.headers.get('location'), '/r/photo-walk#oc-compose');
     const msgs = (await api('GET', '/photo-walk/messages', ann)).body.messages;
-    assert.match(msgs[msgs.length - 1].message, /^From the form https:\/\/openvibe\.pics\/i\//);
+    assert.match(msgs[0].message, /^From the form https:\/\/openvibe\.pics\/i\//);
     const bad = multipart({ back: 'https://evil.example/' }, { name: 'p.png', type: 'image/png', buffer: PNG });
     const r2 = await fetch(`${h.base}/r/photo-walk/picture`, { method: 'POST', headers: { cookie: `ov_token=${bob.token}`, 'content-type': bad.type }, body: bad.body, redirect: 'manual' });
     assert.strictEqual(r2.headers.get('location'), '/r/photo-walk#oc-compose', 'never back to another site');
