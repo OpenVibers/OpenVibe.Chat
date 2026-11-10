@@ -103,6 +103,10 @@ t('a moderator adds an entry by hand, and the room prompt carries the notes', as
     const prompt = await memory.forPrompt(pub);
     assert.ok(prompt.includes('The weekly stream moved to Saturday'), prompt);
 
+    const pageHtml = await fetch(`${h.base}/r/memory-room/memory`, { headers: { cookie: `ov_token=${owner.token}` } }).then((x) => x.text());
+    assert.ok(pageHtml.includes('What this room remembers'), 'the memory page renders');
+    assert.ok(pageHtml.includes('The weekly stream moved to Saturday'), 'the page shows the notes');
+
     r = await h.http('POST', '/api/v1/rooms/memory-room/memory', { token: alice.token, body: { text: 'not allowed' } });
     assert.strictEqual(r.status, 403);
     r = await h.http('DELETE', `/api/v1/rooms/memory-room/memory/${added.id}`, { token: owner.token });
