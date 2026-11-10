@@ -226,6 +226,8 @@ module.exports = {
         // Vibe, OpenVibe's assistant (server/rooms/vibe.js): on unless CHAT_VIBE=0 (it also needs AI members on); a person
         // gets this many answers a UTC day across all their Vibe chats.
         vibe: process.env.CHAT_VIBE !== '0',
+        // C3's explicit "do it for me" task modes (Actor-backed Research, Agent and Code); site owner opt-in.
+        vibeDoIt: bool(process.env.CHAT_VIBE_DO_IT_ENABLED, false),
         vibeRepliesPerDay: Math.max(1, int(process.env.CHAT_VIBE_REPLIES_PER_DAY, 100)),
     },
     bench: {
