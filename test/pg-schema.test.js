@@ -39,6 +39,7 @@ const TABLES = [
     'party_pool_settings', 'party_pool_machines', 'party_pool_holds',   // 0064: OpenVibe's own computers for parties
     'link_previews', 'link_preview_cache',   // 0065: address previews beside the message, and the address cache
     'dm_link_preview_settings',              // 0070: a person's link previews in DMs (on unless they say otherwise)
+    'room_memory',                           // 0071: what a room keeps between summaries
 ];
 const INDEXES = [
     'idx_chat_ts_deleted', 'idx_chat_page_live', 'idx_chat_channel_user_ts', 'idx_chat_stream_ts', 'idx_emotes_channel_code', 'idx_chat_tl_dedup',
