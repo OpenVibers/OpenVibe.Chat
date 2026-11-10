@@ -43,9 +43,10 @@ router.delete('/:slug/emojis/:id', requireAuth, async (req,res) => {
     const server = await resolve(req,res); if (!server) return;
     const access = await servers.access(server, req.user);
     if (!access.moderate) return res.status(403).json({ error:'Only server moderators can remove emoji', code:'emoji.forbidden' });
-    const row = await db.get('SELECT id FROM emotes WHERE id = ? AND server_id = ?', [req.params.id,server.id]);
+    const row = await db.get('SELECT id, media_asset_id FROM emotes WHERE id = ? AND server_id = ?', [req.params.id,server.id]);
     if (!row) return res.status(404).json({ error:'Emoji not found', code:'emoji.not_found' });
     await db.run('DELETE FROM emotes WHERE id = ?', [row.id]);
+    if (row.media_asset_id) await media.deleteObject(row.media_asset_id);
     res.json({ ok:true });
 });
 module.exports = router;
