@@ -36,6 +36,8 @@ const TABLES = [
     'room_sync_clocks', 'room_control_leases',
     'room_message_reactions', 'room_member_timeouts', 'config_snapshots', 'config_keys', 'chat_activity',
     'agent_play_requests', 'agent_play_votes', 'agent_play_log',
+    'party_pool_settings', 'party_pool_machines', 'party_pool_holds',   // 0064: OpenVibe's own computers for parties
+    'link_previews', 'link_preview_cache',   // 0065: address previews beside the message, and the address cache
 ];
 const INDEXES = [
     'idx_chat_ts_deleted', 'idx_chat_page_live', 'idx_chat_channel_user_ts', 'idx_chat_stream_ts', 'idx_emotes_channel_code', 'idx_chat_tl_dedup',
@@ -43,6 +45,7 @@ const INDEXES = [
     'idx_room_messages_room', 'idx_room_members_user', 'idx_network_blocks_blocked', 'idx_mod_actions_created',
     'idx_dm_contacts_user', 'idx_rooms_forum_space',
     'chat_app_link_tokens_by_person', 'chat_app_link_tokens_expiry', 'chat_app_callbacks_by_chat', 'chat_app_callbacks_expiry',
+    'idx_link_previews_message',
 ];
 const MIRRORED = ['chat_messages', 'dm_conversations', 'dm_participants', 'dm_messages', 'dm_blocks', 'tts_voice_overrides',
     'channel_sounds', 'relay_users', 'hidden_relay_users', 'pending_ip_messages', 'stream_first_chats', 'moderation_actions'];

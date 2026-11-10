@@ -34,6 +34,7 @@ const soundboard = require('./soundboard-service');
 const audioQueue = require('./audio-queue');
 const dm = require('./dm');
 const linkCards = require('./link-cards');
+const linkPreviews = require('./link-previews');
 const networkBlocks = require('./network-blocks');
 const presence = require('../presence');
 const vipBadges = require('../vip/badges');
@@ -1189,6 +1190,16 @@ class ChatServer {
             });
             if (result.lastInsertRowid) chatMsg.id = Number(result.lastInsertRowid);
             if (pending && result.lastInsertRowid) linkCards.fillLater('chat_messages', Number(result.lastInsertRowid), pending);
+            // General address previews run after the line is out (server/chat/link-previews.js): the saved message
+            // carries embeds: [] and a later frame carries the filled list. Channel/global viewers get the same frame.
+            if (result.lastInsertRowid) {
+                const id = Number(result.lastInsertRowid);
+                linkPreviews.schedule({ scope: 'chat', messageId: id, text, onReady: (embeds) => {
+                    const frame = { type: 'chat_embeds', id, embeds };
+                    if (client.streamId || client.channelUserId) this.broadcastToChannelRoom(client.channelUserId, client.streamId, frame).catch(() => {});
+                    else this.broadcastGlobal(frame).catch(() => {});
+                } });
+            }
             firstChat = !!result.first_chat;
         } catch (err) {
             // Not saved means not sent: a line everyone saw but history, moderation and replays never

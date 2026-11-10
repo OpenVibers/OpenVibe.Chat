@@ -82,7 +82,7 @@ t('falls back to the extractive summary when AI does not answer', async () => {
     await chatAi._tick();
 
     const row = await db.getChatAiSummary('global', 0, 'global');
-    assert.ok(/messages from \d+ chatter/.test(row.overview), row.overview);
+    assert.ok(/chatting; the latest line was/.test(row.overview), row.overview);
     assert.ok(row.overview.includes('the extractive line'), row.overview);
     aiClient._reset();
     aiClient._setClient(null);

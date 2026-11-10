@@ -90,6 +90,9 @@ async function start() {
     chatAi.start();
     // Workspace rooms' queues (server/rooms/workspace.js): the OpenVibe.Actor tasks they started, followed every 10 s.
     require('./rooms/workspace').start();
+    // OpenVibe's own computers for parties (server/rooms/party-pool.js): release holds that went idle and seat the
+    // line once a minute. The owner switch is read at each placement, so this is safe while it is off.
+    require('./rooms/party-pool').start({ intervalMs: 60_000 });
 
     // Zero-downtime restarts (as OpenVibe.Live): when systemd owns the listener (deploy/systemd/openvibe-chat.socket) it
     // hands it over as file descriptor 3, and connections that arrive during a restart wait in the kernel's accept queue
@@ -127,6 +130,7 @@ async function start() {
             () => events.stop(),
             () => chatAi.stop(),
             () => require('./rooms/workspace').stop(),
+            () => require('./rooms/party-pool').stop(),
             () => subs.stop(),
             () => { if (valkey) return valkey.close(); },
             () => app.locals.chatApps.stop(),

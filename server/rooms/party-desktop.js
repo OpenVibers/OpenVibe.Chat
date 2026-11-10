@@ -11,6 +11,7 @@ const { iceServers } = require('../net/turn');
 const controlLease = require('./control-lease');
 const rooms = require('./rooms');
 const parties = require('./parties');
+const pool = require('./party-pool');
 
 const NODE = /^link:(lnk_[0-9A-HJKMNP-TV-Z]{26})$/;
 const SHARE = /^shr_[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -38,7 +39,17 @@ async function authorized(req) {
     const node = await nodeOf(req);
     const row = await parties.bySlug(req.params.slug);
     const party = parties.partyOf(row);
-    if (!node || !row || !party || party.party_kind !== 'desktop' || party.host_subject !== node.owner) return null;
+    if (!node || !row || !party || party.party_kind !== 'desktop') return null;
+    if (party.desktop_hosting === 'link') {
+        // The host's own machine, acting for the host.
+        if (party.host_subject !== node.owner) return null;
+    } else if (party.desktop_hosting === 'openvibe') {
+        // An OpenVibe party belongs to the machine the pool held for it, not to the person who started it.
+        const hold = await pool.holdForRoom(party.room_id);
+        if (!hold || hold.principal_id !== node.id || hold.state === 'queued' || hold.state === 'released') return null;
+    } else {
+        return null;
+    }
     if (party.desktop_node_id && party.desktop_node_id !== node.id) return null;
     return { node, row, party };
 }
@@ -46,7 +57,6 @@ async function authorized(req) {
 async function claim({ node, row, party }, port) {
     if (party.ended_at || party.desktop_state === 'stopped') throw new parties.PartyError(410, 'party.ended', 'This party has ended');
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new parties.PartyError(422, 'party.port', 'Name a local port');
-    if (party.desktop_hosting === 'openvibe') throw new parties.PartyError(503, 'party.no_openvibe_machine', 'No OpenVibe machine is free right now');
     // neko reads ICE credentials at container start. Match the Connect share's
     // 24-hour expiry; ordinary call rooms retain their one-hour credentials.
     const turn = iceServers(`p${row.id}`, undefined, Date.now(), 24 * 3600);
@@ -60,6 +70,8 @@ async function claim({ node, row, party }, port) {
     await db.run('UPDATE room_parties SET desktop_node_id = ? WHERE room_id = ? AND desktop_node_id IS NULL AND ended_at IS NULL', [node.id, party.room_id]);
     const fresh = parties.partyOf(await parties.bySlug(row.slug));
     if (fresh.desktop_node_id !== node.id) throw new parties.PartyError(409, 'party.host_taken', 'Another machine is hosting this party');
+    // The pool's hold moves held → hosting on the machine the pool chose (a Link party has no hold).
+    if (party.desktop_hosting === 'openvibe') await pool.claiming(party.room_id, node.id);
     return {
         ice_servers: ice,
         share_grant: grant({ type: 'create', party: row.slug, owner: party.host_subject, username: host.username, node: node.id, port, exp: Math.floor(Date.now() / 1000) + 90 }),
@@ -67,6 +79,7 @@ async function claim({ node, row, party }, port) {
 }
 
 async function access({ node, row, party }, subject) {
+    if (party.desktop_hosting === 'openvibe') await pool.renew(party.room_id, node.id);
     const members = (await rooms.members(row, { subjects: true }))
         .filter((m) => m.subject_id && m.role !== 'blocked')
         .map((m) => ({ subject: m.subject_id, username: m.username }));
@@ -89,8 +102,9 @@ async function ready({ node, row, party }, { share_id: shareId, url }) {
         throw new parties.PartyError(422, 'party.share_url', 'Invalid Connect share address');
     }
     await db.run("UPDATE room_parties SET desktop_state = 'ready', desktop_share_id = ?, desktop_share_url = ? WHERE room_id = ? AND desktop_node_id = ? AND ended_at IS NULL", [shareId, u.toString().replace(/\/$/, ''), party.room_id, node.id]);
+    if (party.desktop_hosting === 'openvibe') await pool.ready(party.room_id, node.id);
     const fresh = await parties.bySlug(row.slug);
-    return parties.view(fresh, parties.partyOf(fresh));
+    return parties.view(fresh, parties.partyOf(fresh), { where: await pool.where(party.room_id) });
 }
 
 async function ticket(row, party, user) {
@@ -106,7 +120,22 @@ async function ticket(row, party, user) {
 }
 
 async function stopped({ node, party }) {
+    if (party.desktop_hosting === 'openvibe') await pool.releaseRoom(party.room_id, 'stopped');
     await db.run("UPDATE room_parties SET desktop_state = 'stopped', desktop_share_url = NULL WHERE room_id = ? AND desktop_node_id = ?", [party.room_id, node.id]);
 }
 
-module.exports = { nodeOf, authorized, grant, claim, access, ready, stopped, ticket };
+/**
+ * The pool machine's Link asks what to host next. It presents its own node token; the answer is the oldest party
+ * the pool is holding for it, or none. The poll is also how a registered machine says it is alive.
+ */
+async function assignment(req) {
+    const node = await nodeOf(req);
+    if (!node) return null;
+    await pool.seen(node.id);
+    const hold = await pool.assignmentFor(node.id);
+    return {
+        assignment: hold ? { party: hold.party_slug, hold: hold.id, title: hold.party_title || null } : null,
+    };
+}
+
+module.exports = { nodeOf, authorized, grant, claim, access, ready, stopped, ticket, assignment };
