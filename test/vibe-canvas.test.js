@@ -19,6 +19,7 @@ t('boot: a Vibe chat whose newest task is Actor\'s', async () => {
     h = await boot();
     config = require('../server/config');
     config.ai.vibeCanvas = false;
+    require('../server/config').ai.vibeDoIt = true; // This fixture explicitly enables Actor-backed tasks.
     workspace = require('../server/rooms/workspace');
     workspace._setTokens({ getToken: async () => 'chat-actor-token' });
     ann = h.addUser('mira', { subject: ids.newId('user') });
