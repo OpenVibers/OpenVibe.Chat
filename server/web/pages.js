@@ -39,6 +39,7 @@ const ovServe = require('openvibe-shared/serve');
 const frame = require('openvibe-shared/frame');
 const cache = require('openvibe-shared/cache-policy');
 const { renderPage, contentSecurityPolicy, assetVersion, esc, SITE_NAME } = require('./layout');
+const { insightBlock } = require('./insight-block');
 const { createSessionRoutes } = require('./session');
 const { createDiscoveryRoutes, homeJsonLd } = require('./discovery');
 const home = require('./home');
@@ -1084,6 +1085,8 @@ ${people}
         const work = rooms.isWorkspace(room) ? await require('../rooms/workspace').list(room, me, { limit: 40 }) : null;
         const aiHere = ais.length ? `<p class="oc-ai-here">${ICONS.spark}<span>${ais.map((a) => `<strong>${esc(a.name)}</strong> <span class="oc-muted oc-ai-model">(${esc(aiMembers.modelOf(a))})</span>`).join(', ')} ${ais.length > 1 ? 'are' : 'is'} here: write ${ais.map((a) => `<code>@${esc(a.handle)}</code>`).join(' or ')} to ask</span></p>` : '';
         const memberCount = (await rooms.publicRoom(room)).members;
+        const insight = await require('../chat/room-insight').room(room, { enabled: rooms.insightOn(room) }).catch(() => null);
+        const insightHtml = insight ? insightBlock(insight) : '';
         // A public room's own line when it has one long enough to read as a description; otherwise its name, size
         // and what the page is for. Escaped by the layout's head builder like every other description.
         const topic = typeof room.topic === 'string' ? room.topic.trim() : '';
@@ -1110,7 +1113,7 @@ ${people}
 <a class="oc-icon-btn" href="/rooms" aria-label="All rooms" title="All rooms">${ICONS.back}</a>
 <div class="oc-room-id"><h1>${esc(room.name)}${room.visibility === 'private' ? `<span class="oc-room-lock" title="Private: only people invited read and post">${ICONS.lock}<span class="oc-sr">private</span></span>` : ''}${kindBadge(room)}</h1>
 <p class="oc-muted oc-room-sub">${room.topic && !isAgentRoom ? `${esc(room.topic)} · ` : ''}${memberCount} ${memberCount === 1 ? 'member' : 'members'}${room.slow_seconds ? ` · slow mode ${room.slow_seconds}s` : ''}${yourRole} <span class="oc-live" id="oc-live" hidden>● live</span></p>${roomRules(room)}</div>
-<div class="oc-room-tools">${manage}${leave}</div>
+<div class="oc-room-tools">${manage}${leave}${insightHtml}</div>
 </header>
 ${isAgentRoom ? `<aside class="oc-agent-banner" role="note"><strong>Co-pilot room</strong> ${esc(require('../chat/agent-room').BANNER)}</aside>` : ''}
 ${agentPollView ? agentPollCard(room, agentPollView, can) : ''}
@@ -1267,6 +1270,9 @@ ${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}</details>` : '';
             return await page(req, res, 200, {
                 actor, title: `#${room.name}: AI members`, path: `/r/${room.slug}/settings`, active: 'servers', robots: 'noindex, nofollow', shell: true, footer: 'none',
                 body: roomShell(`${ui.head({ title: `AI members in #${esc(room.name)}`, back: { href: await channelUrl(room, '/settings'), label: 'Server settings' } })}${saved}${error}
+${can.manage ? `<section class="oc-set"><h2>AI insight</h2><form class="oc-form oc-set-form" method="post" action="/r/${esc(room.slug)}/settings">
+<input type="hidden" name="has_ai_insight" value="1"><label class="oc-set-row oc-set-inline"><span class="oc-set-text">Summarise this channel<small>An overview and timeline of the channel, written for someone arriving now. Only messages from people who allowed AI use of them are read.</small></span><input type="checkbox" class="oc-switch" name="ai_insight" value="1"${rooms.insightOn(room) ? ' checked' : ''}></label>
+<p><button type="submit">Save</button></p></form></section>` : ''}
 ${aiSection}`),
             });
         }
@@ -1289,6 +1295,7 @@ ${can.manage ? `<section class="oc-set"><h2>Room</h2><form class="oc-form oc-gri
 <label>Who can read <select name="visibility"><option value="public"${room.visibility === 'public' ? ' selected' : ''}>Anyone (public)</option><option value="private"${room.visibility === 'private' ? ' selected' : ''}>Members only (private)</option></select></label>
 ${room.kind === 'call' ? `<label>People who join <select name="join_role">${rooms.JOIN_ROLES_CALL.map((r) => `<option value="${r}"${r === addRole ? ' selected' : ''}>${{ speaker: 'can talk (speakers)', participant: 'listen and write (participants)', viewer: 'listen and read (viewers)' }[r]}</option>`).join('')}</select></label>` : ''}
 <label>Slow mode: seconds between messages (0 is off) <input name="slow_seconds" type="number" min="0" max="600" value="${Number(room.slow_seconds) || 0}"></label>
+<input type="hidden" name="has_ai_insight" value="1"><label class="oc-set-row oc-set-inline"><span class="oc-set-text">AI insight<small>An overview and timeline of this room, written for someone arriving now. Only messages from people who allowed AI use of them are read; a private room is off until you turn this on.</small></span><input type="checkbox" class="oc-switch" name="ai_insight" value="1"${rooms.insightOn(room) ? ' checked' : ''}></label>
 ${room.slug !== 'staff' && (room.kind || 'community') === 'community' && Number(room.assistant) !== 1 ? `<input type="hidden" name="has_workspace" value="1"><label class="oc-set-row oc-set-inline"><span class="oc-set-text">Work together here<small>A work queue beside the conversation, alerts from other systems and a shared screen</small></span><input type="checkbox" class="oc-switch" name="workspace" value="1"${rooms.isWorkspace(room) ? ' checked' : ''}></label>` : ''}
 ${rooms.isWorkspace(room) ? `<label>Shared screen <input name="screen_url" type="url" value="${esc(room.screen_url || '')}" placeholder="https://openvibe.bot/screen/…"> <span class="oc-muted oc-small">A screen share link from OpenVibe.Bot (a computer's owner makes it on its screen page). Members see the screen beside the conversation; with a "use" link they can click and type on it. Empty: no screen.</span></label>` : ''}
 <p><button type="submit">Save</button></p></form></section>` : ''}
@@ -1324,6 +1331,7 @@ ${attachList}`),
         const workspace = b.has_workspace ? [].concat(b.workspace || []).includes('1') : undefined;
         const updated = await rooms.update(room, actor.user, { name: b.name, topic: b.topic, visibility: b.visibility, slow_seconds: b.slow_seconds === undefined ? undefined : Number(b.slow_seconds), join_role: room.kind === 'call' ? b.join_role : undefined,
             ...(workspace !== undefined ? { workspace } : {}),
+            ...(b.has_ai_insight ? { ai_insight: b.ai_insight === '1' } : {}),
             ...(rooms.isWorkspace(room) && b.screen_url !== undefined ? { screen_url: b.screen_url } : {}) });
         // A room that just became a workspace gets Vibe, who runs and announces its work, when it has room for one more.
         if (workspace && !rooms.isWorkspace(room) && updated.workspace && aiMembers.enabled()) {

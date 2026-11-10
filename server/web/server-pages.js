@@ -18,6 +18,7 @@ const ui = require('./ui');
 const { ICONS: IC } = require('./icons');
 const rooms = require('../rooms/rooms');
 const shell = require('./shell');
+const { insightBlock } = require('./insight-block');
 const servers = require('../rooms/servers');
 const ctx = require('../live-context');
 
@@ -290,6 +291,8 @@ ${sheet}`,
         // request, and the channel's own URL when the request named it. `back` stays the channel URL the composer
         // and the sign-in link post to (POST /s/:slug/:channel).
         const canonicalPath = req.params.channel ? back : `/s/${server.slug}`;
+        const insight = room ? await require('../chat/room-insight').room(room, { enabled: rooms.insightOn(room) }).catch(() => null) : null;
+        const insightHtml = insight ? insightBlock(insight) : '';
         await page(req, res, 200, {
             actor, shell: true, footer: 'none', title: `${isVoice ? (isStage ? 'Stage · ' : '') : '#'}${room.name} · ${server.name}`, path: canonicalPath, active: 'servers', upload: require('../rooms/pictures').enabled(), scripts: require('../rooms/pictures').enabled() ? ['picture-upload.js'] : [],
             robots: server.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
@@ -317,7 +320,7 @@ ${sheet}`,
                     you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
                 }),
                 sideLabel: server.name,
-                main: `${shell.channelHeader({ name: room.name, kind: isStage ? 'stage' : isVoice ? 'voice' : 'text', topic: room.topic, members: true })}
+                main: `${shell.channelHeader({ name: room.name, kind: isStage ? 'stage' : isVoice ? 'voice' : 'text', topic: room.topic, members: true, extra: insightHtml })}
 ${invitePanel}
 <span class="oc-live" id="oc-live" hidden>● live</span>
 ${isStage ? `<section class="oc-stage" aria-label="Stage"><h2>${esc(room.topic || 'Stage')}</h2><p>Stage audio uses this server voice channel. Audience members join muted.</p><div id="oc-stage-speakers">Speakers and raised hands load when the stage is live.</div></section>` : ''}
