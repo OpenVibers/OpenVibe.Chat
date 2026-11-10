@@ -983,5 +983,5 @@ Part of the [OpenVibe network](https://openvibe.network). Built in the open by [
 <!-- versions:start -->
 - openvibe-contracts: v0.384.0
 - openvibe-sdk: v0.135.0
-- openvibe-shared: v4.187.0
+- openvibe-shared: v4.190.0
 <!-- versions:end -->
