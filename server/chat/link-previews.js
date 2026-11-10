@@ -391,6 +391,8 @@ function pump() {
  */
 function schedule({ scope = 'room', messageId, text, room = null, onReady = null } = {}) {
     if (!PREVIEWS_ON) return null;
+    // A test that does not stub the network never makes one (the suite's messages carry all sorts of addresses).
+    if (process.env.NODE_ENV === 'test' && !_request) return null;
     const id = Number(messageId);
     if (!(id > 0) || (scope !== 'room' && scope !== 'dm' && scope !== 'chat')) return null;
     const urls = addresses(text);
