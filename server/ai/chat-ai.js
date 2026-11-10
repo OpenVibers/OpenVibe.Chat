@@ -38,6 +38,16 @@ const USER_PASS_EVERY_MS = 3 * 60 * 1000;       // throttle the (heavier) user d
 const USER_STALE_MS = 24 * 60 * 60 * 1000;      // refresh a lagging user at least daily
 const USER_DISCOVERY_LOOKBACK_DAYS = 14;        // bound the discovery GROUP BY
 
+// Rooms and Live channels (plan 2026-11-10, part 2): the same one-room summary, one or two rooms per
+// pass, and only when there were new messages — the summary is a room's read, not a site-wide one.
+const ROOM_MSG_THRESHOLD = 20;                  // a room refreshes once this many new messages pile up
+const ROOM_MAX_PER_TICK = 1;                    // cap LLM calls per pass (rooms can be many)
+const ROOM_PASS_EVERY_MS = 3 * 60 * 1000;        // same cadence as the per-chatter scan
+const ROOM_STALE_MS = 24 * 60 * 60 * 1000;      // ...and at least daily for a quiet room
+const ROOM_BATCH = 120;                         // newest messages a room summary reads
+const CHANNEL_MSG_THRESHOLD = 30;               // Live channel chats: same rules, a slightly higher bar
+const CHANNEL_MAX_PER_TICK = 1;
+
 const WINDOW_TARGET_MESSAGES = 300;             // adaptive-window sizing target
 const MAX_BATCH_MESSAGES = 300;                 // token cap per call
 const WINDOW_MIN_MS = 30 * 60 * 1000;           // overview window is never shorter than 30 min
@@ -57,6 +67,7 @@ let _running = false;
 let _timer = null;
 let _tickInFlight = false;
 let _lastUserPass = 0;
+let _lastRoomPass = 0;
 
 // ── Small utils ──────────────────────────────────────────────────────────────
 // DB timestamps are UTC 'YYYY-MM-DD HH:MM:SS' (ov_now()). Match that format.
@@ -219,6 +230,128 @@ async function _refreshGlobal() {
     });
     console.log(`[ChatAI] global refreshed (${newCount} new, ${rows.length} consenting, window=${windowLabel})`);
     return true;
+}
+
+// ── ROOMS AND LIVE CHANNELS (plan 2026-11-10, part 2) ───────────────────────
+// One room's rolling picture, from the room's own newest messages. The same engine, prompt and budget
+// rules as Global, capped to a room or two a pass. Only people who allowed AI use of their messages are
+// read (network.consent@1), exactly as Global.
+function _newSince(rows, prior) {
+    const hw = prior ? (Number(prior.last_message_id) || 0) : 0;
+    return (rows || []).reduce((n, r) => n + (Number(r.id) > hw ? 1 : 0), 0);
+}
+function _windowOf(rows, now) {
+    const first = rows[0] && (rows[0].created_at || rows[0].timestamp);
+    const ms = Math.max(60_000, now - _parseSqlTime(first || now));
+    return { label: _windowLabel(ms), start: _sqlTime(now - ms) };
+}
+
+async function _refreshRoom(room) {
+    const prior = await db.getChatAiSummary('room', room.id, 'rolling');
+    const raw = await db.getRoomMessagesForAi({ roomId: room.id, limit: ROOM_BATCH });
+    if (!raw.length) return false;
+    const rows = await consent.filterRows(raw);
+    if (!rows.length) return false;
+    const now = Date.now();
+    const { label: windowLabel, start: windowStart } = _windowOf(rows, now);
+    const priorMemory = prior ? (prior.memory_json || '') : '';
+    let priorTl = [];
+    try { priorTl = JSON.parse(prior ? (prior.timeline_json || '[]') : '[]'); } catch { priorTl = []; }
+
+    let parsed = await aiClient.structured(WORKFLOW_GLOBAL, {
+        window_label: windowLabel, prior_memory: _clip(priorMemory, MEMORY_MAX_CHARS),
+        recent_labels: priorTl.slice(-8).map(t => _clip(t.label, 200)).filter(Boolean),
+        messages: _msgData(rows, { now }),
+    });
+    if (!parsed) parsed = extractive.globalFrom(rows, { windowLabel, priorMemory, now });
+    if (!parsed) return false;
+
+    const nowIso = _sqlTime(now);
+    const newCount = _newSince(rows, prior);
+    await db.addChatTimelineEvents('room', room.id, _stampAdditions(parsed.timeline, nowIso, now));
+    await db.upsertChatAiSummary({
+        scope: 'room', subject_id: room.id, window: 'rolling',
+        overview: _clip(parsed.recent_overview || '', 2000),
+        memory_json: _clip(parsed.memory || priorMemory, MEMORY_MAX_CHARS),
+        timeline_json: _mergeTimeline(prior ? prior.timeline_json : '[]', parsed.timeline, nowIso, now),
+        message_count: (prior ? (prior.message_count || 0) : 0) + newCount,
+        window_message_count: rows.length,
+        last_message_id: Number(room.max_id) || (rows[rows.length - 1] || {}).id || 0,
+        window_label: windowLabel,
+        window_start: windowStart,
+        window_end: nowIso,
+        people: _people(rows),
+        topics_json: JSON.stringify(_topics(rows)),
+    });
+    console.log(`[ChatAI] room ${room.slug} refreshed (${newCount} new, ${rows.length} consenting, window=${windowLabel})`);
+    return true;
+}
+
+async function _roomPass() {
+    const staleCutoff = _sqlTime(Date.now() - ROOM_STALE_MS);
+    const sinceTs = _sqlTime(Date.now() - USER_DISCOVERY_LOOKBACK_DAYS * 86400000);
+    let candidates = [];
+    try { candidates = await db.getRoomsNeedingInsight({ threshold: ROOM_MSG_THRESHOLD, staleCutoffIso: staleCutoff, sinceTs, limit: ROOM_MAX_PER_TICK }); }
+    catch (e) { console.warn('[ChatAI] room discovery failed:', e.message); return; }
+    for (const room of candidates) {
+        try { await _refreshRoom(room); }
+        catch (e) { console.warn(`[ChatAI] room ${room.slug} refresh failed:`, e.message); }
+    }
+}
+
+async function _refreshChannel(channel) {
+    const subjectId = Number(channel.channel_id);
+    if (!subjectId) return false;
+    const prior = await db.getChatAiSummary('channel', subjectId, 'rolling');
+    const raw = await db.getChannelMessagesForAi({ channelUserId: subjectId, limit: ROOM_BATCH });
+    if (!raw.length) return false;
+    const rows = await consent.filterRows(raw);
+    if (!rows.length) return false;
+    const now = Date.now();
+    const { label: windowLabel, start: windowStart } = _windowOf(rows, now);
+    const priorMemory = prior ? (prior.memory_json || '') : '';
+    let priorTl = [];
+    try { priorTl = JSON.parse(prior ? (prior.timeline_json || '[]') : '[]'); } catch { priorTl = []; }
+
+    let parsed = await aiClient.structured(WORKFLOW_GLOBAL, {
+        window_label: windowLabel, prior_memory: _clip(priorMemory, MEMORY_MAX_CHARS),
+        recent_labels: priorTl.slice(-8).map(t => _clip(t.label, 200)).filter(Boolean),
+        messages: _msgData(rows, { now }),
+    });
+    if (!parsed) parsed = extractive.globalFrom(rows, { windowLabel, priorMemory, now });
+    if (!parsed) return false;
+
+    const nowIso = _sqlTime(now);
+    const newCount = _newSince(rows, prior);
+    await db.addChatTimelineEvents('channel', subjectId, _stampAdditions(parsed.timeline, nowIso, now));
+    await db.upsertChatAiSummary({
+        scope: 'channel', subject_id: subjectId, window: 'rolling',
+        overview: _clip(parsed.recent_overview || '', 2000),
+        memory_json: _clip(parsed.memory || priorMemory, MEMORY_MAX_CHARS),
+        timeline_json: _mergeTimeline(prior ? prior.timeline_json : '[]', parsed.timeline, nowIso, now),
+        message_count: (prior ? (prior.message_count || 0) : 0) + newCount,
+        window_message_count: rows.length,
+        last_message_id: Number(channel.max_id) || (rows[rows.length - 1] || {}).id || 0,
+        window_label: windowLabel,
+        window_start: windowStart,
+        window_end: nowIso,
+        people: _people(rows),
+        topics_json: JSON.stringify(_topics(rows)),
+    });
+    console.log(`[ChatAI] channel ${subjectId} refreshed (${newCount} new, ${rows.length} consenting, window=${windowLabel})`);
+    return true;
+}
+
+async function _channelPass() {
+    const staleCutoff = _sqlTime(Date.now() - ROOM_STALE_MS);
+    const sinceTs = _sqlTime(Date.now() - USER_DISCOVERY_LOOKBACK_DAYS * 86400000);
+    let candidates = [];
+    try { candidates = await db.getChannelsNeedingInsight({ threshold: CHANNEL_MSG_THRESHOLD, staleCutoffIso: staleCutoff, sinceTs, limit: CHANNEL_MAX_PER_TICK }); }
+    catch (e) { console.warn('[ChatAI] channel discovery failed:', e.message); return; }
+    for (const channel of candidates) {
+        try { await _refreshChannel(channel); }
+        catch (e) { console.warn(`[ChatAI] channel ${channel.channel_id} refresh failed:`, e.message); }
+    }
 }
 
 // ── PER-USER ─────────────────────────────────────────────────────────────────
@@ -400,6 +533,13 @@ async function _tick() {
         try { await _refreshGlobal(); }
         catch (e) { console.warn('[ChatAI] global refresh failed:', e.message); }
 
+        // Rooms and Live channels (part 2): their own cadence, one or two a pass, only when new messages.
+        if (Date.now() - _lastRoomPass >= ROOM_PASS_EVERY_MS) {
+            _lastRoomPass = Date.now();
+            await _roomPass();
+            await _channelPass();
+        }
+
         if (Date.now() - _lastUserPass >= USER_PASS_EVERY_MS) {
             _lastUserPass = Date.now();
             await _userPass();
@@ -489,7 +629,7 @@ async function getAnonInsight(anonId) {
 }
 
 module.exports = {
-    start, stop, _tick, _msgData, _topics, _people,
+    start, stop, _tick, _msgData, _topics, _people, _refreshRoom, _refreshChannel, WORKFLOW_GLOBAL,
     getGlobalInsight, getUserInsight, getRelayUserInsight, getAnonInsight,
-    WORKFLOW_GLOBAL, WORKFLOW_PROFILE,
+    WORKFLOW_PROFILE,
 };

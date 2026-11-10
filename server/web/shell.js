@@ -269,7 +269,7 @@ ${o.topic ? `<span class="oc-muted oc-chan-topic">${esc(o.topic)}</span>` : ''}
 <span class="oc-chan-tools">
 <button type="button" class="oc-icon-btn oc-members-toggle" data-oc-panel="members" aria-label="Show the people" title="People" aria-pressed="false">${IC.members}</button>
 ${o.back ? iconBtn(o.back.href, o.back.label, IC.back) : ''}
-</span></header>`;
+</span>${o.extra || ''}</header>`;
 }
 
 /**

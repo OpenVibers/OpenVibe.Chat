@@ -113,9 +113,21 @@ async function publicRoom(r, extra = {}) {
         created_at: r.created_at, members: (await db.get("SELECT COUNT(*) AS n FROM room_members WHERE room_id = ? AND role != 'blocked'", [r.id]) || {}).n || 0,
         ...(Number(r.assistant) === 1 ? { assistant: true } : {}),
         ...(isWorkspace(r) ? { workspace: true } : {}),
+        insight: insightOn(r),
         ...(r.server_id ? { server: { slug: (await db.get('SELECT slug FROM chat_servers WHERE id = ?', [r.server_id]) || {}).slug || null, channel: r.channel_slug } } : {}),
         ...extra,
     };
+}
+
+/**
+ * Whether a room is summarised (plan 2026-11-10, part 2): NULL keeps the default — a public room on, a
+ * private one off until its owner turns it on. A chat with Vibe is never: it is a person's own conversation.
+ */
+function insightOn(room) {
+    if (!room) return false;
+    if (Number(room.assistant) === 1) return false;
+    if (room.ai_insight == null) return room.visibility === 'public';
+    return Number(room.ai_insight) === 1;
 }
 
 async function bySlug(slug) {
@@ -475,7 +487,7 @@ function screenUrlOf(v) {
     return s;
 }
 
-async function update(room, actor, { name, topic, visibility, slow_seconds, join_role, screen_url, workspace, link_previews } = {}, { fromServer = false, minName = 3 } = {}) {
+async function update(room, actor, { name, topic, visibility, slow_seconds, join_role, screen_url, workspace, ai_insight, link_previews } = {}, { fromServer = false, minName = 3 } = {}) {
     if (!(await access(room, actor)).manage) fail(403, 'rooms.not_owner', 'Only the owner changes the room');
     // A server's channel follows the server's visibility, and is changed through the server (servers.js).
     if (room.server_id && !fromServer && visibility != null && visibility !== room.visibility) fail(409, 'rooms.server_channel', 'A channel is as public as its server: change the server instead');
@@ -503,8 +515,14 @@ async function update(room, actor, { name, topic, visibility, slow_seconds, join
     }
     if (screen_url !== undefined && isWorkspace(next)) next.screen_url = screenUrlOf(screen_url);
     else if (screen_url !== undefined && screen_url !== '' && screen_url !== null) fail(409, 'rooms.not_workspace', 'Only a workspace room shows a shared screen');
+    // The room's AI insight (plan 2026-11-10, part 2): the owner turns it on or off; without a choice the
+    // default (public on, private off) applies. A chat with Vibe never records one.
+    if (ai_insight !== undefined && ai_insight !== null) {
+        if (Number(room.assistant) === 1 && (ai_insight === true || ai_insight === 1 || ai_insight === '1' || ai_insight === 'on')) fail(409, 'rooms.insight_vibe', 'A chat with Vibe is never summarised');
+        next.ai_insight = (ai_insight === true || ai_insight === 1 || ai_insight === '1' || ai_insight === 'on') ? 1 : 0;
+    }
     await db.tx(async () => {
-        await db.run('UPDATE rooms SET name = ?, topic = ?, visibility = ?, slow_seconds = ?, join_role = ?, screen_url = ?, workspace = ?, link_previews = ? WHERE id = ?', [next.name, next.topic, next.visibility, next.slow_seconds, next.join_role == null ? null : next.join_role, next.screen_url == null ? null : next.screen_url, Number(next.workspace) === 1 ? 1 : 0, next.link_previews !== false, room.id]);
+        await db.run('UPDATE rooms SET name = ?, topic = ?, visibility = ?, slow_seconds = ?, join_role = ?, screen_url = ?, workspace = ?, ai_insight = ?, link_previews = ? WHERE id = ?', [next.name, next.topic, next.visibility, next.slow_seconds, next.join_role == null ? null : next.join_role, next.screen_url == null ? null : next.screen_url, Number(next.workspace) === 1 ? 1 : 0, next.ai_insight == null ? null : Number(next.ai_insight), next.link_previews !== false, room.id]);
         // Public → private: everything the room published stops being replayable on the realtime plane.
         if (room.visibility === 'public' && next.visibility === 'private') {
             await announceDeleted(room, (await db.all('SELECT id FROM room_messages WHERE room_id = ? AND is_deleted = 0 ORDER BY id', [room.id])).map((r) => r.id));
@@ -583,6 +601,6 @@ module.exports = {
     isWorkspace, isStaffRoom,
     postAsAi,
     ensureSchema, create, list, bySlug, access, join, leave, post, history, historyPage, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
-    attach, detach, attachments, joinRoleOf, unreadTotal, isStaff, siteBanned, POSTERS, TALKERS,
+    attach, detach, attachments, joinRoleOf, unreadTotal, isStaff, siteBanned, insightOn, POSTERS, TALKERS,
     RoomError, SLUG_RE, KINDS, ROLES, KIND_ROLES, JOIN_ROLE, JOIN_ROLES_CALL, ATTACH_SERVICES, _reset,
 };
