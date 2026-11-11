@@ -65,7 +65,14 @@ t('the Chat workflow records measured Exchange-backed run cost', async () => {
         VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'we won', yesterday()]);
     await memory.tick();
     assert.strictEqual((await memory.read(person.id, { channelId: channel.id }))[0].summary, 'A game and a win.');
-    assert.ok((await memory.spentToday()).usd >= 0.002);
+    const beforeFailure = await memory.spentToday();
+    assert.ok(beforeFailure.usd >= 0.002);
+    client._setClient({ runs: { create: async () => ({ run: { status: 'failed', usage: { cost_usd: 0.003 } } }) } });
+    await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'another game', yesterday()]);
+    await memory.tick();
+    assert.strictEqual((await memory.read(person.id, { channelId: channel.id }))[0].summary, 'A game and a win.');
+    assert.ok((await memory.spentToday()).usd >= beforeFailure.usd + 0.003, 'a billed failed run counts toward the cap');
     client._reset();
     config.ai.enabled = false;
 });

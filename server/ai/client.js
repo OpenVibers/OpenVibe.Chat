@@ -73,8 +73,9 @@ async function structured(workflow, input, opts = {}) {
             });
         const run = body && (body.run || body);
         _lastProblem = problemOf(run);
+        // Meter completed failed runs too: providers can bill even when no output is returned.
+        if (run && !run.synthetic && opts.onRun) await opts.onRun(run);
         if (!run || run.status !== 'succeeded' || run.synthetic) return null;
-        if (opts.onRun) await opts.onRun(run);
         return run.output || null;
     } catch (err) {
         console.warn(`[AI] ${workflow}: ${err && err.message}`);
