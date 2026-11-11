@@ -42,7 +42,7 @@
   var modelList = document.getElementById('vb-model-list');
   var compareSwitch = document.getElementById('vb-model-compare');
   var modelCatalog = [];
-  function modelLabel(id) { var m = modelCatalog.find(function (x) { return x.slug === id; }); return m ? m.name : id; }
+  function modelLabel(id) { var m = modelCatalog.find(function (x) { return x.slug === id; }); return m ? (m.uncensored ? '18+ · ' : '') + m.name : id; }
   function syncModelChip() {
     if (modelChip) modelChip.textContent = (chosenModels.length > 1 ? chosenModels.length + ' models' : chosenModels.length ? modelLabel(chosenModels[0]) : 'Auto') + ' ▾';
     if (compareSwitch) compareSwitch.checked = chosenModels.length > 1 || compareSwitch.checked;
@@ -58,7 +58,7 @@
       models.forEach(function (m) {
         var row = document.createElement('div'); row.className = 'vb-model-row';
         var choice = document.createElement('button'); choice.type = 'button'; choice.className = 'vb-model-choice';
-        choice.textContent = (chosenModels.includes(m.slug) ? '✓ ' : '') + m.name;
+        choice.textContent = (chosenModels.includes(m.slug) ? '✓ ' : '') + modelLabel(m.slug);
         choice.addEventListener('click', function () {
           if (compareSwitch && compareSwitch.checked) {
             if (chosenModels.includes(m.slug)) chosenModels = chosenModels.filter(function (id) { return id !== m.slug; });
@@ -68,7 +68,7 @@
         }); row.appendChild(choice);
         var offer = (m.offers || []).find(function (x) { return x.price; });
         var facts = document.createElement('small');
-        facts.textContent = offer ? '$' + Number(offer.price.in).toFixed(2) + ' in · $' + Number(offer.price.out).toFixed(2) + ' out / million · ' + (offer.speed && offer.speed.p50_ms ? (offer.speed.p50_ms / 1000).toFixed(1) + 's' : 'speed varies') : 'Price and speed vary';
+        facts.textContent = (m.uncensored ? 'Age confirmation required · ' : '') + (offer ? '$' + Number(offer.price.in).toFixed(2) + ' in · $' + Number(offer.price.out).toFixed(2) + ' out / million · ' + (offer.speed && offer.speed.p50_ms ? (offer.speed.p50_ms / 1000).toFixed(1) + 's' : 'speed varies') : 'Price and speed vary');
         row.appendChild(facts);
         var ranks = document.createElement('a'); ranks.href = 'https://openvibe.report/ai/models/' + encodeURIComponent(m.slug); ranks.textContent = 'How it ranks'; row.appendChild(ranks);
         modelList.appendChild(row);
