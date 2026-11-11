@@ -1,0 +1,90 @@
+'use strict';
+const assert = require('assert');
+const { ids } = require('openvibe-contracts');
+const { boot, suite } = require('./helpers');
+const t = suite('editable messages');
+let h, ann, bob, mod;
+const room = (method, path, user, body) => h.http(method, `/api/chat/rooms${path}`, { token: user && user.token, body });
+const dm = (method, path, user, body) => h.http(method, `/api/dm${path}`, { token: user && user.token, body });
+const chat = (method, path, user, body) => h.http(method, `/api/chat${path}`, { token: user && user.token, body });
+const millis = (value) => Date.parse(String(value).includes('T') ? value : `${String(value).replace(' ', 'T')}Z`);
+const event = async (type, id) => (await h.db.all('SELECT envelope FROM service_outbox WHERE envelope->>\'event_type\' = ?', [type])).map((r) => r.envelope).find((e) => e.payload.message_id === id);
+
+t('boot', async () => {
+    h = await boot();
+    ann = h.addUser('ann', { subject: ids.newId('user') });
+    bob = h.addUser('bob', { subject: ids.newId('user') });
+    mod = h.addUser('moderator', { subject: ids.newId('user'), role: 'global_mod' });
+    for (const u of [ann, bob, mod]) await h.ctx.upsertUser(h.live.users.get(u.id));
+});
+
+t('room and Vibe store: author, window, history, moderator view, socket and Events', async () => {
+    await room('POST', '/', ann, { name: 'Edit Room' });
+    const id = (await room('POST', '/edit-room/messages', ann, { message: 'first room' })).body.message.id;
+    const ws = await h.ws({ ip: '198.51.100.42', token: bob.token });
+    ws.sendJson({ type: 'join_room', room: 'edit-room', token: bob.token });
+    await ws.next((m) => m.type === 'room_joined');
+    assert.strictEqual((await room('PATCH', `/edit-room/messages/${id}`, bob, { message: 'stolen' })).status, 403);
+    const edited = await room('PATCH', `/edit-room/messages/${id}`, ann, { message: 'second room' });
+    assert.strictEqual(edited.status, 200, edited.text);
+    assert.ok(edited.body.message.edited_at);
+    assert.strictEqual((await ws.next((m) => m.type === 'room_message_edited' && m.message.id === id)).message.message, 'second room');
+    assert.strictEqual((await event('chat.room.message.edited', id)).payload.text, 'second room');
+    assert.ok(!(await room('GET', '/edit-room/messages', bob)).body.messages[0].edit_history);
+    assert.strictEqual((await room('GET', `/edit-room/messages/${id}/edits`, bob)).status, 403);
+    assert.strictEqual((await room('GET', `/edit-room/messages/${id}/edits`, mod)).body.versions[0].message, 'first room');
+    const rooms = require('../server/rooms/rooms');
+    const r = await rooms.bySlug('edit-room');
+    const createdAt = (await h.db.get('SELECT created_at FROM room_messages WHERE id = ?', [id])).created_at;
+    await assert.rejects(() => rooms.editMessage(r, ann, id, 'too late', { now: millis(createdAt) + 86_400_001 }), (e) => e.status === 403);
+    ws.close();
+});
+
+t('DM store: participant delivery, history privacy and window', async () => {
+    const created = await dm('POST', '/conversations', ann, { user_ids: [bob.id] });
+    assert.strictEqual(created.status, 200, created.text);
+    const conv = created.body.conversation.id;
+    const sent = await dm('POST', `/conversations/${conv}/messages`, ann, { message: 'first dm' });
+    const id = sent.body.message.id;
+    const ws = await h.ws({ ip: '198.51.100.44', token: bob.token });
+    ws.sendJson({ type: 'join', token: bob.token });
+    await ws.next((m) => m.type === 'auth');
+    assert.strictEqual((await dm('PATCH', `/conversations/${conv}/messages/${id}`, bob, { message: 'stolen' })).status, 403);
+    const edited = await dm('PATCH', `/conversations/${conv}/messages/${id}`, ann, { message: 'second dm' });
+    assert.strictEqual(edited.status, 200, edited.text);
+    assert.strictEqual((await ws.next((m) => m.type === 'dm_edited' && m.message.id === id)).message.message, 'second dm');
+    assert.strictEqual((await event('chat.dm.edited', id)).payload.text, 'second dm');
+    const list = await dm('GET', `/conversations/${conv}/messages`, bob);
+    assert.strictEqual(list.body.messages[0].message, 'second dm');
+    assert.ok(!('edit_history' in list.body.messages[0]));
+    assert.strictEqual((await dm('GET', `/conversations/${conv}/messages/${id}/edits`, bob)).status, 403);
+    assert.strictEqual((await dm('GET', `/conversations/${conv}/messages/${id}/edits`, mod)).body.versions[0].message, 'first dm');
+    const createdAt = (await h.db.get('SELECT created_at FROM dm_messages WHERE id = ?', [id])).created_at;
+    await assert.rejects(() => require('../server/chat/dm').editMessage(conv, id, ann.id, 'too late', { now: millis(createdAt) + 86_400_001 }), (e) => e.status === 403);
+    ws.close();
+});
+
+t('stream chat store: author, history, edit event and window', async () => {
+    const channel = h.addChannel(ann.id);
+    const stream = h.addStream(ann.id, channel);
+    await h.ctx.sync();
+    const ws = await h.ws({ ip: '198.51.100.43', token: ann.token, stream });
+    ws.sendJson({ type: 'join', streamId: stream, token: ann.token });
+    await ws.next((m) => m.type === 'auth');
+    ws.sendJson({ type: 'chat', message: 'first stream' });
+    const msg = await ws.next((m) => m.type === 'chat' && m.message === 'first stream');
+    const id = msg.id;
+    assert.strictEqual((await chat('PATCH', `/messages/${id}`, bob, { message: 'stolen' })).status, 403);
+    const edited = await chat('PATCH', `/messages/${id}`, ann, { message: 'second stream' });
+    assert.strictEqual(edited.status, 200, edited.text);
+    assert.strictEqual((await ws.next((m) => m.type === 'chat_edited' && m.id === id)).message.message, 'second stream');
+    assert.strictEqual((await event('chat.message.edited', id)).payload.text, 'second stream');
+    const row = await h.db.get('SELECT edit_history FROM chat_messages WHERE id = ?', [id]);
+    assert.strictEqual(row.edit_history[0].message, 'first stream');
+    assert.strictEqual((await chat('GET', `/messages/${id}/edits`, bob)).status, 403);
+    assert.strictEqual((await chat('GET', `/messages/${id}/edits`, mod)).body.versions[0].message, 'first stream');
+    const timestamp = (await h.db.get('SELECT timestamp FROM chat_messages WHERE id = ?', [id])).timestamp;
+    await assert.rejects(() => require('../server/chat/message-edits').edit(id, ann, 'too late', { now: millis(timestamp) + 86_400_001 }), (e) => e.status === 403);
+    ws.close();
+});
+t.run(async () => { if (h) await h.close(); });

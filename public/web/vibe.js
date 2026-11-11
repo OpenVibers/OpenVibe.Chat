@@ -287,6 +287,7 @@
     b.appendChild(document.createTextNode(String(text)));
     if (localPicture) { var img = el('img', 'vb-local'); img.src = localPicture; img.alt = 'Your picture'; b.appendChild(img); }
     you.appendChild(b); li.appendChild(you);
+    if (id) { var edit = el('button', 'ovk-btn ovk-btn--quiet vb-edit', 'Edit'); edit.type = 'button'; you.appendChild(edit); }
     return li;
   }
   // The answer side of a turn: Vibe's mark, then its reply.
@@ -499,6 +500,29 @@
     }
     if (stick) toBottom();
   }
+  function applyEdited(m) {
+    var li = have(m && m.id), bubble = li && li.querySelector('.ovt-you .ovt-bubble');
+    if (!bubble) return;
+    bubble.textContent = '';
+    bubble.appendChild(el('span', 'oc-sr', 'You said:'));
+    bubble.appendChild(document.createTextNode(String(m.message || '')));
+    if (!li.querySelector('.vb-edit')) { var edit = el('button', 'ovk-btn ovk-btn--quiet vb-edit', 'Edit'); edit.type = 'button'; li.querySelector('.ovt-you').appendChild(edit); }
+    var mark = li.querySelector('.vb-edited');
+    if (!mark) { mark = el('small', 'vb-edited'); li.querySelector('.ovt-you').appendChild(mark); }
+    mark.textContent = 'edited · ' + String(m.edited_at || '').slice(11, 16);
+  }
+  app.addEventListener('click', function (e) {
+    if (!e.target.classList || !e.target.classList.contains('vb-edit') || !room) return;
+    var li = e.target.closest('[data-me]'), bubble = li && li.querySelector('.ovt-bubble');
+    if (!li || !bubble) return;
+    var copy = bubble.cloneNode(true);
+    Array.prototype.forEach.call(copy.querySelectorAll('button, small'), function (x) { x.remove(); });
+    var body = window.prompt('Edit message', copy.textContent.replace(/^You said:/, ''));
+    if (body == null) return;
+    fetch('/api/chat/rooms/' + encodeURIComponent(room) + '/messages/' + encodeURIComponent(li.getAttribute('data-me')), { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: body }) })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw Error(d.error || 'Could not edit'); applyEdited(d.message); }); })
+      .catch(function (err) { notice(err.message); });
+  });
 
   // ── The canvas (plan HO9): the agent's data panel beside the chat ─────────────────────────────────────────────
   // Only the newest task in the chat, and only when OpenVibe.Actor holds it (the task's actor_task is the tsk_…
@@ -656,6 +680,7 @@
       var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
       if (m.type === 'room_joined') catchUp();
       else if (m.type === 'room_message' && m.room === room) add(m.message);
+      else if (m.type === 'room_message_edited' && m.room === room) applyEdited(m.message);
       else if (m.type === 'room_ai_typing' && m.room === room) { showWait(); if (nearBottom()) toBottom(); }
       else if (m.type === 'room_ai_delta' && m.room === room) streamText(m.text);
       else if (m.type === 'room_message_deleted' && m.room === room) removeMessage(m.id);

@@ -11,7 +11,7 @@ const SOURCE = 'chat';
 const SERVICE_ACTOR = { type: 'service', id: SOURCE };
 const USER_SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 const EVENT_TYPES = [
-    'chat.message.created', 'chat.message.deleted', 'chat.dm.created', 'chat.dm.edited',
+    'chat.message.created', 'chat.message.edited', 'chat.message.deleted', 'chat.dm.created', 'chat.dm.edited',
     'chat.moderation.action', 'chat.room.message.created', 'chat.room.message.edited', 'chat.room.message.deleted',
     'agent.step.started', 'agent.step.updated', 'agent.step.ended',
 ];

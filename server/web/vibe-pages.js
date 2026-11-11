@@ -156,7 +156,7 @@ function resultChips(m, slug) {
 /** What the person said, for their bubble: their words (the bubble keeps line breaks) and any picture. */
 function youOf(m, me) {
     const mine = me && Number(m.user_id) === Number(me.id);
-    return { html: `<span class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</span>${esc(m.message)}${pictures.pageHtml(m.message)}` };
+    return { html: `<span class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</span>${esc(m.message)}${m.edited_at ? ` <small class="vb-edited">edited · ${esc(String(m.edited_at).slice(11, 16))}</small>` : ''}${pictures.pageHtml(m.message)}${mine ? '<button type="button" class="ovk-btn ovk-btn--quiet vb-edit">Edit</button>' : ''}` };
 }
 /** Vibe's answer: the rendered Markdown, what it did (reminders, timers), its sources and how, then Copy and Try again. */
 function answerOf(m, hows, retrySlug, slug) {

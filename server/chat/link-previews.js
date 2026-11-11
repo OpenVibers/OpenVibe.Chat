@@ -570,11 +570,19 @@ async function store(job, position, preview) {
     // Nothing found is nothing written (a retry never leaves a stale preview); a removed row is a tombstone the job
     // must not overwrite, so a preview removed while its job was still running never comes back.
     if (!preview) return;
+    const table = job.scope === 'room' ? 'room_messages' : job.scope === 'dm' ? 'dm_messages' : 'chat_messages';
+    const current = await db.get(`SELECT message FROM ${table} WHERE id = ?`, [job.messageId]);
+    if (!current || addresses(current.message)[position] !== job.urls[position]) return;
     await db.run(`INSERT INTO link_previews (message_scope, message_id, position, url, data) VALUES (?, ?, ?, ?, ?)
                   ON CONFLICT (message_scope, message_id, position)
                   DO UPDATE SET url = EXCLUDED.url, data = EXCLUDED.data
                   WHERE link_previews.removed_at IS NULL`,
         [job.scope, job.messageId, position, preview.url, JSON.stringify(preview)]);
+}
+
+async function replaceForEdit(scope, messageId) {
+    if (!['room', 'dm', 'chat'].includes(scope)) return;
+    await db.run('DELETE FROM link_previews WHERE message_scope = ? AND message_id = ?', [scope, Number(messageId)]);
 }
 
 async function announce(job) {
@@ -669,7 +677,7 @@ async function attach(rows, scope = 'room', { enabled = true } = {}) {
 
 module.exports = {
     addresses, normalizeUrl, textOf, decodeEntities, pageFields, previewFromResponse, previewFromOembed, imageOf,
-    previewOf, schedule, embedsOf, attach, remove, idle, ownLink,
+    previewOf, schedule, embedsOf, attach, remove, replaceForEdit, idle, ownLink,
     CACHE_MS, MISS_MS, MAX_URLS, MAX_BYTES, FETCH_TIMEOUT_MS, MAX_REDIRECTS, PREVIEWS_ON,
     _setRequest(fn) { _request = fn || null; },
     _setLookup(fn) { _lookup = fn || null; },

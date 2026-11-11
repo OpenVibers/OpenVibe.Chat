@@ -283,6 +283,15 @@ router.patch('/:slug/messages/:id', requireAuth, postLimit, async (req, res) => 
     } catch (err) { send(res, err); }
 });
 
+router.get('/:slug/messages/:id/edits', requireAuth, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    const can = await rooms.access(room, req.user);
+    if (!can.moderate) return res.status(403).json({ error: 'Moderators only' });
+    const row = await db.get('SELECT edit_history FROM room_messages WHERE id = ? AND room_id = ?', [Number(req.params.id), room.id]);
+    if (!row) return res.status(404).json({ error: 'No such message' });
+    return res.set('Cache-Control', 'private, no-store').json({ versions: row.edit_history || [] });
+});
+
 /**
  * A preview on a room message, taken back by its author or a room moderator (server/chat/link-previews.js): with a
  * position, that one address; without, every preview on the line. The row becomes a tombstone, so a job still

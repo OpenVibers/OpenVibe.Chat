@@ -135,6 +135,7 @@ async function page(room, { limit, before, channelUsername, decorate } = {}) {
     const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows.map((x) => ({ ...x }));
     await linkCards.hydrate(messages, 'chat_messages');
     await linkPreviews.attach(messages, 'chat');
+    for (const message of messages) delete message.edit_history;
     return { messages, latest_id: latestIdOf(rows), more: page.more };
 }
 
@@ -153,6 +154,7 @@ async function delta(room, { afterId, limit, channelUsername, decorate } = {}) {
     const messages = decorate ? decorate(rows.map((x) => ({ ...x }))) : rows.map((x) => ({ ...x }));
     await linkCards.hydrate(messages, 'chat_messages');
     await linkPreviews.attach(messages, 'chat');
+    for (const message of messages) delete message.edit_history;
     return { messages, latest_id: latestIdOf(rows) || after, complete, deleted_ids: await deletedIds(room, after) };
 }
 

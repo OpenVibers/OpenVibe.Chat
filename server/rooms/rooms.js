@@ -296,7 +296,8 @@ async function editMessage(room, user, messageId, text, { now = Date.now() } = {
     const m = await db.get('SELECT * FROM room_messages WHERE id = ? AND room_id = ?', [messageId, room.id]);
     if (!m || m.is_deleted) fail(404, 'rooms.no_message', 'No such message');
     if (!user || Number(m.user_id) !== Number(user.id)) fail(403, 'rooms.not_yours', 'Only the author can edit this');
-    if (now - Date.parse(m.created_at) > 24 * 60 * 60 * 1000) fail(403, 'rooms.edit_expired', 'Messages can be edited for 24 hours');
+    const sentAt = Date.parse(String(m.created_at).includes('T') ? m.created_at : `${String(m.created_at).replace(' ', 'T')}Z`);
+    if (!Number.isFinite(sentAt) || now - sentAt > 24 * 60 * 60 * 1000) fail(403, 'rooms.edit_expired', 'Messages can be edited for 24 hours');
     const body = String(text || '').replace(/\r\n/g, '\n').trim();
     if (!body) fail(422, 'rooms.empty', 'Write something first');
     const ownVibe = Number(room.assistant) === 1 && Number(room.owner_id) === Number(user.id);
@@ -307,7 +308,8 @@ async function editMessage(room, user, messageId, text, { now = Date.now() } = {
     const { card, pending } = await linkCards.forSend(message);
     const editedAt = new Date(now).toISOString();
     await db.tx(async () => {
-        await db.run(`UPDATE room_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', ?)), message = ?, card = ?, edited_at = ? WHERE id = ?`, [m.message, message, linkCards.toJson(card), editedAt, m.id]);
+        await db.run(`UPDATE room_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', CAST(? AS text))), message = ?, card = ?, edited_at = ? WHERE id = ?`, [m.edited_at || m.created_at, message, linkCards.toJson(card), editedAt, m.id]);
+        await linkPreviews.replaceForEdit('room', Number(m.id));
         await announceEdited(room, user, Number(m.id), message, editedAt);
     });
     if (pending) linkCards.fillLater('room_messages', Number(m.id), pending);
