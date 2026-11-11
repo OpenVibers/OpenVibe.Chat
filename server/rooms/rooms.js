@@ -394,11 +394,11 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
 }
 
 /** A message from one of the room's AI members (server/rooms/ai-members.js): user_id 0, the member's id. */
-async function postAsAi(room, member, text, { now = Date.now(), how = null } = {}) {
+async function postAsAi(room, member, text, { now = Date.now(), how = null, card = null } = {}) {
     // Vibe's answers in its own chats may run longer than a person's message (a recipe, a plan, code).
     const message = String(text || '').trim().slice(0, Number(room.assistant) === 1 ? MAX_AI_TEXT_VIBE : MAX_TEXT);
     const id = await db.tx(async () => {
-        const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, ai_member_id, how) VALUES (?, 0, NULL, ?, ?, ?)', [room.id, message, member.id, how ? JSON.stringify(how) : null]);
+        const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, ai_member_id, how, card) VALUES (?, 0, NULL, ?, ?, ?, ?)', [room.id, message, member.id, how ? JSON.stringify(how) : null, card ? JSON.stringify(card) : null]);
         await db.run('UPDATE rooms SET message_count = message_count + 1, last_message_at = ov_now() WHERE id = ?', [room.id]);
         await announceMessage(room, { subject_id: null, username: member.handle, display_name: member.name }, Number(r.lastInsertRowid), message, now);
         return Number(r.lastInsertRowid);

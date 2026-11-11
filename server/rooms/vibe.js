@@ -162,7 +162,7 @@ async function work(room, user, text, mode) {
         return { message, task: null };
     }
     // A task Actor refused at once was already answered in the chat (workspace.announce) with Actor's reason.
-    if (task.status !== 'failed') await say(`${ON_IT[kind]} ${config.web.baseUrl}${task.url}`);
+    if (task.status !== 'failed' && !task.actor_task) await say(`${ON_IT[kind]} ${config.web.baseUrl}${task.url}`);
     return { message, task };
 }
 

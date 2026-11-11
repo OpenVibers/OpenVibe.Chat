@@ -257,6 +257,19 @@ async function startOnActor(room, t, deps = {}) {
         // A task a worker could take stays taken while Actor holds it, so nobody claims it twice.
         await setStatus(room, t.id, { actor_task: String(task.id), runner: 'actor', status: task.state === 'running' || !QUICK.has(t.kind) ? 'running' : 'queued', started_at: nowText() });
         await announceStep(room, await row(room, t.id), { status: task.state === 'running' || !QUICK.has(t.kind) ? 'running' : 'queued' });
+        if (Number(room.assistant) === 1 && ACTOR_TASK.test(String(task.id || ''))) {
+            try {
+                const member = await db.get("SELECT * FROM room_ai_members WHERE room_id = ? AND enabled = 1 ORDER BY (handle = 'vibe') DESC, id LIMIT 1", [room.id]);
+                if (member) {
+                    const runUrl = `https://openvibe.network/api/frame/agent-runs/actor/${task.id}`;
+                    const posted = await (deps.rooms || rooms).postAsAi(room, member, `Working on “${t.title}”`, { card: {
+                        kind: 'agent-run', title: t.title, status: 'running', url: `https://openvibe.actor/tasks/${task.id}`,
+                        run_url: runUrl, events_url: `${runUrl}/events`, at: Date.now()
+                    } });
+                    try { require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message: posted }); } catch { /* sockets are optional */ }
+                }
+            } catch { /* the task keeps running if its chat card cannot be posted */ }
+        }
     } catch (err) {
         await setStatus(room, t.id, { status: 'failed', runner: 'actor', error: oneLine(err.message, LIMITS.error), finished_at: nowText() });
         await announceStep(room, await row(room, t.id), { status: 'failed', reason: oneLine(err.message, LIMITS.error) });

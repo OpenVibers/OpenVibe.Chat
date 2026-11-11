@@ -308,6 +308,15 @@
     var ans = el('div', 'ovt-answer'); ans.setAttribute('data-ovt-answer', '');
     if (MD) ans.innerHTML = MD.render(m.message); else ans.textContent = m.message;
     reply.appendChild(ans);
+    if (m.card && m.card.kind === 'agent-run') {
+      var run = String(m.card.run_url || ''), events = String(m.card.events_url || '');
+      if (/^https:\/\/openvibe\.network\/api\/frame\/(?:codes-runs|agent-runs\/actor)\/tsk_[0-9A-HJKMNP-TV-Z]{26}(?:~[1-9][0-9]*)?$/.test(run) && events === run + '/events') {
+        var card = el('div', 'oc-agent-run'); card.dataset.ovRunUrl = run; card.dataset.ovEventsUrl = events; card.dataset.ovRunTitle = String(m.card.title || 'Agent run');
+        var link = el('a', '', String(m.card.title || 'Agent run')); link.href = /^https:\/\/openvibe\.actor\/tasks\/tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(m.card.url || '')) ? m.card.url : '#'; card.appendChild(link);
+        reply.appendChild(card);
+        if (window.OpenVibeAgentRunCards) window.OpenVibeAgentRunCards.mountAll(reply);
+      }
+    }
     var res = Array.isArray(m.results) ? m.results : [];
     if (res.length && room) {
       var resBox = el('div', 'vb-res');

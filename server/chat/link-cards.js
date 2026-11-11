@@ -34,7 +34,7 @@ const TABLES = new Set(['chat_messages', 'room_messages', 'dm_messages', 'inbox_
 const MAX_TITLE = 120;
 const MAX_LINE = 200;
 const MAX_NOTE = 160;
-const KINDS = ['video', 'party', 'voice', 'skill'];
+const KINDS = ['video', 'party', 'voice', 'skill', 'agent-run'];
 
 // A test names its own stand-in; a test that does not never reaches the real site (the same rule as party-pages.js).
 const baseOf = (value, production) => {
@@ -310,6 +310,7 @@ async function hydrate(rows, table) {
         if (!row) return;
         const card = parse(row.card);
         if (!card) { row.card = null; return; }
+        if (card.kind === 'agent-run') { row.card = card; return; }
         if (Date.now() - (Number(card.at) || 0) < FRESH_MS) { row.card = card; return; }
         if (budget <= 0) { row.card = card; return; }
         budget--;
