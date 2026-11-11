@@ -123,7 +123,9 @@ async function roomByAgentId(agentRoomId) {
 async function ensureRoom(agentRoomId, { owner, name, subject, visibility = 'public', linkSecretHash = null } = {}) {
     if (!owner && subject) owner = await ctx.getUserBySubject(subject);
     const existing = await roomByAgentId(agentRoomId);
-    const audience = visibility === 'public' ? 'public' : 'private';
+    // The stream's current Live audience is checked by the dedicated agent API
+    // on every read and post. A private storage room cannot leak during sync.
+    const audience = 'private';
     if (existing) {
         await db.run('UPDATE rooms SET visibility = ?, owner_id = COALESCE(NULLIF(owner_id, 0), ?), owner_subject = COALESCE(owner_subject, ?) WHERE id = ?', [audience, owner ? Number(owner.id) || 0 : 0, subject || null, existing.id]);
         await db.run('UPDATE agent_room_identities SET link_secret_hash = ? WHERE room_id = ?', [visibility === 'unlisted' ? linkSecretHash : null, existing.id]);

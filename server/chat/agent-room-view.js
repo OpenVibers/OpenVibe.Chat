@@ -7,16 +7,27 @@ const { optionalAuth, requireAuth } = require('../auth/auth');
 const db = require('../db/database');
 const rooms = require('../rooms/rooms');
 const agent = require('./agent-room');
+const config = require('../config');
 
 const router = express.Router();
+const defaultAccessCheck = async (id, secret) => {
+    const url = `${config.live.internalUrl}/api/streams/agent/${encodeURIComponent(id)}/chat-access${secret ? `?k=${encodeURIComponent(secret)}` : ''}`;
+    try {
+        const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(config.live.requestTimeoutMs), cache: 'no-store' });
+        return res.ok ? (await res.json()).visibility : null;
+    } catch { return null; }
+};
+let accessCheck = defaultAccessCheck;
 
 async function visible(req, res) {
     const id = agent.roomIdOf(req.params.id);
     const room = id && await agent.roomByAgentId(id);
     if (!room) { res.status(404).json({ error: 'No such room' }); return null; }
+    const secret = String(req.query.k || '');
+    const liveVisibility = await accessCheck(req.params.id, secret);
+    if (!['public', 'unlisted'].includes(liveVisibility)) { res.status(404).json({ error: 'No such room' }); return null; }
     const access = await rooms.access(room, req.user || null);
-    if (room.visibility !== 'public' && !access.read) {
-        const secret = String(req.query.k || '');
+    if (liveVisibility === 'unlisted' && !access.read) {
         const saved = await db.get('SELECT link_secret_hash FROM agent_room_identities WHERE room_id = ?', [room.id]);
         const hash = crypto.createHash('sha256').update(secret).digest('hex');
         if (!/^[A-Za-z0-9_-]{22}$/.test(secret) || !saved || !/^[a-f0-9]{64}$/.test(String(saved.link_secret_hash || '')) ||
@@ -66,4 +77,4 @@ router.delete('/:id/messages/:message', requireAuth, async (req, res) => {
     } catch (err) { error(res, err); }
 });
 
-module.exports = { router, visible };
+module.exports = { router, visible, _setAccessCheck: (fn) => { accessCheck = fn || defaultAccessCheck; } };

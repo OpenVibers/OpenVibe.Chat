@@ -59,6 +59,10 @@ t('an unlisted room follows its link, and a public room opens without one', asyn
     const first = 'abcdefghijklmnopqrstuv';
     const second = 'zyxwvutsrqponmlkjihgfed';
     const hash = (s) => crypto.createHash('sha256').update(s).digest('hex');
+    const view = require('../server/chat/agent-room-view');
+    let liveVisibility = 'unlisted', liveSecret = first;
+    view._setAccessCheck(async (_id, key) => liveVisibility === 'public' || (liveVisibility === 'unlisted' && key === liveSecret) ? liveVisibility : null);
+    try {
     let hidden = await agentRoom.ensureRoom(`agent:${id}`, { name: 'A private link', subject: ann.subject_id, visibility: 'unlisted', linkSecretHash: hash(first) });
     assert.strictEqual(hidden.visibility, 'private');
     assert.strictEqual(hidden.owner_id, ann.id);
@@ -70,10 +74,16 @@ t('an unlisted room follows its link, and a public room opens without one', asyn
     assert.strictEqual(line.status, 201, line.text);
     assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}/messages?k=${first}`)).body.messages.at(-1).message, 'The checkout looks good.');
     hidden = await agentRoom.ensureRoom(`agent:${id}`, { subject: ann.subject_id, visibility: 'unlisted', linkSecretHash: hash(second) });
+    liveSecret = second;
     assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}?k=${first}`)).status, 404);
     assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}?k=${second}`)).status, 200);
     await agentRoom.ensureRoom(`agent:${id}`, { subject: ann.subject_id, visibility: 'public' });
-    assert.strictEqual((await h.http('GET', `/api/chat/rooms/${hidden.slug}`)).status, 200);
+    liveVisibility = 'public';
+    assert.strictEqual((await h.http('GET', `/api/chat/rooms/${hidden.slug}`)).status, 404, 'the storage room stays private during visibility changes');
+    assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}`)).status, 200);
+    liveVisibility = 'private';
+    assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}`)).status, 404);
+    } finally { view._setAccessCheck(null); }
 });
 
 t('the digest: who is left out, domains, and the caps', async () => {
