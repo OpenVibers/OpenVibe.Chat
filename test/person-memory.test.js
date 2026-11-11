@@ -1,9 +1,10 @@
 'use strict';
 const assert = require('assert');
-const { boot, suite, sqliteNow } = require('./helpers');
+const { boot, suite } = require('./helpers');
 
 const t = suite('person-memory');
 let h, db, memory, person, channel, outsider;
+const yesterday = () => new Date(Date.now() - 86400000).toISOString().replace('T', ' ').replace('Z', '');
 
 t('boot', async () => {
     h = await boot({ env: { CHAT_PERSON_MEMORY_ENABLED: '1' } });
@@ -19,7 +20,7 @@ t('boot', async () => {
 t('new messages form one day, then week and month from the day', async () => {
     for (const message of ['hello there', 'we are playing a game']) {
         await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp)
-            VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, message, sqliteNow()]);
+            VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, message, yesterday()]);
     }
     await memory.tick();
     const day = await memory.read(person.id, { channelId: channel.id });
@@ -31,7 +32,7 @@ t('new messages form one day, then week and month from the day', async () => {
     assert.strictEqual((await memory.read(person.id))[0].message_count, 2);
     await db.run("UPDATE person_chat_memory SET summary = 'Alice discussed a game.' WHERE user_id = ? AND channel_user_id = ? AND level = 'day'", [person.id, channel.id]);
     await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'one more', sqliteNow()]);
+        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'one more', yesterday()]);
     await memory.tick();
     const incremented = (await memory.read(person.id, { channelId: channel.id }))[0];
     assert.strictEqual(incremented.message_count, 3);
@@ -61,7 +62,7 @@ t('the Chat workflow records measured Exchange-backed run cost', async () => {
         } } };
     } } });
     await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'we won', sqliteNow()]);
+        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'we won', yesterday()]);
     await memory.tick();
     assert.strictEqual((await memory.read(person.id, { channelId: channel.id }))[0].summary, 'A game and a win.');
     assert.ok((await memory.spentToday()).usd >= 0.002);
@@ -85,13 +86,13 @@ t('the person can erase and opt out; the worker does not rebuild it', async () =
 
 t('withdrawn consent erases a newly built memory', async () => {
     await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'new day', sqliteNow()]);
+        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'new day', yesterday()]);
     await memory.tick();
     assert.strictEqual((await memory.read(person.id, { channelId: channel.id }))[0].message_count, 1);
     h.consent.allowed.delete(person.subject_id);
     require('../server/net/consent')._reset();
     await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp)
-        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'withdrawn', sqliteNow()]);
+        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'withdrawn', yesterday()]);
     await memory.tick();
     assert.deepStrictEqual(await memory.read(person.id, { channelId: channel.id }), []);
 });

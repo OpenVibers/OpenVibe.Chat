@@ -10,6 +10,7 @@ const CAP_USD = 0.25;
 const RESERVE_USD = 0.01;
 const ENABLED = process.env.CHAT_PERSON_MEMORY_ENABLED === '1';
 const MAX_MESSAGES = 180;
+const MIN_NEW_MESSAGES = 15;
 
 const date = (s) => String(s || '').slice(0, 10);
 const week = (s) => {
@@ -120,17 +121,25 @@ async function processDay(c) {
     const model = await summarize(source, prior, 'day', c.period_start);
     await save(c.user_id, c.channel_user_id, 'day', c.period_start,
         build(source, model, prior, Number(prior?.message_count || 0) + allowed.length, messages[messages.length - 1].id));
-    await rollup(c.user_id, c.channel_user_id, 'week', c.period_start, 'day');
-    await rollup(c.user_id, c.channel_user_id, 'month', c.period_start, 'week');
+    // A closed day is due for rollup only after its final raw batch. This avoids five
+    // extra model calls for each 180-message batch of a historical day.
+    const settled = c.period_start < new Date().toISOString().slice(0, 10) && messages.length < MAX_MESSAGES;
+    if (settled) {
+        await rollup(c.user_id, c.channel_user_id, 'week', c.period_start, 'day');
+        await rollup(c.user_id, c.channel_user_id, 'month', c.period_start, 'week');
+    }
     if (c.channel_user_id !== -1) {
         const daily = await db.all("SELECT * FROM person_chat_memory WHERE user_id = ? AND channel_user_id >= 0 AND level = 'day' AND period_start = ? AND message_count > 0", [c.user_id, c.period_start]);
         const source = daily.map(r => ({ summary: r.summary, period_start: r.period_start }));
         const priorAll = await db.get("SELECT * FROM person_chat_memory WHERE user_id = ? AND channel_user_id = -1 AND level = 'day' AND period_start = ?", [c.user_id, c.period_start]);
-        const allModel = await summarize(source, priorAll, 'day', c.period_start);
+        const allModel = settled ? await summarize(source, priorAll, 'day', c.period_start)
+            : { summary: source.map(r => r.summary).filter(Boolean).join(' · ').slice(0, 500), topics: [], highlights: [], tone: '', catchphrases: [] };
         await save(c.user_id, -1, 'day', c.period_start, build(source, allModel, priorAll,
             daily.reduce((n, r) => n + Number(r.message_count), 0), Math.max(...daily.map(r => Number(r.last_message_id)))));
-        await rollup(c.user_id, -1, 'week', c.period_start, 'day');
-        await rollup(c.user_id, -1, 'month', c.period_start, 'week');
+        if (settled) {
+            await rollup(c.user_id, -1, 'week', c.period_start, 'day');
+            await rollup(c.user_id, -1, 'month', c.period_start, 'week');
+        }
     }
 }
 
@@ -147,7 +156,8 @@ async function tick() {
         AND m.is_deleted = 0 AND m.is_filtered = 0 AND m.message_type = 'chat'
         AND COALESCE(s.opted_out, 0) = 0
         GROUP BY m.user_id, COALESCE(m.channel_user_id, 0), left(m.timestamp, 10), p.last_message_id, s.resume_after_id
-        ORDER BY period_start DESC LIMIT 2`);
+        HAVING COUNT(*) >= ? OR left(m.timestamp, 10) < ?
+        ORDER BY period_start DESC LIMIT 2`, [MIN_NEW_MESSAGES, new Date().toISOString().slice(0, 10)]);
     for (const c of candidates) await processDay(c);
 }
 
