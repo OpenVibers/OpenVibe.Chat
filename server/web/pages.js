@@ -1235,6 +1235,9 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         const addRole = rooms.joinRoleOf(room);
         const attachments = can.manage ? await rooms.attachments(room) : [];
         const ais = can.manage && room.kind !== 'system' ? await aiMembers.list(room) : [];
+        const actorMembersOn = !!(aiMembers.actorMembersEnabled() && room.server_id);
+        const actorAgents = actorMembersOn && can.manage && actor.user.subject_id
+            ? (await require('../rooms/vibe-agents').list(actor.user.subject_id)).agents || [] : [];
         let myKey = null;
         if (can.manage && room.kind !== 'system' && aiMembers.enabled()) { try { myKey = await credentials.get(actor.user.subject_id); } catch { myKey = null; } }
         const engineField = (a) => {
@@ -1243,7 +1246,9 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
             return `<label>Thinks with <select name="engine"><option value="openvibe"${cur === 'openvibe' ? ' selected' : ''}>OpenVibe's model</option><option value="own"${cur === 'own' ? ' selected' : ''}${cur === 'own' || myKey ? '' : ' disabled'}>${esc(ownLabel)}</option></select></label>
 ${myKey || cur === 'own' ? '' : '<p class="oc-muted">To give it a different model (yours, from OpenAI, Anthropic or an OpenAI-compatible provider, or a model on your own computer), <a href="/settings#oc-ai-key">add your AI key</a>.</p>'}`;
         };
-        const aiForm = (a) => `<form class="oc-form oc-ai-form oc-grid-form" method="post" action="/r/${esc(room.slug)}/ai-members${a ? `/${Number(a.id)}` : ''}">
+        const aiForm = (a) => a && a.link_service === 'actor'
+            ? `<form class="oc-form oc-ai-form" method="post" action="/r/${esc(room.slug)}/ai-members/${Number(a.id)}"><p>Runs as your OpenVibe Actor agent. Its owner can change its instructions and budget on <a href="https://openvibe.actor/me/agents/${esc(a.link_resource)}">Actor</a>.</p><label class="oc-check"><input type="checkbox" name="enabled" value="1"${Number(a.enabled) ? ' checked' : ''}> Answers when someone writes @${esc(a.handle)}</label><button class="ovk-btn ovk-btn--quiet" type="submit">Save</button></form>`
+            : `<form class="oc-form oc-ai-form oc-grid-form" method="post" action="/r/${esc(room.slug)}/ai-members${a ? `/${Number(a.id)}` : ''}">
 ${a ? '' : '<h3>Add an AI member</h3>'}
 <label>Name <input name="name" required minlength="2" maxlength="24" value="${a ? esc(a.name) : ''}" placeholder="Pantry"></label>
 <label>How it should be <textarea name="persona" rows="2" maxlength="1000" placeholder="A cheerful cook who keeps meals cheap and quick">${a ? esc(a.persona) : ''}</textarea></label>
@@ -1253,9 +1258,10 @@ ${a ? `<label class="oc-check"><input type="checkbox" name="enabled" value="1"${
 <p><button type="submit">${a ? 'Save' : 'Add'}</button></p></form>`;
         const aiSection = can.manage && room.kind !== 'system' ? `<details class="oc-card oc-fold" id="oc-ai"${ais.length ? '' : ' open'}><summary><span>AI members${ais.length ? ` <span class="oc-muted">· ${ais.map((a) => esc(a.name)).join(', ')}</span>` : ''}</span>${IC.chevron}</summary>
 ${aiMembers.enabled() ? '' : notice('error', 'AI members are switched off on this server right now.')}
-<p class="oc-muted oc-small">An AI member answers when someone writes its name with an @ (for example @${esc(ais[0] ? ais[0].handle : 'pantry')}). It reads the room's recent messages and the notes you give it, through OpenVibe.AI, with OpenVibe's model or with your own key's (several members with different models make a multi-model group chat). It cannot do anything outside the chat. At most ${aiMembers.MAX_PER_ROOM}.</p>
+<p class="oc-muted oc-small">An AI member answers when someone writes its name with an @ (for example @${esc(ais[0] ? ais[0].handle : 'pantry')}). Standard members use OpenVibe.AI or your own key and stay in chat. An attached Actor agent uses its owner's budget and approval rules, and posts its result here. At most ${aiMembers.MAX_PER_ROOM}.</p>
 ${ais.map((a) => `<section class="oc-ai-member"><h3><span class="oc-badge oc-ai">AI</span> ${esc(a.name)} <span class="oc-muted">@${esc(a.handle)} · ${esc(aiMembers.modelOf(a))}</span>${a.link_service === 'food' ? ' <span class="oc-badge">knows the household\'s pantry (OpenVibe.Food)</span>' : ''}</h3>${aiForm(a)}<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/ai-members/${Number(a.id)}/delete"><button type="submit" class="oc-pill oc-pill-danger">${IC.trash}<span>Remove ${esc(a.name)}</span></button></form></section>`).join('')}
 ${ais.length < aiMembers.MAX_PER_ROOM && !ais.some((a) => a.handle === 'vibe') ? `<form class="oc-form oc-ai-quick" method="post" action="/r/${esc(room.slug)}/ai-members"><input type="hidden" name="name" value="Vibe"><input type="hidden" name="persona" value="${esc(VIBE_IN_ROOMS)}"><p><button type="submit">Add Vibe</button> <span class="oc-muted">OpenVibe's assistant joins the room: anyone here can ask it with @vibe.</span></p></form>` : ''}
+${actorMembersOn && ais.length < aiMembers.MAX_PER_ROOM ? `<form class="oc-form" method="post" action="/r/${esc(room.slug)}/ai-members"><h3>Add one of your Actor agents</h3><p class="oc-muted">Anyone who can post here can ask it. Runs use your Actor budget and daily cap; the answer is public to this channel. Its approval rules still apply.</p><label>Agent <select name="actor_agent_id" required><option value="">Choose an agent</option>${actorAgents.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></label><button class="ovk-btn ovk-btn--primary" type="submit"${actorAgents.length ? '' : ' disabled'}>Add agent</button>${actorAgents.length ? '' : '<p><a href="https://openvibe.actor/me/agents">Create an agent on Actor</a> first.</p>'}</form>` : ''}
 ${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}</details>` : '';
         const mineServers = (await require('../rooms/servers').list(actor.user)).mine;
         const listedRooms = await rooms.list(actor.user);
@@ -1511,7 +1517,7 @@ ${notice('ok', 'Copy the secret now: it is not shown again. Anyone with the addr
         }
         res.redirect(303, `/r/${room.slug}/settings?saved=1`);
     });
-    router.post('/r/:slug/ai-members', formLimit, sameSite, aiMemberForm(async (room, actor, can, b) => { await aiMembers.add(room, actor.user, can, { name: b.name, persona: b.persona, memory: b.memory, engine: b.engine }); }));
+    router.post('/r/:slug/ai-members', formLimit, sameSite, aiMemberForm(async (room, actor, can, b) => { await aiMembers.add(room, actor.user, can, { name: b.name, persona: b.persona, memory: b.memory, engine: b.engine, actor_agent_id: b.actor_agent_id }); }));
     router.post('/r/:slug/ai-members/:id', formLimit, sameSite, aiMemberForm(async (room, actor, can, b, req) => { await aiMembers.update(room, can, req.params.id, { name: b.name, persona: b.persona, memory: b.memory, enabled: b.enabled === '1', engine: b.engine }, actor.user); }));
     router.post('/r/:slug/ai-members/:id/delete', formLimit, sameSite, aiMemberForm(async (room, actor, can, b, req) => { await aiMembers.remove(room, can, req.params.id); }));
 

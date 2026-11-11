@@ -190,12 +190,13 @@ const ERASE_AFTER_ROOMS = [
     ['feed_events', 'DELETE FROM feed_events WHERE feed_id IN (SELECT id FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     [null, 'DELETE FROM feed_sessions WHERE feed_id IN (SELECT id FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     ['feeds', 'DELETE FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)'],
-    // An AI member belongs to its room, not to whoever added it: it stays, without their name on it.
+    // An attached Actor agent belongs to its owner; an ordinary room AI member belongs to the room.
+    ['actor_ai_members', "DELETE FROM room_ai_members WHERE link_service = 'actor' AND created_by_subject = ANY(@s)"],
     [null, 'UPDATE room_ai_members SET created_by_subject = NULL WHERE created_by_subject = ANY(@s)'],
     // A hook queues work as the person who made it: it goes with them.
     ['room_hooks', 'DELETE FROM room_hooks WHERE created_by = ANY(@ids)'],
     // A workspace room's queue keeps the work the team relies on, without who asked or who took it.
-    [null, "UPDATE room_tasks SET requested_by = 0, requested_subject = NULL WHERE requested_subject = ANY(@s) OR requested_by = ANY(@ids)"],
+    [null, "UPDATE room_tasks SET requested_by = CASE WHEN requested_by = ANY(@ids) THEN 0 ELSE requested_by END, requested_subject = CASE WHEN requested_subject = ANY(@s) THEN NULL ELSE requested_subject END WHERE requested_subject = ANY(@s) OR requested_by = ANY(@ids)"],
     [null, "UPDATE room_tasks SET runner = 'a former member' WHERE runner ~ '^user:[0-9]+$' AND substr(runner, 6)::bigint = ANY(@ids)"],
     // Their own AI key is gone with them (OpenVibe.AI erases it): members that thought with it go back to OpenVibe's model.
     [null, "UPDATE room_ai_members SET engine = 'openvibe', engine_subject = NULL, engine_label = NULL WHERE engine_subject = ANY(@s)"],

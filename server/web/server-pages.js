@@ -277,6 +277,10 @@ ${sheet}`,
                 href: `${LIVE}/@${encodeURIComponent(p.username || '')}`,
             })),
         }));
+        if (ais.length) roleGroups.push({ title: 'Agents', people: ais.map((a) => ({
+            username: `@${a.handle}`, display_name: a.name, roles: [require('../rooms/ai-members').modelOf(a)],
+            href: `/s/${server.slug}/${pick.slug}#oc-compose`,
+        })) });
         const canInvite = can.manage || (can.moderate && server.visibility === 'public');
         // The sheet's last step: the invite link, with Copy and Share (a fresh server comes with one).
         const inviteCode = String(req.query.invite || '').toLowerCase();
@@ -547,7 +551,7 @@ ${can.manage ? `<h2>Overview</h2><form class="oc-form" method="post" action="/s/
 <label>Who can find and read it <select name="visibility"><option value="public"${server.visibility === 'public' ? ' selected' : ''}>Anyone: listed, and signed-in people join (public)</option><option value="private"${server.visibility === 'private' ? ' selected' : ''}>Only people with an invite (private)</option></select></label>
 <p><button type="submit">Save</button></p></form>
 <h2>Channels</h2><ul class="oc-members oc-chan-rows">${chans.map(chanRow).join('')}</ul>
-<form class="oc-new" method="post" action="/s/${esc(server.slug)}/channels"><label for="oc-chan-new">Add a channel</label> <input id="oc-chan-new" name="name" required maxlength="40" placeholder="announcements"> <select name="kind" aria-label="Kind of channel"><option value="text">Text</option><option value="voice">Voice</option>${require('../settings').value('forum_channels_enabled', null, false) === true ? '<option value="forum">Forum</option>' : ''}${require('../settings').value('stage_channels_enabled', null, false) === true ? '<option value="stage">Stage</option>' : ''}</select>${require('../settings').value('forum_channels_enabled', null, false) === true ? '<label>Community forum slug <input name="community_space" maxlength="40" placeholder="my-forum"></label>' : ''} <button type="submit">Add</button></form>
+<form class="oc-new" method="post" action="/s/${esc(server.slug)}/channels"><label for="oc-chan-new">Add a channel</label> <input id="oc-chan-new" name="name" required maxlength="40" placeholder="announcements"> <select name="kind" aria-label="Kind of channel"><option value="text">Text</option><option value="voice">Voice</option>${require('../settings').value('forum_channels_enabled', null, true) === true ? '<option value="forum">Forum</option>' : ''}${require('../settings').value('stage_channels_enabled', null, true) === true ? '<option value="stage">Stage</option>' : ''}</select>${require('../settings').value('forum_channels_enabled', null, true) === true ? '<label>Community forum slug <input name="community_space" maxlength="40" placeholder="my-forum"></label>' : ''} <button type="submit">Add</button></form>
 ${config.emotes.serverEmojiEnabled ? `<section id="oc-server-emojis" data-server-emoji-manager="${esc(server.slug)}"><h2>Emoji</h2><p class="oc-muted">${emojiRows.length} of 50 used. PNG, JPEG, GIF or WebP, up to 512 KB.</p><ul class="oc-members">${emojiRows.map((e) => `<li><img class="oc-server-emoji" src="${esc(e.media_url || '')}" alt=":${esc(e.code)}:" width="22" height="22"> <code>:${esc(e.code)}:</code> <button type="button" class="ovk-btn ovk-btn--quiet" data-emoji-remove="${Number(e.id)}">Remove</button></li>`).join('')}</ul><form data-emoji-upload><label>Name <input name="name" required pattern="[A-Za-z0-9_]{2,32}" maxlength="32"></label><div data-emoji-picker></div> <button class="ovk-btn ovk-btn--primary" type="submit">Add emoji</button></form><p role="status" data-emoji-status></p></section>` : ''}
 <section class="oc-set" id="oc-onboarding" aria-labelledby="oc-onb-h"><h2 id="oc-onb-h">Onboarding</h2>
 <p class="oc-muted">People who join read the rules, if there are any, then pick their roles.</p>
@@ -593,7 +597,7 @@ ${can.owner || can.staff ? `<h2>Delete the server</h2><form class="oc-form" meth
     }));
     router.post('/s/:slug/channels', ...settingsAction(async (req, res, server, user) => {
         const b = req.body || {};
-        if (b.kind === 'forum' && require('../settings').value('forum_channels_enabled', null, false) !== true) throw Object.assign(new Error('Forum channels are not enabled'), { status: 403 });
+        if (b.kind === 'forum' && require('../settings').value('forum_channels_enabled', null, true) !== true) throw Object.assign(new Error('Forum channels are not enabled'), { status: 403 });
         if (b.kind === 'forum' && !(await servers.access(server, user)).manage) throw Object.assign(new Error('Only the server owner and admins add channels'), { status: 403 });
         if (b.kind === 'forum') await require('../rooms/community-forum').verifyManage(b.community_space, req.cookies && req.cookies.ov_token);
         const room = await servers.createChannel(server, user, { name: b.name, kind: ['voice', 'forum', 'stage'].includes(b.kind) ? b.kind : 'text', community_space: b.community_space });

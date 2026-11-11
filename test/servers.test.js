@@ -109,8 +109,13 @@ t('roles: the owner appoints admins, admins appoint mods, mods remove and ban me
 
 t('channels: admins add, rename, move and delete them; a server keeps one text channel; voice follows the join role', async () => {
     assert.strictEqual((await api('POST', '/saturday-raiders/channels', cat, { name: 'mods only' })).status, 403, 'mods do not add channels');
-    assert.strictEqual((await api('POST', '/saturday-raiders/channels', bob, { name: 'Ideas', kind: 'forum', community_space: 'ideas' })).body.code, 'servers.forum_disabled', 'forum channels default off');
-    assert.strictEqual((await api('POST', '/saturday-raiders/channels', bob, { name: 'Town hall', kind: 'stage' })).body.code, 'servers.stage_disabled', 'stage channels default off');
+    const settings = require('../server/settings');
+    const previous = settings.current();
+    settings.activate({ value: (key, _env, fallback) => ['forum_channels_enabled', 'stage_channels_enabled'].includes(key) ? false : fallback });
+    try {
+        assert.strictEqual((await api('POST', '/saturday-raiders/channels', bob, { name: 'Ideas', kind: 'forum', community_space: 'ideas' })).body.code, 'servers.forum_disabled', 'the owner can turn forum channels off');
+        assert.strictEqual((await api('POST', '/saturday-raiders/channels', bob, { name: 'Town hall', kind: 'stage' })).body.code, 'servers.stage_disabled', 'the owner can turn stage channels off');
+    } finally { settings.activate(previous); }
     let r = await api('POST', '/saturday-raiders/channels', bob, { name: 'Announcements', topic: 'News' });
     assert.deepStrictEqual([r.status, r.body.channel.slug, r.body.channel.kind], [201, 'announcements', 'text']);
     r = await api('POST', '/saturday-raiders/channels', bob, { name: 'Settings', kind: 'voice' });
