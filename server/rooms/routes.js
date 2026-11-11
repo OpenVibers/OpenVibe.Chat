@@ -232,6 +232,11 @@ router.post('/:slug/polls/:id/vote', requireAuth, postLimit, async (req, res) =>
     try { res.json(await require('../chat/room-slash').vote(room, req.user, req.params.id, req.body && req.body.option)); }
     catch (err) { send(res, err); }
 });
+router.get('/:slug/polls/:id', optionalAuth, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try { res.json({ poll: await require('../chat/room-slash').pollView(room, req.params.id) }); }
+    catch (err) { send(res, err); }
+});
 
 // A reaction on a room message (room_message_reactions, migration 0038): the same one again takes it back. The
 // author's activity gets one row per person and message (server/chat/activity.js reaction).

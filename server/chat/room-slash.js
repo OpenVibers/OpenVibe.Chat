@@ -80,6 +80,15 @@ async function vote(room, user, pollId, option) {
     return { poll_id: Number(poll.id), option: n };
 }
 
+async function pollView(room, pollId) {
+    const poll = await db.get('SELECT * FROM chat_command_polls WHERE id = ? AND room_id = ?', [pollId, room.id]);
+    if (!poll) error(404, 'commands.poll_not_found', 'No such poll');
+    const options = Array.isArray(poll.options) ? poll.options : JSON.parse(poll.options);
+    const votes = await db.all('SELECT option_index, COUNT(*) AS count FROM chat_command_poll_votes WHERE poll_id = ? GROUP BY option_index', [poll.id]);
+    const count = new Map(votes.map((v) => [Number(v.option_index), Number(v.count)]));
+    return { id: Number(poll.id), question: poll.question, closes_at: poll.closes_at, options: options.map((label, i) => ({ index: i + 1, label, votes: count.get(i + 1) || 0 })) };
+}
+
 let timer = null;
 async function deliverReminders() {
     if (!config.slashCommands.enabled) return;
@@ -99,4 +108,4 @@ async function deliverReminders() {
 }
 function start() { if (!timer) { timer = setInterval(() => { deliverReminders().catch((err) => console.warn('[Commands] reminder:', err.message)); }, 15000); timer.unref(); } }
 function stop() { if (timer) clearInterval(timer); timer = null; }
-module.exports = { parse, vote, deliverReminders, start, stop };
+module.exports = { parse, vote, pollView, deliverReminders, start, stop };

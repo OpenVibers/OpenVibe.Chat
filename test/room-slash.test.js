@@ -62,6 +62,8 @@ t('messages, nicknames, polls, reminders and vote work as the sender', async () 
     assert.ok(r.body.poll_id > 0);
     const voted = await api('POST', `/api/chat/rooms/${room}/polls/${r.body.poll_id}/vote`, owner, { option: 2 });
     assert.deepStrictEqual([voted.status, voted.body.option], [200, 2]);
+    const result = await api('GET', `/api/chat/rooms/${room}/polls/${r.body.poll_id}`, member);
+    assert.deepStrictEqual(result.body.poll.options.map((o) => o.votes), [0, 1]);
     r = await api('POST', `/api/chat/rooms/${room}/messages`, member, { message: '/remind 1h bring soup' });
     assert.strictEqual(r.status, 200, r.text);
     assert.strictEqual((await h.db.all('SELECT text FROM chat_command_reminders WHERE room_id = ?', [(await h.db.get('SELECT id FROM rooms WHERE slug = ?', [room])).id])).length, 1);
