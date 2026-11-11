@@ -222,6 +222,27 @@ async function sendMessage(conversationId, senderId, text, { reply_to_id = null 
     return row;
 }
 
+async function editMessage(conversationId, messageId, senderId, text, { now = Date.now() } = {}) {
+    if (!await isParticipant(conversationId, senderId)) return null;
+    const msg = await db.get('SELECT * FROM dm_messages WHERE id = ? AND conversation_id = ?', [messageId, conversationId]);
+    if (!msg) return null;
+    if (Number(msg.sender_id) !== Number(senderId)) { const e = new Error('Only the author can edit this'); e.status = 403; throw e; }
+    if (now - Date.parse(msg.created_at) > 24 * 60 * 60 * 1000) { const e = new Error('Messages can be edited for 24 hours'); e.status = 403; throw e; }
+    const body = String(text || '').trim().slice(0, 2000);
+    if (!body) return null;
+    const { card, pending } = await linkCards.forSend(body);
+    const editedAt = new Date(now).toISOString();
+    const updated = await db.tx(async () => {
+        await db.run(`UPDATE dm_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', ?)), message = ?, card = ?, edited_at = ? WHERE id = ?`, [editedAt, body, linkCards.toJson(card), editedAt, messageId]);
+        const participants = await db.all('SELECT user_id, subject_id FROM dm_participants WHERE conversation_id = ?', [conversationId]);
+        await outbox.emit({ event_type: 'chat.dm.edited', visibility: 'subject', actorSubject: await db.subjectFor(senderId), subject: { type: 'dm_message', id: String(messageId) }, payload: { message_id: Number(messageId), conversation_id: Number(conversationId), participants: await Promise.all(participants.map(async p => ({ user_id: p.user_id, subject: p.subject_id || await db.subjectFor(p.user_id) }))) } });
+        return db.get('SELECT * FROM dm_messages WHERE id = ?', [messageId]);
+    });
+    updated.card = card; updated.edited_at = editedAt;
+    if (pending) linkCards.fillLater('dm_messages', Number(messageId), pending);
+    return updated;
+}
+
 /**
  * Get messages in a conversation (paginated, newest first).
  */
@@ -489,6 +510,7 @@ module.exports = {
     getParticipants,
     getConversation,
     sendMessage,
+    editMessage,
     getMessages, getMessagesPage,
     markRead,
     getTotalUnread,

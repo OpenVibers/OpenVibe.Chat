@@ -564,4 +564,16 @@ router.delete('/conversations/:id/messages/:msgId', deleteLimit, async (req, res
     }
 });
 
+router.patch('/conversations/:id/messages/:msgId', sendLimit, async (req, res) => {
+    const convId = Number(req.params.id), msgId = Number(req.params.msgId);
+    if (!await dm.isParticipant(convId, req.user.id)) return res.status(403).json({ error: 'Not a participant' });
+    try {
+        const message = publicMessage(await dm.editMessage(convId, msgId, req.user.id, req.body && req.body.message));
+        if (!message) return res.status(404).json({ error: 'No such message' });
+        const participants = await dm.getParticipants(convId);
+        for (const p of participants) await require('./chat-server').sendDm(p.id, { type: 'dm_edited', conversation_id: convId, message });
+        return res.json({ message });
+    } catch (err) { return res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to edit message' }); }
+});
+
 module.exports = router;

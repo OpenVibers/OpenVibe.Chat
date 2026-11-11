@@ -437,6 +437,7 @@
     if (ai && window.VibeMarkdown) { t = el('div', 'oc-text vb-md'); t.innerHTML = window.VibeMarkdown.render(m.message); }
     else { t = el('span', 'oc-text'); textWithLinks(t, m.message); }
     li.appendChild(t);
+    if (m.edited_at) { li.appendChild(document.createTextNode(' ')); li.appendChild(el('span', 'oc-muted', 'edited · ' + clock(m.edited_at).textContent)); }
     if (!ai && cfg.pics) { var pw = pictureThumbs(m.message); if (pw) li.appendChild(pw); }
     addCard(li, m);
     if (cfg.moderate || (cfg.me && !ai && m.user_id === cfg.me)) {
@@ -522,6 +523,8 @@
           showThinking(m.name);
         } else if (m.type === 'room_message_embeds' && m.room === cfg.room) {
           updateEmbeds(m.id, m.embeds);
+        } else if (m.type === 'room_message_edited' && m.room === cfg.room && m.message) {
+          var edited = feed.querySelector('[data-id="' + m.message.id + '"]'); if (edited) edited.replaceWith(roomItem(m.message));
         } else if (m.type === 'room_message_deleted' && m.room === cfg.room) {
           var x = feed.querySelector('[data-id="' + m.id + '"]'); if (x) x.remove();
         } else if (m.type === 'room_error' && m.message) {

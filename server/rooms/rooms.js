@@ -282,6 +282,40 @@ async function announceDeleted(room, ids) {
     }
 }
 
+async function announceEdited(room, user, id, message, editedAt) {
+    if (room.visibility !== 'public') return;
+    await require('../events/service-outbox').emit({
+        event_type: 'chat.room.message.edited', visibility: 'public',
+        actorSubject: user.subject_id || null,
+        subject: { type: 'chat_room_message', id: String(id) },
+        payload: { message_id: id, room: room.slug, user_subject: user.subject_id || null, text: message, edited_at: editedAt },
+    });
+}
+
+async function editMessage(room, user, messageId, text, { now = Date.now() } = {}) {
+    const m = await db.get('SELECT * FROM room_messages WHERE id = ? AND room_id = ?', [messageId, room.id]);
+    if (!m || m.is_deleted) fail(404, 'rooms.no_message', 'No such message');
+    if (!user || Number(m.user_id) !== Number(user.id)) fail(403, 'rooms.not_yours', 'Only the author can edit this');
+    if (now - Date.parse(m.created_at) > 24 * 60 * 60 * 1000) fail(403, 'rooms.edit_expired', 'Messages can be edited for 24 hours');
+    const body = String(text || '').replace(/\r\n/g, '\n').trim();
+    if (!body) fail(422, 'rooms.empty', 'Write something first');
+    const ownVibe = Number(room.assistant) === 1 && Number(room.owner_id) === Number(user.id);
+    const max = ownVibe ? MAX_TEXT_VIBE : MAX_TEXT;
+    if (body.length > max) fail(422, 'rooms.too_long', `Messages are at most ${max} characters`);
+    const filtered = wordFilter.check(body);
+    const message = filtered.safe ? body : filtered.filtered;
+    const { card, pending } = await linkCards.forSend(message);
+    const editedAt = new Date(now).toISOString();
+    await db.tx(async () => {
+        await db.run(`UPDATE room_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', ?)), message = ?, card = ?, edited_at = ? WHERE id = ?`, [m.message, message, linkCards.toJson(card), editedAt, m.id]);
+        await announceEdited(room, user, Number(m.id), message, editedAt);
+    });
+    if (pending) linkCards.fillLater('room_messages', Number(m.id), pending);
+    const updated = await messageById(m.id);
+    if (room.link_previews !== false) linkPreviews.schedule({ scope: 'room', messageId: Number(m.id), text: message, room: { id: room.id, slug: room.slug } });
+    return updated;
+}
+
 async function post(room, user, text, { now = Date.now(), ai = true, timezone = null, reply_to_id = null, files = [] } = {}) {
     const a = await access(room, user);
     if (!user) fail(401, 'rooms.sign_in', 'Sign in to chat');
@@ -371,7 +405,7 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null } = {
 }
 
 // A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
-const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.reply_to_id, m.created_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model,
+const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.reply_to_id, m.created_at, m.edited_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle WHEN m.agent_stream THEN 'aiagent' ELSE u.username END AS username,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.name WHEN m.agent_stream THEN 'AI agent' ELSE u.display_name END AS display_name,
         m.agent_stream, u.profile_color, u.role AS user_role
@@ -600,7 +634,7 @@ module.exports = {
     LIMITS,
     isWorkspace, isStaffRoom,
     postAsAi,
-    ensureSchema, create, list, bySlug, access, join, leave, post, history, historyPage, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
+    ensureSchema, create, list, bySlug, access, join, leave, post, editMessage, history, historyPage, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
     attach, detach, attachments, joinRoleOf, unreadTotal, isStaff, siteBanned, insightOn, POSTERS, TALKERS,
     RoomError, SLUG_RE, KINDS, ROLES, KIND_ROLES, JOIN_ROLE, JOIN_ROLES_CALL, ATTACH_SERVICES, _reset,
 };

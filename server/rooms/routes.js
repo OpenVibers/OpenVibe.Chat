@@ -274,6 +274,15 @@ router.delete('/:slug/messages/:id', requireAuth, deleteLimit, async (req, res) 
     } catch (err) { send(res, err); }
 });
 
+router.patch('/:slug/messages/:id', requireAuth, postLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try {
+        const message = await rooms.editMessage(room, req.user, parseInt(req.params.id, 10), req.body && req.body.message);
+        chatServer().broadcastToRoom(room.id, { type: 'room_message_edited', room: room.slug, message });
+        res.json({ message });
+    } catch (err) { send(res, err); }
+});
+
 /**
  * A preview on a room message, taken back by its author or a room moderator (server/chat/link-previews.js): with a
  * position, that one address; without, every preview on the line. The row becomes a tombstone, so a job still
