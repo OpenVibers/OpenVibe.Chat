@@ -50,6 +50,23 @@ t('read exposes private fields only to the person or channel owner', async () =>
     assert.strictEqual(noChannel.status, 400);
 });
 
+t('reply partners require their own consent and disappear after opt out', async () => {
+    h.consent.allowed.add(channel.subject_id);
+    await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)`, [channel.id, channel.id, channel.username, channel.subject_id, 'welcome', yesterday()]);
+    const target = await db.get('SELECT MAX(id) AS id FROM chat_messages WHERE user_id = ?', [channel.id]);
+    await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp, reply_to_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'thanks', yesterday(), target.id]);
+    await memory.tick();
+    const visible = await memory.read(person.id, { channelId: channel.id, privateView: true });
+    assert.ok(visible[0].people.includes(channel.username));
+    await memory.forget(channel.id, true);
+    const hidden = await memory.read(person.id, { channelId: channel.id, privateView: true });
+    assert.ok(!hidden[0].people.includes(channel.username));
+    const stored = await db.get("SELECT people FROM person_chat_memory WHERE user_id = ? AND channel_user_id = ? AND level = 'day'", [person.id, channel.id]);
+    assert.ok(!JSON.stringify(stored.people).includes(channel.username), 'opt out also erases stored references');
+});
+
 t('the Chat workflow records measured Exchange-backed run cost', async () => {
     const config = require('../server/config');
     const client = require('../server/ai/client');

@@ -32,6 +32,15 @@ async function optedOut(userId) {
 
 async function forget(userId, optOut = true) {
     const last = await db.get('SELECT COALESCE(MAX(id), 0) AS id FROM chat_messages WHERE user_id = ?', [userId]);
+    const user = await db.get('SELECT username FROM ctx_users WHERE id = ?', [userId]);
+    if (user?.username) {
+        const linked = await db.all('SELECT user_id, channel_user_id, level, period_start, people FROM person_chat_memory WHERE people @> ?::jsonb',
+            [JSON.stringify([user.username])]);
+        for (const row of linked) {
+            await db.run(`UPDATE person_chat_memory SET people = ?::jsonb WHERE user_id = ? AND channel_user_id = ? AND level = ? AND period_start = ?`,
+                [JSON.stringify(json(row.people).filter(name => name !== user.username)), row.user_id, row.channel_user_id, row.level, row.period_start]);
+        }
+    }
     await db.run('DELETE FROM person_chat_memory WHERE user_id = ?', [userId]);
     // The former rolling cache must also go: otherwise the old profile remains visible.
     await db.run("DELETE FROM chat_ai_summaries WHERE scope = 'user' AND subject_id = ?", [userId]);
@@ -52,7 +61,8 @@ async function summarize(source, prior, level, period) {
     if (spent.usd + RESERVE_USD > CAP_USD || spent.calls >= 25) return null;
     try {
         return await ai.structured('chat.person-memory', {
-            level, period, prior_summary: text(prior?.summary, 500), sources_text: JSON.stringify(source).slice(0, 15000),
+            level, period, prior_summary: text(prior?.summary, 500),
+            sources_text: JSON.stringify(source.map(({ people, ...item }) => item)).slice(0, 15000),
         }, { onRun: async (run) => {
             const measured = Number(run.usage?.cost_usd);
             const cost = Number.isFinite(measured) && measured >= 0 ? measured : RESERVE_USD;
@@ -71,8 +81,9 @@ function build(source, model, prior, count, lastId) {
         return { detail: text(h.detail, 180), stream_id: item.stream_id || null, at: item.timestamp || item.period_start || null };
     }).filter(Boolean);
     const highlights = [...json(prior?.highlights), ...additions].slice(-5);
+    const people = [...new Set([...json(prior?.people), ...source.flatMap(s => json(s.people))])].slice(0, 8);
     return { summary: text(model?.summary || fallback, 500), topics: model ? array(model.topics, 5) : json(prior?.topics), highlights,
-        tone: text(model?.tone || prior?.tone, 120), catchphrases: model ? array(model.catchphrases, 5) : json(prior?.catchphrases), people: json(prior?.people),
+        tone: text(model?.tone || prior?.tone, 120), catchphrases: model ? array(model.catchphrases, 5) : json(prior?.catchphrases), people,
         message_count: count, last_message_id: lastId };
 }
 
@@ -97,7 +108,7 @@ async function rollup(userId, channelId, level, period, childLevel) {
         AND period_start >= ? AND period_start < ? ORDER BY period_start`, [userId, channelId, childLevel, start, end.toISOString().slice(0, 10)]);
     if (!rows.length) return;
     const prior = await db.get('SELECT * FROM person_chat_memory WHERE user_id = ? AND channel_user_id = ? AND level = ? AND period_start = ?', [userId, channelId, level, start]);
-    const source = rows.map(r => ({ summary: r.summary, period_start: r.period_start }));
+    const source = rows.map(r => ({ summary: r.summary, period_start: r.period_start, people: json(r.people) }));
     const model = await summarize(source, prior, level, start);
     const count = rows.reduce((n, r) => n + Number(r.message_count || 0), 0);
     await save(userId, channelId, level, start, build(source, model, prior, count, Math.max(...rows.map(r => Number(r.last_message_id || 0)))));
@@ -105,7 +116,7 @@ async function rollup(userId, channelId, level, period, childLevel) {
 
 async function processDay(c) {
     if (await optedOut(c.user_id)) return;
-    const messages = await db.all(`SELECT id, message, timestamp, stream_id, subject_id FROM chat_messages
+    const messages = await db.all(`SELECT id, message, timestamp, stream_id, subject_id, reply_to_id FROM chat_messages
         WHERE user_id = ? AND COALESCE(channel_user_id, 0) = ? AND left(timestamp, 10) = ? AND id > ?
         AND is_deleted = 0 AND is_filtered = 0 AND message_type = 'chat'
         ORDER BY id ASC LIMIT ?`, [c.user_id, c.channel_user_id, c.period_start, Math.max(Number(c.last_message_id || 0), Number(c.resume_after_id || 0)), MAX_MESSAGES]);
@@ -118,6 +129,17 @@ async function processDay(c) {
     }
     // Mentions can name a person who opted out; strip them from the model input.
     const source = allowed.map(m => ({ message: text(m.message, 200).replace(/@[A-Za-z0-9_]+/g, '@someone'), timestamp: m.timestamp, stream_id: m.stream_id }));
+    const replyIds = [...new Set(allowed.map(m => Number(m.reply_to_id || 0)).filter(Boolean))];
+    if (replyIds.length) {
+        const peers = await db.all(`SELECT target.id, u.username, u.subject_id, COALESCE(s.opted_out, 0) AS opted_out
+            FROM chat_messages target JOIN ctx_users u ON u.id = target.user_id
+            LEFT JOIN person_chat_memory_settings s ON s.user_id = u.id
+            WHERE target.id IN (${replyIds.map(() => '?').join(',')})`, replyIds);
+        const consented = await consent.allowedSubjects(peers.map(p => p.subject_id));
+        const names = peers.filter(p => !Number(p.opted_out) && consented.has(p.subject_id) && p.username)
+            .map(p => String(p.username)).slice(0, 8);
+        if (names.length) source[0].people = names;
+    }
     const model = await summarize(source, prior, 'day', c.period_start);
     await save(c.user_id, c.channel_user_id, 'day', c.period_start,
         build(source, model, prior, Number(prior?.message_count || 0) + allowed.length, messages[messages.length - 1].id));
@@ -130,7 +152,7 @@ async function processDay(c) {
     }
     if (c.channel_user_id !== -1) {
         const daily = await db.all("SELECT * FROM person_chat_memory WHERE user_id = ? AND channel_user_id >= 0 AND level = 'day' AND period_start = ? AND message_count > 0", [c.user_id, c.period_start]);
-        const source = daily.map(r => ({ summary: r.summary, period_start: r.period_start }));
+        const source = daily.map(r => ({ summary: r.summary, period_start: r.period_start, people: json(r.people) }));
         const priorAll = await db.get("SELECT * FROM person_chat_memory WHERE user_id = ? AND channel_user_id = -1 AND level = 'day' AND period_start = ?", [c.user_id, c.period_start]);
         const allModel = settled ? await summarize(source, priorAll, 'day', c.period_start)
             : { summary: source.map(r => r.summary).filter(Boolean).join(' · ').slice(0, 500), topics: [], highlights: [], tone: '', catchphrases: [] };
@@ -169,9 +191,20 @@ async function read(userId, { channelId = null, level = 'day', privateView = fal
     else { where = ' AND channel_user_id = -1'; }
     params.push(limit);
     const rows = await db.all(`SELECT * FROM person_chat_memory WHERE user_id = ? AND level = ?${where} AND message_count > 0 ORDER BY period_start DESC, channel_user_id LIMIT ?`, params);
+    let allowedPeople = new Set();
+    if (privateView) {
+        const names = [...new Set(rows.flatMap(r => json(r.people)))];
+        if (names.length) {
+            const peers = await db.all(`SELECT u.username, u.subject_id, COALESCE(s.opted_out, 0) AS opted_out
+                FROM ctx_users u LEFT JOIN person_chat_memory_settings s ON s.user_id = u.id
+                WHERE u.username IN (${names.map(() => '?').join(',')})`, names);
+            const consented = await consent.allowedSubjects(peers.map(p => p.subject_id));
+            allowedPeople = new Set(peers.filter(p => !Number(p.opted_out) && consented.has(p.subject_id)).map(p => p.username));
+        }
+    }
     return rows.map(r => ({ level: r.level, period_start: r.period_start, channel_user_id: Number(r.channel_user_id),
         summary: r.summary, topics: json(r.topics), highlights: json(r.highlights), message_count: Number(r.message_count),
-        ...(privateView ? { tone: r.tone, catchphrases: json(r.catchphrases), people: json(r.people) } : {}) }));
+        ...(privateView ? { tone: r.tone, catchphrases: json(r.catchphrases), people: json(r.people).filter(name => allowedPeople.has(name)) } : {}) }));
 }
 
 let timer = null;
