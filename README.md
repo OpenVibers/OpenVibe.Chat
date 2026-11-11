@@ -409,9 +409,8 @@ nobody is.
 
 Forum channels are available by default for a server manager who can connect a Community forum they moderate;
 the owner can disable them with `forum_channels_enabled`. Slash commands and custom server emoji are available by
-default and can be disabled with `CHAT_SLASH_COMMANDS_ENABLED=0` and `CHAT_SERVER_EMOJI_ENABLED=0`. Stage channel
-controls stay behind `stage_channels_enabled` until the separate Chat calls cutover in `docs/calls-cutover.md` is
-complete; creating a stage before that cutover would give its audience no audio.
+default and can be disabled with `CHAT_SLASH_COMMANDS_ENABLED=0` and `CHAT_SERVER_EMOJI_ENABLED=0`. Stage channels
+use Chat's voice rooms and are available by default; the owner can disable them with `stage_channels_enabled`.
 
 **Pictures** (`server/rooms/pictures.js`; the owner's "files and pics" for Chat, through OpenVibe.Pics). A person who
 may post sends a picture from the room's or channel's "Add a picture" form (it works without JavaScript; with it, the

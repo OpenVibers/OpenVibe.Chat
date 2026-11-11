@@ -45,7 +45,7 @@ const SCHEMA = Object.freeze({
             'x-owner-input': { group: 'voices', unlocks: 'Forum channels backed by Community discussions and the shared search feed.', get_it_at: 'https://openvibe.community', get_it_how: 'This is a Chat feature switch. Enable it to let server owners connect forums they moderate.' },
         },
         stage_channels_enabled: {
-            type: 'boolean', title: 'Stage channels', 'x-group': 'Channels', default: false,
+            type: 'boolean', title: 'Stage channels', 'x-group': 'Channels', default: true,
             description: 'Allow server owners to create stage channels. Stage audio uses Chat voice rooms.',
             'x-required-for': 'Stage channels',
             'x-owner-input': { group: 'voices', unlocks: 'Stage channel controls in Chat servers using existing voice rooms.', get_it_at: 'https://openvibe.chat', get_it_how: 'This is a Chat feature switch. Enable it to let server owners create stage channels.' },
