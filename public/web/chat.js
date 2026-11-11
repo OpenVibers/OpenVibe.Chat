@@ -231,7 +231,7 @@
       .catch(function () { showError('Could not load earlier versions'); });
   });
   if (feed && (cfg.view === 'global' || cfg.view === 'dm' || cfg.view === 'room')) {
-    Array.prototype.forEach.call(feed.querySelectorAll('[data-id]'), addEditButton);
+    if (feed.querySelectorAll) Array.prototype.forEach.call(feed.querySelectorAll('[data-id]'), addEditButton);
     feed.addEventListener('click', function (e) {
       if (!e.target.classList || !e.target.classList.contains('oc-edit')) return;
       var li = e.target.closest('[data-id]'), t = li && li.querySelector('.oc-text, .oc-bubble');
