@@ -135,6 +135,8 @@ t('an agent-run embed keeps its authorized stream and escapes its title', async 
     assert.match(html, /class="oc-agent-run"/);
     assert.match(html, /&lt;Read files&gt;/);
     assert.ok(!html.includes('<Read files>'));
+    const codes = require('../server/web/ui').embedCard({ ...card, url: `https://openvibe.codes/run/tasks/${id}`, run_url: `https://openvibe.network/api/frame/codes-runs/${id}`, events_url: `https://openvibe.network/api/frame/codes-runs/${id}/events` });
+    assert.ok(codes.includes(`href="https://openvibe.codes/run/tasks/${id}"`), 'a Codes card links to its full task');
     assert.strictEqual(require('../server/web/ui').embedCard({ ...card, events_url: 'https://elsewhere.example/events' }), '');
 });
 

@@ -176,7 +176,7 @@
       var run = String(e.run_url || ''), events = String(e.events_url || '');
       if (!/^https:\/\/openvibe\.network\/api\/frame\/(?:codes-runs|agent-runs\/actor)\/tsk_[0-9A-HJKMNP-TV-Z]{26}(?:~[1-9][0-9]*)?$/.test(run) || events !== run + '/events') return null;
       var host = el('div', 'oc-agent-run'); host.dataset.ovRunUrl = run; host.dataset.ovEventsUrl = events; host.dataset.ovRunTitle = e.title;
-      var link = el('a', '', e.title); link.href = /^https:\/\/openvibe\.(?:actor|codes)\/tasks\/tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(e.url || '')) ? e.url : '#'; link.rel = 'noopener'; host.appendChild(link);
+      var link = el('a', '', e.title); link.href = /^https:\/\/openvibe\.(?:actor\/tasks|codes\/run\/tasks)\/tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(e.url || '')) ? e.url : '#'; link.rel = 'noopener'; host.appendChild(link);
       return host;
     }
     var url = httpsHref(e.url);

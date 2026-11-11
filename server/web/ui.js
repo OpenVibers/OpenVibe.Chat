@@ -150,7 +150,7 @@ function embedCard(e) {
     if (e.kind === 'agent-run') {
         const run = String(e.run_url || ''), events = String(e.events_url || '');
         const trusted = /^https:\/\/openvibe\.network\/api\/frame\/(?:codes-runs|agent-runs\/actor)\/tsk_[0-9A-HJKMNP-TV-Z]{26}(?:~[1-9][0-9]*)?$/;
-        const href = /^https:\/\/openvibe\.(?:actor|codes)\/tasks\/tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(e.url || '')) ? e.url : null;
+        const href = /^https:\/\/openvibe\.(?:actor\/tasks|codes\/run\/tasks)\/tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(e.url || '')) ? e.url : null;
         if (!trusted.test(run) || events !== `${run}/events`) return '';
         return `<div class="oc-agent-run" data-ov-run-url="${esc(run)}" data-ov-events-url="${esc(events)}" data-ov-run-title="${esc(e.title)}">${href ? `<a href="${esc(href)}" rel="noopener">${esc(e.title)}</a>` : esc(e.title)}</div>`;
     }
