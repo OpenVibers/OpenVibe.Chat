@@ -259,10 +259,12 @@ async function forSend(text, budgetMs = SEND_BUDGET_MS) {
 }
 
 /** Write a card that arrived after its message went out into that row. Never awaited by the request. */
-function fillLater(table, id, pending) {
+function fillLater(table, id, pending, expectedText = null) {
     if (!TABLES.has(table) || !id || !pending) return;
     pending.then((card) => {
-        if (card) return db.run(`UPDATE ${table} SET card = ? WHERE id = ?`, [toJson(card), id]);
+        if (card) return expectedText == null
+            ? db.run(`UPDATE ${table} SET card = ? WHERE id = ?`, [toJson(card), id])
+            : db.run(`UPDATE ${table} SET card = ? WHERE id = ? AND message = ?`, [toJson(card), id, expectedText]);
         return null;
     }).catch(() => {});
 }

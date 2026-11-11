@@ -30,9 +30,10 @@ t('room and Vibe store: author, window, history, moderator view, socket and Even
     assert.ok(edited.body.message.edited_at);
     assert.strictEqual((await ws.next((m) => m.type === 'room_message_edited' && m.message.id === id)).message.message, 'second room');
     assert.strictEqual((await event('chat.room.message.edited', id)).payload.text, 'second room');
+    assert.strictEqual((await room('PATCH', `/edit-room/messages/${id}`, ann, { message: 'third room' })).status, 200);
     assert.ok(!(await room('GET', '/edit-room/messages', bob)).body.messages[0].edit_history);
     assert.strictEqual((await room('GET', `/edit-room/messages/${id}/edits`, bob)).status, 403);
-    assert.strictEqual((await room('GET', `/edit-room/messages/${id}/edits`, mod)).body.versions[0].message, 'first room');
+    assert.deepStrictEqual((await room('GET', `/edit-room/messages/${id}/edits`, mod)).body.versions.map((v) => v.message), ['first room', 'second room']);
     const rooms = require('../server/rooms/rooms');
     const r = await rooms.bySlug('edit-room');
     const createdAt = (await h.db.get('SELECT created_at FROM room_messages WHERE id = ?', [id])).created_at;

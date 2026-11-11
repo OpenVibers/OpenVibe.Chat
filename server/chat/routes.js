@@ -399,7 +399,7 @@ router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour
                 card,
             });
             savedId = result.lastInsertRowid;
-            if (pending && savedId) linkCards.fillLater('chat_messages', Number(savedId), pending);
+            if (pending && savedId) linkCards.fillLater('chat_messages', Number(savedId), pending, filtered);
         } catch { /* non-critical */ }
 
         // Attach message ID and reply context to broadcast

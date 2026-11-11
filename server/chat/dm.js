@@ -205,7 +205,7 @@ async function sendMessage(conversationId, senderId, text, { reply_to_id = null 
     if (row) {
         row.card = card;
         row.embeds = [];                 // the job fills them; the send answer starts empty, as a room's does
-        if (pending) linkCards.fillLater('dm_messages', row.id, pending);
+        if (pending) linkCards.fillLater('dm_messages', row.id, pending, trimmed);
         // Address previews run after the line is out (server/chat/link-previews.js), and only when every person in
         // the conversation left link previews on (part 4 privacy: one side off fetches nothing).
         if (await previewSettings.allowedIn(conversationId)) {
@@ -234,7 +234,8 @@ async function editMessage(conversationId, messageId, senderId, text, { now = Da
     const { card, pending } = await linkCards.forSend(body);
     const editedAt = new Date(now).toISOString();
     const updated = await db.tx(async () => {
-        await db.run(`UPDATE dm_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', CAST(? AS text))), message = ?, card = ?, edited_at = ? WHERE id = ?`, [msg.edited_at || msg.created_at, body, linkCards.toJson(card), editedAt, messageId]);
+        const changed = await db.run(`UPDATE dm_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', COALESCE(edited_at, created_at))), message = ?, card = ?, edited_at = ? WHERE id = ?`, [body, linkCards.toJson(card), editedAt, messageId]);
+        if (!changed.changes) { const e = new Error('No such message'); e.status = 404; throw e; }
         await linkPreviews.replaceForEdit('dm', Number(messageId));
         const participants = await db.all('SELECT user_id, subject_id FROM dm_participants WHERE conversation_id = ?', [conversationId]);
         await outbox.emit({ event_type: 'chat.dm.edited', visibility: 'subject', actorSubject: await db.subjectFor(senderId), subject: { type: 'dm_message', id: String(messageId) }, payload: { message_id: Number(messageId), conversation_id: Number(conversationId), text: body, edited_at: editedAt, participants: await Promise.all(participants.map(async p => ({ user_id: p.user_id, subject: p.subject_id || await db.subjectFor(p.user_id) }))) } });
@@ -242,7 +243,7 @@ async function editMessage(conversationId, messageId, senderId, text, { now = Da
     });
     updated.card = card; updated.edited_at = editedAt;
     delete updated.edit_history;
-    if (pending) linkCards.fillLater('dm_messages', Number(messageId), pending);
+    if (pending) linkCards.fillLater('dm_messages', Number(messageId), pending, body);
     if (await previewSettings.allowedIn(conversationId)) linkPreviews.schedule({ scope: 'dm', messageId: Number(messageId), text: body });
     return updated;
 }

@@ -308,11 +308,12 @@ async function editMessage(room, user, messageId, text, { now = Date.now() } = {
     const { card, pending } = await linkCards.forSend(message);
     const editedAt = new Date(now).toISOString();
     await db.tx(async () => {
-        await db.run(`UPDATE room_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', CAST(? AS text))), message = ?, card = ?, edited_at = ? WHERE id = ?`, [m.edited_at || m.created_at, message, linkCards.toJson(card), editedAt, m.id]);
+        const changed = await db.run(`UPDATE room_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', COALESCE(edited_at, created_at))), message = ?, card = ?, edited_at = ? WHERE id = ? AND is_deleted = 0`, [message, linkCards.toJson(card), editedAt, m.id]);
+        if (!changed.changes) fail(404, 'rooms.no_message', 'No such message');
         await linkPreviews.replaceForEdit('room', Number(m.id));
         await announceEdited(room, user, Number(m.id), message, editedAt);
     });
-    if (pending) linkCards.fillLater('room_messages', Number(m.id), pending);
+    if (pending) linkCards.fillLater('room_messages', Number(m.id), pending, message);
     const updated = await messageById(m.id);
     if (room.link_previews !== false) linkPreviews.schedule({ scope: 'room', messageId: Number(m.id), text: message, room: { id: room.id, slug: room.slug } });
     return updated;
@@ -368,7 +369,7 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
         return Number(r.lastInsertRowid);
     });
     const row = await messageById(id);
-    if (pending) linkCards.fillLater('room_messages', id, pending);
+    if (pending) linkCards.fillLater('room_messages', id, pending, message);
     // General address previews are a background job: the message and its response never wait on another site.
     if (room.link_previews !== false) linkPreviews.schedule({ scope: 'room', messageId: id, text: message, room: { id: room.id, slug: room.slug } });
     // Activity: the people this names, and the person it answers (server/chat/activity.js). A failure here never

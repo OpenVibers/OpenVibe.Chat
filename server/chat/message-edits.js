@@ -21,12 +21,13 @@ async function edit(id, user, text, { now = Date.now() } = {}) {
     const { card, pending } = await linkCards.forSend(message);
     const editedAt = new Date(now).toISOString();
     await db.tx(async () => {
-        await db.run(`UPDATE chat_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', CAST(? AS text))), message = ?, card = ?, edited_at = ? WHERE id = ?`, [row.edited_at || row.timestamp, message, linkCards.toJson(card), editedAt, id]);
+        const changed = await db.run(`UPDATE chat_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', COALESCE(edited_at, timestamp))), message = ?, card = ?, edited_at = ? WHERE id = ? AND is_deleted = 0`, [message, linkCards.toJson(card), editedAt, id]);
+        if (!changed.changes) throw error(404, 'No such message');
         await linkPreviews.replaceForEdit('chat', id);
         await outbox.emit({ event_type: 'chat.message.edited', visibility: 'public', actorSubject: row.subject_id || await db.subjectFor(user.id), subject: { type: 'chat_message', id: String(id) }, payload: { message_id: Number(id), room: row.stream_id || row.channel_user_id ? { type: 'channel', channel_user_id: row.channel_user_id || null, stream_id: row.stream_id || null } : { type: 'global' }, user_subject: row.subject_id || await db.subjectFor(user.id), text: message.slice(0, 2000), edited_at: editedAt } });
     });
     history.invalidate();
-    if (pending) linkCards.fillLater('chat_messages', Number(id), pending);
+    if (pending) linkCards.fillLater('chat_messages', Number(id), pending, message);
     linkPreviews.schedule({ scope: 'chat', messageId: Number(id), text: message, onReady: async (embeds) => {
         const server = require('./chat-server');
         const frame = { type: 'chat_embeds', id: Number(id), embeds };
