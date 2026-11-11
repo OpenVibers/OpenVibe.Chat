@@ -190,8 +190,7 @@ ${o.app ? `<script src="${asset('vibe-md.js')}" defer></script>\n<script src="${
 </head>
 <body class="${[cls, o.app ? 'oc-app-body' : ''].filter(Boolean).join(' ')}"${scale}>
 <a class="oc-skip" href="#main">Skip to content</a>
-<div id="navbar-mount"></div>
-${frame.noscriptNav({ name: siteName, home: '/', links: siteLinks.map(({ label, href }) => ({ label, href })) })}
+${frame.serverNav({ name: siteName, service: siteService, home: '/', links: siteLinks.map(({ label, href }) => ({ label, href })) })}
 <main id="main" class="${o.app ? 'vb-wrap' : `oc-main${o.shell ? ' oc-main--shell' : (o.wide ? ' oc-main--wide' : '')}`}"${o.mainAttrs ? ` ${o.mainAttrs}` : ''}>
 <noscript><p class="oc-account">${who}</p></noscript>
 ${o.body || ''}

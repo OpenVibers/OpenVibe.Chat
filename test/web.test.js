@@ -38,6 +38,10 @@ t('global chat reads without JavaScript; signing in shows the composer', async (
     assert.match(r.text, /Sign in with OpenVibe/);
     assert.match(r.text, /<meta name="robots" content="index, follow">/);
     assert.match(r.text, /\/shared\/navbar\.js\?v=/, 'the Frame from this site\'s own /shared/');
+    // The first HTML carries the site's navigation for a crawler, not only the scripts that draw it.
+    const serverNav = /<div id="navbar-mount"><nav class="openvibe-navbar"[^>]*data-ov-server-nav="true"[\s\S]*?<\/nav><\/div>/.exec(r.text);
+    assert.ok(serverNav, 'the first HTML has the server navigation');
+    assert.match(serverNav[0], /href="\/rooms"[^>]*>Rooms</, 'and its places');
     // A Content-Security-Policy with a per-response nonce, carried by every inline script and only by them.
     const csp = r.headers.get('content-security-policy') || '';
     const nonce = (/'nonce-([^']+)'/.exec(csp) || [])[1];
