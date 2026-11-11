@@ -48,6 +48,15 @@ function enabled() {
 }
 
 /**
+ * Chat's bearer token for AI (its own service token; no CHAT_AI_ENABLED gate — TTS has its own
+ * setting). For calls the SDK's AI client has no method for (the Exchange speech route).
+ */
+async function bearer() {
+    if (!_tokens) ai();
+    return _tokens.getToken();
+}
+
+/**
  * Run a workflow and return its `output` object, or null: disabled, a refusal, a failed run, or a
  * transport error all answer null — exactly Live's ai-service.structured() contract. `force` runs it even with
  * the insight job switched off (CHAT_AI_ENABLED): a room's AI members have their own switch (CHAT_AI_MEMBERS).
@@ -176,5 +185,5 @@ async function catalog() {
     return res.json();
 }
 
-module.exports = { structured, stream, complete, catalog, enabled, http, lastProblem, _setClient(c) { _ai = c; }, _setComplete(c) { _complete = c; }, _setHttp(h) { _http = h; }, _setTokens(t) { _tokens = t; },
+module.exports = { structured, stream, complete, catalog, enabled, bearer, http, lastProblem, _setClient(c) { _ai = c; }, _setComplete(c) { _complete = c; }, _setHttp(h) { _http = h; }, _setTokens(t) { _tokens = t; },
     _setProblem(p) { _lastProblem = p; }, _reset() { _ai = null; _http = null; _tokens = null; _complete = null; _lastProblem = null; } };
