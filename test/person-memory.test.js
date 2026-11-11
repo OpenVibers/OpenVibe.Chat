@@ -6,7 +6,7 @@ const t = suite('person-memory');
 let h, db, memory, person, channel, outsider;
 
 t('boot', async () => {
-    h = await boot({ env: { CHAT_PERSON_MEMORY_ENABLED: '1', CHAT_PERSON_MEMORY_MODEL: '' } });
+    h = await boot({ env: { CHAT_PERSON_MEMORY_ENABLED: '1' } });
     db = require('../server/db/database');
     memory = require('../server/ai/person-memory');
     person = h.addUser('memoryperson', { subject: 'usr_01J8Z3Q4R5S6T7V8W9X0Y1Z2B1' });
@@ -47,6 +47,26 @@ t('read exposes private fields only to the person or channel owner', async () =>
     assert.ok(Object.hasOwn(ownRead.body.entries[0], 'tone'));
     const noChannel = await h.http('GET', `/api/v1/people/${person.username}/memory`, { token: outsider.token });
     assert.strictEqual(noChannel.status, 400);
+});
+
+t('the Chat workflow records measured Exchange-backed run cost', async () => {
+    const config = require('../server/config');
+    const client = require('../server/ai/client');
+    config.ai.enabled = true;
+    client._setClient({ runs: { create: async (workflow, input) => {
+        assert.strictEqual(workflow, 'chat.person-memory');
+        assert.ok(['day', 'week', 'month'].includes(input.level));
+        return { run: { status: 'succeeded', usage: { cost_usd: 0.002 }, output: {
+            summary: 'A game and a win.', topics: ['game'], highlights: [], tone: 'brief', catchphrases: [],
+        } } };
+    } } });
+    await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'we won', sqliteNow()]);
+    await memory.tick();
+    assert.strictEqual((await memory.read(person.id, { channelId: channel.id }))[0].summary, 'A game and a win.');
+    assert.ok((await memory.spentToday()).usd >= 0.002);
+    client._reset();
+    config.ai.enabled = false;
 });
 
 t('the person can erase and opt out; the worker does not rebuild it', async () => {

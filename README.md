@@ -130,9 +130,8 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
   - **Person chat memory** (`server/ai/person-memory.js`) is a separate default-off worker
     (`CHAT_PERSON_MEMORY_ENABLED=1`). It summarizes new messages into channel day records,
     folds days into weeks and weeks into months, and keeps an own-view cross-channel rollup.
-    `CHAT_PERSON_MEMORY_MODEL` selects the inexpensive Exchange-backed `ai.complete` model;
-    `CHAT_PERSON_MEMORY_BILLING_SUBJECT` is the billable Network subject. The worker stops
-    model calls at its $0.25 UTC-day ledger cap (maximum 25 calls, 450 output tokens each).
+    The `chat.person-memory` workflow in OpenVibe.AI routes model calls through Exchange;
+    the worker checks its $0.25 UTC-day spend ledger before calls (maximum 25 calls, 450 output tokens each).
     `GET /api/v1/people/:username/memory?channel=&level=day|week|month` returns public
     fields; the person and channel owner see the private fields. A person's `DELETE` erases
     their records and opts out; `PUT .../preferences` with `{"opted_out":false}` opts back in.

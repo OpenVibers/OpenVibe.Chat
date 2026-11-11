@@ -8,7 +8,6 @@ const ai = require('./client');
 
 const CAP_USD = 0.25;
 const RESERVE_USD = 0.01;
-const MODEL = process.env.CHAT_PERSON_MEMORY_MODEL || '';
 const ENABLED = process.env.CHAT_PERSON_MEMORY_ENABLED === '1';
 const MAX_MESSAGES = 180;
 
@@ -48,17 +47,18 @@ async function spentToday() {
 }
 
 async function summarize(source, prior, level, period) {
-    if (!MODEL) return null;
     const spent = await spentToday();
     if (spent.usd + RESERVE_USD > CAP_USD || spent.calls >= 25) return null;
-    const prompt = `Summarize this person's chat activity for one ${level} (${period}). Use only the supplied text. Output JSON with keys summary, topics, highlights, tone, catchphrases. Highlights are objects with index (zero-based source index) and detail. Do not infer looks, identity, health, politics, religion, sexuality or other sensitive traits. Do not include other people's names or usernames. Keep summary under 400 characters and each list under 5 items. Earlier summary: ${text(prior?.summary, 500)}. Sources: ${JSON.stringify(source).slice(0, 15000)}`;
     try {
-        const result = await ai.complete({ model: MODEL, messages: [{ role: 'user', content: prompt }], subject: process.env.CHAT_PERSON_MEMORY_BILLING_SUBJECT || '', maxTokens: 450 });
-        const cost = Number.isFinite(result.cost_usd) && result.cost_usd >= 0 ? result.cost_usd : RESERVE_USD;
-        await db.run(`INSERT INTO person_chat_memory_spend (day, spent_usd, calls) VALUES (?, ?, 1)
-            ON CONFLICT (day) DO UPDATE SET spent_usd = person_chat_memory_spend.spent_usd + excluded.spent_usd, calls = person_chat_memory_spend.calls + 1`, [new Date().toISOString().slice(0, 10), Math.max(cost, 0.000001)]);
-        const raw = String(result.text || '').replace(/^```(?:json)?\s*|\s*```$/g, '');
-        return JSON.parse(raw);
+        return await ai.structured('chat.person-memory', {
+            level, period, prior_summary: text(prior?.summary, 500), sources_text: JSON.stringify(source).slice(0, 15000),
+        }, { onRun: async (run) => {
+            const measured = Number(run.usage?.cost_usd);
+            const cost = Number.isFinite(measured) && measured >= 0 ? measured : RESERVE_USD;
+            await db.run(`INSERT INTO person_chat_memory_spend (day, spent_usd, calls) VALUES (?, ?, 1)
+                ON CONFLICT (day) DO UPDATE SET spent_usd = person_chat_memory_spend.spent_usd + excluded.spent_usd, calls = person_chat_memory_spend.calls + 1`,
+            [new Date().toISOString().slice(0, 10), Math.max(cost, 0.000001)]);
+        } });
     } catch { return null; }
 }
 

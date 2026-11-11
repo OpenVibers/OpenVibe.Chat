@@ -74,6 +74,7 @@ async function structured(workflow, input, opts = {}) {
         const run = body && (body.run || body);
         _lastProblem = problemOf(run);
         if (!run || run.status !== 'succeeded' || run.synthetic) return null;
+        if (opts.onRun) await opts.onRun(run);
         return run.output || null;
     } catch (err) {
         console.warn(`[AI] ${workflow}: ${err && err.message}`);
@@ -146,15 +147,15 @@ async function stream(workflow, input, opts = {}, onText = () => {}) {
 }
 
 /** An explicit catalogue model, billed by AI to the person named in on_behalf_of. */
-async function complete({ model, messages, subject, temperature = null, maxTokens = 2048 }) {
-    if (_complete) return _complete({ model, messages, subject, temperature, maxTokens });
+async function complete({ model, messages, subject, temperature = null }) {
+    if (_complete) return _complete({ model, messages, subject, temperature });
     if (!subject || !model) throw new Error('A person and model are required');
     if (!_tokens) ai();
     const token = await _tokens.getToken();
     const res = await fetch(`${config.ai.internalUrl}/api/v1/runs?wait=${Math.max(0, Math.floor(config.ai.waitMs))}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ workflow: 'ai.complete', input: { model, messages, max_tokens: maxTokens,
+        body: JSON.stringify({ workflow: 'ai.complete', input: { model, messages, max_tokens: 2048,
             ...(temperature == null ? {} : { temperature }) }, on_behalf_of: { type: 'user', id: subject }, options: { cache: 'none' } }),
         signal: AbortSignal.timeout(config.ai.waitMs + 10000),
     });
