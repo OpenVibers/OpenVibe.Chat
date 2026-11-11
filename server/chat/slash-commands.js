@@ -4,6 +4,7 @@ const config = require('../config');
 const { requireAuth } = require('../auth/auth');
 const serviceAuth = require('../net/service-auth');
 const ctx = require('../live-context');
+const { validate } = require('openvibe-contracts');
 const db = require('../db/database');
 const servers = require('../rooms/servers');
 const { limits } = require('../net/actor-limits');
@@ -63,7 +64,7 @@ internalRouter.post('/', serviceAuth.guard('chat.commands.register', { allowPubl
     if (!server || !(await servers.access(server, user)).manage) return res.status(403).json({ error:'Only server managers register commands', code:'commands.forbidden' });
     const command = req.body?.command || {}, name = String(command.name || '').toLowerCase(), options = command.options;
     const template = String(req.body?.response_template || '');
-    if (!/^[a-z][a-z0-9_-]{0,31}$/.test(name) || BUILT_INS.some((c) => c.name === name) || typeof command.description !== 'string' || command.description.length > 100 || !Array.isArray(options) || options.length > 25 ||
+    if (!/^[a-z][a-z0-9_-]{0,31}$/.test(name) || !validate('chat.command@1', command).valid || BUILT_INS.some((c) => c.name === name) || typeof command.description !== 'string' || command.description.length > 100 || !Array.isArray(options) || options.length > 25 ||
         options.some((o) => !/^[a-z][a-z0-9_-]{0,31}$/.test(o.name) || !['string','integer','boolean','user','channel'].includes(o.type) || typeof o.description !== 'string' || o.description.length > 100 || typeof o.required !== 'boolean') ||
         !template || template.length > 2000) return res.status(422).json({ error:'Invalid command', code:'commands.invalid' });
     try {
