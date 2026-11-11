@@ -103,7 +103,7 @@ function mountInboxPages(router, { page, viewerOf, needUser, sameSite, formLimit
         const list = mine.length
             ? `<ul class="ib-list">${mine.map((i) => `<li><a href="/inbox/${esc(i.id)}"><span class="ib-dot" style="background:${esc(i.color)}"></span><b>${esc(i.name)}</b>
 <span class="oc-muted">${i.waiting ? `${i.waiting} waiting · ` : ''}${i.open} open · ${i.role === 'owner' ? 'owner' : 'agent'}</span></a></li>`).join('')}</ul>`
-            : '<p class="oc-muted">No inboxes yet. Make one below, paste its snippet into your site, and visitors can write to you: Vibe answers first, you take over when it matters.</p>';
+            : kit.empty({ icon: 'mail', title: 'No inboxes yet', text: 'Make one below, paste its snippet into your site, and visitors can write to you: Vibe answers first, you take over when it matters.', action: { href: '#oc-new-inbox', label: 'Make an inbox', icon: 'plus' } });
         const mineServers = (await require('../rooms/servers').list(actor.user)).mine;
         const dmUnread = await require('../chat/dm').getTotalUnread(actor.user.id);
         await page(req, res, 200, {

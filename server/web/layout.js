@@ -167,7 +167,8 @@ ${o.shell ? `<link rel="stylesheet" href="${asset('chat-shell.css')}">` : ''}
 ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` : ''}
 ${o.upload ? `<link rel="stylesheet" href="${ovServe.url('ov-upload.css')}">` : ''}
 ${(o.inlineStyles || []).map((css) => `<style>${css}</style>`).join('\n')}
-${o.kit ? `<link rel="stylesheet" href="${ovServe.url('kit.css')}">\n<link rel="stylesheet" href="${ovServe.url('thread.css')}">` : ''}
+${o.kit || o.shell ? `<link rel="stylesheet" href="${ovServe.url('kit.css')}">` : ''}
+${o.kit ? `<link rel="stylesheet" href="${ovServe.url('thread.css')}">` : ''}
 ${o.app || o.appStyle ? `<link rel="stylesheet" href="${asset(o.appStyle || 'vibe.css')}">` : ''}
 ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
 ${o.partyHome ? `<link rel="stylesheet" href="${asset('party-home.css')}">` : ''}
