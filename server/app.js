@@ -181,6 +181,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     app.use('/api/v1/rooms', require('./chat/room-insight-routes'));
     // A room's memory (part 3): what the summariser keeps between summaries, for its members.
     app.use('/api/v1/rooms', require('./chat/memory-routes'));
+    app.use('/api/v1/people', require('./chat/person-memory-routes'));
     app.get('/health', (req, res) => res.json({ ok: true, service: 'chat' }));
     // Readiness in the openvibe-shared/ready shape (status ready/degraded/not_ready, named checks):
     // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
