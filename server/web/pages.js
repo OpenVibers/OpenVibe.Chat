@@ -926,7 +926,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
 <p class="oc-muted">One vote each. ${v.options.length > 1 ? `Type !1 to !${v.options.length} too.` : ''}</p>${can && can.moderate ? `<form method="post" action="/r/${esc(r.slug)}/poll/close" class="oc-inline"><input type="hidden" name="poll_id" value="${esc(v.poll_id)}"><button class="oc-pill" type="submit" name="action" value="close">Close poll</button><button class="oc-pill" type="submit" name="action" value="veto">Veto result</button></form>` : ''}</section>`;
     const roomCard = (r) => `<li class="oc-row${r.unread ? ' oc-unread' : ''}"><a href="/r/${esc(r.slug)}">${ui.initials(r.name)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(r.name)}</strong>${kindBadge(r)}${r.visibility === 'private' ? `<span class="oc-row-lock" title="Private">${IC.lock}<span class="oc-sr">private</span></span>` : ''}</span>`
         + `<span class="oc-row-sub">${esc(r.topic || `${r.members} member${r.members === 1 ? '' : 's'}`)}${r.unread ? `<span class="oc-dot" aria-label="${r.unread} new">${r.unread > 9 ? '9+' : r.unread}</span>` : ''}</span></span></a></li>`;
-    const roomMessage = (m, can, slug, me) => {
+    const roomMessage = (m, can, slug, me, emojis = null) => {
         const t = hhmm(m.created_at);
         const ai = m.ai_member_id != null;
         const agent = !!m.agent_stream;
@@ -937,7 +937,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
             ? `<span class="oc-name oc-ai-name">${esc(m.display_name || 'AI')}</span> <span class="oc-badge oc-ai" title="An AI member of this room">AI</span>`
             : `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)}`;
         // An AI member writes Markdown (lists, bold, links): vibe-md.js escapes every character first, then marks it up.
-        const text = ai ? `<div class="oc-text vb-md">${md.render(m.message)}</div>` : `<span class="oc-text">${linkify(m.message)}</span>`;
+        const text = ai ? `<div class="oc-text vb-md">${md.render(m.message)}</div>` : `<span class="oc-text">${emojis ? require('../chat/emoji-text').render(m.message, emojis, linkify, esc) : linkify(m.message)}</span>`;
         return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${m.edited_at ? ` <span class="oc-muted oc-edited">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ai ? '' : pictures.pageHtml(m.message)}${ui.messageCards(m)}${can.moderate && m.edited_at ? '<button type="button" class="ovk-btn ovk-btn--quiet oc-edits">Earlier versions</button>' : ''}${del}</li>`;
     };
     const applyRoomChange = async (room) => await roomRoutes.applyRoomChange(room);

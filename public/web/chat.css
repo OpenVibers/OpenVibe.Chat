@@ -807,3 +807,5 @@ div.oc-set-row { cursor: default; }
 .oc-agent-poll-vote small { color: var(--text-secondary, #96a7c2); white-space: nowrap; }
 .oc-kind-agent_stream { color: var(--accent, #3b82f6); border-color: color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent); }
 @media (max-width: 480px) { .oc-agent-banner, .oc-agent-poll { padding: 9px 11px; } }
+.oc-server-emoji { vertical-align: middle; object-fit: contain; }
+.oc-emoji-choices { display: flex; flex-wrap: wrap; max-height: 12rem; overflow: auto; }
