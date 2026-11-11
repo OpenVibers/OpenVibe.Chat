@@ -215,14 +215,27 @@ router.get('/:slug/messages', optionalAuth, async (req, res) => {
 router.post('/:slug/messages', requireAuth, postLimit, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     try {
-        const message = await rooms.post(room, req.user, req.body && req.body.message, {
+        const command = await require('../chat/room-slash').parse(room, req.user, req.body && req.body.message);
+        if (command.handled && !command.text) return res.json({ reply: command.reply });
+        const message = await rooms.post(room, req.user, command.handled ? command.text : req.body && req.body.message, {
             timezone: req.body && req.body.timezone,
             files: require('./files').attachmentsFromBody(req.body),
             reply_to_id: req.body && req.body.reply_to_id,
         });
         chatServer().broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
-        res.status(201).json({ message });
+        res.status(201).json({ message, ...(command.poll_id ? { poll_id: command.poll_id } : {}) });
     } catch (err) { send(res, err); }
+});
+
+router.post('/:slug/polls/:id/vote', requireAuth, postLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try { res.json(await require('../chat/room-slash').vote(room, req.user, req.params.id, req.body && req.body.option)); }
+    catch (err) { send(res, err); }
+});
+router.get('/:slug/polls/:id', optionalAuth, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try { res.json({ poll: await require('../chat/room-slash').pollView(room, req.params.id) }); }
+    catch (err) { send(res, err); }
 });
 
 // A reaction on a room message (room_message_reactions, migration 0038): the same one again takes it back. The

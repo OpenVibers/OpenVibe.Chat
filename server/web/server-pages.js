@@ -302,6 +302,7 @@ ${sheet}`,
             page: {
                 view: 'room', room: room.slug, back: `/s/${server.slug}`, kind: room.kind, pics: require('../rooms/pictures').enabled() ? require('../rooms/pictures').publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, historyMore: roomPage.more,
                 me: me ? me.id : null, moderate: rcan.moderate, post: rcan.post, role: rcan.role,
+                commandServer: config.slashCommands.enabled ? server.slug : null,
                 serverEmojiSlug: config.emotes.serverEmojiEnabled ? server.slug : null,
                 serverEmojis: serverEmojis.map((e) => ({ name: e.code, url: e.media_url })),
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: rcan.join, talk: rcan.talk } } : {}),
@@ -328,7 +329,7 @@ ${sheet}`,
 ${invitePanel}
 <span class="oc-live" id="oc-live" hidden>● live</span>
 ${isStage ? `<section class="oc-stage" aria-label="Stage"><h2>${esc(room.topic || 'Stage')}</h2><p>Stage audio uses this server voice channel. Audience members join muted.</p><div id="oc-stage-speakers">Speakers and raised hands load when the stage is live.</div></section>` : ''}
-${aiHere}${errorOf(req)}
+${aiHere}${errorOf(req)}${req.query.saved ? notice('ok', String(req.query.saved).slice(0, 200)) : ''}
 ${isVoice ? callPanel(room, rcan, me) : ''}
 <ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages in ${esc(room.name)}"><li id="oc-history-state" class="oc-muted" hidden aria-live="polite"></li>${msgs.map((m) => roomMessage(m, rcan, room.slug, me, emojiMap)).join('\n') || `<li class="oc-empty oc-muted">${isVoice ? 'The voice channel\'s chat is empty.' : `This is the start of #${esc(room.name)}.`}</li>`}</ol>
 ${composer}`,
@@ -706,7 +707,9 @@ ${errorOf(req)}${action}</section>`,
         if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/servers');
         if (room.forum_space) return res.redirect(303, `/s/${server.slug}/${room.channel_slug}`);
         req.back = `/s/${server.slug}/${room.channel_slug}`;
-        const message = await rooms.post(room, actor.user, req.body && req.body.message);
+        const command = await require('../chat/room-slash').parse(room, actor.user, req.body && req.body.message);
+        if (command.handled && !command.text) return res.redirect(303, `/s/${server.slug}/${room.channel_slug}?saved=${encodeURIComponent(command.reply)}#oc-compose`);
+        const message = await rooms.post(room, actor.user, command.handled ? command.text : req.body && req.body.message);
         require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
         res.redirect(303, `/s/${server.slug}/${room.channel_slug}#oc-compose`);
     }));

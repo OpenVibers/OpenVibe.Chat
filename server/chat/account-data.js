@@ -54,7 +54,11 @@ const EXPORTS = [
     ['conversations.json', `SELECT * FROM dm_participants WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['rooms_owned.json', `SELECT * FROM rooms WHERE (owner_subject = ANY(@s) OR owner_id = ANY(@ids)) AND server_id IS NULL ORDER BY id DESC LIMIT ${LIMIT}`],
     ['servers_owned.json', `SELECT * FROM chat_servers WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
-    ['server_memberships.json', `SELECT m.server_id, s.slug, s.name, m.role, m.roles, m.joined_at FROM chat_server_members m JOIN chat_servers s ON s.id = m.server_id WHERE m.user_id = ANY(@ids) ORDER BY m.joined_at DESC LIMIT ${LIMIT}`],
+    ['server_memberships.json', `SELECT m.server_id, s.slug, s.name, m.role, m.roles, m.nickname, m.joined_at FROM chat_server_members m JOIN chat_servers s ON s.id = m.server_id WHERE m.user_id = ANY(@ids) ORDER BY m.joined_at DESC LIMIT ${LIMIT}`],
+    ['command_polls.json', `SELECT id, room_id, question, options, created_at, closes_at FROM chat_command_polls WHERE author_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['command_poll_votes.json', `SELECT poll_id, option_index FROM chat_command_poll_votes WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
+    ['command_reminders.json', `SELECT room_id, due_at, text, delivered_at FROM chat_command_reminders WHERE user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['server_timeouts.json', `SELECT server_id, expires_at FROM chat_server_timeouts WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['stage_speaker_actions.json', `SELECT room_id, user_id, hand_raised, invited_by, updated_at FROM chat_stage_speakers WHERE user_id = ANY(@ids) OR invited_by = ANY(@ids) ORDER BY updated_at DESC LIMIT ${LIMIT}`],
     ['server_invites_made.json', `SELECT code, server_id, uses, max_uses, expires_at, revoked_at, created_at FROM chat_server_invites WHERE created_by_subject = ANY(@s) OR created_by = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['calls.json', `SELECT * FROM calls WHERE created_by_subject = ANY(@s) OR target_subject = ANY(@s) OR created_by = ANY(@ids) OR target_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
@@ -131,6 +135,10 @@ const ERASE_FIRST = [
     ['conversations', 'DELETE FROM dm_conversations WHERE id NOT IN (SELECT conversation_id FROM dm_participants)'],
     ['room_memberships', 'DELETE FROM room_members WHERE user_id = ANY(@ids)'],
     ['room_attachments', 'DELETE FROM room_attachments WHERE attached_by_subject = ANY(@s)'],
+    ['command_poll_votes', 'DELETE FROM chat_command_poll_votes WHERE user_id = ANY(@ids)'],
+    ['command_reminders', 'DELETE FROM chat_command_reminders WHERE user_id = ANY(@ids)'],
+    ['server_timeouts', 'DELETE FROM chat_server_timeouts WHERE user_id = ANY(@ids) OR actor_user_id = ANY(@ids)'],
+    [null, 'UPDATE chat_command_polls SET author_user_id = 0 WHERE author_user_id = ANY(@ids)'],
 ];
 const ERASE_AFTER_ROOMS = [
     ['stage_speaker_roles', 'DELETE FROM chat_stage_speakers WHERE user_id = ANY(@ids)'],
