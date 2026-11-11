@@ -370,6 +370,7 @@ async function _channelPass() {
 
 // ── PER-USER ─────────────────────────────────────────────────────────────────
 async function _refreshUser(uid, maxId) {
+    if (await require('./person-memory').optedOut(uid)) return false;
     const prior = await db.getChatAiSummary('user', uid, 'rolling');
     const now = Date.now();
 
@@ -636,6 +637,7 @@ async function getGlobalInsight() {
 }
 
 async function getUserInsight(userId) {
+    if (await require('./person-memory').optedOut(userId)) return null;
     const row = await db.getChatAiSummary('user', userId, 'rolling');
     return row ? _parseOverviews(row) : null;
 }

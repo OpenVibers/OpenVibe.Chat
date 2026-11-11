@@ -88,6 +88,7 @@ async function start() {
     // The chat-AI job (Live's server/ai/chat-ai.js, now Chat's): off unless CHAT_AI_ENABLED=1; it
     // writes Chat's own chat_ai_summaries/chat_timeline_events rows directly (C-04 done).
     chatAi.start();
+    require('./ai/person-memory').start();
     // Workspace rooms' queues (server/rooms/workspace.js): the OpenVibe.Actor tasks they started, followed every 10 s.
     require('./rooms/workspace').start();
     // OpenVibe's own computers for parties (server/rooms/party-pool.js): release holds that went idle and seat the
