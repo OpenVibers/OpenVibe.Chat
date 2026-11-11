@@ -47,6 +47,8 @@ t('setup and owner switch', async () => {
 });
 
 t('owner attaches their agent and members can see and ask it', async () => {
+    // The server channel page is exercised through HTTP below.
+    assert.ok(require('../server/web/server-pages').mountServerPages);
     const attached = await roomApi('POST', `/${channel}/ai-members`, owner, { actor_agent_id: AGENT });
     assert.strictEqual(attached.status, 201, attached.text);
     assert.deepStrictEqual([attached.body.name, attached.body.model, attached.body.link.service], ['Researcher', 'OpenVibe Actor', 'actor']);
@@ -55,6 +57,9 @@ t('owner attaches their agent and members can see and ask it', async () => {
     assert.strictEqual(page.status, 200);
     assert.match(html, /Agents <span class="oc-muted">1<\/span>/);
     assert.match(html, /@researcher/);
+    const settingsPage = await realFetch(`${h.base}/r/${channel}/settings`, { headers: { cookie: `ov_token=${owner.token}` } });
+    assert.strictEqual(settingsPage.status, 200);
+    assert.match(await settingsPage.text(), /Add one of your Actor agents/);
     const posted = await roomApi('POST', `/${channel}/messages`, member, { message: '@researcher summarize our plan' });
     assert.strictEqual(posted.status, 201, posted.text);
     const db = require('../server/db/database');
