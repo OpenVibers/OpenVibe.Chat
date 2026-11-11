@@ -9,11 +9,13 @@
   if (document.documentElement && document.documentElement.classList) document.documentElement.classList.add('oc-js');
   // The icons the server draws (server/web/icons.js), for controls made here: constant markup, never user text.
   var TRASH = '<svg class="oc-i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></svg>';
+  var SMILE = '<svg class="oc-i" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0"/><path d="M9 9.5h.01M15 9.5h.01"/></svg>';
   var feed = document.getElementById('oc-feed');
   var form = document.getElementById('oc-compose');
   var input = document.getElementById('oc-input');
   if (cfg.commandServer && input && form) {
-    var commandMenu = el('div', 'oc-command-menu'); commandMenu.setAttribute('role', 'listbox'); commandMenu.hidden = true;
+    var commandMenu = el('div', 'oc-command-menu'); commandMenu.setAttribute('role', 'listbox'); commandMenu.setAttribute('aria-label', 'Commands'); commandMenu.id = 'oc-command-menu'; commandMenu.hidden = true;
+    input.setAttribute('aria-controls', 'oc-command-menu');
     form.insertBefore(commandMenu, input);
     var commandTimer = 0;
     input.addEventListener('input', function () {
@@ -25,17 +27,37 @@
           .then(function (r) { return r.ok ? r.json() : { commands: [] }; }).then(function (body) {
             if (input.value !== '/' + found[1]) return;
             commandMenu.replaceChildren();
-            (body.commands || []).forEach(function (command) {
-              var button = el('button', 'ovk-btn ovk-btn--quiet', '/' + command.name + ' · ' + command.description);
-              button.type = 'button'; button.setAttribute('role', 'option');
-              button.addEventListener('click', function () { input.value = '/' + command.name + ' '; commandMenu.hidden = true; input.focus(); });
+            (body.commands || []).forEach(function (command, i) {
+              // A row: the command in the accent, what it does under it (Opus, 2026-11-11).
+              var button = el('button', 'oc-cmd');
+              button.type = 'button'; button.setAttribute('role', 'option'); button.id = 'oc-cmd-' + i;
+              button.setAttribute('aria-selected', i === 0 ? 'true' : 'false');
+              button.appendChild(el('b', '', '/' + command.name));
+              if (command.description) button.appendChild(el('span', '', command.description));
+              button.addEventListener('click', function () { input.value = '/' + command.name + ' '; commandMenu.hidden = true; input.removeAttribute('aria-activedescendant'); input.focus(); });
               commandMenu.appendChild(button);
             });
             commandMenu.hidden = !commandMenu.children.length;
+            if (!commandMenu.hidden) input.setAttribute('aria-activedescendant', 'oc-cmd-0');
           }).catch(function () { commandMenu.hidden = true; });
       }, 120);
     });
-    input.addEventListener('keydown', function (event) { if (event.key === 'Escape') commandMenu.hidden = true; });
+    // Up and down move through the commands, Enter or Tab takes the one marked, Escape closes the list.
+    input.addEventListener('keydown', function (event) {
+      if (commandMenu.hidden) return;
+      var rows = Array.prototype.slice.call(commandMenu.querySelectorAll('.oc-cmd'));
+      var at = rows.findIndex(function (r) { return r.getAttribute('aria-selected') === 'true'; });
+      if (event.key === 'Escape') { commandMenu.hidden = true; input.removeAttribute('aria-activedescendant'); return; }
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault(); event.stopImmediatePropagation();
+        var next = rows[(at + (event.key === 'ArrowDown' ? 1 : rows.length - 1)) % rows.length];
+        rows.forEach(function (r) { r.setAttribute('aria-selected', r === next ? 'true' : 'false'); });
+        input.setAttribute('aria-activedescendant', next.id); next.scrollIntoView({ block: 'nearest' });
+        return;
+      }
+      // Taken here, not sent: the composer's own Enter-to-send listener (added after this one) never sees it.
+      if ((event.key === 'Enter' || event.key === 'Tab') && rows[at]) { event.preventDefault(); event.stopImmediatePropagation(); rows[at].click(); }
+    });
   }
   var serverEmojis = new Map((Array.isArray(cfg.serverEmojis) ? cfg.serverEmojis : []).map(function (e) { return [String(e.name).toLowerCase(), e]; }));
   function textWithRoomEmoji(parent, text) {
@@ -55,24 +77,25 @@
   }
   if (cfg.serverEmojiSlug && form && input) {
     var picker = el('details', 'oc-emoji-picker');
-    var toggle = el('summary', 'ovk-btn ovk-btn--quiet', 'Emoji'); toggle.setAttribute('aria-label', 'Choose server emoji'); picker.appendChild(toggle);
+    var toggle = el('summary', 'oc-emoji-toggle'); toggle.setAttribute('aria-label', 'Choose server emoji'); toggle.title = 'Server emoji';
+    toggle.innerHTML = SMILE; picker.appendChild(toggle);
     var choices = el('div', 'oc-emoji-choices'); picker.appendChild(choices);
     function showChoices() {
       choices.replaceChildren();
       Array.from(serverEmojis.values()).forEach(function (emoji) {
-        var button = el('button', 'ovk-btn ovk-btn--quiet'); button.type = 'button'; button.title = ':' + emoji.name + ':';
-        var img = el('img', 'oc-server-emoji'); img.src = emoji.url; img.alt = ':' + emoji.name + ':'; img.width = 22; img.height = 22;
-        img.addEventListener('error', function () { this.replaceWith(document.createTextNode(this.alt)); });
-        button.appendChild(img); button.appendChild(document.createTextNode(' :' + emoji.name + ':'));
+        var button = el('button', 'oc-emoji-choice'); button.type = 'button'; button.title = ':' + emoji.name + ':'; button.setAttribute('aria-label', ':' + emoji.name + ':');
+        var img = el('img', 'oc-server-emoji'); img.src = emoji.url; img.alt = ''; img.width = 28; img.height = 28;
+        img.addEventListener('error', function () { this.replaceWith(document.createTextNode(':' + emoji.name + ':')); });
+        button.appendChild(img);
         button.addEventListener('click', function () {
           var start = input.selectionStart, end = input.selectionEnd, value = ':' + emoji.name + ':';
           input.setRangeText(value, start, end, 'end'); input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); picker.open = false;
         });
         choices.appendChild(button);
       });
-      if (!choices.children.length) choices.textContent = 'No server emoji yet.';
+      if (!choices.children.length) choices.appendChild(el('p', 'oc-emoji-none', 'No server emoji yet.'));
       else {
-        var report = el('a', 'ovk-btn ovk-btn--quiet', 'Report an emoji');
+        var report = el('a', 'oc-emoji-report', 'Report an emoji');
         report.href = 'https://openvibe.community/submissions?kind=report#submit';
         choices.appendChild(report);
       }
