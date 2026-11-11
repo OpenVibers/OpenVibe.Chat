@@ -96,7 +96,7 @@ function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat', partyPro
         // still call Chat's DM API there (openvibe.party is on the credentialed CORS list, server/app.js).
         // https://openvibe.actor: a Vibe chat draws the agent's canvas beside it (plan HO9), only the two canvas
         // GETs and only with the person's own Bearer (the Actor API's CORS route).
-        `connect-src 'self' ${wsOrigin} https://openvibe.chat https://openvibe.actor https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com`,
+        `connect-src 'self' ${wsOrigin} https://openvibe.chat https://openvibe.actor https://openvibe.network https://openvibe.quest wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com`,
         // A workspace room's shared screen: a screen share page from OpenVibe.Bot (rooms.screen_url).
         `frame-src 'self' https://openvibe.bot https://*.openvibe.link https://openvibe.network${partyProviders ? ' https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv' : ''}`,
         "frame-ancestors 'self'",
