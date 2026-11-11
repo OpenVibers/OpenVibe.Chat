@@ -60,4 +60,17 @@ t('the person can erase and opt out; the worker does not rebuild it', async () =
     assert.deepStrictEqual(await memory.read(person.id, { channelId: channel.id }), [], 'old messages remain forgotten');
 });
 
+t('withdrawn consent erases a newly built memory', async () => {
+    await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'new day', sqliteNow()]);
+    await memory.tick();
+    assert.strictEqual((await memory.read(person.id, { channelId: channel.id }))[0].message_count, 1);
+    h.consent.allowed.delete(person.subject_id);
+    require('../server/net/consent')._reset();
+    await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'withdrawn', sqliteNow()]);
+    await memory.tick();
+    assert.deepStrictEqual(await memory.read(person.id, { channelId: channel.id }), []);
+});
+
 t('close', async () => { memory.stop(); await h.close(); });

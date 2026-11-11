@@ -110,11 +110,8 @@ async function processDay(c) {
     const allowed = await consent.filterRows(messages);
     const prior = await db.get('SELECT * FROM person_chat_memory WHERE user_id = ? AND channel_user_id = ? AND level = ? AND period_start = ?', [c.user_id, c.channel_user_id, 'day', c.period_start]);
     if (!allowed.length) {
-        // Advance past messages that may not be used. A consent change begins a new window.
-        await save(c.user_id, c.channel_user_id, 'day', c.period_start,
-            { summary: prior?.summary || '', topics: json(prior?.topics), highlights: json(prior?.highlights),
-                tone: prior?.tone || '', catchphrases: json(prior?.catchphrases), people: [],
-                message_count: Number(prior?.message_count || 0), last_message_id: messages[messages.length - 1].id });
+        // A withdrawn or unverifiable consent erases every cached level and the old profile.
+        await forget(c.user_id, false);
         return;
     }
     // Mentions can name a person who opted out; strip them from the model input.
