@@ -24,34 +24,48 @@ t('registry and autocomplete use the current server', async () => {
     assert.strictEqual(listed.status, 200, listed.text);
     for (const name of ['me', 'shrug', 'nick', 'poll', 'remind']) assert.ok(listed.body.commands.some((c) => c.name === name), name);
     assert.ok(!listed.body.commands.some((c) => c.name === 'timeout'), 'member does not see moderator commands');
+    assert.strictEqual((await api('GET', '/api/chat/commands', member)).body.commands.some((c) => c.name === 'timeout'), false);
+    assert.strictEqual((await api('GET', `/api/chat/commands/autocomplete?server=${slug}&command=timeout&option=user`, member)).status, 403);
     const suggested = await api('GET', `/api/chat/commands/autocomplete?server=${slug}&command=timeout&option=user&q=commandm`, owner);
     assert.deepStrictEqual(suggested.body.choices, ['commandmember']);
 });
 
 t('an approved app registers a command only for a server it manages', async () => {
     const now = Math.floor(Date.now() / 1000);
-    const token = (user, cap) => serviceAuth.signServiceToken({
-        iss: h.ISS, sub: 'app:app_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3', actor_type: 'app',
+    const token = (user, cap, sub = 'app:app_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3') => serviceAuth.signServiceToken({
+        iss: h.ISS, sub, actor_type: sub.startsWith('agent:') ? 'agent' : 'app',
         project_id: 'prj_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3', env: 'production', aud: ['openvibe.chat'], cap,
         on_behalf_of: user.subject_id, iat: now, exp: now + 300, jti: `tok_${Math.random().toString(36).slice(2)}`,
     }, h.keys.privateKey);
-    const body = { server: slug, command: { name: 'hello', description: 'Say hello', options: [] }, response_template: 'Hello, {args}!' };
+    const body = { server: slug, command: { name: 'hello', description: 'Say hello', options: [{ name: 'style', description: 'Greeting style', type: 'string', required: false, choices: ['hi', 'hey'] }] }, response_template: 'Hello, {args}!' };
     let r = await h.http('POST', '/api/chat/commands/registered', { token: token(owner, []), body });
     assert.strictEqual(r.status, 403, r.text);
-    r = await h.http('POST', '/api/chat/commands/registered', { token: token(member, ['chat.config.manage']), body });
-    assert.strictEqual(r.status, 403, r.text);
     r = await h.http('POST', '/api/chat/commands/registered', { token: token(owner, ['chat.config.manage']), body });
+    assert.strictEqual(r.status, 403, r.text);
+    r = await h.http('POST', '/api/chat/commands/registered', { token: token(member, ['chat.commands.register']), body });
+    assert.strictEqual(r.status, 403, r.text);
+    r = await h.http('POST', '/api/chat/commands/registered', { token: token(owner, ['chat.commands.register']), body });
     assert.strictEqual(r.status, 201, r.text);
     const listed = await api('GET', `/api/chat/commands?server=${slug}`, member);
     assert.ok(listed.body.commands.some((c) => c.name === 'hello' && c.source === 'app'));
+    assert.deepStrictEqual(listed.body.commands.find((c) => c.name === 'hello').options, body.command.options);
+    assert.deepStrictEqual((await api('GET', `/api/chat/commands/autocomplete?server=${slug}&command=hello&option=style&q=he`, member)).body.choices, ['hey']);
     const sent = await api('POST', `/api/chat/rooms/${room}/messages`, member, { message: '/hello world' });
     assert.strictEqual(sent.body.message.message, 'Hello, world!');
+    const agent = token(owner, ['chat.commands.register'], 'agent:agt_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3');
+    r = await h.http('POST', '/api/chat/commands/registered', { token: agent, body: { server: slug, command: { name: 'welcome', description: 'Welcome a member', options: [] }, response_template: 'Welcome, {args}!' } });
+    assert.strictEqual(r.status, 201, r.text);
+    assert.strictEqual(r.body.command.source, 'actor');
 });
 
 t('messages, nicknames, polls, reminders and vote work as the sender', async () => {
     let r = await api('POST', `/api/chat/rooms/${room}/messages`, member, { message: '/me waves' });
     assert.strictEqual(r.status, 201, r.text);
     assert.match(r.body.message.message, /waves$/);
+    r = await api('POST', `/api/chat/rooms/${room}/messages`, member, { message: '/help' });
+    assert.strictEqual(r.status, 200, r.text);
+    assert.match(r.body.reply, /\/remind/);
+    assert.doesNotMatch(r.body.reply, /\/timeout/);
     r = await api('POST', `/api/chat/rooms/${room}/messages`, member, { message: '/nick Moon' });
     assert.deepStrictEqual([r.status, r.body.reply], [200, 'Your server nickname is Moon.']);
     r = await api('POST', `/api/chat/rooms/${room}/messages`, member, { message: '/shrug okay' });
