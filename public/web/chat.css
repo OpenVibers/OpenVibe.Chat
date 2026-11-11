@@ -638,6 +638,10 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-snip > pre { max-height: 50vh; overflow: auto; padding-right: 48px; }
 /* A header's "more" menu (a conversation's Block): a small panel under its button. */
 .oc-more { position: relative; }
+/* The room's AI overview sits in the header's tools (it wrapped onto a row of its own: .oc-more is also the grid of
+   "more" links above). Opus, 2026-11-11. */
+.oc-chan-tools .oc-more { display: inline-flex; margin: 0; grid-template-columns: none; }
+.oc-chan-tools .oc-insight-pop { width: min(340px, calc(100vw - 32px)); }
 .oc-more > summary { list-style: none; }
 .oc-more > summary::-webkit-details-marker { display: none; }
 .oc-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; padding: 6px; border-radius: 12px; border: 1px solid var(--oc-line); background: var(--oc-panel); box-shadow: 0 12px 28px rgba(0, 0, 0, .35); }
