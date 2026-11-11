@@ -344,7 +344,7 @@ only; members see names and handles, managers the set-up); the settings page man
 member can also be added by account subject: `POST /api/chat/rooms/:slug/members { subject: "usr_…" }`. Deleting an
 account keeps the ordinary AI members it added (they belong to the room) without its subject on them, and exports them.
 
-**Actor agents in server channels** (`actor_members_enabled` in Chat owner settings, or `CHAT_ACTOR_MEMBERS=1`; default off): a server manager can attach one of their own
+**Actor agents in server channels** (`actor_members_enabled` in Chat owner settings, on by default; `CHAT_ACTOR_MEMBERS=1` forces it on): a server manager can attach one of their own
 OpenVibe.Actor agents to a channel from its AI members settings. Anyone who can post in that channel can mention the
 agent; Chat starts the owner's personal agent through `actor.agent.run`, records a durable room task, and follows it
 through the existing workspace poller. The answer returns as that agent's room message. Actor applies the owner's
@@ -406,6 +406,12 @@ servers run across the top and the channel list folds away. API: `/api/chat/serv
 delete, join `{ invite? }`, leave, members, channels, invites, `GET /invites/:code`). Deleting an account removes its
 memberships; a server it owned stays without an owner while anyone else is in it, and goes with its channels when
 nobody is.
+
+Forum channels are available by default for a server manager who can connect a Community forum they moderate;
+the owner can disable them with `forum_channels_enabled`. Slash commands and custom server emoji are available by
+default and can be disabled with `CHAT_SLASH_COMMANDS_ENABLED=0` and `CHAT_SERVER_EMOJI_ENABLED=0`. Stage channel
+controls stay behind `stage_channels_enabled` until the separate Chat calls cutover in `docs/calls-cutover.md` is
+complete; creating a stage before that cutover would give its audience no audio.
 
 **Pictures** (`server/rooms/pictures.js`; the owner's "files and pics" for Chat, through OpenVibe.Pics). A person who
 may post sends a picture from the room's or channel's "Add a picture" form (it works without JavaScript; with it, the

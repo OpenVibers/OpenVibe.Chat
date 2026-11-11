@@ -40,10 +40,13 @@ t('setup and owner switch', async () => {
     channel = (await serverApi('GET', '/build-club', owner)).body.channels[0].room;
     assert.strictEqual((await serverApi('POST', '/build-club/join', member)).status, 200);
     const config = require('../server/config');
+    const settings = require('../server/settings');
+    const previous = settings.current();
     config.actor.members = false;
+    settings.activate({ value: (key, _env, fallback) => key === 'actor_members_enabled' ? false : fallback });
     try {
         assert.strictEqual((await roomApi('POST', `/${channel}/ai-members`, owner, { actor_agent_id: AGENT })).status, 403);
-    } finally { config.actor.members = true; }
+    } finally { config.actor.members = true; settings.activate(previous); }
 });
 
 t('owner attaches their agent and members can see and ask it', async () => {

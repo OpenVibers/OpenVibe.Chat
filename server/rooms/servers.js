@@ -167,7 +167,7 @@ async function insertChannel(server, user, { name, kind, topic = null, position 
     if (wordFilter.check(n).safe === false) fail(422, 'servers.channel_name_filtered', 'That channel name is not allowed');
     const roomKind = CHANNEL_KINDS[kind];
     if (!roomKind) fail(422, 'servers.channel_kind', 'A channel is text, voice, forum or stage');
-    if (kind === 'forum' && require('../settings').value('forum_channels_enabled', null, false) !== true) fail(403, 'servers.forum_disabled', 'Forum channels are not enabled');
+    if (kind === 'forum' && require('../settings').value('forum_channels_enabled', null, true) !== true) fail(403, 'servers.forum_disabled', 'Forum channels are not enabled');
     if (kind === 'forum' && !require('./community-forum').slugOf(community_space)) fail(422, 'servers.forum_space', 'Connect a valid Community forum address');
     if (kind === 'stage' && require('../settings').value('stage_channels_enabled', null, false) !== true) fail(403, 'servers.stage_disabled', 'Stage channels are not enabled');
     const count = Number((await db.get('SELECT COUNT(*) AS n FROM rooms WHERE server_id = ? AND archived_at IS NULL', [server.id]) || {}).n) || 0;

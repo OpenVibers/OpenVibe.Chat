@@ -57,7 +57,7 @@ class AiMemberError extends Error { constructor(status, code, message) { super(m
 const fail = (status, code, message) => { throw new AiMemberError(status, code, message); };
 
 const enabled = () => Boolean(config.ai.members && config.oauth.clientSecret);
-const actorMembersEnabled = () => config.actor.members || require('../settings').value('actor_members_enabled', null, false) === true;
+const actorMembersEnabled = () => config.actor.members || require('../settings').value('actor_members_enabled', null, true) === true;
 
 async function list(room) {
     return await db.all('SELECT * FROM room_ai_members WHERE room_id = ? ORDER BY id', [room.id]);

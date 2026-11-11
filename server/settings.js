@@ -39,7 +39,7 @@ const SCHEMA = Object.freeze({
     additionalProperties: false,
     properties: {
         forum_channels_enabled: {
-            type: 'boolean', title: 'Forum channels', 'x-group': 'Channels', default: false,
+            type: 'boolean', title: 'Forum channels', 'x-group': 'Channels', default: true,
             description: 'Allow server owners to connect channels to Community forums.',
             'x-required-for': 'Community backed forum channels',
             'x-owner-input': { group: 'voices', unlocks: 'Forum channels backed by Community discussions and the shared search feed.', get_it_at: 'https://openvibe.community', get_it_how: 'This is a Chat feature switch. Enable it to let server owners connect forums they moderate.' },
@@ -51,7 +51,7 @@ const SCHEMA = Object.freeze({
             'x-owner-input': { group: 'voices', unlocks: 'Stage channel controls in Chat servers using existing voice rooms.', get_it_at: 'https://openvibe.chat', get_it_how: 'This is a Chat feature switch. Enable it to let server owners create stage channels.' },
         },
         actor_members_enabled: {
-            type: 'boolean', title: 'Actor agents in channels', 'x-group': 'Channels', default: false,
+            type: 'boolean', title: 'Actor agents in channels', 'x-group': 'Channels', default: true,
             description: 'Allow server managers to attach their own Actor agents to channels. Members can ask them there; the agent owner pays from their Actor budget.',
             'x-required-for': 'Actor agents as channel members',
             'x-owner-input': { group: 'voices', unlocks: 'An owner controlled Actor agent can answer in a server channel.', get_it_at: 'https://openvibe.chat', get_it_how: 'Enable this Chat switch after the Actor read delegation and Network grant are deployed.' },
