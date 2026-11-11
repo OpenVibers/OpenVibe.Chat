@@ -293,6 +293,8 @@ ${sheet}`,
         const canonicalPath = req.params.channel ? back : `/s/${server.slug}`;
         const insight = room ? await require('../chat/room-insight').room(room, { enabled: rooms.insightOn(room) }).catch(() => null) : null;
         const insightHtml = insight ? insightBlock(insight) : '';
+        const serverEmojis = config.emotes.serverEmojiEnabled ? await require('../db/database').all('SELECT code, media_url FROM emotes WHERE server_id = ? ORDER BY lower(code)', [server.id]) : [];
+        const emojiMap = new Map(serverEmojis.map((e) => [e.code.toLowerCase(), { url: e.media_url }]));
         await page(req, res, 200, {
             actor, shell: true, footer: 'none', title: `${isVoice ? (isStage ? 'Stage · ' : '') : '#'}${room.name} · ${server.name}`, path: canonicalPath, active: 'servers', upload: require('../rooms/pictures').enabled(), scripts: require('../rooms/pictures').enabled() ? ['picture-upload.js'] : [],
             robots: server.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady,
@@ -300,6 +302,8 @@ ${sheet}`,
             page: {
                 view: 'room', room: room.slug, back: `/s/${server.slug}`, kind: room.kind, pics: require('../rooms/pictures').enabled() ? require('../rooms/pictures').publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, historyMore: roomPage.more,
                 me: me ? me.id : null, moderate: rcan.moderate, post: rcan.post, role: rcan.role,
+                serverEmojiSlug: config.emotes.serverEmojiEnabled ? server.slug : null,
+                serverEmojis: serverEmojis.map((e) => ({ name: e.code, url: e.media_url })),
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: rcan.join, talk: rcan.talk } } : {}),
             },
             body: shell.shell({
@@ -326,7 +330,7 @@ ${invitePanel}
 ${isStage ? `<section class="oc-stage" aria-label="Stage"><h2>${esc(room.topic || 'Stage')}</h2><p>Stage audio uses this server voice channel. Audience members join muted.</p><div id="oc-stage-speakers">Speakers and raised hands load when the stage is live.</div></section>` : ''}
 ${aiHere}${errorOf(req)}
 ${isVoice ? callPanel(room, rcan, me) : ''}
-<ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages in ${esc(room.name)}"><li id="oc-history-state" class="oc-muted" hidden aria-live="polite"></li>${msgs.map((m) => roomMessage(m, rcan, room.slug, me)).join('\n') || `<li class="oc-empty oc-muted">${isVoice ? 'The voice channel\'s chat is empty.' : `This is the start of #${esc(room.name)}.`}</li>`}</ol>
+<ol class="oc-feed oc-srv-feed" id="oc-feed" aria-live="polite" aria-label="Messages in ${esc(room.name)}"><li id="oc-history-state" class="oc-muted" hidden aria-live="polite"></li>${msgs.map((m) => roomMessage(m, rcan, room.slug, me, emojiMap)).join('\n') || `<li class="oc-empty oc-muted">${isVoice ? 'The voice channel\'s chat is empty.' : `This is the start of #${esc(room.name)}.`}</li>`}</ol>
 ${composer}`,
                 mainLabel: `${isVoice ? (isStage ? 'Stage: ' : '') : '#'}${room.name}`,
                 members: shell.membersColumn({ groups: roleGroups }),
@@ -481,6 +485,7 @@ ${roles.length ? `<fieldset class="oc-set oc-role-set"><legend id="oc-onboard-ro
         const canInvite = can.manage || server.visibility === 'public';
         const invites = canInvite ? await servers.invites(server) : [];
         const selfRoles = servers.selfRolesOf(server);
+        const emojiRows = config.emotes.serverEmojiEnabled ? await require('../db/database').all('SELECT id, code, media_url FROM emotes WHERE server_id = ? ORDER BY lower(code)', [server.id]) : [];
         const myRank = can.staff ? -1 : servers.RANK[can.role];
         // The side column: the server's channels, with the people in its voice channels, and the you-bar.
         const categories = [];
@@ -524,7 +529,7 @@ ${can.manage && c.kind !== 'voice' && require('../rooms/ai-members').enabled() ?
         const inviteRow = (i) => `<li><code class="oc-invite-url">${esc(`${site}/join/${i.code}`)}</code> <span class="oc-muted">${i.uses} use${i.uses === 1 ? '' : 's'}${i.max_uses != null ? ` of ${i.max_uses}` : ''}${i.expires_at ? ` · until <time datetime="${esc(i.expires_at)}">${esc(i.expires_at.slice(0, 16).replace('T', ' '))} UTC</time>` : ' · never expires'}</span>
 <form class="oc-inline" method="post" action="/s/${esc(server.slug)}/invites/${esc(i.code)}/revoke"><button type="submit" class="oc-link">Revoke</button></form></li>`;
         await page(req, res, 200, {
-            actor, title: `${server.name}: settings`, path: `/s/${server.slug}/settings`, active: 'servers', robots: 'noindex, nofollow', shell: true, footer: 'none',
+            actor, title: `${server.name}: settings`, path: `/s/${server.slug}/settings`, active: 'servers', robots: 'noindex, nofollow', shell: true, footer: 'none', upload: config.emotes.serverEmojiEnabled, scripts: config.emotes.serverEmojiEnabled ? ['server-emojis.js'] : [],
             body: shell.shell({
                 rail: shell.rail({ dmUnread, servers: railServers.map((sv) => ({ slug: sv.slug, name: sv.name, unread: sv.unread, active: sv.slug === server.slug })) }),
                 side: shell.sideServer({
@@ -542,6 +547,7 @@ ${can.manage ? `<h2>Overview</h2><form class="oc-form" method="post" action="/s/
 <p><button type="submit">Save</button></p></form>
 <h2>Channels</h2><ul class="oc-members oc-chan-rows">${chans.map(chanRow).join('')}</ul>
 <form class="oc-new" method="post" action="/s/${esc(server.slug)}/channels"><label for="oc-chan-new">Add a channel</label> <input id="oc-chan-new" name="name" required maxlength="40" placeholder="announcements"> <select name="kind" aria-label="Kind of channel"><option value="text">Text</option><option value="voice">Voice</option>${require('../settings').value('forum_channels_enabled', null, false) === true ? '<option value="forum">Forum</option>' : ''}${require('../settings').value('stage_channels_enabled', null, false) === true ? '<option value="stage">Stage</option>' : ''}</select>${require('../settings').value('forum_channels_enabled', null, false) === true ? '<label>Community forum slug <input name="community_space" maxlength="40" placeholder="my-forum"></label>' : ''} <button type="submit">Add</button></form>
+${config.emotes.serverEmojiEnabled ? `<section id="oc-server-emojis" data-server-emoji-manager="${esc(server.slug)}"><h2>Emoji</h2><p class="oc-muted">${emojiRows.length} of 50 used. PNG, JPEG, GIF or WebP, up to 512 KB.</p><ul class="oc-members">${emojiRows.map((e) => `<li><img class="oc-server-emoji" src="${esc(e.media_url || '')}" alt=":${esc(e.code)}:" width="22" height="22"> <code>:${esc(e.code)}:</code> <button type="button" class="ovk-btn ovk-btn--quiet" data-emoji-remove="${Number(e.id)}">Remove</button></li>`).join('')}</ul><form data-emoji-upload><label>Name <input name="name" required pattern="[A-Za-z0-9_]{2,32}" maxlength="32"></label><div data-emoji-picker></div> <button class="ovk-btn ovk-btn--primary" type="submit">Add emoji</button></form><p role="status" data-emoji-status></p></section>` : ''}
 <section class="oc-set" id="oc-onboarding" aria-labelledby="oc-onb-h"><h2 id="oc-onb-h">Onboarding</h2>
 <p class="oc-muted">People who join read the rules, if there are any, then pick their roles.</p>
 <form class="oc-form" method="post" action="/s/${esc(server.slug)}/onboarding">
