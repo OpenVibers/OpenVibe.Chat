@@ -54,6 +54,7 @@ t('global chat reads without JavaScript; signing in shows the composer', async (
     assert.ok(!/id="oc-compose"/.test(r.text), 'no composer for a guest');
     const me = await req('GET', '/', { headers: cookie(alice) });
     assert.match(me.text, /id="oc-compose"/);
+    assert.match(me.text, /data-ov-guide="chat.message"/, 'public composer exposes its quest control');
     // Under the room, what openvibe.chat does: six cards, each a place to go, with the showcase stylesheet. A guest's
     // messages and settings cards go through sign-in; a signed-in person's go straight there.
     const what = (/<section class="sc-sec" id="what-chat-does"[\s\S]*?<\/section>/.exec(r.text) || [''])[0];

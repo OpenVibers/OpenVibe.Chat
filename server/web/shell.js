@@ -227,10 +227,11 @@ ${youBar(o.you || {})}`;
  * o: { action, label, placeholder, max, add: the panel Add opens (pictureComposer's), hint }
  */
 function composer(o = {}) {
+    const questHook = o.action === '/send' ? ' data-ov-guide="chat.message"' : '';
     const add = o.add || '';
     return `<div class="oc-dock${add ? ' has-add' : ''}"><form class="oc-compose" method="post" action="${esc(o.action || '')}" id="oc-compose"><label for="oc-input" class="oc-sr">${esc(o.label || 'Message')}</label>
 <div class="oc-compose-box"><div class="oc-compose-tray" data-oc-tray hidden></div>
-<div class="oc-compose-row">${add ? `<button type="button" class="oc-compose-add" data-oc-attach aria-expanded="false" aria-controls="oc-add-panel" aria-label="Add a picture" title="Add a picture">${IC.plus}</button>` : ''}<textarea id="oc-input" name="message" maxlength="${Number(o.max) || 2000}" rows="1" required placeholder="${esc(o.placeholder || 'Write a message')}"></textarea><button type="submit" class="oc-send" aria-label="Send" title="Send">${IC.send}</button></div></div></form>${add}</div>`;
+<div class="oc-compose-row">${add ? `<button type="button" class="oc-compose-add" data-oc-attach aria-expanded="false" aria-controls="oc-add-panel" aria-label="Add a picture" title="Add a picture">${IC.plus}</button>` : ''}<textarea id="oc-input" name="message" maxlength="${Number(o.max) || 2000}" rows="1" required placeholder="${esc(o.placeholder || 'Write a message')}"></textarea><button type="submit" class="oc-send"${questHook} aria-label="Send" title="Send">${IC.send}</button></div></div></form>${add}</div>`;
 }
 
 /** The you-bar: your mark, your status, mute, deafen and settings (the foot of the side column). */
