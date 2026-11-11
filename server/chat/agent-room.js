@@ -113,7 +113,7 @@ function guard(capability) {
 
 /** The Co-pilot room of an agent stream, by its id, or null. */
 async function roomByAgentId(agentRoomId) {
-    return await db.get("SELECT * FROM rooms WHERE lower(slug) = ? AND kind = 'agent_stream' AND archived_at IS NULL", [String(agentRoomId || '').toLowerCase()]) || null;
+    return await db.get("SELECT * FROM rooms WHERE slug = ? AND kind = 'agent_stream' AND archived_at IS NULL", [String(agentRoomId || '').toLowerCase()]) || null;
 }
 
 /**
