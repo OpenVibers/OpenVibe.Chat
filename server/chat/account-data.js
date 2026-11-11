@@ -45,6 +45,8 @@ async function liveIds(d, subjects) {
 const LIMIT = ROW_LIMIT + 1;
 const EXPORTS = [
     ['chat_messages.json', `SELECT * FROM chat_messages WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['person_chat_memory.json', `SELECT * FROM person_chat_memory WHERE user_id = ANY(@ids) ORDER BY period_start DESC LIMIT ${LIMIT}`],
+    ['person_chat_memory_settings.json', `SELECT * FROM person_chat_memory_settings WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['room_messages.json', `SELECT * FROM room_messages WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['vibe_canvases.json', `SELECT c.* FROM vibe_canvases c JOIN rooms r ON r.id = c.room_id WHERE r.owner_subject = ANY(@s) OR r.owner_id = ANY(@ids) ORDER BY c.updated_at DESC LIMIT ${LIMIT}`],
     ['vibe_canvas_versions.json', `SELECT v.* FROM vibe_canvas_versions v JOIN vibe_canvases c ON c.id = v.canvas_id JOIN rooms r ON r.id = c.room_id WHERE r.owner_subject = ANY(@s) OR r.owner_id = ANY(@ids) ORDER BY v.created_at DESC LIMIT ${LIMIT}`],
@@ -147,6 +149,8 @@ const ERASE_AFTER_ROOMS = [
     // A person's own summaries and timeline are keyed by their Live id (scope 'user').
     ['ai_summaries', "DELETE FROM chat_ai_summaries WHERE scope = 'user' AND subject_id = ANY(@ids)"],
     ['timeline', "DELETE FROM chat_timeline_events WHERE scope = 'user' AND subject_id = ANY(@ids)"],
+    ['person_chat_memory', 'DELETE FROM person_chat_memory WHERE user_id = ANY(@ids)'],
+    ['person_chat_memory_settings', 'DELETE FROM person_chat_memory_settings WHERE user_id = ANY(@ids)'],
     ['tags', 'DELETE FROM user_tags WHERE user_id = ANY(@ids)'],
     ['moderator_roles', 'DELETE FROM channel_moderators WHERE user_id = ANY(@ids)'],
     ['pending_messages', 'DELETE FROM pending_ip_messages WHERE user_id = ANY(@ids)'],

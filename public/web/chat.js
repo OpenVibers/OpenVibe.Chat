@@ -37,6 +37,57 @@
     });
     input.addEventListener('keydown', function (event) { if (event.key === 'Escape') commandMenu.hidden = true; });
   }
+  var serverEmojis = new Map((Array.isArray(cfg.serverEmojis) ? cfg.serverEmojis : []).map(function (e) { return [String(e.name).toLowerCase(), e]; }));
+  function textWithRoomEmoji(parent, text) {
+    if (!cfg.serverEmojiSlug) { textWithLinks(parent, text); return; }
+    var raw = String(text || ''), re = /:([a-z0-9_]{2,32}):/gi, last = 0, m;
+    while ((m = re.exec(raw))) {
+      textWithLinks(parent, raw.slice(last, m.index));
+      var emoji = serverEmojis.get(m[1].toLowerCase());
+      if (emoji && /^https:\/\//.test(String(emoji.url || ''))) {
+        var img = el('img', 'oc-server-emoji'); img.src = emoji.url; img.alt = m[0]; img.width = 22; img.height = 22; img.loading = 'lazy';
+        img.addEventListener('error', function () { this.replaceWith(document.createTextNode(this.alt)); });
+        parent.appendChild(img);
+      } else parent.appendChild(document.createTextNode(m[0]));
+      last = re.lastIndex;
+    }
+    textWithLinks(parent, raw.slice(last));
+  }
+  if (cfg.serverEmojiSlug && form && input) {
+    var picker = el('details', 'oc-emoji-picker');
+    var toggle = el('summary', 'ovk-btn ovk-btn--quiet', 'Emoji'); toggle.setAttribute('aria-label', 'Choose server emoji'); picker.appendChild(toggle);
+    var choices = el('div', 'oc-emoji-choices'); picker.appendChild(choices);
+    function showChoices() {
+      choices.replaceChildren();
+      Array.from(serverEmojis.values()).forEach(function (emoji) {
+        var button = el('button', 'ovk-btn ovk-btn--quiet'); button.type = 'button'; button.title = ':' + emoji.name + ':';
+        var img = el('img', 'oc-server-emoji'); img.src = emoji.url; img.alt = ':' + emoji.name + ':'; img.width = 22; img.height = 22;
+        img.addEventListener('error', function () { this.replaceWith(document.createTextNode(this.alt)); });
+        button.appendChild(img); button.appendChild(document.createTextNode(' :' + emoji.name + ':'));
+        button.addEventListener('click', function () {
+          var start = input.selectionStart, end = input.selectionEnd, value = ':' + emoji.name + ':';
+          input.setRangeText(value, start, end, 'end'); input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); picker.open = false;
+        });
+        choices.appendChild(button);
+      });
+      if (!choices.children.length) choices.textContent = 'No server emoji yet.';
+      else {
+        var report = el('a', 'ovk-btn ovk-btn--quiet', 'Report an emoji');
+        report.href = 'https://openvibe.community/submissions?kind=report#submit';
+        choices.appendChild(report);
+      }
+    }
+    showChoices();
+    picker.addEventListener('toggle', function () {
+      if (!picker.open) return;
+      fetch('/api/chat/servers/' + encodeURIComponent(cfg.serverEmojiSlug) + '/emojis', { credentials: 'same-origin' })
+        .then(function (r) { return r.ok ? r.json() : null; }).then(function (body) {
+          if (!body || !Array.isArray(body.emojis)) return;
+          serverEmojis = new Map(body.emojis.map(function (e) { return [String(e.name).toLowerCase(), e]; })); showChoices();
+        }).catch(function () {});
+    });
+    form.insertBefore(picker, input);
+  }
   var latest = Number(cfg.latest) || 0;
   var LIVE = 'https://openvibe.live';
   var viewToggle = document.getElementById('oc-view-toggle');
@@ -234,7 +285,7 @@
     var li = feed.querySelector('[data-id="' + Number(id) + '"]');
     if (!li) return;
     var t = li.querySelector('.oc-text, .oc-bubble');
-    if (t) { t.textContent = ''; textWithLinks(t, m.message); }
+    if (t) { t.textContent = ''; if (cfg.view === 'room') textWithRoomEmoji(t, m.message); else textWithLinks(t, m.message); }
     var mark = li.querySelector('.oc-edited');
     if (!mark) { mark = el('span', 'oc-muted oc-edited'); if (t) t.insertAdjacentElement('afterend', mark); else li.appendChild(mark); }
     mark.textContent = ' edited · ' + clock(m.edited_at).textContent;
@@ -512,7 +563,7 @@
     // An AI member writes Markdown: rendered by VibeMarkdown, which escapes every character first (as the server does).
     var t;
     if (ai && window.VibeMarkdown) { t = el('div', 'oc-text vb-md'); t.innerHTML = window.VibeMarkdown.render(m.message); }
-    else { t = el('span', 'oc-text'); textWithLinks(t, m.message); }
+    else { t = el('span', 'oc-text'); textWithRoomEmoji(t, m.message); }
     li.appendChild(t);
     if (m.edited_at) { li.appendChild(document.createTextNode(' ')); li.appendChild(el('span', 'oc-muted oc-edited', 'edited · ' + clock(m.edited_at).textContent)); }
     if (cfg.moderate && m.edited_at) { var versions = el('button', 'ovk-btn ovk-btn--quiet oc-edits', 'Earlier versions'); versions.type = 'button'; li.appendChild(versions); }
