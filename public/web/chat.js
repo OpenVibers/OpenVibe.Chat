@@ -46,6 +46,11 @@
         choices.appendChild(button);
       });
       if (!choices.children.length) choices.textContent = 'No server emoji yet.';
+      else {
+        var report = el('a', 'ovk-btn ovk-btn--quiet', 'Report an emoji');
+        report.href = 'https://openvibe.community/submissions?kind=report#submit';
+        choices.appendChild(report);
+      }
     }
     showChoices();
     picker.addEventListener('toggle', function () {
