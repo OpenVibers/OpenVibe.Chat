@@ -56,7 +56,9 @@ router.get('/autocomplete', requireAuth, readLimit, async (req,res) => {
     res.json({ choices: (option?.choices || []).filter(c => c.toLowerCase().includes(query)).slice(0,25) });
 });
 const internalRouter = express.Router();
-internalRouter.post('/', serviceAuth.guard('chat.commands.register', { allowPublic: true }), writeLimit, async (req, res) => {
+// Command registration is server configuration. Use the released config grant until
+// the dedicated command grant in the next Contracts release is available to Chat.
+internalRouter.post('/', serviceAuth.guard('chat.config.manage', { allowPublic: true }), writeLimit, async (req, res) => {
     if (!config.slashCommands.enabled) return res.status(404).json({ error:'Not found', code:'commands.disabled' });
     const principal = req.principal, user = principal.person && await ctx.getUserBySubject(principal.person);
     if (!user || user.is_banned || !/^(app|agent):/.test(principal.sub)) return res.status(403).json({ error:'A person and an approved app or agent grant are required', code:'commands.grant_required' });
@@ -73,7 +75,7 @@ internalRouter.post('/', serviceAuth.guard('chat.commands.register', { allowPubl
         res.status(201).json({ command: { name, description: command.description, options, source, application_id: principal.sub } });
     } catch (err) { res.status(409).json({ error:'Command name is already used', code:'commands.name_taken' }); }
 });
-internalRouter.delete('/:name', serviceAuth.guard('chat.commands.register', { allowPublic: true }), writeLimit, async (req, res) => {
+internalRouter.delete('/:name', serviceAuth.guard('chat.config.manage', { allowPublic: true }), writeLimit, async (req, res) => {
     if (!config.slashCommands.enabled) return res.status(404).json({ error:'Not found', code:'commands.disabled' });
     const principal = req.principal, user = principal.person && await ctx.getUserBySubject(principal.person);
     const server = await servers.bySlug(req.query.server);

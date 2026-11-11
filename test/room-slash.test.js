@@ -38,9 +38,9 @@ t('an approved app registers a command only for a server it manages', async () =
     const body = { server: slug, command: { name: 'hello', description: 'Say hello', options: [] }, response_template: 'Hello, {args}!' };
     let r = await h.http('POST', '/api/chat/commands/registered', { token: token(owner, []), body });
     assert.strictEqual(r.status, 403, r.text);
-    r = await h.http('POST', '/api/chat/commands/registered', { token: token(member, ['chat.commands.register']), body });
+    r = await h.http('POST', '/api/chat/commands/registered', { token: token(member, ['chat.config.manage']), body });
     assert.strictEqual(r.status, 403, r.text);
-    r = await h.http('POST', '/api/chat/commands/registered', { token: token(owner, ['chat.commands.register']), body });
+    r = await h.http('POST', '/api/chat/commands/registered', { token: token(owner, ['chat.config.manage']), body });
     assert.strictEqual(r.status, 201, r.text);
     const listed = await api('GET', `/api/chat/commands?server=${slug}`, member);
     assert.ok(listed.body.commands.some((c) => c.name === 'hello' && c.source === 'app'));
