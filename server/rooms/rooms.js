@@ -282,13 +282,13 @@ async function announceDeleted(room, ids) {
     }
 }
 
-async function announceEdited(room, user, id, message, editedAt) {
+async function announceEdited(room, user, id, message, editedAt, card) {
     if (room.visibility !== 'public') return;
     await require('../events/service-outbox').emit({
         event_type: 'chat.room.message.edited', visibility: 'public',
         actorSubject: user.subject_id || null,
         subject: { type: 'chat_room_message', id: String(id) },
-        payload: { message_id: id, room: room.slug, user_subject: user.subject_id || null, text: message, edited_at: editedAt },
+        payload: { message_id: id, room: room.slug, user_subject: user.subject_id || null, text: message, edited_at: editedAt, card: card || null },
     });
 }
 
@@ -311,7 +311,7 @@ async function editMessage(room, user, messageId, text, { now = Date.now() } = {
         const changed = await db.run(`UPDATE room_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', COALESCE(edited_at, created_at))), message = ?, card = ?, edited_at = ? WHERE id = ? AND is_deleted = 0`, [message, linkCards.toJson(card), editedAt, m.id]);
         if (!changed.changes) fail(404, 'rooms.no_message', 'No such message');
         await linkPreviews.replaceForEdit('room', Number(m.id));
-        await announceEdited(room, user, Number(m.id), message, editedAt);
+        await announceEdited(room, user, Number(m.id), message, editedAt, card);
     });
     if (pending) linkCards.fillLater('room_messages', Number(m.id), pending, message);
     const updated = await messageById(m.id);

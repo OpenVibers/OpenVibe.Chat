@@ -238,13 +238,21 @@ async function editMessage(conversationId, messageId, senderId, text, { now = Da
         if (!changed.changes) { const e = new Error('No such message'); e.status = 404; throw e; }
         await linkPreviews.replaceForEdit('dm', Number(messageId));
         const participants = await db.all('SELECT user_id, subject_id FROM dm_participants WHERE conversation_id = ?', [conversationId]);
-        await outbox.emit({ event_type: 'chat.dm.edited', visibility: 'subject', actorSubject: await db.subjectFor(senderId), subject: { type: 'dm_message', id: String(messageId) }, payload: { message_id: Number(messageId), conversation_id: Number(conversationId), text: body, edited_at: editedAt, participants: await Promise.all(participants.map(async p => ({ user_id: p.user_id, subject: p.subject_id || await db.subjectFor(p.user_id) }))) } });
+        const senderSubject = await db.subjectFor(senderId);
+        for (const participant of participants) {
+            const subject = participant.subject_id || await db.subjectFor(participant.user_id);
+            if (!subject) continue;
+            await outbox.emit({ event_type: 'chat.dm.edited', visibility: 'subject', subject: { type: 'user', id: subject }, payload: { message_id: Number(messageId), conversation_id: Number(conversationId), text: body, edited_at: editedAt, sender_subject: senderSubject, card: card || null } });
+        }
         return db.get('SELECT * FROM dm_messages WHERE id = ?', [messageId]);
     });
     updated.card = card; updated.edited_at = editedAt;
     delete updated.edit_history;
     if (pending) linkCards.fillLater('dm_messages', Number(messageId), pending, body);
-    if (await previewSettings.allowedIn(conversationId)) linkPreviews.schedule({ scope: 'dm', messageId: Number(messageId), text: body });
+    if (await previewSettings.allowedIn(conversationId)) linkPreviews.schedule({ scope: 'dm', messageId: Number(messageId), text: body, onReady: async (embeds) => {
+        const participants = await getParticipants(conversationId);
+        for (const participant of participants) await require('./chat-server').sendDm(participant.id, { type: 'dm_embeds', conversation_id: Number(conversationId), id: Number(messageId), embeds });
+    } });
     return updated;
 }
 

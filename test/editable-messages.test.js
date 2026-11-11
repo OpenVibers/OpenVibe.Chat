@@ -55,6 +55,9 @@ t('DM store: participant delivery, history privacy and window', async () => {
     assert.strictEqual(edited.status, 200, edited.text);
     assert.strictEqual((await ws.next((m) => m.type === 'dm_edited' && m.message.id === id)).message.message, 'second dm');
     assert.strictEqual((await event('chat.dm.edited', id)).payload.text, 'second dm');
+    const privateEvents = (await h.db.all("SELECT envelope FROM service_outbox WHERE envelope->>'event_type' = 'chat.dm.edited'")).map((r) => r.envelope).filter((e) => e.payload.message_id === id);
+    assert.deepStrictEqual(privateEvents.map((e) => e.subject.id).sort(), [ann.subject_id, bob.subject_id].sort(), 'one subject event for each participant');
+    assert.ok(privateEvents.every((e) => e.visibility === 'subject' && e.subject.type === 'user'));
     const list = await dm('GET', `/conversations/${conv}/messages`, bob);
     assert.strictEqual(list.body.messages[0].message, 'second dm');
     assert.ok(!('edit_history' in list.body.messages[0]));

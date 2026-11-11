@@ -407,7 +407,7 @@
     function connectDm() {
       var dmSocket = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
       dmSocket.onopen = function () { dmSocket.send(JSON.stringify({ type: 'join', token: sessionToken() })); };
-      dmSocket.onmessage = function (ev) { var m; try { m = JSON.parse(ev.data); } catch (_) { return; } if (m.type === 'dm_edited' && Number(m.conversation_id) === Number(cfg.conversation) && m.message) applyEdit(m.message.id, m.message); };
+      dmSocket.onmessage = function (ev) { var m; try { m = JSON.parse(ev.data); } catch (_) { return; } if (Number(m.conversation_id) !== Number(cfg.conversation)) return; if (m.type === 'dm_edited' && m.message) applyEdit(m.message.id, m.message); else if (m.type === 'dm_embeds') updateEmbeds(m.id, m.embeds); };
       dmSocket.onclose = function () { setTimeout(connectDm, 3000); };
     }
     connectDm();
