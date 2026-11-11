@@ -37,7 +37,9 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
-    "@electric-sql/pglite-socket": "0.2.11"
+    "@electric-sql/pglite-socket": "0.2.11",
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@ffprobe-installer/ffprobe": "^2.1.2"
   },
   "engines": {
     "node": ">=22.0.0"
