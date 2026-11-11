@@ -379,6 +379,14 @@ async function _refreshUser(uid, maxId) {
     if (!dayRows.length) dayRows = await db.getChatMessagesForAi({ userId: uid, order: 'desc', limit: 80 });
     if (!dayRows.length) return false;
 
+    // A personal profile is still AI training use: respect the same Network consent as the shared
+    // summaries, and erase the cached profile if consent was withdrawn (or cannot be verified).
+    dayRows = await consent.filterRows(dayRows);
+    if (!dayRows.length) {
+        await db.deleteChatAiSubjectMemory(uid);
+        return false;
+    }
+
     const uname = dayRows[dayRows.length - 1].username || `user#${uid}`;
     const priorMemory = prior ? (prior.memory_json || '') : '';
     const totalSeen = (prior ? (prior.message_count || 0) : 0);
@@ -643,7 +651,7 @@ async function getAnonInsight(anonId) {
 }
 
 module.exports = {
-    start, stop, _tick, _msgData, _topics, _people, _refreshRoom, _refreshChannel, WORKFLOW_GLOBAL,
+    start, stop, _tick, _msgData, _topics, _people, _refreshRoom, _refreshChannel, _refreshUser, WORKFLOW_GLOBAL,
     getGlobalInsight, getUserInsight, getRelayUserInsight, getAnonInsight,
     WORKFLOW_PROFILE,
 };
