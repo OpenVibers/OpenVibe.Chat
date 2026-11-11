@@ -198,11 +198,52 @@
   }
   // A preview that landed after its message: replace the line's cards with the finished list.
   function updateEmbeds(id, embeds) {
-    if (!feed || !Array.isArray(embeds) || !embeds.length) return;
+    if (!feed || !Array.isArray(embeds)) return;
     var li = feed.querySelector('[data-id="' + Number(id) + '"]');
     if (!li) return;
     Array.prototype.forEach.call(li.querySelectorAll('.oc-card'), function (c) { c.remove(); });
     addCard(li, { embeds: embeds });
+  }
+  function applyEdit(id, m) {
+    if (!feed) return;
+    var li = feed.querySelector('[data-id="' + Number(id) + '"]');
+    if (!li) return;
+    var t = li.querySelector('.oc-text, .oc-bubble');
+    if (t) { t.textContent = ''; textWithLinks(t, m.message); }
+    var mark = li.querySelector('.oc-edited');
+    if (!mark) { mark = el('span', 'oc-muted oc-edited'); if (t) t.insertAdjacentElement('afterend', mark); else li.appendChild(mark); }
+    mark.textContent = ' edited · ' + clock(m.edited_at).textContent;
+    Array.prototype.forEach.call(li.querySelectorAll('.oc-card'), function (c) { c.remove(); });
+    addCard(li, m);
+  }
+  function addEditButton(li) {
+    if (!li || li.querySelector('.oc-edit') || !cfg.me) return;
+    var owned = cfg.view === 'dm' ? li.classList.contains('oc-mine') || li.classList.contains('oc-bubble-mine') : Number(li.dataset.user) === Number(cfg.me);
+    if (!owned) return;
+    var b = el('button', 'ovk-btn ovk-btn--quiet oc-edit', 'Edit'); b.type = 'button'; li.appendChild(b);
+  }
+  if (feed) feed.addEventListener('click', function (e) {
+    if (!e.target.classList || !e.target.classList.contains('oc-edits') || !cfg.room) return;
+    var li = e.target.closest('[data-id]'); if (!li) return;
+    fetch('/api/chat/rooms/' + encodeURIComponent(cfg.room) + '/messages/' + encodeURIComponent(li.dataset.id) + '/edits', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && d.versions) window.alert(d.versions.map(function (v) { return String(v.edited_at || '') + '\n' + String(v.message || ''); }).join('\n\n')); })
+      .catch(function () { showError('Could not load earlier versions'); });
+  });
+  if (feed && (cfg.view === 'global' || cfg.view === 'dm' || cfg.view === 'room')) {
+    if (feed.querySelectorAll) Array.prototype.forEach.call(feed.querySelectorAll('[data-id]'), addEditButton);
+    feed.addEventListener('click', function (e) {
+      if (!e.target.classList || !e.target.classList.contains('oc-edit')) return;
+      var li = e.target.closest('[data-id]'), t = li && li.querySelector('.oc-text, .oc-bubble');
+      if (!li || !t) return;
+      var body = window.prompt('Edit message', t.textContent);
+      if (body == null || body.trim() === t.textContent.trim()) return;
+      var base = cfg.view === 'dm' ? '/api/dm/conversations/' + encodeURIComponent(cfg.conversation) : cfg.view === 'room' ? '/api/chat/rooms/' + encodeURIComponent(cfg.room) : '/api/chat';
+      e.target.disabled = true;
+      fetch(base + '/messages/' + encodeURIComponent(li.dataset.id), { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: body }) })
+        .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw Error(d.error || 'Could not edit'); applyEdit(li.dataset.id, d.message); }); })
+        .catch(function (err) { showError(err.message); }).then(function () { e.target.disabled = false; });
+    });
   }
 
   // Display only (the server decides who may do what): the same badges the page renders.
@@ -214,7 +255,7 @@
     if (id && feed.querySelector('[data-id="' + id + '"]')) return;
     var stick = nearBottom();
     removeEmpty();
-    feed.appendChild(li);
+    addEditButton(li); feed.appendChild(li);
     while (feed.children.length > 300) {
       var oldest = feed.querySelector('[data-id]');
       if (!oldest) break;
@@ -254,7 +295,7 @@
 
   // ── Global chat ──
   function globalItem(m) {
-    var li = el('li', 'oc-msg'); li.dataset.id = m.id || '';
+    var li = el('li', 'oc-msg'); li.dataset.id = m.id || ''; li.dataset.user = m.user_id || '';
     li.appendChild(clock(m.timestamp)); li.appendChild(document.createTextNode(' '));
     var handle = m.core_username || (m.user_id ? m.username : null);
     var name = m.display_name || m.username || m.anon_id || 'someone';
@@ -265,6 +306,7 @@
     var b = badge(m.role); if (b) li.appendChild(b);
     li.appendChild(document.createTextNode(' '));
     var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
+    if (m.edited_at) li.appendChild(el('span', 'oc-muted oc-edited', ' edited · ' + clock(m.edited_at).textContent));
     addCard(li, m);
     return li;
   }
@@ -320,6 +362,8 @@
           append(globalItem(m), m.id);
         } else if (m.type === 'chat_embeds' && m.id) {
           updateEmbeds(m.id, m.embeds);
+        } else if (m.type === 'chat_edited' && m.message) {
+          applyEdit(m.id, m.message);
         } else if (m.type === 'delete-messages' && Array.isArray(m.ids || m.message_ids)) {
           removeIds(m.ids || m.message_ids);
         } else if (m.type === 'error' && m.message) {
@@ -354,11 +398,19 @@
     li.appendChild(el('span', 'oc-name', m.display_name || m.username));
     li.appendChild(document.createTextNode(' '));
     var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
+    if (m.edited_at) li.appendChild(el('span', 'oc-muted oc-edited', ' edited · ' + clock(m.edited_at).textContent));
     addCard(li, m);
     return li;
   }
   function startDm() {
     var base = '/api/dm/conversations/' + encodeURIComponent(cfg.conversation);
+    function connectDm() {
+      var dmSocket = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
+      dmSocket.onopen = function () { dmSocket.send(JSON.stringify({ type: 'join', token: sessionToken() })); };
+      dmSocket.onmessage = function (ev) { var m; try { m = JSON.parse(ev.data); } catch (_) { return; } if (Number(m.conversation_id) !== Number(cfg.conversation)) return; if (m.type === 'dm_edited' && m.message) applyEdit(m.message.id, m.message); else if (m.type === 'dm_embeds') updateEmbeds(m.id, m.embeds); };
+      dmSocket.onclose = function () { setTimeout(connectDm, 3000); };
+    }
+    connectDm();
     window.OvChatHistory.attach(feed, document.getElementById('oc-history-state'), function (before) {
       return fetch(base + '/messages?before=' + encodeURIComponent(before) + '&limit=50', { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; });
@@ -437,6 +489,8 @@
     if (ai && window.VibeMarkdown) { t = el('div', 'oc-text vb-md'); t.innerHTML = window.VibeMarkdown.render(m.message); }
     else { t = el('span', 'oc-text'); textWithLinks(t, m.message); }
     li.appendChild(t);
+    if (m.edited_at) { li.appendChild(document.createTextNode(' ')); li.appendChild(el('span', 'oc-muted oc-edited', 'edited · ' + clock(m.edited_at).textContent)); }
+    if (cfg.moderate && m.edited_at) { var versions = el('button', 'ovk-btn ovk-btn--quiet oc-edits', 'Earlier versions'); versions.type = 'button'; li.appendChild(versions); }
     if (!ai && cfg.pics) { var pw = pictureThumbs(m.message); if (pw) li.appendChild(pw); }
     addCard(li, m);
     if (cfg.moderate || (cfg.me && !ai && m.user_id === cfg.me)) {
@@ -522,6 +576,8 @@
           showThinking(m.name);
         } else if (m.type === 'room_message_embeds' && m.room === cfg.room) {
           updateEmbeds(m.id, m.embeds);
+        } else if (m.type === 'room_message_edited' && m.room === cfg.room && m.message) {
+          applyEdit(m.message.id, m.message);
         } else if (m.type === 'room_message_deleted' && m.room === cfg.room) {
           var x = feed.querySelector('[data-id="' + m.id + '"]'); if (x) x.remove();
         } else if (m.type === 'room_error' && m.message) {

@@ -22,6 +22,7 @@ const linkCards = require('./link-cards');
 const networkBlocks = require('./network-blocks');
 const { limits } = require('../net/actor-limits');
 const { positiveInt } = require('./route-params');
+const messageEdits = require('./message-edits');
 
 /**
  * A signed-in reader does not get the lines of people they blocked on the network (one-way; only
@@ -68,7 +69,7 @@ function csvCell(v) {
 
 // Chat-internal columns (the author's Network subject) are not part of Live's API.
 function publicRows(rows) {
-    if (Array.isArray(rows)) for (const r of rows) { if (r) delete r.subject_id; }
+    if (Array.isArray(rows)) for (const r of rows) { if (r) { delete r.subject_id; delete r.edit_history; } }
     return rows;
 }
 
@@ -281,6 +282,29 @@ async function hydrateReplies(messages) {
 // The browser posts over /ws/chat and presents its token in the join (the upgrade itself carries none).
 // Every line reaches every global chat socket: a bot posts at most one every 3 s (20 a minute, 300
 // an hour), refusals included; the word and spam filters below still decide each line.
+router.patch('/messages/:id', requireAuth, limits('chat.message.edit', { minute: 30, hour: 300 }), async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'No such message' });
+    try {
+        const message = await messageEdits.edit(id, req.user, req.body && req.body.message);
+        const frame = { type: 'chat_edited', id, message };
+        const chatServer = require('./chat-server');
+        if (message.channel_user_id || message.stream_id) await chatServer.broadcastToChannelRoom(message.channel_user_id, message.stream_id, frame);
+        await chatServer.broadcastGlobal(frame);
+        return res.json({ message });
+    } catch (err) { return res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to edit message' }); }
+});
+
+router.get('/messages/:id/edits', requireAuth, async (req, res) => {
+    const id = Number(req.params.id);
+    if (!Number.isSafeInteger(id) || id < 1) return res.status(404).json({ error: 'No such message' });
+    const row = await db.get('SELECT channel_user_id, stream_id, edit_history FROM chat_messages WHERE id = ?', [id]);
+    if (!row) return res.status(404).json({ error: 'No such message' });
+    const allowed = row.channel_user_id ? await permissions.canModerateChannel(req.user, row.channel_user_id) : row.stream_id ? await permissions.canModerateStream(req.user, row.stream_id) : permissions.isStaff(req.user);
+    if (!allowed) return res.status(403).json({ error: 'Moderators only' });
+    return res.set('Cache-Control', 'private, no-store').json({ versions: row.edit_history || [] });
+});
+
 router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour: 300 }), async (req, res) => {
     try {
         const text = (req.body.message || '').trim();
@@ -375,7 +399,7 @@ router.post('/send', requireAuth, limits('chat.message.send', { minute: 20, hour
                 card,
             });
             savedId = result.lastInsertRowid;
-            if (pending && savedId) linkCards.fillLater('chat_messages', Number(savedId), pending);
+            if (pending && savedId) linkCards.fillLater('chat_messages', Number(savedId), pending, filtered);
         } catch { /* non-critical */ }
 
         // Attach message ID and reply context to broadcast

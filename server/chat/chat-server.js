@@ -1189,7 +1189,7 @@ class ChatServer {
                 card,
             });
             if (result.lastInsertRowid) chatMsg.id = Number(result.lastInsertRowid);
-            if (pending && result.lastInsertRowid) linkCards.fillLater('chat_messages', Number(result.lastInsertRowid), pending);
+            if (pending && result.lastInsertRowid) linkCards.fillLater('chat_messages', Number(result.lastInsertRowid), pending, text);
             // General address previews run after the line is out (server/chat/link-previews.js): the saved message
             // carries embeds: [] and a later frame carries the filled list. Channel/global viewers get the same frame.
             if (result.lastInsertRowid) {

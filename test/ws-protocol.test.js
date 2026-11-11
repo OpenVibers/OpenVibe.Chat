@@ -395,6 +395,10 @@ t('a token in the socket address is not read, and the socket says how to send it
 });
 
 t('upgrade guards: foreign origin refused, banned address refused (admins exempt)', async () => {
+    const dock = await h.ws({ origin: 'https://openvibe.video' });
+    dock.sendJson({ type: 'join', token: alice.token });
+    assert.strictEqual((await dock.next((m) => m.type === 'auth')).authenticated, true, 'the shared Dock connects from a first-party site');
+    dock.close();
     assert.strictEqual(await h.wsRefused({ origin: 'https://evil.example' }), true);
     h.live.addBan({ ip_address: '192.0.2.0/24' });
     await h.ctx.invalidateBans();

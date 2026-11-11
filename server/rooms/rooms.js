@@ -282,6 +282,43 @@ async function announceDeleted(room, ids) {
     }
 }
 
+async function announceEdited(room, user, id, message, editedAt, card) {
+    if (room.visibility !== 'public') return;
+    await require('../events/service-outbox').emit({
+        event_type: 'chat.room.message.edited', visibility: 'public',
+        actorSubject: user.subject_id || null,
+        subject: { type: 'chat_room_message', id: String(id) },
+        payload: { message_id: id, room: room.slug, user_subject: user.subject_id || null, text: message, edited_at: editedAt, card: card || null },
+    });
+}
+
+async function editMessage(room, user, messageId, text, { now = Date.now() } = {}) {
+    const m = await db.get('SELECT * FROM room_messages WHERE id = ? AND room_id = ?', [messageId, room.id]);
+    if (!m || m.is_deleted) fail(404, 'rooms.no_message', 'No such message');
+    if (!user || Number(m.user_id) !== Number(user.id)) fail(403, 'rooms.not_yours', 'Only the author can edit this');
+    const sentAt = Date.parse(String(m.created_at).includes('T') ? m.created_at : `${String(m.created_at).replace(' ', 'T')}Z`);
+    if (!Number.isFinite(sentAt) || now - sentAt > 24 * 60 * 60 * 1000) fail(403, 'rooms.edit_expired', 'Messages can be edited for 24 hours');
+    const body = String(text || '').replace(/\r\n/g, '\n').trim();
+    if (!body) fail(422, 'rooms.empty', 'Write something first');
+    const ownVibe = Number(room.assistant) === 1 && Number(room.owner_id) === Number(user.id);
+    const max = ownVibe ? MAX_TEXT_VIBE : MAX_TEXT;
+    if (body.length > max) fail(422, 'rooms.too_long', `Messages are at most ${max} characters`);
+    const filtered = wordFilter.check(body);
+    const message = filtered.safe ? body : filtered.filtered;
+    const { card, pending } = await linkCards.forSend(message);
+    const editedAt = new Date(now).toISOString();
+    await db.tx(async () => {
+        const changed = await db.run(`UPDATE room_messages SET edit_history = edit_history || jsonb_build_array(jsonb_build_object('message', message, 'edited_at', COALESCE(edited_at, created_at))), message = ?, card = ?, edited_at = ? WHERE id = ? AND is_deleted = 0`, [message, linkCards.toJson(card), editedAt, m.id]);
+        if (!changed.changes) fail(404, 'rooms.no_message', 'No such message');
+        await linkPreviews.replaceForEdit('room', Number(m.id));
+        await announceEdited(room, user, Number(m.id), message, editedAt, card);
+    });
+    if (pending) linkCards.fillLater('room_messages', Number(m.id), pending, message);
+    const updated = await messageById(m.id);
+    if (room.link_previews !== false) linkPreviews.schedule({ scope: 'room', messageId: Number(m.id), text: message, room: { id: room.id, slug: room.slug } });
+    return updated;
+}
+
 async function post(room, user, text, { now = Date.now(), ai = true, timezone = null, reply_to_id = null, files = [] } = {}) {
     const a = await access(room, user);
     if (!user) fail(401, 'rooms.sign_in', 'Sign in to chat');
@@ -332,7 +369,7 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
         return Number(r.lastInsertRowid);
     });
     const row = await messageById(id);
-    if (pending) linkCards.fillLater('room_messages', id, pending);
+    if (pending) linkCards.fillLater('room_messages', id, pending, message);
     // General address previews are a background job: the message and its response never wait on another site.
     if (room.link_previews !== false) linkPreviews.schedule({ scope: 'room', messageId: id, text: message, room: { id: room.id, slug: room.slug } });
     // Activity: the people this names, and the person it answers (server/chat/activity.js). A failure here never
@@ -371,7 +408,7 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null } = {
 }
 
 // A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
-const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.reply_to_id, m.created_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model,
+const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.reply_to_id, m.created_at, m.edited_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle WHEN m.agent_stream THEN 'aiagent' ELSE u.username END AS username,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.name WHEN m.agent_stream THEN 'AI agent' ELSE u.display_name END AS display_name,
         m.agent_stream, u.profile_color, u.role AS user_role
@@ -600,7 +637,7 @@ module.exports = {
     LIMITS,
     isWorkspace, isStaffRoom,
     postAsAi,
-    ensureSchema, create, list, bySlug, access, join, leave, post, history, historyPage, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
+    ensureSchema, create, list, bySlug, access, join, leave, post, editMessage, history, historyPage, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
     attach, detach, attachments, joinRoleOf, unreadTotal, isStaff, siteBanned, insightOn, POSTERS, TALKERS,
     RoomError, SLUG_RE, KINDS, ROLES, KIND_ROLES, JOIN_ROLE, JOIN_ROLES_CALL, ATTACH_SERVICES, _reset,
 };

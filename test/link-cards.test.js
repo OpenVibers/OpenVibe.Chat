@@ -220,6 +220,26 @@ t('a room message stores and draws its card too', async () => {
     assert.ok(html.text.includes('Watch together'));
 });
 
+t('editing a link refreshes the current card in rooms, DMs and chat', async () => {
+    const first = 'https://openvibe.video/v/123';
+    const next = 'https://openvibe.video/v/456';
+    const roomSent = await h.http('POST', `/api/chat/rooms/${room.slug}/messages`, { token: ann.token, body: { message: first } });
+    const roomEdit = await h.http('PATCH', `/api/chat/rooms/${room.slug}/messages/${roomSent.body.message.id}`, { token: ann.token, body: { message: next } });
+    assert.strictEqual(roomEdit.status, 200, roomEdit.text);
+    assert.strictEqual(roomEdit.body.message.card.url, next);
+    const dmSent = await dmSend(ann, first);
+    const dmEdit = await h.http('PATCH', `/api/dm/conversations/${conv}/messages/${dmSent.body.message.id}`, { token: ann.token, body: { message: next } });
+    assert.strictEqual(dmEdit.status, 200, dmEdit.text);
+    assert.strictEqual(dmEdit.body.message.card.url, next);
+    await globalSend(ann, first);
+    const global = (await h.http('GET', '/api/chat/global/history?limit=50', { token: ann.token })).body.messages.find((m) => m.message === first);
+    const globalEdit = await h.http('PATCH', `/api/chat/messages/${global.id}`, { token: ann.token, body: { message: next } });
+    assert.strictEqual(globalEdit.status, 200, globalEdit.text);
+    assert.strictEqual(globalEdit.body.message.card.url, next);
+    const cleared = await h.http('PATCH', `/api/chat/messages/${global.id}`, { token: ann.token, body: { message: 'no link now' } });
+    assert.strictEqual(cleared.body.message.card, null);
+});
+
 t('global chat stores and draws its card, and the card is one per message', async () => {
     const text = 'https://openvibe.video/v/456';
     assert.strictEqual((await globalSend(ann, text)).status, 200);

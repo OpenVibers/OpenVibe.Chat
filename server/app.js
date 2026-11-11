@@ -419,7 +419,8 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     async function handleUpgrade(req, socket, head) {
         const url = req.url || '';
         const origin = normalizeOrigin(req.headers.origin);
-        if (origin && !allowedOrigins.has(origin)) {
+        // The shared Dock opens a bearer-authenticated chat socket from every first-party site.
+        if (origin && !allowedOrigins.has(origin) && !(url.startsWith('/ws/chat') && FIRST_PARTY.has(origin))) {
             console.warn(`[Server] WebSocket upgrade rejected — origin "${origin}" not in allowed origins`);
             socket.destroy();
             return;
