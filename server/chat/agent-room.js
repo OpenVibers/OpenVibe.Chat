@@ -113,24 +113,35 @@ function guard(capability) {
 
 /** The Co-pilot room of an agent stream, by its id, or null. */
 async function roomByAgentId(agentRoomId) {
-    return await db.get("SELECT * FROM rooms WHERE slug = ? AND kind = 'agent_stream' AND archived_at IS NULL", [String(agentRoomId || '')]) || null;
+    return await db.get("SELECT * FROM rooms WHERE slug = ? AND kind = 'agent_stream' AND archived_at IS NULL", [String(agentRoomId || '').toLowerCase()]) || null;
 }
 
 /**
  * The room for an agent stream, made if it is not there yet (Live calls this when the stream becomes public
  * or unlisted). The banner is the room's purpose, said before anyone types.
  */
-async function ensureRoom(agentRoomId, { owner, name, subject } = {}) {
+async function ensureRoom(agentRoomId, { owner, name, subject, visibility = 'public', linkSecretHash = null } = {}) {
+    if (!owner && subject) owner = await ctx.getUserBySubject(subject);
     const existing = await roomByAgentId(agentRoomId);
-    if (existing) return existing;
-    const slug = String(agentRoomId || '');
+    // The stream's current Live audience is checked by the dedicated agent API
+    // on every read and post. A private storage room cannot leak during sync.
+    const audience = 'private';
+    if (existing) {
+        await db.run('UPDATE rooms SET visibility = ?, owner_id = COALESCE(NULLIF(owner_id, 0), ?), owner_subject = COALESCE(owner_subject, ?) WHERE id = ?', [audience, owner ? Number(owner.id) || 0 : 0, subject || null, existing.id]);
+        await db.run('UPDATE agent_room_identities SET link_secret_hash = ? WHERE room_id = ?', [visibility === 'unlisted' ? linkSecretHash : null, existing.id]);
+        if (audience === 'private') await db.run("DELETE FROM room_members WHERE room_id = ? AND role NOT IN ('owner', 'mod', 'blocked')", [existing.id]);
+        if (owner) await db.run("INSERT INTO room_members (room_id, user_id, role) VALUES (?, ?, 'owner') ON CONFLICT (room_id, user_id) DO NOTHING", [existing.id, owner.id]);
+        return await db.get('SELECT * FROM rooms WHERE id = ?', [existing.id]);
+    }
+    const slug = String(agentRoomId || '').toLowerCase();
     const id = await db.tx(async () => {
         const r = await db.run(
-            "INSERT INTO rooms (slug, name, topic, kind, visibility, owner_id, owner_subject) VALUES (?, ?, ?, 'agent_stream', 'public', ?, ?)",
-            [slug, String(name || slug).slice(0, 40), BANNER, owner ? Number(owner.id) || 0 : 0, subject || null]
+            "INSERT INTO rooms (slug, name, topic, kind, visibility, owner_id, owner_subject) VALUES (?, ?, ?, 'agent_stream', ?, ?, ?)",
+            [slug, String(name || slug).slice(0, 40), BANNER, audience, owner ? Number(owner.id) || 0 : 0, subject || null]
         );
         const roomId = Number(r.lastInsertRowid);
-        await db.run("INSERT INTO agent_room_identities (room_id) VALUES (?) ON CONFLICT (room_id) DO NOTHING", [roomId]);
+        await db.run('INSERT INTO agent_room_identities (room_id, link_secret_hash) VALUES (?, ?)', [roomId, visibility === 'unlisted' ? linkSecretHash : null]);
+        if (owner) await db.run("INSERT INTO room_members (room_id, user_id, role) VALUES (?, ?, 'owner')", [roomId, owner.id]);
         return roomId;
     });
     return await db.get('SELECT * FROM rooms WHERE id = ?', [id]);

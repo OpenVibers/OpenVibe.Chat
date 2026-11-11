@@ -11,6 +11,7 @@
 const express = require('express');
 const serviceAuth = require('../net/service-auth');
 const room = require('./agent-room');
+const ctx = require('../live-context');
 
 const router = express.Router();
 
@@ -19,11 +20,22 @@ router.post('/agent-room', serviceAuth.guard('chat.live_bridge.write'), async (r
         const body = req.body || {};
         const id = room.roomIdOf(body.agent_stream_id);
         if (!id) return res.status(400).json({ error: 'That is not an agent stream id', code: 'agent_room.bad_stream_id' });
+        if (body.close === true) {
+            const existing = await room.roomByAgentId(id);
+            if (existing) await require('../db/database').run('UPDATE rooms SET archived_at = ov_now() WHERE id = ?', [existing.id]);
+            return res.json({ room: existing ? existing.slug : null, archived: true });
+        }
         const owner = String(body.owner_subject || '').trim() || null;
         const name = String(body.name || '').trim().slice(0, 40) || id;
-        const made = await room.ensureRoom(id, { name, subject: owner });
-        if (body.close === true) await require('../db/database').run('UPDATE rooms SET archived_at = ov_now() WHERE id = ? AND archived_at IS NULL', [made.id]);
-        res.status(200).json({ room: made.slug, id: made.id, banner: room.BANNER, kind: made.kind, archived: body.close === true });
+        const visibility = ['public', 'unlisted', 'private'].includes(body.visibility) ? body.visibility : 'public';
+        const linkSecretHash = /^[a-f0-9]{64}$/.test(String(body.link_secret_hash || '')) ? body.link_secret_hash : null;
+        if (visibility === 'unlisted' && !linkSecretHash) return res.status(400).json({ error: 'The unlisted link is missing', code: 'agent_room.link' });
+        const existing = await room.roomByAgentId(id);
+        if (visibility === 'private' && !existing) return res.json({ room: null, archived: false });
+        let user = owner ? await ctx.getUserBySubject(owner) : null;
+        if (!user && body.owner_username) user = await ctx.ensureUserByUsername(String(body.owner_username));
+        const made = await room.ensureRoom(id, { name, subject: owner, owner: user, visibility, linkSecretHash });
+        res.status(200).json({ room: made.slug, id: made.id, banner: room.BANNER, kind: made.kind, archived: false });
     } catch (err) {
         console.error('[Chat] the agent room failed:', err.message);
         res.status(500).json({ error: 'The room could not be made', code: 'agent_room.failed' });
@@ -31,4 +43,3 @@ router.post('/agent-room', serviceAuth.guard('chat.live_bridge.write'), async (r
 });
 
 module.exports = router;
-

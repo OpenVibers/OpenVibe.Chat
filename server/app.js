@@ -349,6 +349,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
     // The people of a Co-pilot room vote on the agent's poll (Agent Streams S5).
     app.use('/api/chat/rooms', require('./chat/agent-poll-routes'));
+    app.use('/api/chat/agent-rooms', require('./chat/agent-room-view').router);
     // The chat plays queue of a room (Agent Streams S6): the votes and the moderators' hand.
     app.use('/api/chat/rooms', require('./chat/play-queue-routes').member);
     app.use('/api/chat/rooms', require('./rooms/routes'));

@@ -150,7 +150,11 @@ async function access(room, user) {
         if (!staff) return { role: null, kind, read: false, post: false, join: false, talk: false, moderate: false, manage: false };
         if (!(await roleOf(room.id, user.id))) await db.run("INSERT INTO room_members (room_id, user_id, role, last_seen_at) VALUES (?, ?, 'member', ov_now()) ON CONFLICT (room_id, user_id) DO NOTHING", [room.id, user.id]);
     }
-    const role = user ? await roleOf(room.id, user.id) : null;
+    let role = user ? await roleOf(room.id, user.id) : null;
+    if (kind === 'agent_stream' && user && role !== 'blocked' && role !== 'owner') {
+        const channel = await ctx.getChannelByUserId(room.owner_id);
+        if (channel && await ctx.isChannelModerator(user.id, channel.id)) role = 'mod';
+    }
     const blocked = role === 'blocked';
     const member = !!role && !blocked;
     const banned = siteBanned(user);
@@ -319,8 +323,12 @@ async function editMessage(room, user, messageId, text, { now = Date.now() } = {
     return updated;
 }
 
-async function post(room, user, text, { now = Date.now(), ai = true, timezone = null, reply_to_id = null, files = [] } = {}) {
+async function post(room, user, text, { now = Date.now(), ai = true, timezone = null, reply_to_id = null, files = [], agentView = false } = {}) {
     const a = await access(room, user);
+    if (agentView && kindOf(room) === 'agent_stream' && a.role !== 'blocked' && user && !siteBanned(user)) {
+        a.read = true;
+        a.post = true;
+    }
     if (!user) fail(401, 'rooms.sign_in', 'Sign in to chat');
     if (siteBanned(user)) fail(403, 'rooms.banned', 'Your account is banned from chat');
     if (!a.post) {
