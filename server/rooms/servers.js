@@ -114,7 +114,8 @@ async function channelAccess(room, user) {
     if (room.stage_channel && user && a.member) stageSpeaker = !!await db.get('SELECT 1 FROM chat_stage_speakers WHERE room_id = ? AND user_id = ?', [room.id, user.id]);
     const vrole = !a.member ? null : srole === 'owner' ? 'owner' : RANK[srole] <= RANK.mod ? 'mod' : kind === 'call' ? (room.stage_channel ? (stageSpeaker ? 'speaker' : 'participant') : rooms.joinRoleOf(room)) : 'member';
     const banned = rooms.siteBanned(user);
-    const post = !!user && a.read && !banned && a.member && rooms.POSTERS[kind].has(vrole);
+    const timedOut = !!user && !!await db.get('SELECT 1 FROM chat_server_timeouts WHERE server_id = ? AND user_id = ? AND expires_at > now()', [server.id, user.id]);
+    const post = !!user && a.read && !banned && !timedOut && a.member && rooms.POSTERS[kind].has(vrole);
     const join = kind === 'call' && a.read;
     const talk = join && !!user && !banned && ((a.member && rooms.TALKERS.has(vrole)) || a.staff);
     return { role: vrole, kind, read: a.read, post, join, talk, moderate: a.moderate, manage: a.manage, server: server.slug, server_role: srole };
@@ -354,7 +355,7 @@ async function setFeatured(server, actor, on) {
 /** The server's people by rank (blocked last, only for moderators). A member's picked roles ride along. */
 async function members(server, { blocked = false, limit = 1000, subjects = false } = {}) {
     const order = `CASE m.role ${Object.entries(RANK).map(([r, n]) => `WHEN '${r}' THEN ${n}`).join(' ')} ELSE 9 END`;
-    const rows = await db.all(`SELECT m.user_id, m.role, m.roles, m.joined_at, u.username, u.display_name, u.profile_color, u.subject_id, u.avatar_url FROM chat_server_members m
+    const rows = await db.all(`SELECT m.user_id, m.role, m.roles, m.joined_at, u.username, COALESCE(m.nickname, u.display_name) AS display_name, u.profile_color, u.subject_id, u.avatar_url FROM chat_server_members m
         LEFT JOIN ctx_users u ON u.id = m.user_id WHERE m.server_id = ? ${blocked ? '' : "AND m.role != 'blocked'"}
         ORDER BY ${order}, lower(u.username) LIMIT ?`, [server.id, Math.min(5000, Math.max(1, Number(limit) || 1000))]);
     return rows.map((p) => ({ ...p, roles: parseList(p.roles).map(String).filter(Boolean) }));

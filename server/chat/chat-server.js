@@ -759,7 +759,9 @@ class ChatServer {
                 const room = client.roomId ? await rooms.bySlug(client.roomSlug) : null;
                 if (!room || room.id !== client.roomId) { this.sendTo(ws, { type: 'room_error', code: 'rooms.not_joined', message: 'Open a room first' }); break; }
                 try {
-                    const message = await rooms.post(room, client.user, msg.message);
+                    const command = await require('./room-slash').parse(room, client.user, msg.message);
+                    if (command.handled && !command.text) { this.sendTo(ws, { type: 'system', message: command.reply }); break; }
+                    const message = await rooms.post(room, client.user, command.handled ? command.text : msg.message);
                     this.broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
                 } catch (err) {
                     this.sendTo(ws, { type: 'room_error', room: room.slug, code: err.code || 'rooms.error', message: err.code ? err.message : 'Your message could not be sent' });

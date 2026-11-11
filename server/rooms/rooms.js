@@ -410,7 +410,9 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null } = {
 // A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
 const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.reply_to_id, m.created_at, m.edited_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle WHEN m.agent_stream THEN 'aiagent' ELSE u.username END AS username,
-        CASE WHEN m.ai_member_id IS NOT NULL THEN a.name WHEN m.agent_stream THEN 'AI agent' ELSE u.display_name END AS display_name,
+        CASE WHEN m.ai_member_id IS NOT NULL THEN a.name WHEN m.agent_stream THEN 'AI agent' ELSE COALESCE((
+            SELECT sm.nickname FROM chat_server_members sm JOIN rooms sr ON sr.server_id = sm.server_id
+            WHERE sr.id = m.room_id AND sm.user_id = m.user_id), u.display_name) END AS display_name,
         m.agent_stream, u.profile_color, u.role AS user_role
     FROM room_messages m LEFT JOIN ctx_users u ON u.id = m.user_id AND m.ai_member_id IS NULL
     LEFT JOIN room_ai_members a ON a.id = m.ai_member_id`;

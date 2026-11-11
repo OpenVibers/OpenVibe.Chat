@@ -12,6 +12,31 @@
   var feed = document.getElementById('oc-feed');
   var form = document.getElementById('oc-compose');
   var input = document.getElementById('oc-input');
+  if (cfg.commandServer && input && form) {
+    var commandMenu = el('div', 'oc-command-menu'); commandMenu.setAttribute('role', 'listbox'); commandMenu.hidden = true;
+    form.insertBefore(commandMenu, input);
+    var commandTimer = 0;
+    input.addEventListener('input', function () {
+      window.clearTimeout(commandTimer);
+      var found = /^\/([a-z0-9_-]*)$/i.exec(input.value);
+      if (!found) { commandMenu.hidden = true; return; }
+      commandTimer = window.setTimeout(function () {
+        fetch('/api/chat/commands?server=' + encodeURIComponent(cfg.commandServer) + '&q=' + encodeURIComponent(found[1]), { credentials: 'same-origin' })
+          .then(function (r) { return r.ok ? r.json() : { commands: [] }; }).then(function (body) {
+            if (input.value !== '/' + found[1]) return;
+            commandMenu.replaceChildren();
+            (body.commands || []).forEach(function (command) {
+              var button = el('button', 'ovk-btn ovk-btn--quiet', '/' + command.name + ' · ' + command.description);
+              button.type = 'button'; button.setAttribute('role', 'option');
+              button.addEventListener('click', function () { input.value = '/' + command.name + ' '; commandMenu.hidden = true; input.focus(); });
+              commandMenu.appendChild(button);
+            });
+            commandMenu.hidden = !commandMenu.children.length;
+          }).catch(function () { commandMenu.hidden = true; });
+      }, 120);
+    });
+    input.addEventListener('keydown', function (event) { if (event.key === 'Escape') commandMenu.hidden = true; });
+  }
   var latest = Number(cfg.latest) || 0;
   var LIVE = 'https://openvibe.live';
   var viewToggle = document.getElementById('oc-view-toggle');
