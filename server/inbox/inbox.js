@@ -531,15 +531,49 @@ async function markRead(inbox, conv) { await db.run('UPDATE inbox_conversations 
 
 const inFlight = new Set();
 const today = () => new Date().toISOString().slice(0, 10);
+/** The UTC hour the turn belongs to, so a visitor's hour is a window of its own. */
+const thisHour = () => new Date().toISOString().slice(0, 13);
 const HANDOFF_RE = /\[HANDOFF\]\s*$/;
+
+/**
+ * The visitor's own turn limit (one-engine slice): how many turns this visitor's widget session may ask for in an
+ * hour and in a day. The turn is counted when it is asked for, before it is sent, so a limit stops the cost rather
+ * than the bill. The visitor is their token, hashed: the table never keeps the token itself.
+ *
+ * → { refused: false } while there is room, or { refused: true, words } with what the visitor reads.
+ */
+async function visitorTurns(inbox, conv) {
+    const perHour = Math.max(1, Number(config.inbox.visitorTurnsPerHour) || 10);
+    const perDay = Math.max(1, Number(config.inbox.visitorTurnsPerDay) || 40);
+    const who = String(conv.visitor_token_hash || '');
+    if (!who) return { refused: false };
+    const windows = [[`h:${thisHour()}`, perHour, 'hour'], [`d:${today()}`, perDay, 'day']];
+    for (const [period, limit, of] of windows) {
+        const row = await db.get('SELECT turns FROM inbox_visitor_turns WHERE inbox_id = ? AND visitor_token_hash = ? AND period = ?', [inbox.id, who, period]);
+        if (Number((row || {}).turns || 0) >= limit) {
+            return {
+                refused: true,
+                words: of === 'hour'
+                    ? 'You have asked a lot of questions in the last hour. Please try again later, or ask for a person.'
+                    : 'You have asked a lot of questions today. Please try again tomorrow, or ask for a person.',
+            };
+        }
+    }
+    // The turn is about to be sent: it is counted now, once.
+    for (const [period] of windows) {
+        await db.run(`INSERT INTO inbox_visitor_turns (inbox_id, visitor_token_hash, period, turns) VALUES (?, ?, ?, 1)
+            ON CONFLICT (inbox_id, visitor_token_hash, period) DO UPDATE SET turns = inbox_visitor_turns.turns + 1`, [inbox.id, who, period]);
+    }
+    return { refused: false };
+}
 
 function inboxPrompt(inbox, { actions = false } = {}) {
     const urls = json(inbox.knowledge_urls, []);
     return [
         `You are Vibe, the assistant answering for "${inbox.name}" in the chat on their website. A visitor is writing to them.`,
         inbox.ai_instructions ? `What ${inbox.name} tells you (follow it):\n${inbox.ai_instructions}` : '',
-        urls.length ? `Pages about ${inbox.name} you may read with read_page when the answer may be there:\n${urls.join('\n')}` : '',
-        actions ? `You can ask ${inbox.name}'s own systems with the action_ tools (like looking up an order). Ask the visitor for what an action needs before you use it, and use what it answers.` : '',
+        urls.length ? `Pages about ${inbox.name} you may read with read_page when the answer may be there (read only these; never another site):\n${urls.join('\n')}` : '',
+        actions ? `You may ask ${inbox.name}'s own systems (like looking up an order), but that call is not open to you yet: say plainly that you could not check right now, and ask a person from ${inbox.name} if the visitor needs it.` : '',
         '',
         'How you answer:',
         '- Short, friendly and clear: one to four sentences, in the language the visitor wrote in. Plain text; a short list when it helps.',
@@ -558,28 +592,24 @@ function inboxPrompt(inbox, { actions = false } = {}) {
     ].filter((l, i, a) => l !== '' || a[i - 1] !== '').join('\n');
 }
 
-/** read_page limited to the inbox's own sites (the hosts of its pages), the time, and the inbox's actions (actions.js). */
+/**
+ * The tools this inbox's Vibe may use, as names (one-engine slice): read_page (the owner's own pages), current_time
+ * (the time) and the inbox's own action_* (the owner's systems). The names are what the turn carries to Actor: its
+ * registry answers read_page as read_page and the time as time_in; the action_* tools call the owner's systems from
+ * Chat with the action's secret, so they stay a Chat-side tool for a later slice.
+ */
 async function inboxTools(inbox, conv) {
     const aiTools = require('../rooms/ai-tools');
     const actions = await require('./actions').tools(inbox, conv);
     const hosts = new Set(json(inbox.knowledge_urls, []).map((u) => { try { return new URL(u).host; } catch { return null; } }).filter(Boolean));
     const defs = [...aiTools.definitions({}).filter((d) => (d.function.name === 'read_page' && hosts.size) || d.function.name === 'current_time'), ...actions.defs];
-    const run = async (name, raw) => {
-        const acted = await actions.run(name, raw);
-        if (acted != null) return acted;
-        if (name === 'read_page') {
-            let host = null;
-            try { host = new URL(JSON.parse(raw || '{}').url).host; } catch { host = null; }
-            if (!host || !hosts.has(host)) return JSON.stringify({ error: `you may only read ${[...hosts].join(', ')}` });
-        }
-        return await aiTools.run(name, raw, {});
-    };
-    return { defs, run };
+    return { defs, run: actions.run };
 }
 
 /**
  * Vibe sees the pictures a signed-in visitor sent (their OpenVibe.Pics links; anyone else's stay links): in the visitor's
- * latest messages, the newest that has any, at most two, given to the model with that message (rooms/pictures forModel).
+ * latest messages, the newest that has any, at most two. The turn Actor answers is words, so the pictures travel as
+ * their links and a note saying they are there (rooms/pictures forModel still reads them for the page).
  */
 async function showPictures(said, transcript) {
     const pictures = require('../rooms/pictures');
@@ -587,10 +617,9 @@ async function showPictures(said, transcript) {
         if (said[i].author_user_id == null) continue;
         const links = pictures.linksIn(said[i].body).slice(0, 2);
         if (!links.length) continue;
-        const images = (await Promise.all(links.map((l) => pictures.forModel(l).catch(() => null)))).filter(Boolean);
-        if (images.length) {
-            transcript[i] = { role: 'user', content: [{ type: 'text', text: `${transcript[i].content}\n\n(${images.length === 1 ? 'The picture they sent is' : 'The pictures they sent are'} attached.)` }, ...images.map((url) => ({ type: 'image_url', image_url: { url } }))] };
-        }
+        // The turn Actor answers is words, so the pictures travel as their links and a note saying they are there.
+        const note = `(${links.length === 1 ? 'The picture they sent is' : 'The pictures they sent are'} attached.)`;
+        transcript[i] = { role: 'user', content: `${transcript[i].content}\n\n${note} ${links.join(' ')}`.trim() };
         return;
     }
 }
@@ -609,6 +638,10 @@ async function aiAnswer(inbox, convId, deps = {}) {
     if (Number(conv.ai_replies) >= AI_PER_CONVERSATION) return await stop(`A person from ${inbox.name} will take it from here.`, 'This conversation is as long as Vibe can go. Start a new one any time.');
     const used = Number((await db.get('SELECT replies FROM inbox_ai_usage WHERE inbox_id = ? AND day = ?', [inbox.id, today()]) || {}).replies) || 0;
     if (used >= config.inbox.aiRepliesPerDay) return await stop(`Vibe has answered a lot today; a person from ${inbox.name} will reply here.`, 'Vibe has answered all it can today. Please try again tomorrow.');
+    // The visitor's own turn limit (one-engine slice): one visitor's session may not spend the whole day's answers
+    // while other visitors wait. It is inside the inbox's own daily cap above, which stays the outer limit.
+    const visitorLimit = await visitorTurns(inbox, conv);
+    if (visitorLimit.refused) return await stop(visitorLimit.words, visitorLimit.words);
     inFlight.add(convId);
     try {
         broadcaster(deps)(inbox.id, conv.id, { type: 'inbox_typing', inbox: inbox.id, conversation: conv.id, who: 'Vibe' });
@@ -616,25 +649,44 @@ async function aiAnswer(inbox, convId, deps = {}) {
         const said = history.reverse().filter((m) => m.author !== 'system');
         const transcript = said.map((m) => ({ role: m.author === 'visitor' ? 'user' : 'assistant', content: `${m.author === 'agent' ? `(${m.author_name || 'a person'} from ${inbox.name}) ` : ''}${String(m.body).slice(0, 2000)}` }));
         await showPictures(said, transcript);
-        const tools = await inboxTools(inbox, conv);
-        const aiClient = deps.aiClient || require('../ai/client');
         // What Vibe may know about where the visitor is and who they are (a verified name only: anyone can type a name).
         const context = [conv.page_url ? `The visitor is on this page: ${conv.page_url}` : '', Number(conv.verified) && conv.visitor_name ? `${inbox.name}'s site says the visitor is ${conv.visitor_name}.` : ''].filter(Boolean).join('\n');
-        const messagesForModel = [{ role: 'system', content: inboxPrompt(inbox, { actions: tools.defs.some((d) => d.function.name.startsWith('action_')) }) + (context ? `\n\n${context}` : '') }, ...transcript];
+        // The turn is OpenVibe.Actor's (one-engine slice): the words, the pages Vibe may read and the answer all
+        // come from there. The direct OpenVibe.AI call is gone; there is no second engine behind this.
+        const actorModule = require('./actor');
+        const actor = deps.actor || actorModule.actor();
+        const tools = await inboxTools(inbox, conv);
+        const system = inboxPrompt(inbox, { actions: tools.defs.some((d) => d.function.name.startsWith('action_')) }) + (context ? `\n\n${context}` : '');
+        // The visitor is signed in to OpenVibe: the turn is theirs, on their own allowance (their subject id in
+        // X-OV-Subject, which Actor checks against Chat's service grant). An anonymous visitor has no account:
+        // the turn is Chat's own then, on Chat's cap — Chat never borrows an account for them.
+        const subject = conv.visitor_subject || null;
         const lastId = history.length ? history[history.length - 1].id : 0;
-        let text = '';
-        for (let round = 0; round <= 3 && !text; round++) {
-            const last = round === 3;
-            const out = await aiClient.structured('chat.member.turn', { messages: messagesForModel, ...(tools.defs.length ? { tools: tools.defs, tool_choice: last ? 'none' : 'auto' } : {}), max_tokens: 900, temperature: 0.4 },
-                { force: true, attribution: { service: 'chat', type: 'inbox', id: inbox.id, label: inbox.name.slice(0, 200) }, idempotencyKey: `chat-inbox-${conv.id}-${lastId}-t${round}` });
-            const msg = out && Array.isArray(out.choices) && out.choices[0] && out.choices[0].message;
-            if (!msg) break;
-            const calls = !last && Array.isArray(msg.tool_calls) ? msg.tool_calls.filter((c) => c && c.function && c.function.name).slice(0, 4) : [];
-            if (!calls.length) { text = typeof msg.content === 'string' ? msg.content : ''; break; }
-            messagesForModel.push({ role: 'assistant', content: typeof msg.content === 'string' ? msg.content : null, tool_calls: calls });
-            for (const c of calls) messagesForModel.push({ role: 'tool', tool_call_id: String(c.id || `call_${round}`).slice(0, 128), content: await tools.run(c.function.name, c.function.arguments) });
+        let out = null;
+        try {
+            out = await actor.turn({
+                subject,
+                task: actorModule.turnText({ system, history: transcript }),
+                // The tools Actor's registry offers that this inbox needs: read the owner's pages, and the time.
+                // The inbox's own action_* tools call the owner's systems from Chat with the action's secret, so
+                // they stay a Chat-side tool for a later slice; Vibe is told it cannot use them here.
+                tools: tools.defs.some((d) => d.function.name === 'read_page') ? ['read_page', 'time_in'] : ['time_in'],
+                budgetUsd: config.inbox.actorPerTurnUsd,
+                conversation: { product: 'chat', id: `inbox:${conv.id}/turn:${lastId}` },
+                idempotencyKey: `chat-inbox-${conv.id}-${lastId}`,
+            });
+        } catch (err) {
+            // A refusal or an outage is words in the chat, never a silent second engine.
+            const words = actorWords(err);
+            await db.run(`INSERT INTO inbox_ai_usage (inbox_id, day, replies) VALUES (?, ?, 1) ON CONFLICT (inbox_id, day) DO UPDATE SET replies = inbox_ai_usage.replies + 1`, [inbox.id, today()]);
+            return await say(words);
         }
-        text = clean(text, LIMITS.body);
+        if (out.pending) {
+            // Still running when the wait ended: these words hold its place, and the next view fills the answer in.
+            await db.run(`INSERT INTO inbox_ai_usage (inbox_id, day, replies) VALUES (?, ?, 1) ON CONFLICT (inbox_id, day) DO UPDATE SET replies = inbox_ai_usage.replies + 1`, [inbox.id, today()]);
+            return await say('Vibe is taking a little longer than usual — the answer will appear here by itself.');
+        }
+        const text = clean(out.answer, LIMITS.body);
         if (!text) return await stop(`A person from ${inbox.name} will reply here.`, 'Vibe could not answer just now. Try again in a moment.');
         const wants = HANDOFF_RE.test(text);
         const answer = text.replace(HANDOFF_RE, '').trim();
@@ -646,6 +698,19 @@ async function aiAnswer(inbox, convId, deps = {}) {
     } finally {
         inFlight.delete(convId);
     }
+}
+
+/**
+ * An Actor failure as the words the visitor reads: the task's own refusal, or the outage line. Never a promise
+ * that another engine will answer, and never a second engine quietly taking over.
+ */
+function actorWords(err) {
+    if (err && err.code === 'actor.unreachable') return 'Vibe could not be reached just now. Nothing was charged. Please try again in a moment.';
+    if (err && err.code === 'actor.off') return 'The assistant is not available on this site right now. Please try again later.';
+    if (err && err.code === 'actor.not_allowed') return 'The answer needs a fresh sign-in. Sign in again and send once more.';
+    const detail = err && (err.detail || err.message);
+    if (detail) return String(detail).slice(0, 500);
+    return 'Vibe could not answer just now. Nothing was charged. Please try again in a moment.';
 }
 
 function _reset() { inFlight.clear(); }
