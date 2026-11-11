@@ -8,6 +8,9 @@
   var root = document.getElementById('re');
   if (!root) return;
   var slug = root.getAttribute('data-room');
+  var agentId = root.getAttribute('data-agent');
+  var secret = root.getAttribute('data-k') || '';
+  var agentBase = agentId ? '/api/chat/agent-rooms/' + encodeURIComponent(agentId) + '?k=' + encodeURIComponent(secret) : null;
   var KEY = 'ov-embed-token';
   var thread = document.getElementById('re-thread');
   var form = document.getElementById('re-form');
@@ -60,7 +63,7 @@
     form.hidden = !(token && can.post);
     dock.textContent = '';
     if (!token) { dock.appendChild(signinBtn); signinBtn.disabled = !!polling; signinBtn.textContent = polling ? 'Finish signing in in the window…' : 'Sign in with OpenVibe to chat'; }
-    else if (!can.post && !role) { var j = el('button', 're-signin', 'Join this room to chat'); j.type = 'button'; j.addEventListener('click', join); dock.appendChild(j); }
+    else if (!can.post && !role && !agentId) { var j = el('button', 're-signin', 'Join this room to chat'); j.type = 'button'; j.addEventListener('click', join); dock.appendChild(j); }
     else if (!can.post) dock.appendChild(el('p', 'em-system', 'You can read this room but not write in it.'));
     whoEl.textContent = '';
     if (token) {
@@ -71,6 +74,11 @@
   }
 
   function connect() {
+    if (agentId) {
+      loadAgent();
+      setInterval(catchUp, 2500);
+      return;
+    }
     if (!window.WebSocket) return;
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
     ws.onopen = function () { delay = 1000; ws.send(JSON.stringify({ type: 'join_room', room: slug, token: token || undefined })); catchUp(); };
@@ -82,10 +90,17 @@
     };
     ws.onclose = function () { setTimeout(connect, delay); delay = Math.min(delay * 2, 30000); };
   }
-  function reconnect() { if (ws) { ws.onclose = null; try { ws.close(); } catch (e) { /* closed */ } } connect(); }
+  function reconnect() { if (ws) { ws.onclose = null; try { ws.close(); } catch (e) { /* closed */ } } if (agentId) loadAgent(); else connect(); }
+  function loadAgent() {
+    fetch(agentBase, { credentials: 'omit', headers: token ? { Authorization: 'Bearer ' + token } : {} })
+      .then(function (r) { return r.ok ? r.json() : null; }).then(function (d) {
+        can = d && d.can || {}; role = d && d.role || (token && can.post ? 'member' : null); dockState();
+      }).catch(function () { error('The chat is unavailable right now.'); });
+  }
   function catchUp() {
-    if (!latest) return;
-    fetch('/api/chat/rooms/' + encodeURIComponent(slug) + '/messages?after=' + latest, { credentials: 'omit' })
+    if (!latest && !agentId) return;
+    var url = agentId ? agentBase + '&after=' + latest : '/api/chat/rooms/' + encodeURIComponent(slug) + '/messages?after=' + latest;
+    fetch(url, { credentials: 'omit' })
       .then(function (r) { return r.ok ? r.json() : null; }).then(function (d) { if (d && d.messages) d.messages.forEach(render); }).catch(function () {});
   }
 
@@ -126,6 +141,14 @@
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     var text = input.value.trim();
+    if (agentId) {
+      if (!text || !token) return;
+      fetch(agentBase.replace('?k=', '/messages?k='), { method: 'POST', credentials: 'omit', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) })
+        .then(function (r) { if (r.status === 401) { signOut(); return null; } return r.json().then(function (d) { if (!r.ok) { error(d.error || 'That did not work.'); return null; } return d; }); })
+        .then(function (d) { if (d && d.message) { render(d.message); input.value = ''; grow(); bottom(); } })
+        .catch(function () { error('You seem to be offline.'); });
+      return;
+    }
     if (!text || !ws || ws.readyState !== 1) return;
     error('');
     ws.send(JSON.stringify({ type: 'room_message', message: text }));

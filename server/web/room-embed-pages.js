@@ -43,7 +43,7 @@ function messageHtml(m) {
     return `<li class="re-msg${ai ? ' re-ai' : ''}" data-id="${Number(m.id) || 0}"><time datetime="${esc(hhmm(m.created_at))}"></time><b>${esc(m.display_name || m.username || 'someone')}</b>${ai ? '<span class="re-badge">AI</span>' : ''} <span class="re-text">${esc(m.message)}</span></li>`;
 }
 
-function embedHtml(room, members, msgs, { bubble }) {
+function embedHtml(room, members, msgs, { bubble, agentId = null, secret = '' }) {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -55,10 +55,10 @@ function embedHtml(room, members, msgs, { bubble }) {
 <script src="${asset('room-embed.js')}" defer></script>
 </head>
 <body style="--accent:#3b82f6">
-<div class="em re" id="re" data-room="${esc(room.slug)}"${bubble ? ' data-bubble="1"' : ''}>
+<div class="em re" id="re" data-room="${esc(room.slug)}"${agentId ? ` data-agent="${esc(agentId)}" data-k="${esc(secret)}"` : ''}${bubble ? ' data-bubble="1"' : ''}>
 <header class="em-head"><span class="em-mark" aria-hidden="true">#</span>
 <div><b>${esc(room.name)}</b><span>${members} ${members === 1 ? 'member' : 'members'}${room.topic ? ` · ${esc(room.topic)}` : ''}</span></div>
-<a class="em-x" href="https://openvibe.chat/r/${esc(room.slug)}" target="_blank" rel="noopener" aria-label="Open the room on OpenVibe" title="Open on OpenVibe">&#8599;</a>${bubble ? '<button class="em-x" type="button" data-close aria-label="Close the chat">&times;</button>' : ''}</header>
+${agentId ? '' : `<a class="em-x" href="https://openvibe.chat/r/${esc(room.slug)}" target="_blank" rel="noopener" aria-label="Open the room on OpenVibe" title="Open on OpenVibe">&#8599;</a>`}${bubble ? '<button class="em-x" type="button" data-close aria-label="Close the chat">&times;</button>' : ''}</header>
 <ol class="em-thread re-thread" id="re-thread" aria-live="polite" aria-label="Messages">${msgs.map(messageHtml).join('') || '<li class="em-system" id="re-empty">No messages yet. Say hello.</li>'}</ol>
 <p class="em-error" role="alert" hidden></p>
 <form class="em-composer" id="re-form" hidden><label class="em-sr" for="re-input" hidden>Your message</label>
@@ -75,6 +75,19 @@ function embedHtml(room, members, msgs, { bubble }) {
 function mountRoomEmbedPages(router, { viewerOf, sameSite, config }) {
     const base = config.web.baseUrl;
     const ticketLimit = rateLimit({ windowMs: 60_000, max: 90, standardHeaders: true, legacyHeaders: false });
+
+    router.get('/embed/agent/:id', async (req, res) => {
+        const viewer = await viewerOf(req);
+        req.user = viewer && viewer.kind === 'user' ? viewer.user : null;
+        const found = await require('../chat/agent-room-view').visible(req, res);
+        if (!found) return;
+        const messages = await rooms.history(found.room, { limit: 50 });
+        res.set('Content-Security-Policy', [
+            "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data: https:",
+            `connect-src 'self' ${base.replace(/^http/, 'ws')}`, "frame-ancestors https://openvibe.live", "base-uri 'self'", "form-action 'self'", "object-src 'none'",
+        ].join('; ')).set('Cache-Control', 'no-store').set('Referrer-Policy', 'no-referrer').set('X-Robots-Tag', 'noindex').type('html')
+            .send(embedHtml(found.room, (await rooms.publicRoom(found.room)).members, messages, { bubble: false, agentId: req.params.id, secret: req.query.k || '' }));
+    });
 
     router.get('/embed/room/:slug', async (req, res) => {
         const room = await rooms.bySlug(req.params.slug);
