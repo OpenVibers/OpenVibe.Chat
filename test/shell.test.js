@@ -17,6 +17,7 @@ const { boot, suite } = require('./helpers');
 
 const t = suite('shell');
 let h, dee, bob, cat;
+let contactsMod, viewDefaults, serverPages, dmRoutes;
 const api = (method, path, u, body) => h.http(method, `/api/chat/servers${path}`, { token: u && u.token, body });
 const dmApi = (method, path, u, body) => h.http(method, `/api/dm${path}`, { token: u && u.token, body });
 const page = async (path, u) => {
@@ -30,7 +31,15 @@ t('boot', async () => {
     dee = h.addUser('dee', { subject: ids.newId('user') });
     bob = h.addUser('bob', { subject: ids.newId('user') });
     cat = h.addUser('cat', { subject: ids.newId('user') });
-    for (const u of [dee, bob, cat]) await h.ctx.upsertUser(h.live.users.get(u.id));
+    for (const u of [dee, bob, cat]) {
+        await h.ctx.upsertUser(h.live.users.get(u.id));
+        h.netModules.subjects.add(u.subject_id);
+    }
+    // Require after boot so config reads the env vars set by helpers.js.
+    contactsMod = require('../server/chat/contacts');
+    viewDefaults = require('../server/chat/view-defaults');
+    serverPages = require('../server/web/server-pages');
+    dmRoutes = require('../server/chat/dm-routes');
 });
 
 t('the shell: the rail, the side column, the members column and the bottom bar', async () => {
@@ -129,6 +138,104 @@ t('a server starts from a template and ends with its invite link', async () => {
     const shown = await page(location, dee);
     assert.match(shown.text, /Your invite link/, 'the invite is shown');
     assert.match(shown.text, /\/join\/[a-z0-9]+/);
+});
+
+t('contacts module: add, accept and remove directly', async () => {
+    await contactsMod.add(cat.id, dee.id);
+    let c = await contactsMod.of(cat.id);
+    assert.strictEqual(c.asked.length, 1, 'cat asked dee');
+    assert.ok(await contactsMod.accept(dee.id, cat.id), 'dee accepts');
+    c = await contactsMod.of(cat.id);
+    assert.strictEqual(c.friends.length, 1, 'they are friends');
+    assert.ok(await contactsMod.remove(cat.id, dee.id), 'cat removes dee');
+    c = await contactsMod.of(cat.id);
+    assert.strictEqual(c.friends.length, 0, 'no longer friends');
+});
+
+t('view defaults: Chat table and DM-routes view endpoints', async () => {
+    // Chat's own dm_view_defaults table (used while Contracts lacks a view_defaults field).
+    assert.deepStrictEqual(await viewDefaults.of(dee.id), viewDefaults.FALLBACK, 'fallbacks when empty');
+    await viewDefaults.save(dee.id, { one_to_one: 'room', group: 'bubbles' });
+    const saved = await viewDefaults.of(dee.id);
+    assert.strictEqual(saved.one_to_one, 'room');
+    assert.strictEqual(saved.group, 'bubbles');
+    assert.strictEqual(saved.ai, viewDefaults.FALLBACK.ai);
+    // The DM-routes view endpoint reads the Network chat.preferences default, then a per-conversation override.
+    h.netModules.set('chat.preferences', dee.subject_id, { view_defaults: { one_to_one: 'room', group: 'room' } });
+    // Drop any cached empty record from earlier page renders so the Network write is read.
+    require('../server/prefs/stores').preferences.invalidate(dee.subject_id);
+    // Use cat (bob was blocked in the previous contacts test).
+    const conv = await dmApi('POST', '/conversations', dee, { user_ids: [cat.id] });
+    const id = conv.body.conversation.id;
+    const get = await dmApi('GET', `/conversations/${id}/view`, dee);
+    assert.strictEqual(get.status, 200);
+    assert.strictEqual(get.body.view, 'room', 'conversation inherits the one_to_one default');
+    const put = await dmApi('PUT', `/conversations/${id}/view`, dee, { view: 'bubbles' });
+    assert.strictEqual(put.status, 200);
+    assert.strictEqual(put.body.view, 'bubbles');
+    assert.strictEqual((await dmApi('GET', `/conversations/${id}/view`, dee)).body.view, 'bubbles');
+    const bad = await dmApi('PUT', `/conversations/${id}/view`, dee, { view: 'tiles' });
+    assert.strictEqual(bad.status, 400);
+});
+
+t('server-pages module exports the page mount function', async () => {
+    assert.strictEqual(typeof serverPages.mountServerPages, 'function');
+});
+
+t('dm-routes module is an Express router', async () => {
+    assert.ok(dmRoutes, 'dm-routes loaded');
+    assert.strictEqual(typeof dmRoutes, 'function');
+    assert.strictEqual(typeof dmRoutes.get, 'function');
+});
+
+t('chat-shell.js runs in a browser sandbox and opens the Start sheet', async () => {
+    const vm = require('vm');
+    const fs = require('fs');
+    const path = require('path');
+    const src = fs.readFileSync(path.join(__dirname, '../public/web/chat-shell.js'), 'utf8');
+    let opened = false;
+    let focused = false;
+    let panelName = 'main';
+    const sheet = {
+        open: false,
+        id: 'oc-new-server',
+        set open(v) { this._open = v; opened = v; },
+        get open() { return this._open; },
+        closest: () => ({ offsetTop: 100, scrollTo() {} }),
+        querySelector: (sel) => {
+            if (sel.includes('input')) return { focus() { focused = true; } };
+            return null;
+        },
+    };
+    const appEl = {
+        getAttribute: () => panelName,
+        setAttribute: (k, v) => { if (k === 'data-oc-panel') panelName = v; },
+        classList: { toggle: () => {} },
+        addEventListener: () => {},
+        querySelectorAll: () => [],
+    };
+    const document = {
+        cookie: `ov_token=${dee.token}`,
+        querySelector: (sel) => (sel === '[data-oc-app]' ? appEl : null),
+        querySelectorAll: () => [],
+        getElementById: (id) => (id === 'oc-new-server' ? sheet : null),
+        documentElement: { classList: { add: () => {} } },
+        addEventListener: () => {},
+        createElement: () => ({ setAttribute: () => {}, addEventListener: () => {} }),
+        head: { appendChild: () => {} },
+    };
+    const window = {
+        OpenVibeUserCard: null,
+        OpenVibeUserMenu: null,
+        matchMedia: () => ({ matches: false }),
+        addEventListener: () => {},
+        location: { hash: '#oc-new-server' },
+        history: { replaceState: () => {} },
+        navigator: { clipboard: null },
+    };
+    vm.runInNewContext(src, { window, document, navigator: window.navigator, location: window.location });
+    assert.strictEqual(opened, true, 'the Start sheet opens on #oc-new-server');
+    assert.strictEqual(focused, true, 'the first field is focused');
 });
 
 t.run(async () => { if (h && h.close) await h.close(); });
