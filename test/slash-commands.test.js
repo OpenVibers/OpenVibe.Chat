@@ -23,14 +23,15 @@ t('boot: a stream room, its moderator and two viewers', async () => {
     await h.ctx.sync();
 });
 
-t('registry: signed-in only, built-ins without their permission, q filters by name', async () => {
+t('registry: signed-in only, no unscoped moderator commands, q filters by name', async () => {
     let r = await h.http('GET', '/api/chat/commands');
     assert.strictEqual(r.status, 401);
 
     r = await h.http('GET', '/api/chat/commands', { token: alice.token });
     assert.strictEqual(r.status, 200, r.text);
     const names = r.body.commands.map((c) => c.name);
-    for (const n of ['me', 'shrug', 'help', 'mute', 'timeout']) assert.ok(names.includes(n), n);
+    for (const n of ['me', 'shrug', 'help']) assert.ok(names.includes(n), n);
+    for (const n of ['mute', 'timeout']) assert.ok(!names.includes(n), n);
     assert.ok(r.body.commands.every((c) => !('permission' in c)), 'rights are not advertised');
     const shrug = r.body.commands.find((c) => c.name === 'shrug');
     assert.deepStrictEqual(shrug.options.map((o) => [o.name, o.type, o.required]), [['text', 'string', false]]);
@@ -39,11 +40,11 @@ t('registry: signed-in only, built-ins without their permission, q filters by na
     assert.deepStrictEqual(r.body.commands.map((c) => c.name), ['shrug']);
 });
 
-t('autocomplete: only an option with choices answers, filtered and capped', async () => {
+t('autocomplete: moderator choices require a server, other options answer', async () => {
     let r = await h.http('GET', '/api/chat/commands/autocomplete?command=timeout&option=seconds', { token: alice.token });
-    assert.deepStrictEqual(r.body.choices, ['60', '300', '900']);
+    assert.strictEqual(r.status, 403);
     r = await h.http('GET', '/api/chat/commands/autocomplete?command=%2Ftimeout&option=seconds&q=3', { token: alice.token });
-    assert.deepStrictEqual(r.body.choices, ['300']);
+    assert.strictEqual(r.status, 403);
     r = await h.http('GET', '/api/chat/commands/autocomplete?command=shrug&option=text&q=hi', { token: alice.token });
     assert.deepStrictEqual(r.body.choices, [], 'an option without choices suggests nothing');
 });
