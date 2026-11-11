@@ -342,7 +342,15 @@ quiet (independent of the insight job's `CHAT_AI_ENABLED`). An AI member linked 
 `CHAT_FOOD_INTERNAL_URL`). API: `GET|POST /api/chat/rooms/:slug/ai-members`, `PATCH|DELETE …/ai-members/:id` (people
 only; members see names and handles, managers the set-up); the settings page manages them without JavaScript. A room
 member can also be added by account subject: `POST /api/chat/rooms/:slug/members { subject: "usr_…" }`. Deleting an
-account keeps the AI members it added (they belong to the room) without its subject on them, and exports them.
+account keeps the ordinary AI members it added (they belong to the room) without its subject on them, and exports them.
+
+**Actor agents in server channels** (`actor_members_enabled` in Chat owner settings, or `CHAT_ACTOR_MEMBERS=1`; default off): a server manager can attach one of their own
+OpenVibe.Actor agents to a channel from its AI members settings. Anyone who can post in that channel can mention the
+agent; Chat starts the owner's personal agent through `actor.agent.run`, records a durable room task, and follows it
+through the existing workspace poller. The answer returns as that agent's room message. Actor applies the owner's
+budget, daily cap and approvals. The settings form says the answer is public to the channel. Deleting the owner's
+account removes its attached Actor agents; ordinary room AI members remain. Network must grant Chat `actor.agent.run`
+and Actor must allow Chat to read only the personal agent tasks it started.
 
 **Tools** (`server/rooms/ai-tools.js`; the owner's "modular AI conversation… tool calling"). An AI member's answer
 is a few turns of OpenVibe.AI's `chat.member.turn` (a Chat Completions passthrough with tools, AI#96): the model may

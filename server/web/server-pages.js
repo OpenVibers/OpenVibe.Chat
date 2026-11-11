@@ -277,6 +277,10 @@ ${sheet}`,
                 href: `${LIVE}/@${encodeURIComponent(p.username || '')}`,
             })),
         }));
+        if (ais.length) roleGroups.push({ title: 'Agents', people: ais.map((a) => ({
+            username: `@${a.handle}`, display_name: a.name, roles: [require('../rooms/ai-members').modelOf(a)],
+            href: `/s/${server.slug}/${pick.slug}#oc-compose`,
+        })) });
         const canInvite = can.manage || (can.moderate && server.visibility === 'public');
         // The sheet's last step: the invite link, with Copy and Share (a fresh server comes with one).
         const inviteCode = String(req.query.invite || '').toLowerCase();

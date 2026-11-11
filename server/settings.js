@@ -50,6 +50,12 @@ const SCHEMA = Object.freeze({
             'x-required-for': 'Stage channels',
             'x-owner-input': { group: 'voices', unlocks: 'Stage channel controls in Chat servers using existing voice rooms.', get_it_at: 'https://openvibe.chat', get_it_how: 'This is a Chat feature switch. Enable it to let server owners create stage channels.' },
         },
+        actor_members_enabled: {
+            type: 'boolean', title: 'Actor agents in channels', 'x-group': 'Channels', default: false,
+            description: 'Allow server managers to attach their own Actor agents to channels. Members can ask them there; the agent owner pays from their Actor budget.',
+            'x-required-for': 'Actor agents as channel members',
+            'x-owner-input': { group: 'voices', unlocks: 'An owner controlled Actor agent can answer in a server channel.', get_it_at: 'https://openvibe.chat', get_it_how: 'Enable this Chat switch after the Actor read delegation and Network grant are deployed.' },
+        },
         amazon_polly_access_key_id: {
             type: 'string', title: 'Amazon Polly access key ID', 'x-group': GROUP,
             description: 'The access key ID of an AWS user that may call Polly. Together with its secret it turns on the Polly voices in chat; the ID alone does nothing.',
