@@ -808,4 +808,26 @@ div.oc-set-row { cursor: default; }
 .oc-kind-agent_stream { color: var(--accent, #3b82f6); border-color: color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent); }
 @media (max-width: 480px) { .oc-agent-banner, .oc-agent-poll { padding: 9px 11px; } }
 .oc-server-emoji { vertical-align: middle; object-fit: contain; }
-.oc-emoji-choices { display: flex; flex-wrap: wrap; max-height: 12rem; overflow: auto; }
+/* The composer's command list and emoji picker (Opus, 2026-11-11): both float above the box. A command is its name in
+   the accent and what it does under it; the marked one (arrows, Enter or Tab) is tinted. The emoji are a grid of 44 px
+   tiles; the report link sits small at the end. */
+.oc-compose { position: relative; }
+.oc-command-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 30; display: grid; gap: 2px; max-height: min(320px, 50vh); overflow: auto; padding: 6px;
+  border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel, var(--oc-bg)); box-shadow: 0 16px 40px rgba(0, 0, 0, .35); }
+.oc-command-menu[hidden] { display: none; }
+.oc-cmd { display: grid; gap: 1px; width: 100%; min-height: 44px; padding: 7px 10px; border: 0; border-radius: 10px; background: none; color: var(--oc-text); font: inherit; text-align: left; cursor: pointer; }
+.oc-cmd b { font: 650 .92rem/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--oc-accent); }
+.oc-cmd span { font-size: .84rem; color: var(--oc-muted); line-height: 1.35; overflow-wrap: anywhere; }
+.oc-cmd:hover, .oc-cmd[aria-selected="true"] { background: var(--oc-panel-2, rgba(255, 255, 255, .06)); }
+.oc-emoji-picker { position: relative; flex: none; }
+.oc-emoji-toggle { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; list-style: none; color: var(--oc-muted); }
+.oc-emoji-toggle::-webkit-details-marker { display: none; }
+.oc-emoji-toggle:hover, .oc-emoji-picker[open] .oc-emoji-toggle { color: var(--oc-text); background: var(--oc-panel-2, rgba(255, 255, 255, .06)); }
+.oc-emoji-toggle .oc-i { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.oc-emoji-choices { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30; width: min(320px, calc(100vw - 32px)); display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 4px;
+  max-height: 14rem; overflow: auto; padding: 8px; border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel, var(--oc-bg)); box-shadow: 0 16px 40px rgba(0, 0, 0, .35); }
+.oc-emoji-choice { display: grid; place-items: center; height: 44px; border: 0; border-radius: 10px; background: none; cursor: pointer; }
+.oc-emoji-choice:hover, .oc-emoji-choice:focus-visible { background: var(--oc-panel-2, rgba(255, 255, 255, .06)); }
+.oc-emoji-report { grid-column: 1 / -1; justify-self: start; margin-top: 4px; font-size: .8rem; color: var(--oc-muted); }
+.oc-emoji-none { grid-column: 1 / -1; margin: 6px 4px; color: var(--oc-muted); font-size: .88rem; }
+@media (min-width: 761px) { .oc-command-menu { right: auto; width: min(420px, 100%); } }
