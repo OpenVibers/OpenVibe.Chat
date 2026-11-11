@@ -1279,6 +1279,15 @@ async function getChatAiSummaries(scope, subjectId) {
     return await all('SELECT * FROM chat_ai_summaries WHERE scope = ? AND subject_id = ? ORDER BY "window"',
         [scope, subjectId || 0]);
 }
+async function deleteChatAiSubjectMemory(subjectId) {
+    const id = Number(subjectId);
+    if (!Number.isSafeInteger(id) || id <= 0) return false;
+    return await transaction(async () => {
+        await run("DELETE FROM chat_ai_summaries WHERE scope = 'user' AND subject_id = ?", [id]);
+        await run("DELETE FROM chat_timeline_events WHERE scope = 'user' AND subject_id = ?", [id]);
+        return true;
+    });
+}
 // Paginated + searchable timeline browse. `before` = epoch ms (exclusive upper bound); `q`
 // filters label/detail; `since` = epoch ms lower bound (for period jumps). Newest first.
 async function getChatTimelineEvents({ scope = 'global', subjectId = 0, before = null, since = null, q = null, limit = 25 } = {}) {
@@ -1569,6 +1578,7 @@ module.exports = {
     // chat AI (Live's server/ai/chat-ai.js, moved): the job's selection/read helpers and the routes' reads
     getChatAiSummary,
     getChatAiSummaries,
+    deleteChatAiSubjectMemory,
     getChatTimelineEvents,
     getMaxChatMessageId,
     countChatMessagesSince,
