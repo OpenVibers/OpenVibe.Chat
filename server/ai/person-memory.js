@@ -63,14 +63,15 @@ async function summarize(source, prior, level, period) {
 }
 
 function build(source, model, prior, count, lastId) {
-    const fallback = `${count} chat message${count === 1 ? '' : 's'} in this period`;
-    const highlights = (Array.isArray(model?.highlights) ? model.highlights : []).slice(0, 5).map(h => {
+    const fallback = text(prior?.summary, 500) || `${count} chat message${count === 1 ? '' : 's'} in this period`;
+    const additions = (Array.isArray(model?.highlights) ? model.highlights : []).slice(0, 5).map(h => {
         const item = source[Number(h.index)];
         if (!item) return null;
         return { detail: text(h.detail, 180), stream_id: item.stream_id || null, at: item.timestamp || item.period_start || null };
     }).filter(Boolean);
-    return { summary: text(model?.summary || fallback, 500), topics: array(model?.topics, 5), highlights,
-        tone: text(model?.tone, 120), catchphrases: array(model?.catchphrases, 5), people: [],
+    const highlights = [...json(prior?.highlights), ...additions].slice(-5);
+    return { summary: text(model?.summary || fallback, 500), topics: model ? array(model.topics, 5) : json(prior?.topics), highlights,
+        tone: text(model?.tone || prior?.tone, 120), catchphrases: model ? array(model.catchphrases, 5) : json(prior?.catchphrases), people: json(prior?.people),
         message_count: count, last_message_id: lastId };
 }
 

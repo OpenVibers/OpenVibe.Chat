@@ -29,10 +29,13 @@ t('new messages form one day, then week and month from the day', async () => {
     assert.strictEqual((await memory.read(person.id, { channelId: channel.id, level: 'week' }))[0].message_count, 2);
     assert.strictEqual((await memory.read(person.id, { channelId: channel.id, level: 'month' }))[0].message_count, 2);
     assert.strictEqual((await memory.read(person.id))[0].message_count, 2);
+    await db.run("UPDATE person_chat_memory SET summary = 'Alice discussed a game.' WHERE user_id = ? AND channel_user_id = ? AND level = 'day'", [person.id, channel.id]);
     await db.run(`INSERT INTO chat_messages (user_id, channel_user_id, username, subject_id, message, timestamp)
         VALUES (?, ?, ?, ?, ?, ?)`, [person.id, channel.id, person.username, person.subject_id, 'one more', sqliteNow()]);
     await memory.tick();
-    assert.strictEqual((await memory.read(person.id, { channelId: channel.id }))[0].message_count, 3);
+    const incremented = (await memory.read(person.id, { channelId: channel.id }))[0];
+    assert.strictEqual(incremented.message_count, 3);
+    assert.strictEqual(incremented.summary, 'Alice discussed a game.', 'a capped model call does not discard earlier memory');
 });
 
 t('read exposes private fields only to the person or channel owner', async () => {
