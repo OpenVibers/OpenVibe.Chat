@@ -147,6 +147,13 @@ function linkCard(card) {
  */
 function embedCard(e) {
     if (!e || typeof e !== 'object' || typeof e.title !== 'string' || !e.title) return '';
+    if (e.kind === 'agent-run') {
+        const run = String(e.run_url || ''), events = String(e.events_url || '');
+        const trusted = /^https:\/\/openvibe\.network\/api\/frame\/(?:codes-runs|agent-runs\/actor)\/tsk_[0-9A-HJKMNP-TV-Z]{26}(?:~[1-9][0-9]*)?$/;
+        const href = /^https:\/\/openvibe\.(?:actor|codes)\/tasks\/tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(e.url || '')) ? e.url : null;
+        if (!trusted.test(run) || events !== `${run}/events`) return '';
+        return `<div class="oc-agent-run" data-ov-run-url="${esc(run)}" data-ov-events-url="${esc(events)}" data-ov-run-title="${esc(e.title)}">${href ? `<a href="${esc(href)}" rel="noopener">${esc(e.title)}</a>` : esc(e.title)}</div>`;
+    }
     const href = cardHref(e.url);
     const image = cardImage(e.image);
     const kind = ['link', 'video', 'image', 'live', 'picture', 'design', 'post', 'profile', 'game'].includes(e.kind) ? e.kind : 'link';
@@ -164,7 +171,7 @@ function embedCard(e) {
 function messageCards(m) {
     if (!m || typeof m !== 'object') return '';
     if (Array.isArray(m.embeds) && m.embeds.length) return m.embeds.slice(0, 3).map(embedCard).filter(Boolean).join('');
-    return linkCard(m.card);
+    return m.card && m.card.kind === 'agent-run' ? embedCard(m.card) : linkCard(m.card);
 }
 
 const hueOf = (slug) => { let h = 0; for (const c of String(slug)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };

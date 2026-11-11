@@ -124,6 +124,20 @@ t('a video watch page is a card with Watch together, and the stored card comes b
     assert.ok(html.text.includes('oc-card-pic'), 'the picture');
 });
 
+t('an agent-run embed keeps its authorized stream and escapes its title', async () => {
+    const id = 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3';
+    const run = `https://openvibe.network/api/frame/agent-runs/actor/${id}`;
+    const card = { kind: 'agent-run', title: '<Read files>', url: `https://openvibe.actor/tasks/${id}`, run_url: run, events_url: `${run}/events` };
+    const rows = [{ card: JSON.stringify(card) }];
+    await require('../server/chat/link-cards').hydrate(rows, 'room_messages');
+    assert.deepStrictEqual(rows[0].card, card, 'the run card is never replaced by a stale link preview');
+    const html = require('../server/web/ui').messageCards(rows[0]);
+    assert.match(html, /class="oc-agent-run"/);
+    assert.match(html, /&lt;Read files&gt;/);
+    assert.ok(!html.includes('<Read files>'));
+    assert.strictEqual(require('../server/web/ui').embedCard({ ...card, events_url: 'https://elsewhere.example/events' }), '');
+});
+
 t('a private video and a page Video does not vouch for are no card', async () => {
     const priv = await dmSend(bob, 'https://openvibe.video/v/777');
     assert.strictEqual(priv.status, 200, priv.text);

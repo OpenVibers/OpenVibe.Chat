@@ -172,6 +172,13 @@
   var EMBED_KINDS = ['link', 'video', 'image', 'live', 'picture', 'design', 'post', 'profile', 'game'];
   function embedCard(e) {
     if (!e || typeof e !== 'object' || typeof e.title !== 'string' || !e.title) return null;
+    if (e.kind === 'agent-run') {
+      var run = String(e.run_url || ''), events = String(e.events_url || '');
+      if (!/^https:\/\/openvibe\.network\/api\/frame\/(?:codes-runs|agent-runs\/actor)\/tsk_[0-9A-HJKMNP-TV-Z]{26}(?:~[1-9][0-9]*)?$/.test(run) || events !== run + '/events') return null;
+      var host = el('div', 'oc-agent-run'); host.dataset.ovRunUrl = run; host.dataset.ovEventsUrl = events; host.dataset.ovRunTitle = e.title;
+      var link = el('a', '', e.title); link.href = /^https:\/\/openvibe\.(?:actor|codes)\/tasks\/tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(e.url || '')) ? e.url : '#'; link.rel = 'noopener'; host.appendChild(link);
+      return host;
+    }
     var url = httpsHref(e.url);
     var box = el('div', 'oc-card'); box.dataset.kind = EMBED_KINDS.indexOf(e.kind) >= 0 ? e.kind : 'link';
     var img = typeof e.image === 'string' && /^https:\/\/openvibe\.media\/[^\s"'<>]+$/.test(e.image) ? httpsHref(e.image) : null;
@@ -192,18 +199,22 @@
   function addCard(li, m) {
     if (m && Array.isArray(m.embeds) && m.embeds.length) {
       m.embeds.slice(0, 3).forEach(function (e) { var c = embedCard(e); if (c) li.appendChild(c); });
+      mountRunCards(li);
       return;
     }
-    var c = linkCard(m && m.card); if (c) li.appendChild(c);
+    var c = m && m.card && m.card.kind === 'agent-run' ? embedCard(m.card) : linkCard(m && m.card); if (c) li.appendChild(c);
+    mountRunCards(li);
   }
   // A preview that landed after its message: replace the line's cards with the finished list.
   function updateEmbeds(id, embeds) {
     if (!feed || !Array.isArray(embeds)) return;
     var li = feed.querySelector('[data-id="' + Number(id) + '"]');
     if (!li) return;
-    Array.prototype.forEach.call(li.querySelectorAll('.oc-card'), function (c) { c.remove(); });
+    Array.prototype.forEach.call(li.querySelectorAll('.oc-card, .oc-agent-run'), function (c) { c.remove(); });
     addCard(li, { embeds: embeds });
   }
+
+  function mountRunCards(root) { if (window.OpenVibeAgentRunCards) window.OpenVibeAgentRunCards.mountAll(root); }
   function applyEdit(id, m) {
     if (!feed) return;
     var li = feed.querySelector('[data-id="' + Number(id) + '"]');
