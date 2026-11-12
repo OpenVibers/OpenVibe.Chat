@@ -17,7 +17,7 @@ function insightBlock(insight) {
     const off = insight && insight.state === 'off';
     const when = o.updated_at ? ui.when(o.updated_at) : null;
     const meta = [o.people ? `${o.people} ${o.people === 1 ? 'person' : 'people'}` : '', o.messages ? `${o.messages} messages` : '', when && when.text ? `updated ${when.text}` : ''].filter(Boolean);
-    return `<details class="oc-more oc-insight"><summary class="oc-icon-btn" aria-label="AI overview of this room" title="AI overview">${IC.spark}</summary><div class="oc-pop oc-insight-pop">`
+    return `<details class="oc-more oc-insight"><summary class="oc-icon-btn" aria-label="AI overview of this room" title="AI overview">${IC.steps}</summary><div class="oc-pop oc-insight-pop">`
         + (ready ? `<p>${esc(o.text)}</p>` : `<p class="oc-muted">${off ? 'AI insight is off for this room.' : 'Quiet right now: there is nothing new to summarise.'}</p>`)
         + (topics.length ? `<ul class="oc-insight-topics">${topics.map((t) => `<li>${esc(t.label)} <span class="oc-muted">${Number(t.count) || 0}</span></li>`).join('')}</ul>` : '')
         + (events.length ? `<ol class="oc-insight-timeline">${events.map((e) => `<li><time>${esc(ui.when(e.at).text || '')}</time> <strong>${esc(e.title)}</strong>${e.text ? ` <span class="oc-muted">${esc(e.text)}</span>` : ''}</li>`).join('')}</ol>` : '')

@@ -20,6 +20,10 @@ async function parse(room, user, raw) {
         return { handled: true, text: `* ${user.display_name || user.username} ${args}` };
     }
     if (name === 'shrug') return { handled: true, text: `${args ? `${args} ` : ''}¯\\_(ツ)_/¯` };
+    if (name === 'help') {
+        const available = require('./slash-commands').BUILT_INS.filter((command) => !command.permission || a.moderate);
+        return { handled: true, reply: `Commands: ${available.map((command) => `/${command.name}`).join(', ')}` };
+    }
     if (name === 'nick') {
         if (!room.server_id) error(422, 'commands.server_only', '/nick works in a server channel');
         if (!/^[^\x00-\x1f\x7f]{2,32}$/.test(args)) error(422, 'commands.options', 'Use /nick <2–32 character name>');

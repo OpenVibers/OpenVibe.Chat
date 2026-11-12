@@ -342,7 +342,15 @@ quiet (independent of the insight job's `CHAT_AI_ENABLED`). An AI member linked 
 `CHAT_FOOD_INTERNAL_URL`). API: `GET|POST /api/chat/rooms/:slug/ai-members`, `PATCH|DELETE …/ai-members/:id` (people
 only; members see names and handles, managers the set-up); the settings page manages them without JavaScript. A room
 member can also be added by account subject: `POST /api/chat/rooms/:slug/members { subject: "usr_…" }`. Deleting an
-account keeps the AI members it added (they belong to the room) without its subject on them, and exports them.
+account keeps the ordinary AI members it added (they belong to the room) without its subject on them, and exports them.
+
+**Actor agents in server channels** (`actor_members_enabled` in Chat owner settings, on by default; `CHAT_ACTOR_MEMBERS=1` forces it on): a server manager can attach one of their own
+OpenVibe.Actor agents to a channel from its AI members settings. Anyone who can post in that channel can mention the
+agent; Chat starts the owner's personal agent through `actor.agent.run`, records a durable room task, and follows it
+through the existing workspace poller. The answer returns as that agent's room message. Actor applies the owner's
+budget, daily cap and approvals. The settings form says the answer is public to the channel. Deleting the owner's
+account removes its attached Actor agents; ordinary room AI members remain. Network must grant Chat `actor.agent.run`
+and Actor must allow Chat to read only the personal agent tasks it started.
 
 **Tools** (`server/rooms/ai-tools.js`; the owner's "modular AI conversation… tool calling"). An AI member's answer
 is a few turns of OpenVibe.AI's `chat.member.turn` (a Chat Completions passthrough with tools, AI#96): the model may
@@ -398,6 +406,11 @@ servers run across the top and the channel list folds away. API: `/api/chat/serv
 delete, join `{ invite? }`, leave, members, channels, invites, `GET /invites/:code`). Deleting an account removes its
 memberships; a server it owned stays without an owner while anyone else is in it, and goes with its channels when
 nobody is.
+
+Forum channels are available by default for a server manager who can connect a Community forum they moderate;
+the owner can disable them with `forum_channels_enabled`. Slash commands and custom server emoji are available by
+default and can be disabled with `CHAT_SLASH_COMMANDS_ENABLED=0` and `CHAT_SERVER_EMOJI_ENABLED=0`. Stage channels
+use Chat's voice rooms and are available by default; the owner can disable them with `stage_channels_enabled`.
 
 **Pictures** (`server/rooms/pictures.js`; the owner's "files and pics" for Chat, through OpenVibe.Pics). A person who
 may post sends a picture from the room's or channel's "Add a picture" form (it works without JavaScript; with it, the
@@ -989,7 +1002,7 @@ left OpenVibe.Sites, and this repository's vhost serves it.
 Part of the [OpenVibe network](https://openvibe.network). Built in the open by [OpenVibers](https://github.com/OpenVibers).
 
 <!-- versions:start -->
-- openvibe-contracts: v0.399.0
-- openvibe-sdk: v0.147.0
-- openvibe-shared: v4.206.0
+- openvibe-contracts: v0.408.0
+- openvibe-sdk: v0.150.0
+- openvibe-shared: v4.214.0
 <!-- versions:end -->

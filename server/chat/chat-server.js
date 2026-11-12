@@ -1514,6 +1514,20 @@ class ChatServer {
         const parts = text.trim().split(/\s+/);
         const cmd = parts[0].toLowerCase();
 
+        // A !command may be an Element trigger (Elements, stage 1). Commands bypass the normal chat
+        // line path, so this is the one place they reach Live's existing chat-message effect; Live runs
+        // an element only if its library listens for that command, and a signed-in person is required.
+        if (client.channelUserId && client.user?.id) {
+            try {
+                ctx.effects.chatMessage({
+                    element: true, element_command: true,
+                    stream_id: client.streamId || null, channel_user_id: client.channelUserId,
+                    user_id: client.user.id, username: client.user.display_name || client.user.username,
+                    message: text,
+                }).catch(() => { /* the element trigger is not worth a user-visible error */ });
+            } catch { /* non-critical */ }
+        }
+
         // Arena: !hype / !beef / !arena (Live server/arena/arena-chat.js) — chat can only hype; the Arena
         // is pure mic. Live runs the command. When Live delivers through Chat's ingress (LIVE_CHAT_INGRESS)
         // the sender-only replies come back in the effect response and this socket sends them; on the old

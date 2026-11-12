@@ -25,6 +25,11 @@ const BUILT_INS = [
     { name:'vote', description:'Vote in a poll', options:[{name:'poll',description:'Poll number',type:'integer',required:true},{name:'option',description:'Option number',type:'integer',required:true}] },
     { name:'remind', description:'Remind yourself in this channel', options:[{name:'when',description:'10m, 2h or 1d and a message',type:'string',required:true}] },
 ];
+function optionsOf(command) {
+    if (Array.isArray(command?.options)) return command.options;
+    try { const options = JSON.parse(command?.options || '[]'); return Array.isArray(options) ? options : []; }
+    catch { return []; }
+}
 async function serverFor(req, res) {
     if (!req.query.server) return null;
     const server = await servers.bySlug(req.query.server);
@@ -36,9 +41,9 @@ router.get('/', requireAuth, readLimit, async (req,res) => {
     const server = await serverFor(req, res); if (server === false) return;
     const query = String(req.query.q || '').replace(/^\//,'').toLowerCase();
     const access = server && await servers.access(server, req.user);
-    const commands = BUILT_INS.filter(c => (!c.permission || (server ? access.moderate : true)) && (!query || c.name.startsWith(query))).map(({permission,...c}) => ({ ...c, source: 'builtin' }));
+    const commands = BUILT_INS.filter(c => (!c.permission || access?.moderate) && (!query || c.name.startsWith(query))).map(({permission,...c}) => ({ ...c, source: 'builtin' }));
     if (server) for (const row of await db.all('SELECT name, description, options, source, application_id FROM chat_registered_commands WHERE server_id = ? ORDER BY name', [server.id])) {
-        if (!query || row.name.startsWith(query)) commands.push({ name: row.name, description: row.description, options: row.options, source: row.source, application_id: row.application_id });
+        if (!query || row.name.startsWith(query)) commands.push({ name: row.name, description: row.description, options: optionsOf(row), source: row.source, application_id: row.application_id });
     }
     res.json({ commands });
 });
@@ -47,7 +52,8 @@ router.get('/autocomplete', requireAuth, readLimit, async (req,res) => {
     const server = await serverFor(req, res); if (server === false) return;
     const name = String(req.query.command || '').replace(/^\//,'').toLowerCase();
     const command = BUILT_INS.find(c => c.name === name) || (server && await db.get('SELECT options FROM chat_registered_commands WHERE server_id = ? AND name = ?', [server.id, name]));
-    const option = command?.options.find(o => o.name === String(req.query.option || ''));
+    if (command?.permission && !(server && (await servers.access(server, req.user)).moderate)) return res.status(403).json({ error: 'You do not have permission', code: 'commands.forbidden' });
+    const option = optionsOf(command).find(o => o.name === String(req.query.option || ''));
     const query = String(req.query.q || '').toLowerCase();
     if (option?.type === 'user' && server) {
         const rows = await db.all(`SELECT u.username FROM chat_server_members m JOIN ctx_users u ON u.id = m.user_id WHERE m.server_id = ? AND m.role != 'blocked' AND lower(u.username) LIKE ? ORDER BY u.username LIMIT 25`, [server.id, `${query.slice(0, 30)}%`]);
@@ -56,9 +62,7 @@ router.get('/autocomplete', requireAuth, readLimit, async (req,res) => {
     res.json({ choices: (option?.choices || []).filter(c => c.toLowerCase().includes(query)).slice(0,25) });
 });
 const internalRouter = express.Router();
-// Command registration is server configuration. Use the released config grant until
-// the dedicated command grant in the next Contracts release is available to Chat.
-internalRouter.post('/', serviceAuth.guard('chat.config.manage', { allowPublic: true }), writeLimit, async (req, res) => {
+internalRouter.post('/', serviceAuth.guard('chat.commands.register', { allowPublic: true }), writeLimit, async (req, res) => {
     if (!config.slashCommands.enabled) return res.status(404).json({ error:'Not found', code:'commands.disabled' });
     const principal = req.principal, user = principal.person && await ctx.getUserBySubject(principal.person);
     if (!user || user.is_banned || !/^(app|agent):/.test(principal.sub)) return res.status(403).json({ error:'A person and an approved app or agent grant are required', code:'commands.grant_required' });
@@ -75,7 +79,7 @@ internalRouter.post('/', serviceAuth.guard('chat.config.manage', { allowPublic: 
         res.status(201).json({ command: { name, description: command.description, options, source, application_id: principal.sub } });
     } catch (err) { res.status(409).json({ error:'Command name is already used', code:'commands.name_taken' }); }
 });
-internalRouter.delete('/:name', serviceAuth.guard('chat.config.manage', { allowPublic: true }), writeLimit, async (req, res) => {
+internalRouter.delete('/:name', serviceAuth.guard('chat.commands.register', { allowPublic: true }), writeLimit, async (req, res) => {
     if (!config.slashCommands.enabled) return res.status(404).json({ error:'Not found', code:'commands.disabled' });
     const principal = req.principal, user = principal.person && await ctx.getUserBySubject(principal.person);
     const server = await servers.bySlug(req.query.server);
