@@ -174,6 +174,7 @@ ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<scrip
 ${o.partyHome ? `<link rel="stylesheet" href="${asset('party-home.css')}">` : ''}
 ${o.party ? `<link rel="stylesheet" href="${ovServe.url('player.css')}">\n<link rel="stylesheet" href="${asset('party.css')}">\n<script src="${ovServe.url('player.js')}" defer></script>\n<script src="${ovServe.url('ov-sync.js')}" defer></script>\n<script src="${asset('party-providers.js')}" defer></script>\n<script src="${asset('party-provider-sync.js')}" defer></script>\n<script src="${asset('party.js')}" defer></script>` : ''}
 ${o.script || o.app ? `<script src="${asset('agent-run-card.js')}" defer></script>` : ''}
+${String(o.body || '').includes('id="oc-compose"') ? `<script src="${ovServe.url('ov-composer.js')}" defer></script>\n<script src="${asset('composer.js')}" defer></script>` : ''}
 ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join('\n')}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>

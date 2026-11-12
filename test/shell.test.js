@@ -86,7 +86,7 @@ t('the shell: the rail, the side column, the members column and the bottom bar',
     const asBob = await page(`/s/${slug}`, bob);
     assert.ok(/data-s="leave"/.test(asBob.text) && !/data-s="settings"/.test(asBob.text) && !/data-s="delete"/.test(asBob.text), 'a member: leave, and not a word about settings or deleting');
     // One composer: a box, Send on its right; no picture store in this run, so no Add.
-    assert.match(r.text, /<form class="oc-compose" method="post" action="\/s\/saturday-raiders\/general" id="oc-compose">/);
+    assert.match(r.text, /<form class="oc-compose" method="post" action="\/s\/saturday-raiders\/general" id="oc-compose" data-ovc-compose data-ovc-preset="chat">/);
     assert.match(r.text, /<div class="oc-compose-box"><div class="oc-compose-tray" data-oc-tray hidden><\/div>/);
     assert.match(r.text, /<textarea id="oc-input" name="message" maxlength="2000" rows="1" required placeholder="Message #general"><\/textarea><button type="submit" class="oc-send" aria-label="Send"/);
 });
