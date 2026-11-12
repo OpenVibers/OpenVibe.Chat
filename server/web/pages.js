@@ -1533,6 +1533,7 @@ ${notice('ok', 'Copy the secret now: it is not shown again. Anyone with the addr
     // ── What shipped, robots, sitemap ──
     // ── Servers (server/rooms/servers.js): text and voice channels, roles, invites ──
     require('./vibe-pages').mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit, notice });
+    require('./persona-admin').mountPersonaAdmin(router, { page, needUser, sameSite, formLimit, notice });
     require('./inbox-pages').mountInboxPages(router, { page, viewerOf, needUser, sameSite, formLimit, notice, config });
     require('./room-embed-pages').mountRoomEmbedPages(router, { viewerOf, sameSite, config });
     require('./developer-pages').mountDeveloperPages(router, { page, config });

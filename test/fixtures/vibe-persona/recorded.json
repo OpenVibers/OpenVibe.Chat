@@ -1,0 +1,36 @@
+{
+  "persona": {
+    "first": {
+      "name": "Keyboard Scout",
+      "glyph": "keyboard",
+      "hue": 210,
+      "topic": "mechanical keyboards and switches"
+    },
+    "changed": {
+      "name": "Stream Doctor",
+      "glyph": "video",
+      "hue": 12,
+      "topic": "live streaming setups and OBS"
+    },
+    "invalid_glyph": {
+      "name": "Ghost Guide",
+      "glyph": "not-a-real-glyph",
+      "hue": 400,
+      "topic": "haunted houses and ghost stories"
+    },
+    "remade": {
+      "name": "Desk Mechanic",
+      "glyph": "wrench",
+      "hue": 28,
+      "topic": "fixing a squeaky desk and chair"
+    }
+  },
+  "checks": {
+    "no_change": "NO",
+    "changed": "YES"
+  },
+  "image": {
+    "b64": "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2ZQAAAABJRU5ErkJggg==",
+    "url": null
+  }
+}

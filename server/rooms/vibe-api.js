@@ -9,6 +9,10 @@
  *                                     { chat: null } before the first. after = a message id: only what came after it
  *                                     (the Dock polls this for Vibe's answer). A Vibe message carries what Vibe really
  *                                     did (results: the reminders and timers it set or stopped), absent when none.
+ *                                     chat.persona is the chat's persona (server/persona/index.js), or null until it
+ *                                     is made: { name, glyph, hue, image_url|null, topic, made_at }.
+ *   GET  /api/vibe/conversations       { conversations: [{ slug, name, last_message_at, created_at, persona, … }], count }:
+ *                                     every item carries the same persona shape, so the Vibe panel and the Dock draw one.
  *   POST /api/vibe/undo { message_id, index }
  *                                     undo one of those results: the reminder is stopped, the timer too, and the
  *                                     result is marked undone. The person themself, in their own chat, within a day.
@@ -27,6 +31,7 @@ const { requireAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
 const vibe = require('./vibe');
+const persona = require('../persona');
 const vibeResults = require('./vibe-results');
 const aiClient = require('../ai/client');
 const compare = require('./vibe-compare');
@@ -87,7 +92,7 @@ router.get('/chat', personOnly, async (req, res) => {
     const after = Number(req.query.after) || null;
     const rows = await rooms.history(room, after ? { after, limit: 50 } : { limit: 40 });
     const by = await compare.answers(room, rows.filter((m) => !m.ai_member_id).map((m) => Number(m.id)));
-    return res.set('Cache-Control', 'private, no-store').json({ chat: { ...chatOf(room), ...(await compare.settings(room)) },
+    return res.set('Cache-Control', 'private, no-store').json({ chat: { ...chatOf(room), persona: persona.wire(await persona.forRoom(room.id)), ...(await compare.settings(room)) },
         messages: rows.filter((m) => !m.is_deleted).map((m) => ({ ...wire(m), ...(by.has(Number(m.id)) ? { answers: by.get(Number(m.id)) } : {}) })) });
 });
 

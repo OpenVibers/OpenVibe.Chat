@@ -14,6 +14,7 @@ let _ai = null;
 let _http = null;
 let _tokens = null;
 let _complete = null;
+let _catalog = null;   // tests: a recorded catalogue, so no model page or persona test touches the network
 // Why the last run answered nothing, when the caller can show it: `ai.resting` today. Cleared by a run that
 // succeeds. A product asks lastProblem() instead of turning "no answer" into an error.
 let _lastProblem = null;
@@ -182,10 +183,11 @@ async function complete({ model, messages, subject, temperature = null }) {
 }
 
 async function catalog() {
+    if (_catalog) return _catalog();
     const res = await fetch(`${config.ai.internalUrl}/api/v1/exchange/catalog`, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) throw new Error(`AI catalogue answered ${res.status}`);
     return res.json();
 }
 
-module.exports = { structured, stream, complete, catalog, enabled, bearer, http, lastProblem, _setClient(c) { _ai = c; }, _setComplete(c) { _complete = c; }, _setHttp(h) { _http = h; }, _setTokens(t) { _tokens = t; },
-    _setProblem(p) { _lastProblem = p; }, _reset() { _ai = null; _http = null; _tokens = null; _complete = null; _lastProblem = null; } };
+module.exports = { structured, stream, complete, catalog, enabled, bearer, http, lastProblem, _setClient(c) { _ai = c; }, _setCatalog(c) { _catalog = c; }, _setComplete(c) { _complete = c; }, _setHttp(h) { _http = h; }, _setTokens(t) { _tokens = t; },
+    _setProblem(p) { _lastProblem = p; }, _reset() { _ai = null; _http = null; _tokens = null; _complete = null; _catalog = null; _lastProblem = null; } };

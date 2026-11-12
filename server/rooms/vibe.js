@@ -36,6 +36,7 @@ const config = require('../config');
 const wordFilter = require('../chat/word-filter');
 const rooms = require('./rooms');
 const credentials = require('../ai/credentials');
+const persona = require('../persona');
 
 const VIBE = { name: 'Vibe', handle: 'vibe' };
 const MAX_CHATS = 500;
@@ -162,7 +163,10 @@ async function work(room, user, text, mode) {
         return { message, task: null };
     }
     // A task Actor refused at once was already answered in the chat (workspace.announce) with Actor's reason.
-    if (task.status !== 'failed' && !task.actor_task) await say(`${ON_IT[kind]} ${config.web.baseUrl}${task.url}`);
+    if (task.status !== 'failed' && !task.actor_task) {
+        const said = await say(`${ON_IT[kind]} ${config.web.baseUrl}${task.url}`);
+        if (said) { try { persona.afterAnswer(room); } catch { /* a persona never breaks the answer */ } }
+    }
     return { message, task };
 }
 
@@ -183,14 +187,16 @@ async function startWork(user, text, mode) {
 async function list(user, { limit = 100 } = {}) {
     if (!user) return [];
     const lim = Math.min(MAX_CHATS, Math.max(1, Number(limit) || 100));
-    const rows = await db.all(`SELECT r.slug, r.name, r.last_message_at, r.created_at, r.vibe_origin_site,
+    const rows = await db.all(`SELECT r.id, r.slug, r.name, r.last_message_at, r.created_at, r.vibe_origin_site,
             (SELECT m.message FROM room_messages m WHERE m.room_id = r.id AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT 1) AS last_line,
             (SELECT m.created_at FROM room_messages m WHERE m.room_id = r.id AND m.is_deleted = 0 AND m.ai_member_id IS NOT NULL ORDER BY m.id DESC LIMIT 1) AS last_answer_at
         FROM rooms r
         WHERE r.owner_id = ? AND r.assistant = 1 AND r.archived_at IS NULL ORDER BY COALESCE(r.last_message_at, r.created_at) DESC LIMIT ?`, [user.id, lim]);
+    const personas = await persona.forRooms(rows.map((r) => r.id));
     return rows.map((r) => ({ slug: r.slug, name: r.name, last_message_at: r.last_message_at || r.created_at, created_at: r.created_at,
         last_line: r.last_line ? String(r.last_line).replace(/\s+/g, ' ').slice(0, 160) : null,
-        last_answer_at: r.last_answer_at || null, site: r.vibe_origin_site || null }));
+        last_answer_at: r.last_answer_at || null, site: r.vibe_origin_site || null,
+        persona: persona.wire(personas.get(Number(r.id))) }));
 }
 
 async function count(user) {
@@ -239,7 +245,8 @@ async function rename(room, user, name) {
     if (!isVibeRoom(room) || !user || Number(room.owner_id) !== Number(user.id)) fail(404, 'rooms.not_found', 'No such chat');
     const n = String(name || '').replace(/\s+/g, ' ').trim();
     if (n.length < 1 || n.length > TITLE_MAX) fail(422, 'vibe.name', `A chat's name is 1 to ${TITLE_MAX} characters`);
-    await db.run('UPDATE rooms SET name = ? WHERE id = ?', [n, room.id]);
+    // Their name stays theirs: a persona made later never writes over it (server/persona/index.js).
+    await db.run('UPDATE rooms SET name = ?, vibe_title_locked = 1 WHERE id = ?', [n, room.id]);
     return await rooms.publicRoom(await db.get('SELECT * FROM rooms WHERE id = ?', [room.id]), { role: 'owner' });
 }
 

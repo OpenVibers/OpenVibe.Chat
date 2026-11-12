@@ -63,6 +63,15 @@ async function start() {
     } catch (err) {
         console.warn('[Chat] chat-app settings unavailable, the chat apps read the environment:', err && err.message);
     }
+    // Vibe personas' owner settings (chat.persona, server/persona/settings.js): the models, the re-check interval
+    // and the monthly cap. A failure turns personas off (no store, no spending) and says why in the log.
+    let personaSettings = null;
+    try {
+        personaSettings = await require('./persona/settings').createPersonaSettings({ db: db.getDb(), log: console });
+        console.log(`[Chat] owner settings ready (${personaSettings.namespace})`);
+    } catch (err) {
+        console.warn('[Chat] persona settings unavailable, Vibe personas are off:', err && err.message);
+    }
 
     // Shared per-actor rate-limit counters on Valkey (ADR-035); without VALKEY_URL they count in this
     // process, as before. openvibe-sdk/valkey's createValkey returns null when the URL is unset.
@@ -79,7 +88,7 @@ async function start() {
     callServer.init(server);
     const relay = serviceOutbox.configure({ config });
     const events = createEventsConsumer({ chatServer, secrets: config.events.secrets });
-    const { app, handleUpgrade } = createApp({ chatServer, relay, events, callServer, settings, chatAppSettings });
+    const { app, handleUpgrade } = createApp({ chatServer, relay, events, callServer, settings, chatAppSettings, personaSettings });
     void app.locals.chatApps.start();
     server.on('request', app);
     server.on('upgrade', (req, socket, head) => { handleUpgrade(req, socket, head).catch(() => { try { socket.destroy(); } catch { /* */ } }); });

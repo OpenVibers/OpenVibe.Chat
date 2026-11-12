@@ -142,7 +142,7 @@ t('removing the panel token falls back to the environment; the hook is guarded',
     const denied = await h.http('POST', `/internal/config/${NS}/test/telegram.bot_token`, { token: h.serviceToken(['chat.stats.read']) });
     assert.strictEqual(denied.status, 403);
     const voices = await cfg('GET', '/internal/config');
-    assert.deepStrictEqual(voices.body.namespaces.map((n) => n.namespace), ['chat.voices', 'chat.apps'], 'both namespaces on one route');
+    assert.deepStrictEqual(voices.body.namespaces.map((n) => n.namespace), ['chat.voices', 'chat.apps', 'chat.persona'], 'every namespace on one route (2026-11-12: chat.persona)');
 });
 
 t('no log or console line carries a token', async () => {

@@ -23,6 +23,7 @@ async function get(sql, params) { return await db.prepare(sql).get(...(params ||
 // Every table Chat owns, including the Chat ingress retry ledger and runtime-created modules.
 const TABLES = [
     'vibe_model_turns', 'vibe_chat_settings', 'vibe_model_preferences', 'vibe_import_notices',   // 0048: multi-model Vibe and the Exchange import
+    'vibe_personas', 'vibe_persona_spend',   // 0078: Vibe personas
     'chat_messages', 'person_chat_memory', 'person_chat_memory_settings', 'person_chat_memory_spend',
     'dm_conversations', 'dm_participants', 'dm_messages', 'dm_blocks', 'tts_voice_overrides',
     'channel_sounds', 'relay_users', 'hidden_relay_users', 'pending_ip_messages', 'stream_first_chats', 'moderation_actions',
