@@ -527,7 +527,10 @@ async function afterPost(room, message, user, deps = {}) {
         if (vibe && !own) await require('./vibe').countReply(user);
         // "How Vibe did this" says which model answered when it was the person's own (their key or their computer).
         if (vibe && own && steps && member.engine_label) steps.steps.unshift(`Answered with ${String(member.engine_label).slice(0, 160)}`);
-        return await say(text, steps && steps.steps.length ? steps : null);
+        const posted = await say(text, steps && steps.steps.length ? steps : null);
+        // The persona is due-based and never blocks the answer: afterPost schedules it and returns.
+        if (vibe) { try { require('./persona').afterAnswer(room); } catch { /* a persona never breaks an answer */ } }
+        return posted;
     } catch (err) {
         console.warn(`[Chat AI members] room ${room.id}: ${(err && err.message) || err}`);
         return null;

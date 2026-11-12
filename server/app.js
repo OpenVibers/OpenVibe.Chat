@@ -65,7 +65,7 @@ function getAllowedOrigins() {
     return allowed;
 }
 
-function createApp({ chatServer, relay, events = null, callServer = null, settings = null, chatAppSettings = null }) {
+function createApp({ chatServer, relay, events = null, callServer = null, settings = null, chatAppSettings = null, personaSettings = null }) {
     const allowedOrigins = getAllowedOrigins();
     const app = express();
     // Times leave with their zone (openvibe.design rule 148): the SQLite-era text columns are UTC.
@@ -160,11 +160,11 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // or x-danger change needs X-OV-Fresh: 1, and the test route synthesizes one short line without echoing a key.
     // chat.apps (the Telegram, Discord and Slack bots) is served by the same routes; its Test button is mounted first,
     // because the voices' test route answers 404 for every other namespace.
-    if (settings || chatAppSettings) {
+    if (settings || chatAppSettings || personaSettings) {
         const guard = serviceAuth.guard('chat.config.manage');
         app.use('/internal/config', express.json({ limit: '64kb' }));
         if (chatAppSettings) app.post(`/internal/config/${chatAppSettings.namespace}/test/:key`, guard, require('./chat-apps/owner-settings').testRoute(chatAppSettings));
-        const also = chatAppSettings ? [chatAppSettings.store] : [];
+        const also = [chatAppSettings && chatAppSettings.store, personaSettings && personaSettings.store].filter(Boolean);
         if (settings) settings.mount(app, { guard, also });
         else require('./settings').mountStores(app, { guard, stores: also });
     }
@@ -377,6 +377,8 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     app.use('/api/dm', require('./chat/dm-routes'));
     // Vibe from any OpenVibe site (the Dock, plan L48 V2): ask, and read the answer, with the person's own token.
     app.use('/api/vibe', require('./rooms/vibe-api'));
+    // The owner's Vibe persona settings (server/rooms/persona-api.js): owner sign-in only, never an API token.
+    app.use('/api/admin/persona', limits.identify, require('./rooms/persona-api'));
     // A companion's answer, read aloud in the character's own voice (the person's own token, the agent
     // voice's per-person limiter).
     app.use('/api/tts', require('./chat/tts-person'));

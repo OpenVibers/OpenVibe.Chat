@@ -160,6 +160,7 @@ same.
 
 - [README.md](README.md) — the product, cutover, data, events, rooms, Vibe, inboxes, feeds, deploy.
 - [docs/platform.md](docs/platform.md) — agent rooms and the digest Code/Chat/Actor use.
+- [docs/vibe-personas.md](docs/vibe-personas.md) — the persona shape, the topic check, models, spend cap, owner page and tests.
 - [docs/chat-ingress.md](docs/chat-ingress.md) — `/internal/chat/*` tickets and reads.
 - [docs/calls-cutover.md](docs/calls-cutover.md), [docs/parity.md](docs/parity.md),
   [docs/chat-apps.md](docs/chat-apps.md), [docs/party-pool.md](docs/party-pool.md).

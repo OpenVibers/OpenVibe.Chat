@@ -148,6 +148,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 | Emote image bytes | **OpenVibe.Media** (namespace `chat`) | `server/media/client.js` (openvibe-sdk `createObjectsClient`), Chat's service token (`media.object.upload` / `.delete`); the row keeps `media_url` + `media_asset_id` |
 | Chat-AI summaries (global / per-chatter insight + timeline) | **OpenVibe.AI** (namespace `chat.*`) | `server/ai/client.js` (openvibe-sdk `createAiClient`), Chat's service token (`ai.run.create` / `ai.run.read`); workflows `chat.global` / `chat.profile`; extractive fallback when AI does not answer |
 | Vibe's search (OpenVibe and the web) | **OpenVibe.Search** (Search Fabric, `GET /api/v1/query`) | `server/rooms/search-fabric.js` (openvibe-sdk/search 0.70), Chat's service token (Network grants `search.query.delegate` on `openvibe.search`), the person in `X-OV-Subject`; each result keeps its provider, date and URL; Search's `/api/v1/search` and Actor's web task are the fallbacks only when the fabric is down |
+| Vibe personas (name, glyph, hue, topic, avatar) | **OpenVibe.AI / Exchange** and **OpenVibe.Media** | `server/persona/index.js`: `ai.complete` with an explicit catalogue model and `chat.persona.image` for a picture, Chat's service token; each run's `usage.cost_usd` is kept in `vibe_persona_spend` under the owner's cap; avatar bytes go to Media (namespace `chat`) |
 | Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |
 | Events | **OpenVibe.Events** | `service_outbox` (openvibe-sdk outbox) → `POST /api/v1/events` when `EVENTS_URL` and `OV_OAUTH_CLIENT_SECRET` are set (`events.event.publish`); Chat's subscriptions deliver to `POST /internal/events` (`server/events/consumer.js`, `events.subscription.manage`) |
 
@@ -385,6 +386,20 @@ turned on "Let my AI use this computer's models".
   `GET|PUT /api/chat/vibe/engine`): every Vibe chat of theirs and each new one. There is no daily limit then. The page
   says "Vibe thinks with … (change)", "How Vibe did this" says which model answered, and a computer that does not answer
   is named, with what to check. Removing the key ends it.
+
+**Vibe personas** (`server/persona/`, `migrations/0078_vibe_personas.sql`; the owner, 2026-11-12). Each Vibe
+conversation gets a name and a face made from what it is about, and a new one when the topic changes. The shape is
+`persona { name, glyph, hue, image_url|null, topic, made_at }`, on every item of `GET /api/vibe/conversations` and on
+`chat` in `GET /api/vibe/chat` (null until the first answer, and past the cap). The name also names the chat until the
+person renames it. The first is made after the first answer; then every 8 messages (configurable) the cheapest chat
+model answers one word, `YES` or `NO`, to "has the topic changed?". The glyph is one name from
+`openvibe-shared/glyphs`; an invalid answer is retried once and then replaced from the registry. Auto models are the
+cheapest chat and image models in Exchange's catalogue; every call is `ai.complete` (or Chat's
+`chat.persona.image` workflow for a picture) under Chat's own grant, billed to Chat, with its `usage.cost_usd`
+recorded against the owner's monthly cap. Images are off by default and go to OpenVibe.Media. The owner page is
+`/admin/persona` (spend shown, model choices, interval, cap, remake one chat); the same values are the revisioned
+`chat.persona` namespace, and `GET|POST /api/admin/persona` + `POST /api/admin/persona/remake` are owner-sign-in
+only. `docs/vibe-personas.md` has the shape, settings and test notes.
 
 **Servers** (`server/rooms/servers.js`, `server/rooms/server-routes.js`, `server/web/server-pages.js`,
 `migrations/0013_chat_servers.sql`; the owner's Q14: friend groups and couples first, then communities with servers,
@@ -865,6 +880,7 @@ server/prefs/              chat preferences in the Network user module chat.pref
 server/calls/              moved from Live: the call server (/ws/call), its REST routes, Live's stream hooks (/internal/calls), the calls lifecycle
 server/media/client.js     OpenVibe.Media objects (namespace chat): emote image bytes, with Chat's own service token
 server/ai/                 moved from Live: chat-ai.js (the rolling insight job, off unless CHAT_AI_ENABLED), client.js (OpenVibe.AI runs, namespace chat.*), extractive.js (the fallback summary)
+server/persona/            Vibe personas: settings.js (chat.persona owner settings), index.js (the first name, the topic check, the cap, the avatar)
 server/db/                 database.js (Live's chat functions, same names and arguments; PostgreSQL, migrations/)
 scripts/                   parity, subscribe-events, n-1-record
 docs/                      calls-cutover.md, parity.md, chat-ingress.md, capabilities-proposal/
