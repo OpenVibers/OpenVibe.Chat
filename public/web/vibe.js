@@ -286,8 +286,9 @@
     b.appendChild(el('span', 'oc-sr', 'You said:'));
     b.appendChild(document.createTextNode(String(text)));
     if (localPicture) { var img = el('img', 'vb-local'); img.src = localPicture; img.alt = 'Your picture'; b.appendChild(img); }
+    b.dataset.raw = String(text);
     you.appendChild(b); li.appendChild(you);
-    if (id) { var edit = el('button', 'ovk-btn ovk-btn--quiet vb-edit', 'Edit'); edit.type = 'button'; you.appendChild(edit); }
+    if (id) vibeActions(li);
     return li;
   }
   // The answer side of a turn: Vibe's mark, then its reply.
@@ -509,29 +510,80 @@
     }
     if (stick) toBottom();
   }
+  function vibeActions(li) {
+    if (!li || !window.OVMessages || !room) return;
+    var id = li.getAttribute('data-me'); if (!id) return;
+    var bubble = li.querySelector('.ovt-you .ovt-bubble'); if (!bubble) return;
+    var raw = bubble.dataset.raw || String(bubble.textContent || '').replace(/^You said:/, '');
+    window.OVMessages.actions(li, ['edit'], { mine: true, message: { id: Number(id), message: raw, edited_at: bubble.dataset.editedAt || null }, onAction: function (a) { if (a === 'edit') startVibeEdit(li); } });
+  }
   function applyEdited(m) {
     var li = have(m && m.id), bubble = li && li.querySelector('.ovt-you .ovt-bubble');
     if (!bubble) return;
     bubble.textContent = '';
     bubble.appendChild(el('span', 'oc-sr', 'You said:'));
     bubble.appendChild(document.createTextNode(String(m.message || '')));
-    if (!li.querySelector('.vb-edit')) { var edit = el('button', 'ovk-btn ovk-btn--quiet vb-edit', 'Edit'); edit.type = 'button'; li.querySelector('.ovt-you').appendChild(edit); }
-    var mark = li.querySelector('.vb-edited');
-    if (!mark) { mark = el('small', 'vb-edited'); li.querySelector('.ovt-you').appendChild(mark); }
-    mark.textContent = 'edited · ' + String(m.edited_at || '').slice(11, 16);
+    bubble.dataset.raw = String(m.message || '');
+    Array.prototype.forEach.call(li.querySelectorAll('.vb-edited, .ovm-edited'), function (x) { x.remove(); });
+    if (m.edited_at && window.OVMessages) window.OVMessages.edited(bubble, m.edited_at);
+    vibeActions(li);
   }
-  app.addEventListener('click', function (e) {
-    if (!e.target.classList || !e.target.classList.contains('vb-edit') || !room) return;
-    var li = e.target.closest('[data-me]'), bubble = li && li.querySelector('.ovt-bubble');
-    if (!li || !bubble) return;
-    var copy = bubble.cloneNode(true);
-    Array.prototype.forEach.call(copy.querySelectorAll('button, small'), function (x) { x.remove(); });
-    var body = window.prompt('Edit message', copy.textContent.replace(/^You said:/, ''));
-    if (body == null) return;
-    fetch('/api/chat/rooms/' + encodeURIComponent(room) + '/messages/' + encodeURIComponent(li.getAttribute('data-me')), { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: body }) })
-      .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw Error(d.error || 'Could not edit'); applyEdited(d.message); }); })
-      .catch(function (err) { notice(err.message); });
-  });
+  // Editing your own message, in Vibe's box: the same bar and keys as the shared composer (rule 138).
+  var vibeEditing = null;
+  function startVibeEdit(li) {
+    if (!li || !room || !form) return;
+    var bubble = li.querySelector('.ovt-you .ovt-bubble'); if (!bubble) return;
+    var id = li.getAttribute('data-me'); if (!id) return;
+    var raw = bubble.dataset.raw || String(bubble.textContent || '').replace(/^You said:/, '');
+    cancelVibeEdit();
+    var draft = input.value;
+    var bar = el('div', 'oc-bar vb-edit-bar');
+    bar.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg><b>Editing your message</b><span>Enter saves · Esc cancels</span>';
+    var x = el('button', 'oc-bar-x', '×'); x.type = 'button'; x.setAttribute('aria-label', 'Stop editing');
+    bar.appendChild(x);
+    form.insertBefore(bar, form.firstChild);
+    form.classList.add('is-editing');
+    input.value = raw; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    function stop(restore) {
+      input.removeEventListener('keydown', keys, true);
+      form.removeEventListener('submit', submit, true);
+      if (bar.parentNode) bar.remove();
+      form.classList.remove('is-editing');
+      input.value = restore ? draft : draft;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      vibeEditing = null;
+      input.focus();
+    }
+    function save() {
+      var body = input.value.trim();
+      if (!body) { notice('A message can\'t be empty.'); return; }
+      fetch('/api/chat/rooms/' + encodeURIComponent(room) + '/messages/' + encodeURIComponent(id), { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: body }) })
+        .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw Error(d.error || 'Could not edit'); applyEdited(d.message); stop(false); }); })
+        .catch(function (err) { notice(err.message); });
+    }
+    function keys(e) {
+      if (!vibeEditing) return;
+      if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); stop(true); }
+      else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.stopImmediatePropagation(); save(); }
+    }
+    function submit(e) { if (!vibeEditing) return; e.preventDefault(); e.stopImmediatePropagation(); save(); }
+    x.addEventListener('click', function () { stop(true); });
+    input.addEventListener('keydown', keys, true);
+    form.addEventListener('submit', submit, true);
+    vibeEditing = { stop: stop };
+  }
+  function cancelVibeEdit() { if (vibeEditing) vibeEditing.stop(true); }
+  function hydrateVibe() {
+    if (!window.OVMessages) return;
+    Array.prototype.forEach.call(app.querySelectorAll('.ovt-turn[data-me]'), function (li) {
+      var bubble = li.querySelector('.ovt-you .ovt-bubble'); if (!bubble) return;
+      var mark = li.querySelector('.vb-edited');
+      if (mark) { var at = mark.getAttribute('data-edited-at'); mark.remove(); if (at) { bubble.dataset.editedAt = at; window.OVMessages.edited(bubble, at); } }
+      if (!bubble.dataset.raw) bubble.dataset.raw = String(bubble.textContent || '').replace(/^You said:/, '');
+      vibeActions(li);
+    });
+  }
 
   // ── The canvas (plan HO9): the agent's data panel beside the chat ─────────────────────────────────────────────
   // Only the newest task in the chat, and only when OpenVibe.Actor holds it (the task's actor_task is the tsk_…
@@ -881,6 +933,7 @@
     }
     refreshCompare(); setInterval(refreshCompare, 1500);
   }
+  hydrateVibe();
   canvasInit();
   connect();
   window.addEventListener('pagehide', function () { var w = ws; room = null; if (w) w.close(); });
