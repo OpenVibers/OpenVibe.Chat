@@ -1,4 +1,4 @@
-/* The Chat composer on the shared one (openvibe-shared 4.215.0, OpenVibeComposer.mount, preset chat): the room,
+/* The Chat composer on the shared one (openvibe-shared 4.217.0, OpenVibeComposer.mount, preset chat): the room,
    conversation and global message boxes keep their form (action, socket submit, no-JS post) and become the shared
    box with its tools and Send. Add stays beside them where the place takes pictures. Without ov-composer.js the
    server's form is untouched. */
@@ -20,12 +20,18 @@
     });
     if (!c) return;
     c.text.id = ta.id || 'oc-input';
-    form.textContent = '';
-    while (c.form.firstChild) form.appendChild(c.form.firstChild);
-    form.classList.add('ovt-composer', 'ovc-v2');
-    form.dataset.preset = 'chat';
-    if (add) { var tools = form.querySelector('.ovt-c-tools'); if (tools) tools.insertBefore(add, tools.firstChild); }
-    form.__ovcComposer = c;
+    // The mounted form IS the box (not its children in the old one): api.edit() and its submit capture belong to
+    // this form, so Enter saves an edit before the room's send handler hears it.
+    c.form.id = form.id || 'oc-compose';
+    c.form.className = 'oc-compose ovt-composer ovc-v2';
+    c.form.dataset.preset = 'chat';
+    c.form.dataset.ovcCompose = '';
+    c.form.setAttribute('action', form.getAttribute('action') || '');
+    c.form.setAttribute('method', form.getAttribute('method') || 'post');
+    Array.prototype.forEach.call(form.querySelectorAll('input[type="hidden"]'), function (h) { c.form.appendChild(h.cloneNode(true)); });
+    if (add) { var tools = c.form.querySelector('.ovt-c-tools'); if (tools) tools.insertBefore(add, tools.firstChild); }
+    c.form.__ovcComposer = c;
+    if (form.parentNode) form.parentNode.replaceChild(c.form, form);
   }
   window.OVChatComposer = { scan: scan, upgrade: upgrade };
 })();

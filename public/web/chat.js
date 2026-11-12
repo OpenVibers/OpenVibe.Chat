@@ -314,47 +314,155 @@
   }
 
   function mountRunCards(root) { if (window.OpenVibeAgentRunCards) window.OpenVibeAgentRunCards.mountAll(root); }
+  // A message's text element for an edit or an "edited" mark (a room line, a DM line, a bubble).
+  function rowText(li) { return li && li.querySelector('.oc-text, .oc-bubble'); }
+  function rowMine(li) {
+    if (!li || !cfg.me) return false;
+    if (cfg.view === 'dm') return li.classList.contains('oc-mine') || li.classList.contains('oc-bubble-mine') || Number(li.dataset.user) === Number(cfg.me);
+    return Number(li.dataset.user) === Number(cfg.me);
+  }
+  function rowMessage(li) {
+    var mark = li && li.querySelector('.oc-edited');
+    var t = rowText(li);
+    return {
+      id: li ? Number(li.dataset.id) || 0 : 0,
+      user_id: li ? Number(li.dataset.user) || 0 : 0,
+      message: t ? String(t.textContent || '').trim() : '',
+      edited_at: mark ? mark.getAttribute('data-edited-at') || null : null,
+    };
+  }
+  // openvibe.design rule 138: one cluster at the row's corner, never in its words (shared messages.js).
+  function offerActions(li, m, mine) {
+    if (!li || !m || !m.id || !window.OVMessages || !mine) return;
+    var ids = ['edit'];
+    if (cfg.view === 'room' || cfg.view === 'dm') ids.push('delete');
+    var old = li.querySelector('.oc-del');
+    if (old) old.hidden = true;
+    window.OVMessages.actions(li, ids, { message: m, mine: true, onAction: onMessageAction });
+    li.__ovm = m;
+  }
   function applyEdit(id, m) {
     if (!feed) return;
     var li = feed.querySelector('[data-id="' + Number(id) + '"]');
     if (!li) return;
-    var t = li.querySelector('.oc-text, .oc-bubble');
+    var t = rowText(li);
     if (t) { t.textContent = ''; if (cfg.view === 'room') textWithRoomEmoji(t, m.message); else textWithLinks(t, m.message); }
-    var mark = li.querySelector('.oc-edited');
-    if (!mark) { mark = el('span', 'oc-muted oc-edited'); if (t) t.insertAdjacentElement('afterend', mark); else li.appendChild(mark); }
-    mark.textContent = ' edited · ' + clock(m.edited_at).textContent;
+    Array.prototype.forEach.call(li.querySelectorAll('.oc-edited, .ovm-edited'), function (x) { x.remove(); });
+    if (t && m.edited_at && window.OVMessages) window.OVMessages.edited(t, m.edited_at);
+    var mm = { id: Number(m.id) || Number(id), user_id: Number(m.user_id) || 0, message: String(m.message || ''), edited_at: m.edited_at || null };
+    li.__ovm = mm;
+    if (rowMine(li)) offerActions(li, mm, true);
     Array.prototype.forEach.call(li.querySelectorAll('.oc-card'), function (c) { c.remove(); });
     addCard(li, m);
   }
-  function addEditButton(li) {
-    if (!li || li.querySelector('.oc-edit') || !cfg.me) return;
-    var owned = cfg.view === 'dm' ? li.classList.contains('oc-mine') || li.classList.contains('oc-bubble-mine') : Number(li.dataset.user) === Number(cfg.me);
-    if (!owned) return;
-    var b = el('button', 'ovk-btn ovk-btn--quiet oc-edit', 'Edit'); b.type = 'button'; li.appendChild(b);
+  function editBase() {
+    if (cfg.view === 'dm') return '/api/dm/conversations/' + encodeURIComponent(cfg.conversation);
+    if (cfg.view === 'room') return '/api/chat/rooms/' + encodeURIComponent(cfg.room);
+    return '/api/chat';
   }
-  if (feed) feed.addEventListener('click', function (e) {
-    if (!e.target.classList || !e.target.classList.contains('oc-edits') || !cfg.room) return;
-    var li = e.target.closest('[data-id]'); if (!li) return;
-    fetch('/api/chat/rooms/' + encodeURIComponent(cfg.room) + '/messages/' + encodeURIComponent(li.dataset.id) + '/edits', { credentials: 'same-origin' })
-      .then(function (r) { return r.ok ? r.json() : null; })
-      .then(function (d) { if (d && d.versions) window.alert(d.versions.map(function (v) { return String(v.edited_at || '') + '\n' + String(v.message || ''); }).join('\n\n')); })
-      .catch(function () { showError('Could not load earlier versions'); });
-  });
-  if (feed && (cfg.view === 'global' || cfg.view === 'dm' || cfg.view === 'room')) {
-    if (feed.querySelectorAll) Array.prototype.forEach.call(feed.querySelectorAll('[data-id]'), addEditButton);
-    feed.addEventListener('click', function (e) {
-      if (!e.target.classList || !e.target.classList.contains('oc-edit')) return;
-      var li = e.target.closest('[data-id]'), t = li && li.querySelector('.oc-text, .oc-bubble');
-      if (!li || !t) return;
-      var body = window.prompt('Edit message', t.textContent);
-      if (body == null || body.trim() === t.textContent.trim()) return;
-      var base = cfg.view === 'dm' ? '/api/dm/conversations/' + encodeURIComponent(cfg.conversation) : cfg.view === 'room' ? '/api/chat/rooms/' + encodeURIComponent(cfg.room) : '/api/chat';
-      e.target.disabled = true;
-      fetch(base + '/messages/' + encodeURIComponent(li.dataset.id), { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: body }) })
-        .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw Error(d.error || 'Could not edit'); applyEdit(li.dataset.id, d.message); }); })
-        .catch(function (err) { showError(err.message); }).then(function () { e.target.disabled = false; });
+  function saveEdit(m, body) {
+    if (!m || !m.id) return Promise.resolve(false);
+    return fetch(editBase() + '/messages/' + encodeURIComponent(m.id), {
+      method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: body }),
+    }).then(function (r) {
+      return r.json().then(function (d) { if (!r.ok) throw Error(d.error || 'Could not edit'); applyEdit(m.id, d.message); return true; });
+    }).catch(function (err) { showError(err.message); return false; });
+  }
+  // A view whose box is not on mount() gets the same bar and keys in plain markup (Vibe has its own).
+  function plainEdit(li, m) {
+    if (!form || !input) return;
+    var bar = form.querySelector('.oc-edit-bar');
+    if (!bar) {
+      bar = el('div', 'oc-bar oc-edit-bar');
+      bar.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg><b>Editing your message</b><span>Enter saves · Esc cancels</span>';
+      var x = el('button', 'oc-bar-x', '×'); x.type = 'button'; x.setAttribute('aria-label', 'Stop editing');
+      x.addEventListener('click', function () { stopPlainEdit(); });
+      bar.appendChild(x); form.insertBefore(bar, form.firstChild);
+    }
+    var draft = input.value;
+    function stopPlainEdit() { if (bar) bar.remove(); input.value = draft; input.dispatchEvent(new Event('input', { bubbles: true })); form.__plainEdit = null; input.focus(); }
+    function keydown(e) {
+      if (!form.__plainEdit) return;
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); stopPlainEdit(); }
+      else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.stopPropagation(); saveEdit(m, input.value.trim()).then(function (ok) { if (ok) stopPlainEdit(); }); }
+    }
+    input.value = m.message; input.focus(); input.setSelectionRange(input.value.length, input.value.length);
+    form.__plainEdit = { stop: stopPlainEdit };
+    input.addEventListener('keydown', keydown, true);
+    var oldStop = stopPlainEdit;
+    stopPlainEdit = function () { input.removeEventListener('keydown', keydown, true); oldStop(); };
+  }
+  function startEdit(li) {
+    var m = li && (li.__ovm || rowMessage(li));
+    if (!m || !m.id) return;
+    var c = form && form.__ovcComposer;
+    if (c && typeof c.edit === 'function') {
+      c.edit({ text: m.message, onSave: function (next) { return saveEdit(m, next); } });
+      return;
+    }
+    plainEdit(li, m);
+  }
+  function deleteRow(li, m) {
+    var f = li && li.querySelector('.oc-del form');
+    if (f) { if (f.requestSubmit) f.requestSubmit(); else f.submit(); return; }
+    if (cfg.view === 'dm') {
+      fetch('/api/dm/conversations/' + encodeURIComponent(cfg.conversation) + '/messages/' + encodeURIComponent(m.id), { method: 'DELETE', credentials: 'same-origin' })
+        .then(function (r) { if (!r.ok) throw Error('Could not delete this message'); li.remove(); })
+        .catch(function (err) { showError(err.message); });
+      return;
+    }
+    showError('This message cannot be deleted here.');
+  }
+  function onMessageAction(action, m, li) {
+    if (action === 'edit') startEdit(li);
+    else if (action === 'delete') deleteRow(li, m);
+  }
+  // The server draws the first page: give its rows the same cluster and "edited" word as a row that arrives live.
+  function hydrateFeed() {
+    if (!feed || !window.OVMessages) return;
+    if (typeof window.OVMessages.tapToAct === 'function') window.OVMessages.tapToAct(feed);
+    Array.prototype.forEach.call(feed.querySelectorAll('[data-id]'), function (li) {
+      if (li.__ovmHydrated) return; li.__ovmHydrated = true;
+      var m = rowMessage(li); if (!m.id) return;
+      var mark = li.querySelector('.oc-edited'), t = rowText(li);
+      if (mark) {
+        var at = mark.getAttribute('data-edited-at');
+        mark.remove();
+        if (at && t) window.OVMessages.edited(t, at);
+      }
+      if (rowMine(li)) { m.user_id = Number(cfg.me); offerActions(li, m, true); }
     });
   }
+  // The moderators' Earlier versions, in a small sheet (never window.alert).
+  function showEditions(versions) {
+    var d = document.createElement('dialog'); d.className = 'oc-edits-sheet'; d.setAttribute('aria-label', 'Earlier versions');
+    var head = document.createElement('header');
+    var h = document.createElement('b'); h.textContent = 'Earlier versions'; head.appendChild(h);
+    var x = document.createElement('button'); x.type = 'button'; x.setAttribute('aria-label', 'Close'); x.textContent = '×';
+    x.addEventListener('click', function () { d.close(); }); head.appendChild(x);
+    var list = document.createElement('ol');
+    (Array.isArray(versions) ? versions : []).forEach(function (v) {
+      var li = document.createElement('li'); var time = document.createElement('time');
+      var at = v && v.edited_at ? new Date(String(v.edited_at).replace(' ', 'T') + (/[zZ]|[+-]\d{2}:?\d{2}$/.test(String(v.edited_at)) ? '' : 'Z')) : null;
+      time.textContent = at && !isNaN(at) ? at.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : '';
+      var p = document.createElement('p'); p.textContent = String(v && v.message || '');
+      li.append(time, p); list.appendChild(li);
+    });
+    if (!list.children.length) { var p = document.createElement('p'); p.textContent = 'No earlier versions.'; list.appendChild(p); }
+    d.append(head, list);
+    d.addEventListener('click', function (e) { if (e.target === d) d.close(); });
+    document.body.appendChild(d);
+    if (d.showModal) d.showModal(); else d.setAttribute('open', '');
+  }
+  if (feed) feed.addEventListener('click', function (e) {
+    var earlier = e.target.closest && e.target.closest('.oc-edits');
+    if (!earlier || !cfg.room) return;
+    var li = earlier.closest('[data-id]'); if (!li) return;
+    fetch('/api/chat/rooms/' + encodeURIComponent(cfg.room) + '/messages/' + encodeURIComponent(li.dataset.id) + '/edits', { credentials: 'same-origin' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { showEditions(d && d.versions); })
+      .catch(function () { showError('Could not load earlier versions'); });
+  });
 
   // Display only (the server decides who may do what): the same badges the page renders.
   var BADGES = { admin: ['oc-badge oc-badge-staff', 'staff'], global_mod: ['oc-badge oc-badge-mod', 'mod'] };
@@ -365,7 +473,7 @@
     if (id && feed.querySelector('[data-id="' + id + '"]')) return;
     var stick = nearBottom();
     removeEmpty();
-    addEditButton(li); feed.appendChild(li);
+    feed.appendChild(li);
     while (feed.children.length > 300) {
       var oldest = feed.querySelector('[data-id]');
       if (!oldest) break;
@@ -416,8 +524,9 @@
     var b = badge(m.role); if (b) li.appendChild(b);
     li.appendChild(document.createTextNode(' '));
     var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
-    if (m.edited_at) li.appendChild(el('span', 'oc-muted oc-edited', ' edited · ' + clock(m.edited_at).textContent));
+    if (m.edited_at && window.OVMessages) window.OVMessages.edited(t, m.edited_at);
     addCard(li, m);
+    offerActions(li, { id: m.id, user_id: m.user_id, message: m.message, edited_at: m.edited_at }, Number(m.user_id) === Number(cfg.me));
     return li;
   }
   function removeIds(ids) {
@@ -503,13 +612,14 @@
 
   // ── A conversation ──
   function dmItem(m) {
-    var li = el('li', 'oc-msg' + (m.sender_id === cfg.me ? ' oc-mine' : '')); li.dataset.id = m.id || '';
+    var li = el('li', 'oc-msg' + (m.sender_id === cfg.me ? ' oc-mine' : '')); li.dataset.id = m.id || ''; li.dataset.user = m.sender_id || '';
     li.appendChild(clock(m.created_at)); li.appendChild(document.createTextNode(' '));
     li.appendChild(el('span', 'oc-name', m.display_name || m.username));
     li.appendChild(document.createTextNode(' '));
     var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
-    if (m.edited_at) li.appendChild(el('span', 'oc-muted oc-edited', ' edited · ' + clock(m.edited_at).textContent));
+    if (m.edited_at && window.OVMessages) window.OVMessages.edited(t, m.edited_at);
     addCard(li, m);
+    offerActions(li, { id: m.id, user_id: m.sender_id, message: m.message, edited_at: m.edited_at }, Number(m.sender_id) === Number(cfg.me));
     return li;
   }
   function startDm() {
@@ -599,15 +709,17 @@
     if (ai && window.VibeMarkdown) { t = el('div', 'oc-text vb-md'); t.innerHTML = window.VibeMarkdown.render(m.message); }
     else { t = el('span', 'oc-text'); textWithRoomEmoji(t, m.message); }
     li.appendChild(t);
-    if (m.edited_at) { li.appendChild(document.createTextNode(' ')); li.appendChild(el('span', 'oc-muted oc-edited', 'edited · ' + clock(m.edited_at).textContent)); }
+    if (m.edited_at && window.OVMessages) window.OVMessages.edited(t, m.edited_at);
     if (cfg.moderate && m.edited_at) { var versions = el('button', 'ovk-btn ovk-btn--quiet oc-edits', 'Earlier versions'); versions.type = 'button'; li.appendChild(versions); }
     if (!ai && cfg.pics) { var pw = pictureThumbs(m.message); if (pw) li.appendChild(pw); }
     addCard(li, m);
-    if (cfg.moderate || (cfg.me && !ai && m.user_id === cfg.me)) {
+    var mine = !ai && Number(m.user_id) === Number(cfg.me);
+    if (cfg.moderate || mine) {
       var f = el('form', 'oc-del'); f.method = 'post'; f.action = '/r/' + encodeURIComponent(cfg.room) + '/delete/' + m.id;
       var x = el('button'); x.type = 'submit'; x.title = 'Delete this message'; x.setAttribute('aria-label', 'Delete this message'); x.innerHTML = TRASH;
       f.appendChild(x); li.appendChild(f);
     }
+    offerActions(li, { id: m.id, user_id: m.user_id, message: m.message, edited_at: m.edited_at }, mine);
     return li;
   }
   // OpenVibe.Pics pictures a message links (server/rooms/pictures.js): thumbnails linked to the picture's page.
@@ -814,6 +926,7 @@
       });
     });
   }
+  hydrateFeed();
   toBottom();
   if (cfg.view === 'global') startGlobal();
   else if (cfg.view === 'dm') startDm();
