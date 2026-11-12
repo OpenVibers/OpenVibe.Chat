@@ -302,6 +302,39 @@ function personaFrom(answer, seed, previous) {
     return { name, topic, glyph, hue };
 }
 
+/**
+ * A picture an image provider answered with an address: https only, every hop's address checked public by
+ * openvibe-shared/egress (DNS rebinding included, through its lookup), at most two redirects, 20 s and 2 MB.
+ * Null for anything else.
+ */
+async function downloadImage(url, hops = 0) {
+    const { assertPublicUrl, safeLookup } = require('openvibe-shared/egress');
+    let u;
+    try { u = new URL(String(url)); } catch { return null; }
+    if (u.protocol !== 'https:' || u.username || u.password || hops > 2) return null;
+    try { await assertPublicUrl(u, { protocols: ['https:'] }); } catch { return null; }
+    const res = await new Promise((resolve) => {
+        const https = require('https');
+        const req = https.request(u.href, { method: 'GET', lookup: safeLookup, timeout: 20_000, headers: { accept: 'image/*' } }, (r) => {
+            const chunks = []; let size = 0; let over = false;
+            r.on('data', (c) => { size += c.length; if (size > 2 * 1024 * 1024) { over = true; r.destroy(); return; } chunks.push(c); });
+            r.on('end', () => resolve(over ? null : { status: r.statusCode, headers: r.headers, bytes: Buffer.concat(chunks) }));
+            r.on('close', () => resolve(over ? null : { status: r.statusCode, headers: r.headers, bytes: Buffer.concat(chunks) }));
+            r.on('error', () => resolve(null));
+        });
+        req.on('timeout', () => req.destroy());
+        req.on('error', () => resolve(null));
+        req.end();
+    });
+    if (!res) return null;
+    if ([301, 302, 303, 307, 308].includes(Number(res.status)) && res.headers.location) {
+        let next; try { next = new URL(String(res.headers.location), u).href; } catch { return null; }
+        return downloadImage(next, hops + 1);
+    }
+    if (res.status !== 200 || !res.bytes.length) return null;
+    return { type: String(res.headers['content-type'] || '').split(';')[0].trim().toLowerCase(), bytes: res.bytes };
+}
+
 /** The avatar: one small picture from the image model, uploaded to Media as Chat. Never fatal. */
 async function avatarFor(room, persona, key) {
     if (!settings.value('images')) return null;
@@ -341,12 +374,11 @@ async function avatarFor(room, persona, key) {
                 const m = /^data:(image\/[a-z0-9.+-]+);base64,(.*)$/is.exec(first.url);
                 if (m) { mimeType = m[1].toLowerCase(); buffer = Buffer.from(m[2], 'base64'); }
             } else if (/^https:\/\//i.test(first.url)) {
-                const res = await fetch(first.url, { signal: AbortSignal.timeout(20_000) });
-                if (!res.ok) return null;
-                const type = String(res.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-                if (/^image\//.test(type)) mimeType = type;
-                const bytes = Buffer.from(await res.arrayBuffer());
-                if (bytes.length <= 2 * 1024 * 1024) buffer = bytes;
+                // The provider's picture address is not ours to trust: the egress guard checks every hop is public.
+                const got = await downloadImage(first.url);
+                if (!got) return null;
+                if (/^image\//.test(got.type)) mimeType = got.type;
+                buffer = got.bytes;
             }
         }
         if (!buffer || !buffer.length || buffer.length > 2 * 1024 * 1024) return null;
