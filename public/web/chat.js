@@ -561,7 +561,7 @@
         var text = input.value.trim();
         if (!text) { e.preventDefault(); return; }
         e.preventDefault();
-        var btn = form.querySelector('button'); if (btn) btn.disabled = true;
+        var btn = form.querySelector('[data-ovt-send]') || form.querySelector('.oc-send') || form.querySelector('button'); if (btn) btn.disabled = true;
         fetch(base + '/messages', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) })
           .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
           .then(function (x) {
