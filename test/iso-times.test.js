@@ -7,7 +7,15 @@
  */
 const assert = require('assert');
 const { boot, suite } = require('./helpers');
-const { isoTime, normalizeTimes } = require('../server/iso-times');
+const { isoTime, normalizeTimes, storedTime } = require('../server/iso-times');
+
+// A cursor sent back as ISO is compared in the stored shape (an ISO string sorts after every row of its own day).
+assert.strictEqual(storedTime('2026-11-12T10:00:05.123Z'), '2026-11-12 10:00:05', 'ISO with Z → stored text');
+assert.strictEqual(storedTime('2026-11-12T12:00:05+02:00'), '2026-11-12 10:00:05', 'an offset is moved to UTC');
+assert.strictEqual(storedTime('2026-11-12 10:00:05'), '2026-11-12 10:00:05', 'the stored shape is read as UTC and kept');
+assert.strictEqual(storedTime('not a time'), null, 'not a time');
+assert.strictEqual(storedTime(''), null, 'empty');
+assert.ok(storedTime('2026-11-12T10:00:05Z') < '2026-11-12 10:00:06' && storedTime('2026-11-12T10:00:05Z') > '2026-11-12 10:00:04', 'and it orders against the column');
 
 assert.strictEqual(isoTime('2026-11-12 05:01:02'), '2026-11-12T05:01:02Z');
 assert.strictEqual(isoTime('2026-11-12T05:01:02.123Z'), '2026-11-12T05:01:02.123Z', 'ISO with Z is left alone');

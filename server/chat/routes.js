@@ -591,7 +591,9 @@ router.get('/:streamId/history', optionalAuth, async (req, res) => {
         const streamId = positiveInt(req.params.streamId);
         if (streamId === null) return res.status(400).json({ error: 'Invalid stream ID' });
         const limit = Math.min(parseInt(req.query.limit || '500'), 500);
-        const before = req.query.before; // ISO timestamp for pagination
+        // A time cursor: the pages give times as ISO (#542) and the column keeps 'YYYY-MM-DD HH:MM:SS' UTC text.
+        const before = req.query.before != null && req.query.before !== '' ? require('../iso-times').storedTime(String(req.query.before)) : null;
+        if (req.query.before != null && req.query.before !== '' && !before) return res.status(400).json({ error: 'before is a time, like 2026-11-12T10:00:00Z' });
 
         // Resolve which broadcaster this stream belongs to.
         const stream = await ctx.ensureStream(streamId);

@@ -9,8 +9,8 @@
  * stored text, cursors built from it and every query that compares it stay exactly as they are.
  *
  * Already-ISO values (with Z or an offset), dates (`YYYY-MM-DD`) and non-strings pass through.
- * `POST /api/v1/...` cursors echo their own stored text, not one of these fields, so pagination is
- * unaffected.
+ * `POST /api/v1/...` cursors echo their own stored text, not one of these fields. A time cursor a page
+ * documents as ISO (`/api/chat/history/:streamId?before=`) goes back through storedTime() first.
  */
 const SQL_TEXT_TIME = /^\d{4}-\d\d-\d\d[ T]\d\d:\d\d(?::\d\d(?:\.\d+)?)?$/;
 // created_at, updated_at, started_at, ended_at, expires_at, last_message_at, timestamp, …
@@ -43,4 +43,17 @@ function isoJsonTimes(req, res, next) {
     next();
 }
 
-module.exports = { TIME_KEY, SQL_TEXT_TIME, isoTime, normalizeTimes, isoJsonTimes };
+/**
+ * The other way: a time a client sends back (an ISO `?before=` echoed from a page) in the stored shape, so a text
+ * comparison against the column orders correctly. ISO puts a 'T' where the stored text has a space, and 'T' sorts after
+ * every digit and the space, so an ISO cursor compared raw let through every row of that same day. Null when it is not
+ * a time.
+ */
+function storedTime(value) {
+    if (typeof value !== 'string' || !value || value.length > 40) return null;
+    const v = value.trim();
+    const t = Date.parse(SQL_TEXT_TIME.test(v) ? `${v.replace(' ', 'T')}Z` : v);
+    return Number.isFinite(t) ? new Date(t).toISOString().replace('T', ' ').slice(0, 19) : null;
+}
+
+module.exports = { TIME_KEY, SQL_TEXT_TIME, isoTime, normalizeTimes, isoJsonTimes, storedTime };
