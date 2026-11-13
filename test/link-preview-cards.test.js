@@ -221,6 +221,7 @@ t('the room page draws the × for those who may hide the cards, and for nobody e
     const r = await newRoom('Drawn room');
     const message = await withPreview(r.slug, 'https://93.184.216.34/drawn', page('<meta property="og:title" content="Drawn">'));
     const mine = await (await fetch(`${h.base}/r/${r.slug}`, { headers: { cookie: `ov_token=${alice.token}` } })).text();
+    assert.ok(mine.includes('/web/chat.js'), 'the room page loads the client that drops a picture that does not load');
     assert.ok(mine.includes('aria-label="Hide the preview"'), 'the author gets the ×');
     assert.ok(mine.includes(`/r/${r.slug}/embeds/${message.id}/hidden`), 'and the form that hides them');
     const other = await (await fetch(`${h.base}/r/${r.slug}`, { headers: { cookie: `ov_token=${carol.token}` } })).text();
