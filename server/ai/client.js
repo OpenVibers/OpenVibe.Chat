@@ -62,6 +62,9 @@ async function bearer() {
  * transport error all answer null — exactly Live's ai-service.structured() contract. `force` runs it even with
  * the insight job switched off (CHAT_AI_ENABLED): a room's AI members have their own switch (CHAT_AI_MEMBERS).
  */
+// The workflows Chat runs in the background (the room insight job), which may take longer than a person waits.
+const BACKGROUND = new Set(['chat.global', 'chat.profile']);
+
 async function structured(workflow, input, opts = {}) {
     if (!(opts.force ? config.oauth.clientSecret : enabled())) return null;
     _lastProblem = null;
@@ -77,11 +80,17 @@ async function structured(workflow, input, opts = {}) {
                 ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : { idempotencyKey: false }),
             })
             : await runs.create(workflow, input, {
-                wait: config.ai.waitMs,
+                // A summary is background work: ask for a short wait (inside the HTTP client's 30 s), then poll the
+                // run to its end (2026-11-13: chat.global took 12-76 s and Chat gave up at 30 s, so the room's line
+                // was the extractive fallback while AI's answer arrived after it stopped listening).
+                wait: BACKGROUND.has(workflow) ? 20000 : config.ai.waitMs,
                 ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
                 ...(opts.attribution !== undefined ? { attribution: opts.attribution } : {}),
             });
-        const run = body && (body.run || body);
+        let run = body && (body.run || body);
+        if (run && run.id && (run.status === 'queued' || run.status === 'running') && BACKGROUND.has(workflow) && typeof runs.waitFor === 'function') {
+            run = await runs.waitFor(run.id, { intervalMs: 2000, timeoutMs: 150000 });
+        }
         _lastProblem = problemOf(run);
         // Meter completed failed runs too: providers can bill even when no output is returned.
         if (run && !run.synthetic && opts.onRun) await opts.onRun(run);
