@@ -9,8 +9,9 @@
  * The job reads the page through openvibe-shared/egress: public addresses only (DNS is checked again at connect, so
  * a name that answers a private address is refused), https only, at most two redirects each checked on its own,
  * 4 s and 512 KiB per request, no cookies, a plain user agent. YouTube and Vimeo are read from their oEmbed endpoint
- * on a fixed origin instead of their page. A picture is only kept when it already lives on openvibe.media: a page's
- * own image is not hot-linked (a Media proxy path can add those later).
+ * on a fixed origin instead of their page. A picture is never hot-linked: a page's own image is brought into
+ * OpenVibe.Media first (server/chat/media-import.js), and the card shows the Media address; a picture that cannot
+ * be brought in is left off the card.
  *
  * Previews live apart from the message (link_previews) and are cached by address for a day (link_preview_cache), so
  * sending, and every later send of the same address, never waits on another site. The fields are data, never markup:
@@ -21,6 +22,7 @@
  */
 const { assertPublicUrl, safeLookup } = require('openvibe-shared/egress');
 const db = require('../db/database');
+const mediaImport = require('./media-import');
 
 const MAX_URLS = 3;
 const MAX_URL = 2048;
@@ -131,6 +133,19 @@ function imageOf(value) {
     } catch { return null; }
 }
 
+/**
+ * A page's own picture address (https only): the one the job may bring into Media, so that a card shows a
+ * picture from our own host and never a hot-linked one.
+ */
+function httpsAddress(value) {
+    if (typeof value !== 'string' || !value) return null;
+    try {
+        const u = new URL(value);
+        if (u.protocol !== 'https:' || u.username || u.password) return null;
+        return u.href;
+    } catch { return null; }
+}
+
 const intOf = (value) => {
     const n = parseInt(value, 10);
     return Number.isFinite(n) && n > 0 && n <= 100000 ? n : 0;
@@ -168,7 +183,11 @@ function previewFromResponse(url, res) {
     const f = pageFields(html);
     const title = textOf(f['og:title'] || f['twitter:title'] || f['html:title'], MAX_TITLE);
     const description = textOf(f['og:description'] || f['twitter:description'], MAX_DESCRIPTION);
-    const image = imageOf(f['og:image'] || f['og:image:url'] || f['twitter:image']);
+    const raw = String(f['og:image'] || f['og:image:url'] || f['twitter:image'] || '').trim();
+    const image = imageOf(raw);
+    // The page's own picture: the job brings it into Media (server/chat/media-import.js) and keeps the Media
+    // address. A picture that is already on Media is kept as it is; one that cannot be brought in is left off.
+    const source_image = image ? null : httpsAddress(raw);
     const ogType = String(f['og:type'] || '').toLowerCase();
     const card = String(f['twitter:card'] || '').toLowerCase();
     const kind = ogType.startsWith('video') || card === 'player' ? 'video' : ogType.startsWith('image') ? 'image' : 'link';
@@ -182,6 +201,7 @@ function previewFromResponse(url, res) {
         kind,
         width: intOf(f['og:image:width'] || f['twitter:image:width']),
         height: intOf(f['og:image:height'] || f['twitter:image:height']),
+        ...(source_image ? { source_image } : {}),
     };
 }
 
@@ -548,6 +568,12 @@ async function previewOf(value) {
     if (hit.hit) return hit.value;
     let preview = null;
     try { preview = await readUrl(url); } catch { preview = null; }
+    // The page's own picture is brought into Media before the preview is kept: a card shows a picture from our
+    // own host, never a hot-linked one. A picture that cannot be brought in is left off the card.
+    if (preview && preview.source_image && !preview.image) {
+        const brought = await mediaImport.importPicture(preview.source_image).catch(() => null);
+        if (brought) preview = { ...preview, image: brought };
+    }
     const checked = preview ? parsePreview({ ...preview, url }) : null;
     await remember(url, checked);
     return checked;
@@ -671,13 +697,34 @@ async function attach(rows, scope = 'room', { enabled = true } = {}) {
         if (!byId.has(key)) byId.set(key, []);
         byId.get(key).push(preview);
     }
-    for (const row of list) row.embeds = byId.get(Number(row.id)) || [];
+    for (const row of list) {
+        // Cards that were taken back are not sent on a read, even when the rows are still there.
+        if (isHidden(row)) continue;
+        row.embeds = byId.get(Number(row.id)) || [];
+    }
     return rows;
 }
 
+/** A message whose cards were taken back (room_messages.embeds_hidden). */
+function isHidden(row) {
+    const v = row && row.embeds_hidden;
+    return v === true || v === 1 || v === '1' || v === 't' || v === 'true';
+}
+
+/**
+ * Take a message's cards back, or put them back. The flag lives on the message, so the cards can come back;
+ * the preview rows stay in the table (they are not deleted), so a job that is still running cannot change the
+ * answer. The author or a room moderator decides; the route checks that.
+ */
+async function hide(scope, messageId, hidden) {
+    const id = Number(messageId) || 0;
+    if (scope === 'room') await db.run('UPDATE room_messages SET embeds_hidden = ? WHERE id = ?', [hidden ? true : false, id]);
+    return { hidden: !!hidden, embeds: hidden ? [] : await embedsOf(scope, id) };
+}
+
 module.exports = {
-    addresses, normalizeUrl, textOf, decodeEntities, pageFields, previewFromResponse, previewFromOembed, imageOf,
-    previewOf, schedule, embedsOf, attach, remove, replaceForEdit, idle, ownLink,
+    addresses, normalizeUrl, textOf, decodeEntities, pageFields, previewFromResponse, previewFromOembed, imageOf, httpsAddress,
+    previewOf, schedule, embedsOf, attach, remove, hide, isHidden, replaceForEdit, idle, ownLink,
     CACHE_MS, MISS_MS, MAX_URLS, MAX_BYTES, FETCH_TIMEOUT_MS, MAX_REDIRECTS, PREVIEWS_ON,
     _setRequest(fn) { _request = fn || null; },
     _setLookup(fn) { _lookup = fn || null; },

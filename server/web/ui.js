@@ -142,10 +142,23 @@ function linkCard(card) {
 }
 
 /**
+ * The small × that takes a message's cards back, and the button that puts them back (server/rooms/routes.js).
+ * Only the message's author and the room's moderators get them: the page decides who may (server/web/pages.js).
+ */
+function hideForm(action) {
+    if (!action) return '';
+    return `<form class="oc-card-hide" method="post" action="${esc(action)}"><input type="hidden" name="hidden" value="1"><button type="submit" class="oc-card-hide-btn" aria-label="Hide the preview" title="Hide the preview">×</button></form>`;
+}
+function showForm(action) {
+    if (!action) return '';
+    return `<form class="oc-inline oc-card-show" method="post" action="${esc(action)}"><input type="hidden" name="hidden" value="0"><button type="submit" class="oc-link">Show previews</button></form>`;
+}
+
+/**
  * An address preview under a message (server/chat/link-previews.js): the picture when there is one, the address's
  * title as the link, its description, and "by" and LIVE for OpenVibe's own kinds. Every field is data: escaped here.
  */
-function embedCard(e) {
+function embedCard(e, opts) {
     if (!e || typeof e !== 'object' || typeof e.title !== 'string' || !e.title) return '';
     if (e.kind === 'agent-run') {
         const run = String(e.run_url || ''), events = String(e.events_url || '');
@@ -164,13 +177,14 @@ function embedCard(e) {
     const description = typeof e.description === 'string' && e.description ? `<p class="oc-card-line">${esc(e.description)}</p>` : '';
     const by = typeof e.by === 'string' && e.by ? `<p class="oc-card-line">by ${esc(e.by)}</p>` : '';
     const live = e.live === true ? '<p class="oc-card-note"><span class="oc-badge oc-badge-mod">LIVE</span></p>' : '';
-    return `<div class="oc-card" data-kind="${esc(kind)}">${pic}<div class="oc-card-body">${head}${description}${by}${live}</div></div>`;
+    const hide = opts && opts.hide ? hideForm(opts.hide) : '';
+    return `<div class="oc-card" data-kind="${esc(kind)}">${pic}<div class="oc-card-body">${head}${description}${by}${live}</div>${hide}</div>`;
 }
 
 /** A message's previews (up to three, in the order the addresses appeared), or its one known-link card when it has none. */
-function messageCards(m) {
+function messageCards(m, opts) {
     if (!m || typeof m !== 'object') return '';
-    if (Array.isArray(m.embeds) && m.embeds.length) return m.embeds.slice(0, 3).map(embedCard).filter(Boolean).join('');
+    if (Array.isArray(m.embeds) && m.embeds.length) return m.embeds.slice(0, 3).map((e) => embedCard(e, opts)).filter(Boolean).join('');
     return m.card && m.card.kind === 'agent-run' ? embedCard(m.card) : linkCard(m.card);
 }
 
@@ -178,4 +192,4 @@ const hueOf = (slug) => { let h = 0; for (const c of String(slug)) h = (h * 31 +
 const serverLetters = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 const serverMark = (s) => `<span class="oc-srv-icon oc-srv-icon--row" style="--oc-hue:${hueOf(s.slug)}" aria-hidden="true">${esc(serverLetters(s.name))}</span>`;
 
-module.exports = { head, when, initials, presenceState, presenceDot, presenceOrder, presenceLine, hueOf, serverLetters, serverMark, linkCard, embedCard, messageCards };
+module.exports = { head, when, initials, presenceState, presenceDot, presenceOrder, presenceLine, hueOf, serverLetters, serverMark, linkCard, embedCard, messageCards, hideForm, showForm };

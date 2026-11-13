@@ -416,7 +416,7 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null, card
 }
 
 // A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
-const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.reply_to_id, m.created_at, m.edited_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model,
+const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.reply_to_id, m.created_at, m.edited_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model, m.embeds_hidden,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle WHEN m.agent_stream THEN 'aiagent' ELSE u.username END AS username,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.name WHEN m.agent_stream THEN 'AI agent' ELSE COALESCE((
             SELECT sm.nickname FROM chat_server_members sm JOIN rooms sr ON sr.server_id = sm.server_id
@@ -578,6 +578,19 @@ async function update(room, actor, { name, topic, visibility, slow_seconds, join
     return await publicRoom(await db.get('SELECT * FROM rooms WHERE id = ?', [room.id]));
 }
 
+/**
+ * The room's link previews switch: its owner and its moderators set it (server/rooms/routes.js). Off: no new
+ * address in the room is fetched, and the reads show no previews. The room's own setting, not the PATCH above
+ * (which only the owner may use).
+ */
+async function setLinkPreviews(room, actor, on) {
+    const a = await access(room, actor);
+    if (!a.moderate) fail(403, 'rooms.not_mod', 'Only the room\'s owner and moderators change this');
+    const value = on === true || on === 1 || on === '1' || on === 'on';
+    await db.run('UPDATE rooms SET link_previews = ? WHERE id = ?', [value, room.id]);
+    return await publicRoom(await db.get('SELECT * FROM rooms WHERE id = ?', [room.id]));
+}
+
 /** The room's people, by role. `seen` adds last_seen_at (moderators only: it is presence). */
 async function members(room, { seen = false, subjects = false } = {}) {
     // A server's channel: the server's people, with the role each has in the channel.
@@ -647,7 +660,7 @@ module.exports = {
     LIMITS,
     isWorkspace, isStaffRoom,
     postAsAi,
-    ensureSchema, create, list, bySlug, access, join, leave, post, editMessage, history, historyPage, markRead, deleteMessage, setRole, update, members, publicRoom, messageById,
+    ensureSchema, create, list, bySlug, access, join, leave, post, editMessage, history, historyPage, markRead, deleteMessage, setRole, update, setLinkPreviews, members, publicRoom, messageById,
     attach, detach, attachments, joinRoleOf, unreadTotal, isStaff, siteBanned, insightOn, POSTERS, TALKERS,
     RoomError, SLUG_RE, KINDS, ROLES, KIND_ROLES, JOIN_ROLE, JOIN_ROLES_CALL, ATTACH_SERVICES, _reset,
 };

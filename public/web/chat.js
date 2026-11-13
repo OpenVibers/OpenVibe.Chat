@@ -269,7 +269,21 @@
   // description, and by/LIVE for OpenVibe's own kinds. Every field is data: textContent, and https only for links
   // and pictures (openvibe.media for the picture).
   var EMBED_KINDS = ['link', 'video', 'image', 'live', 'picture', 'design', 'post', 'profile', 'game'];
-  function embedCard(e) {
+  // The cards of a message can be taken back by its author or by a room moderator (server/rooms/routes.js):
+  // a small × on each card, for those who may, and for nobody else.
+  function mayHideCards(userId) {
+    if (!cfg || cfg.view !== 'room') return false;
+    if (cfg.moderate) return true;
+    return !!(cfg.me && Number(userId) === Number(cfg.me));
+  }
+  function hideButton(messageId, label) {
+    var b = el('button', 'oc-card-hide-btn'); b.type = 'button';
+    b.setAttribute('aria-label', label || 'Hide the preview'); b.title = label || 'Hide the preview';
+    b.textContent = '×';
+    b.addEventListener('click', function () { setHidden(messageId, true); });
+    return b;
+  }
+  function embedCard(e, mayHide, messageId) {
     if (!e || typeof e !== 'object' || typeof e.title !== 'string' || !e.title) return null;
     if (e.kind === 'agent-run') {
       var run = String(e.run_url || ''), events = String(e.events_url || '');
@@ -293,24 +307,54 @@
     if (typeof e.by === 'string' && e.by) body.appendChild(el('p', 'oc-card-line', 'by ' + e.by));
     if (e.live === true) { var live = el('p', 'oc-card-note'); live.appendChild(el('span', 'oc-badge oc-badge-mod', 'LIVE')); body.appendChild(live); }
     box.appendChild(body);
+    if (mayHide && messageId) box.appendChild(hideButton(messageId));
     return box;
   }
   function addCard(li, m) {
+    var mayHide = mayHideCards(li ? li.dataset.user : 0);
     if (m && Array.isArray(m.embeds) && m.embeds.length) {
-      m.embeds.slice(0, 3).forEach(function (e) { var c = embedCard(e); if (c) li.appendChild(c); });
+      var mid = Number(m.id || (li && li.dataset.id) || 0);
+      m.embeds.slice(0, 3).forEach(function (e) {
+        var c = embedCard(e, mayHide, mid);
+        if (c) li.appendChild(c);
+      });
       mountRunCards(li);
       return;
     }
     var c = m && m.card && m.card.kind === 'agent-run' ? embedCard(m.card) : linkCard(m && m.card); if (c) li.appendChild(c);
     mountRunCards(li);
   }
-  // A preview that landed after its message: replace the line's cards with the finished list.
-  function updateEmbeds(id, embeds) {
+  // A preview that landed after its message: replace the line's cards with the finished list. A message whose
+  // cards were taken back shows the note instead, and the ones who may put them back get the button.
+  function updateEmbeds(id, embeds, hidden) {
     if (!feed || !Array.isArray(embeds)) return;
     var li = feed.querySelector('[data-id="' + Number(id) + '"]');
     if (!li) return;
     Array.prototype.forEach.call(li.querySelectorAll('.oc-card, .oc-agent-run'), function (c) { c.remove(); });
-    addCard(li, { embeds: embeds });
+    var note = li.querySelector('.oc-card-hidden-note');
+    if (note) note.remove();
+    if (hidden) { li.appendChild(hiddenNote(li, Number(id))); return; }
+    addCard(li, { embeds: embeds, id: Number(id) });
+  }
+  // The note under a message whose cards were taken back.
+  function hiddenNote(li, id) {
+    var box = el('span', 'oc-card-hidden-note');
+    box.appendChild(el('span', '', 'Previews hidden'));
+    if (mayHideCards(li ? li.dataset.user : 0)) {
+      var show = el('button', 'oc-link', 'Show previews'); show.type = 'button';
+      show.addEventListener('click', function () { setHidden(id, false); });
+      box.appendChild(show);
+    }
+    return box;
+  }
+  // Take a message's cards back, or put them back (server/rooms/routes.js).
+  function setHidden(id, hidden) {
+    if (!cfg || !cfg.room) return;
+    var api = '/api/chat/rooms/' + encodeURIComponent(cfg.room) + '/messages/' + Number(id) + '/embeds/hidden';
+    fetch(api, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hidden: !!hidden }) })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (out) { if (out) updateEmbeds(id, out.embeds || [], !!out.hidden); })
+      .catch(function () {});
   }
 
   function mountRunCards(root) { if (window.OpenVibeAgentRunCards) window.OpenVibeAgentRunCards.mountAll(root); }
@@ -712,7 +756,9 @@
     if (m.edited_at && window.OVMessages) window.OVMessages.edited(t, m.edited_at);
     if (cfg.moderate && m.edited_at) { var versions = el('button', 'ovk-btn ovk-btn--quiet oc-edits', 'Earlier versions'); versions.type = 'button'; li.appendChild(versions); }
     if (!ai && cfg.pics) { var pw = pictureThumbs(m.message); if (pw) li.appendChild(pw); }
-    addCard(li, m);
+    // Cards that were taken back are not sent with the message: the line says so instead.
+    if (m.embeds_hidden) li.appendChild(hiddenNote(li, Number(m.id) || 0));
+    else addCard(li, m);
     var mine = !ai && Number(m.user_id) === Number(cfg.me);
     if (cfg.moderate || mine) {
       var f = el('form', 'oc-del'); f.method = 'post'; f.action = '/r/' + encodeURIComponent(cfg.room) + '/delete/' + m.id;
@@ -797,7 +843,7 @@
         } else if (m.type === 'room_ai_typing' && m.room === cfg.room) {
           showThinking(m.name);
         } else if (m.type === 'room_message_embeds' && m.room === cfg.room) {
-          updateEmbeds(m.id, m.embeds);
+          updateEmbeds(m.id, m.embeds, !!m.hidden);
         } else if (m.type === 'room_message_edited' && m.room === cfg.room && m.message) {
           applyEdit(m.message.id, m.message);
         } else if (m.type === 'room_message_deleted' && m.room === cfg.room) {
