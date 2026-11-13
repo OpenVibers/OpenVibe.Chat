@@ -112,7 +112,11 @@ function cardHref(value) {
         return u.protocol === 'https:' ? u.href : null;
     } catch { return null; }
 }
-/** A card's picture: only https on openvibe.media, as the resolver also enforces. */
+/**
+ * A card's picture: only https on openvibe.media, as the resolver also enforces. The picture carries
+ * data-oc-card-pic, so the client (public/web/chat.js) can drop this one when it does not load: a card never
+ * shows a broken image, and the card itself (its title, its description, its link) stays.
+ */
 function cardImage(value) {
     try {
         const u = new URL(String(value || ''));
@@ -136,7 +140,7 @@ function linkCard(card) {
     const head = href
         ? `<a class="oc-card-title" href="${esc(href)}" rel="noopener nofollow" target="_blank">${esc(title)}</a>`
         : `<span class="oc-card-title">${esc(title)}</span>`;
-    const pic = image ? `<a class="oc-card-pic" href="${esc(href || image)}" rel="noopener nofollow" target="_blank"><img src="${esc(image)}" alt="" loading="lazy" decoding="async"></a>` : '';
+    const pic = image ? `<a class="oc-card-pic" href="${esc(href || image)}" rel="noopener nofollow" target="_blank"><img src="${esc(image)}" alt="" loading="lazy" decoding="async" data-oc-card-pic="1"></a>` : '';
     const go = actionHref ? `<a class="oc-card-go" href="${esc(actionHref)}" rel="noopener nofollow" target="_blank">${esc(action.label)}</a>` : '';
     return `<div class="oc-card" data-kind="${esc(typeof card.kind === 'string' ? card.kind : 'link')}">${pic}<div class="oc-card-body">${head}${line ? `<p class="oc-card-line">${esc(line)}</p>` : ''}${note ? `<p class="oc-card-note">${esc(note)}</p>` : ''}${go}</div></div>`;
 }
@@ -173,7 +177,7 @@ function embedCard(e, opts) {
     const head = href
         ? `<a class="oc-card-title" href="${esc(href)}" rel="noopener nofollow" target="_blank">${esc(e.title)}</a>`
         : `<span class="oc-card-title">${esc(e.title)}</span>`;
-    const pic = image ? `<a class="oc-card-pic" href="${esc(href || image)}" rel="noopener nofollow" target="_blank"><img src="${esc(image)}" alt="" loading="lazy" decoding="async"></a>` : '';
+    const pic = image ? `<a class="oc-card-pic" href="${esc(href || image)}" rel="noopener nofollow" target="_blank"><img src="${esc(image)}" alt="" loading="lazy" decoding="async" data-oc-card-pic="1"></a>` : '';
     const description = typeof e.description === 'string' && e.description ? `<p class="oc-card-line">${esc(e.description)}</p>` : '';
     const by = typeof e.by === 'string' && e.by ? `<p class="oc-card-line">by ${esc(e.by)}</p>` : '';
     const live = e.live === true ? '<p class="oc-card-note"><span class="oc-badge oc-badge-mod">LIVE</span></p>' : '';

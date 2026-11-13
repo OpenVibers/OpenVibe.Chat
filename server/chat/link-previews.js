@@ -17,6 +17,10 @@
  * sending, and every later send of the same address, never waits on another site. The fields are data, never markup:
  * control characters are gone, whitespace folded, sizes capped, and the API/renderer escape them as text.
  *
+ * A card's picture is kept with the message it is shown under: once the preview is stored, the picture is kept in
+ * OpenVibe.Media (server/chat/media-import.js) for that message, so it lives in Media's kept window (30 days)
+ * instead of the day-long one, and a picture the cache shows again for a later message is kept again for it.
+ *
  * The room wiring (server/rooms/rooms.js) attaches the rows on every read as `embeds` ([] before the job is done),
  * and the job announces `room_message_embeds` when it has something.
  */
@@ -532,6 +536,9 @@ function parsePreview(value) {
     };
     if (p.by != null) preview.by = textOf(p.by, 80);
     if (p.live === true || p.live === false) preview.live = p.live;
+    // The Media attachment behind the picture (the id a keep names). It travels with the preview, so a
+    // picture that is shown again (the cache serves it a day later) can be kept for that message too.
+    if (preview.image && typeof p.image_id === 'string' && /^att_[0-9A-HJKMNP-TV-Z]{26}$/.test(p.image_id)) preview.image_id = p.image_id;
     return preview;
 }
 
@@ -569,10 +576,11 @@ async function previewOf(value) {
     let preview = null;
     try { preview = await readUrl(url); } catch { preview = null; }
     // The page's own picture is brought into Media before the preview is kept: a card shows a picture from our
-    // own host, never a hot-linked one. A picture that cannot be brought in is left off the card.
+    // own host, never a hot-linked one. A picture that cannot be brought in is left off the card. The id of the
+    // attachment travels with the preview, so the picture can be kept with the message that shows it.
     if (preview && preview.source_image && !preview.image) {
         const brought = await mediaImport.importPicture(preview.source_image).catch(() => null);
-        if (brought) preview = { ...preview, image: brought };
+        if (brought) preview = { ...preview, image: brought.url, image_id: brought.id };
     }
     const checked = preview ? parsePreview({ ...preview, url }) : null;
     await remember(url, checked);
@@ -599,11 +607,17 @@ async function store(job, position, preview) {
     const table = job.scope === 'room' ? 'room_messages' : job.scope === 'dm' ? 'dm_messages' : 'chat_messages';
     const current = await db.get(`SELECT message FROM ${table} WHERE id = ?`, [job.messageId]);
     if (!current || addresses(current.message)[position] !== job.urls[position]) return;
-    await db.run(`INSERT INTO link_previews (message_scope, message_id, position, url, data) VALUES (?, ?, ?, ?, ?)
+    const written = await db.run(`INSERT INTO link_previews (message_scope, message_id, position, url, data) VALUES (?, ?, ?, ?, ?)
                   ON CONFLICT (message_scope, message_id, position)
                   DO UPDATE SET url = EXCLUDED.url, data = EXCLUDED.data
                   WHERE link_previews.removed_at IS NULL`,
         [job.scope, job.messageId, position, preview.url, JSON.stringify(preview)]);
+    // The card's picture is kept with the message it is shown under: the picture leaves its day-long life (an
+    // attachment nobody sent to a message) and lives in Media's kept window instead, so it is still there long
+    // after the day. A picture the cache shows again for another message is kept again for that message too.
+    if (written && written.changes && preview.image_id) {
+        await mediaImport.keepPicture(preview.image_id, job.messageId).catch(() => false);
+    }
 }
 
 async function replaceForEdit(scope, messageId) {

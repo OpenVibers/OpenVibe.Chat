@@ -15,6 +15,19 @@ const t = suite('link preview cards');
 let h, alice, mod, bob, carol, previews, mediaImport;
 
 const page = (head) => `<html><head>${head}</head><body>body</body></html>`;
+/** The picture Media brings in: its id (the one a keep names) and the address the card shows. */
+const PICTURE = 'att_01JZ0M0Q8F3K2V7YB6N4T5R9WQ';
+/** Media is stubbed here: the import answers with the picture, the keep answers that it is kept. */
+const mediaStub = (calls) => async (url, opts) => {
+    calls.push({ url: String(url), auth: String((opts && opts.headers && (opts.headers.Authorization || opts.headers.authorization)) || ''), body: JSON.parse(opts.body) });
+    const keep = String(url).endsWith('/keep');
+    return {
+        status: keep ? 200 : 201,
+        json: async () => (keep
+            ? { id: PICTURE, message_id: (JSON.parse(opts.body) || {}).message_id, kept_for: [] }
+            : { id: PICTURE, kind: 'image', mime: 'image/png', url: `https://openvibe.media/a/${PICTURE}/picture.png` }),
+    };
+};
 const type = (body) => ({ status: 200, headers: { 'content-type': 'text/html; charset=utf-8' }, body });
 const room = (method, path, user, body) => h.http(method, `/api/chat/rooms${path}`, { token: user && user.token, body });
 /** A form the site's own pages post (a cookie, not a bearer). */
@@ -26,6 +39,16 @@ const form = async (p, body, token) => {
 const newRoom = async (name) => {
     const made = await room('POST', '/', alice, { name });
     assert.strictEqual(made.status, 201, made.text);
+    return made.body.room;
+};
+/**
+ * A room of bob's own, with alice in it: the room budget is per caller, and this file already makes as many
+ * rooms as alice may make in a minute.
+ */
+const newRoomFor = async (name) => {
+    const made = await room('POST', '/', bob, { name });
+    assert.strictEqual(made.status, 201, made.text);
+    await room('POST', `/${made.body.room.slug}/join`, alice);
     return made.body.room;
 };
 const withPreview = async (slug, text, html) => {
@@ -129,22 +152,47 @@ t('the owner and the moderators turn the cards off and on again', async () => {
 t('the picture of a page is brought into Media, and the card never hot-links it', async () => {
     const r = await newRoom('Picture room');
     const calls = [];
-    mediaImport._setFetch(async (url, opts) => {
-        calls.push({ url, auth: String((opts && opts.headers && (opts.headers.Authorization || opts.headers.authorization)) || ''), body: JSON.parse(opts.body) });
-        return { status: 201, json: async () => ({ id: 'att_picture', kind: 'image', mime: 'image/png', url: 'https://openvibe.media/a/att_picture/picture.png' }) };
-    });
+    mediaImport._setFetch(mediaStub(calls));
     const message = await withPreview(r.slug, 'https://93.184.216.34/with-a-picture',
         page('<meta property="og:title" content="With a picture"><meta property="og:image" content="https://pictures.example/og.png">'));
     const got = await room('GET', `/${r.slug}/messages`, alice);
     const embed = got.body.messages.find((m) => m.id === message.id).embeds[0];
-    assert.strictEqual(embed.image, 'https://openvibe.media/a/att_picture/picture.png', 'the card shows the Media address');
+    assert.strictEqual(embed.image, `https://openvibe.media/a/${PICTURE}/picture.png`, 'the card shows the Media address');
     assert.ok(!JSON.stringify(embed).includes('pictures.example'), 'the other host is nowhere on the card');
-    assert.strictEqual(calls.length, 1, 'Media is asked once');
-    assert.match(calls[0].auth, /^Bearer /, 'the call carries a service token');
-    assert.deepStrictEqual(calls[0].body, { url: 'https://pictures.example/og.png' }, 'Media is asked for that picture');
+    const imports = calls.filter((c) => c.url.endsWith('/attachments/import'));
+    assert.strictEqual(imports.length, 1, 'Media is asked once');
+    assert.match(imports[0].auth, /^Bearer /, 'the call carries a service token');
+    assert.deepStrictEqual(imports[0].body, { url: 'https://pictures.example/og.png' }, 'Media is asked for that picture');
     const asked = h.tokenRequests.find((t2) => t2.audience === 'openvibe.media');
     assert.ok(asked, 'a service token for Media was asked for');
     assert.match(asked.scope, /media\.object\.upload/);
+});
+
+t('the picture of a stored preview is kept with the message it is shown under', async () => {
+    const r = await newRoomFor('Kept picture room');
+    const calls = [];
+    mediaImport._setFetch(mediaStub(calls));
+    const message = await withPreview(r.slug, 'https://93.184.216.34/kept-picture',
+        page('<meta property="og:title" content="Kept"><meta property="og:image" content="https://pictures.example/kept.png">'));
+    const keeps = calls.filter((c) => c.url.endsWith('/keep'));
+    assert.strictEqual(keeps.length, 1, 'the picture is kept once');
+    assert.ok(keeps[0].url.includes(`/attachments/${PICTURE}/keep`), 'Media is asked to keep that picture');
+    assert.deepStrictEqual(keeps[0].body, { message_id: String(message.id) }, 'and it is kept with the message it is shown under');
+    assert.match(keeps[0].auth, /^Bearer /, 'the keep carries Chat\'s own service token');
+});
+
+t('a picture the cache shows again for a second message is kept again for it', async () => {
+    const r = await newRoomFor('Kept twice room');
+    const calls = [];
+    mediaImport._setFetch(mediaStub(calls));
+    const address = 'https://93.184.216.34/kept-twice';
+    const html = page('<meta property="og:title" content="Kept twice"><meta property="og:image" content="https://pictures.example/twice.png">');
+    const first = await withPreview(r.slug, address, html);
+    const second = await withPreview(r.slug, address, html);
+    assert.strictEqual(calls.filter((c) => c.url.endsWith('/attachments/import')).length, 1, 'the picture is brought in once');
+    const keeps = calls.filter((c) => c.url.endsWith('/keep'));
+    assert.strictEqual(keeps.length, 2, 'and it is kept twice');
+    assert.deepStrictEqual(keeps.map((c) => c.body.message_id), [String(first.id), String(second.id)], 'once for each message that shows it');
 });
 
 t('a picture Media refuses leaves the card without one', async () => {

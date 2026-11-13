@@ -234,6 +234,33 @@
     }
     if (last < text.length) parent.appendChild(document.createTextNode(text.slice(last)));
   }
+  // A card's picture that does not load is dropped (server/web/ui.js draws the same markup): the picture goes,
+  // the card stays (its title, its description, its link). A picture that never loaded (it failed before this
+  // file ran) is dropped as well.
+  function dropCardPicture(img) {
+    if (!img) return;
+    var wrap = img.closest ? img.closest('.oc-card-pic') : null;
+    var node = wrap || img;
+    if (node.parentNode) node.parentNode.removeChild(node);
+    else if (node.remove) node.remove();
+  }
+  function watchCardPicture(img) {
+    if (!img || img.__ovCardPic) return;
+    img.__ovCardPic = true;
+    img.addEventListener('error', function () { dropCardPicture(img); });
+    if (img.complete && img.naturalWidth === 0) dropCardPicture(img);
+  }
+  // The server draws the cards too, so every picture on the page is watched, not only the ones made here.
+  if (document.querySelectorAll) {
+    Array.prototype.forEach.call(document.querySelectorAll('img[data-oc-card-pic]'), watchCardPicture);
+  }
+  if (document.addEventListener) {
+    document.addEventListener('error', function (ev) {
+      var t = ev && ev.target;
+      if (t && t.tagName === 'IMG' && t.hasAttribute && t.hasAttribute('data-oc-card-pic')) dropCardPicture(t);
+    }, true);
+  }
+  window.OpenVibeChatCards = { dropPicture: dropCardPicture, watchPicture: watchCardPicture };
   // A known OpenVibe link's card under its message (server/chat/link-cards.js, server/web/ui.js draws the same):
   // the picture when there is one, the title, one line and the one move as a button. Every field is data: set with
   // textContent, and a link or picture only when it is https (openvibe.media for the picture).
@@ -249,7 +276,9 @@
       var href = url || img;
       var a = el('a', 'oc-card-pic'); a.href = href; a.target = '_blank'; a.rel = 'noopener nofollow';
       var picture = document.createElement('img'); picture.src = img; picture.alt = ''; picture.loading = 'lazy'; picture.decoding = 'async';
+      picture.setAttribute('data-oc-card-pic', '1');
       a.appendChild(picture); box.appendChild(a);
+      watchCardPicture(picture);
     }
     var body = el('div', 'oc-card-body');
     if (url) {
@@ -298,7 +327,9 @@
     if (img) {
       var picLink = el('a', 'oc-card-pic'); picLink.href = url || img; picLink.target = '_blank'; picLink.rel = 'noopener nofollow';
       var picture = document.createElement('img'); picture.src = img; picture.alt = ''; picture.loading = 'lazy'; picture.decoding = 'async';
+      picture.setAttribute('data-oc-card-pic', '1');
       picLink.appendChild(picture); box.appendChild(picLink);
+      watchCardPicture(picture);
     }
     var body = el('div', 'oc-card-body');
     if (url) { var title = el('a', 'oc-card-title', e.title); title.href = url; title.target = '_blank'; title.rel = 'noopener nofollow'; body.appendChild(title); }
