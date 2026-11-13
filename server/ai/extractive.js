@@ -26,19 +26,31 @@ function _minsAgo(ts, now) {
 const _PLACEHOLDER = /^(short title|one sentence|label|title|detail|\.\.\.)$/i;
 
 /** Notable moments: non-chat activity (donations, clips, sound events), else the latest messages. */
+// The window's moments, newest last: each event once (a sound played three times is one line, "×3", at its latest),
+// and the latest messages beside them, so a window of repeated sound plays still shows what was said today (the owner,
+// 11-13: "played !africa" three times, and nothing from today).
 function _timeline(rows, now) {
-    const notable = rows.filter((r) => r.message_type && r.message_type !== 'chat' && r.message_type !== 'tts');
-    const picked = (notable.length ? notable : rows.slice(-5)).slice(-10);
-    return picked
-        .map((r) => {
-            const label = _oneLine(r.message, 80);
-            if (!label || _PLACEHOLDER.test(label)) return null;
-            return {
-                label, detail: _oneLine(r.username || r.channel_username || '', 120), mins_ago: _minsAgo(r.timestamp || r.created_at, now),
-                kind: r.message_type && r.message_type !== 'chat' ? 'event' : 'message', message_id: r.id == null ? null : Number(r.id),
-            };
-        })
-        .filter(Boolean);
+    const isEvent = (r) => !!(r.message_type && r.message_type !== 'chat' && r.message_type !== 'tts');
+    const byLabel = new Map();
+    for (const r of rows) {
+        if (!isEvent(r)) continue;
+        const label = _oneLine(r.message, 80);
+        if (!label || _PLACEHOLDER.test(label)) continue;
+        const key = label.toLowerCase();
+        const was = byLabel.get(key);
+        byLabel.set(key, { r, label, n: was ? was.n + 1 : 1 });
+    }
+    const events = [...byLabel.values()].slice(-6);
+    const said = rows.filter((r) => !isEvent(r) && r.message_type !== 'tts').slice(-Math.max(3, 8 - events.length));
+    const at = (r) => Date.parse(r.timestamp || r.created_at || '') || 0;
+    const picked = [...events.map((e) => ({ ...e, kind: 'event' })), ...said.map((r) => ({ r, label: _oneLine(r.message, 80), n: 1, kind: 'message' }))]
+        .filter((e) => e.label && !_PLACEHOLDER.test(e.label))
+        .sort((x, y) => at(x.r) - at(y.r))
+        .slice(-10);
+    return picked.map(({ r, label, n, kind }) => ({
+        label: n > 1 ? `${label} ×${n}` : label, detail: _oneLine(r.username || r.channel_username || '', 120),
+        mins_ago: _minsAgo(r.timestamp || r.created_at, now), kind, message_id: r.id == null ? null : Number(r.id),
+    }));
 }
 
 // The words the window keeps coming back to (the same stop-list rule as the job's topics).
