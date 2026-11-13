@@ -72,14 +72,14 @@ function viaProxy(req) {
 }
 
 /** Express guard for one capability on an /internal route. */
-function guard(capability) {
+function guard(capability, { allowPublic = false } = {}) {
     const registered = !!capabilities.get(capability);
     return function serviceGuard(req, res, next) {
         check(req, res, next).catch(next);
     };
     async function check(req, res, next) {
         const ctx = http.requestContext(req.headers);
-        if (viaProxy(req)) return http.sendProblem(res, 403, 'capability.denied', { detail: 'internal routes are loopback-only', ctx });
+        if (!allowPublic && viaProxy(req)) return http.sendProblem(res, 403, 'capability.denied', { detail: 'internal routes are loopback-only', ctx });
         const auth = String(req.headers.authorization || '');
         if (!auth.startsWith('Bearer ')) return http.sendProblem(res, 401, 'token.missing', { detail: 'no service token', ctx });
         const r = await verifyServiceToken(auth.slice(7).trim(), { ...keys().verifyOptions, issuer: config.networkUrl, audience: AUDIENCE, contracts });
@@ -89,7 +89,7 @@ function guard(capability) {
             ? capabilities.check(r.claims, capability)
             : (capabilities.grants(r.claims.cap, capability) ? { allowed: true } : { allowed: false, code: 'capability.denied', reason: `${capability} not granted` });
         if (!c.allowed) return http.sendProblem(res, 403, c.code || 'capability.denied', { detail: c.reason, ctx });
-        req.principal = { sub: r.claims.sub, cap: r.claims.cap, jti: r.claims.jti };
+        req.principal = { sub: r.claims.sub, cap: r.claims.cap, jti: r.claims.jti, person: r.claims.on_behalf_of || null };
         next();
     }
 }

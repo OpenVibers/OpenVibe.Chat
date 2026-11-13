@@ -18,6 +18,7 @@ const { isOwner } = require('../auth/permissions');
 const { limits } = require('../net/actor-limits');
 const parties = require('../rooms/parties');
 const radio = require('../rooms/radio');
+const music = require('../rooms/party-music');
 const desktop = require('../rooms/party-desktop');
 const partyPool = require('../rooms/party-pool');
 
@@ -25,6 +26,8 @@ const router = express.Router();
 
 // Starting a party: the same budget as making a room (owners keep at most MAX_ROOMS_PER_OWNER).
 const createLimit = limits('chat.party.create', { minute: 10, hour: 60 });
+// Music changes are quick controls (play, pause, next): a generous budget, separate from starting a party.
+const musicLimit = limits('chat.party.music', { minute: 60, hour: 300 });
 // The owner's pool panel is a write surface; the person's own pool budget is in party-pool.js (maxPerActor).
 const poolLimit = limits('chat.party.pool', { minute: 30, hour: 120 });
 
@@ -154,6 +157,28 @@ router.post('/:slug/desktop/layout', requireAuth, express.json({ limit: '1kb' })
     try {
         const row = await parties.bySlug(req.params.slug), party = parties.partyOf(row);
         res.set('Cache-Control', 'no-store').json({ party: await parties.setDesktopLayout(row, party, req.user, req.body && req.body.layout) });
+    } catch (err) { send(res, err); }
+});
+
+// ── Listening together in a watch party or shared computer ──────────────────────────────────────────────────────
+// The room's remote holder plays OpenVibe Radio beside the video or desktop: a licensed track, or the Radio station.
+// The state carries the track, who started it, and position_ms at at_ms; a joiner gets it from the party and the
+// socket (sendRoomState). Volume is each person's own and never reaches this API.
+router.get('/:slug/music', optionalAuth, async (req, res) => {
+    try {
+        const row = await parties.bySlug(req.params.slug), party = parties.partyOf(row);
+        if (!row || !party || !await parties.mayView(row, party, req.user, req.query.k)) return res.status(404).json({ code: 'rooms.not_found' });
+        const out = await music.state(row);
+        res.set('Cache-Control', 'private, no-store').json({ music: out, server_time_ms: Date.now() });
+    } catch (err) { send(res, err); }
+});
+
+router.post('/:slug/music/:action', requireAuth, musicLimit, async (req, res) => {
+    try {
+        const row = await parties.bySlug(req.params.slug), party = parties.partyOf(row);
+        if (!row || !party || !await parties.mayView(row, party, req.user, null)) return res.status(404).json({ code: 'rooms.not_found' });
+        const out = await music.change(row, party, req.user, String(req.params.action || ''), req.body || {});
+        res.set('Cache-Control', 'private, no-store').json({ music: out, server_time_ms: Date.now() });
     } catch (err) { send(res, err); }
 });
 

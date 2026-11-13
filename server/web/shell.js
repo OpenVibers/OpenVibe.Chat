@@ -24,6 +24,7 @@
 const { esc } = require('./layout');
 const ui = require('./ui');
 const { ICONS: IC } = require('./icons');
+const kit = require('openvibe-shared/kit');
 
 /** The five places of the phone's bottom bar: Shared's app bar draws them (appbar.js). */
 const APP_BAR = [
@@ -116,18 +117,18 @@ function sideHome(o = {}) {
 </div>
 <section class="oc-side-sec" aria-labelledby="oc-side-friends"><h2 class="oc-side-group" id="oc-side-friends">Friends <span class="oc-muted">${friends.length}</span></h2>
 ${friends.length ? `<ul class="oc-side-list">${friends.map((f) => `<li class="oc-row"><form method="post" action="/messages/new"><input type="hidden" name="username" value="${esc(f.username || '')}"><button type="submit" class="oc-side-person">${ui.initials(f.display_name || f.username || '?', f.presence, { avatarUrl: f.avatar_url })}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(f.display_name || f.username || '?')}</strong></span><span class="oc-row-sub">@${esc(f.username || '')}</span></span></button></form></li>`).join('')}</ul>`
-        : `<p class="oc-side-empty oc-muted">No friends yet. Start a conversation and add the people you talk to.</p>`}
+        : `<div class="oc-side-empty">${kit.empty({ icon: 'user', title: 'No friends yet', text: 'Start a conversation and add the people you talk to.' })}</div>`}
 <form class="oc-side-add" method="post" action="/messages/contacts"><label class="oc-sr" for="oc-add-friend">Add a friend by username</label><input id="oc-add-friend" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="Add a friend by username" autocomplete="off"><button type="submit">Add</button></form>
 </section>
 <section class="oc-side-sec" aria-labelledby="oc-side-requests"><h2 class="oc-side-group" id="oc-side-requests">Requests <span class="oc-muted">${requests.length}</span></h2>
 ${requests.length ? `<ul class="oc-side-list">${requests.map((r) => personRow(r, { extra: `<form class="oc-inline" method="post" action="/messages/contacts/${Number(r.id)}/accept"><button type="submit" class="oc-link">Accept</button></form>` })).join('')}</ul>`
-        : `<p class="oc-side-empty oc-muted">No requests.</p>`}
+        : `<div class="oc-side-empty">${kit.empty({ icon: 'user', title: 'No requests', text: 'Friend requests appear here.' })}</div>`}
 </section>
 <section class="oc-side-sec" aria-labelledby="oc-side-vibe"><h2 class="oc-side-group" id="oc-side-vibe">Vibe</h2>
 <ul class="oc-side-list"><li class="oc-row"><a href="/vibe">${IC.spark}<span class="oc-row-main"><span class="oc-row-top"><strong>Vibe</strong></span><span class="oc-row-sub">OpenVibe's assistant</span></span></a></li></ul>
 </section>
 <section class="oc-side-sec" aria-labelledby="oc-side-dms"><h2 class="oc-side-group" id="oc-side-dms">Direct messages</h2>
-${dms.length ? `<ul class="oc-side-list">${dms.map(dmRow).join('')}</ul>` : `<p class="oc-side-empty oc-muted">No conversations yet.</p>`}
+${dms.length ? `<ul class="oc-side-list">${dms.map(dmRow).join('')}</ul>` : `<div class="oc-side-empty">${kit.empty({ icon: 'chat', title: 'No conversations yet', text: 'Find someone above to start one.' })}</div>`}
 </section>
 ${youBar(o.you || {})}`;
 }
@@ -215,7 +216,7 @@ function sideInbox(o = {}) {
     const row = (i) => `<li class="oc-row${i.waiting ? ' oc-unread' : ''}"><a href="/inbox/${esc(i.id)}"${i.current ? ' aria-current="page"' : ''}><span class="oc-dot" style="background:${esc(i.color || 'var(--oc-accent)')}" aria-hidden="true"></span><span class="oc-row-main"><span class="oc-row-top"><strong>${esc(i.name)}</strong></span><span class="oc-row-sub">${i.waiting ? `${i.waiting} waiting · ` : ''}${i.open} open · ${i.role === 'owner' ? 'owner' : 'agent'}</span></span></a></li>`;
     return `<div class="oc-side-top"><a class="oc-side-find" href="/inbox#oc-new-inbox">${IC.plus}<span>Make an inbox</span></a></div>
 <section class="oc-side-sec" aria-labelledby="oc-side-inboxes"><h2 class="oc-side-group" id="oc-side-inboxes">Your inboxes</h2>
-${inboxes.length ? `<ul class="oc-side-list">${inboxes.map(row).join('')}</ul>` : '<p class="oc-side-empty oc-muted">No inboxes yet.</p>'}</section>
+${inboxes.length ? `<ul class="oc-side-list">${inboxes.map(row).join('')}</ul>` : `<div class="oc-side-empty">${kit.empty({ icon: 'mail', title: 'No inboxes yet', text: 'Make one to answer visitors.', action: { href: '/inbox#oc-new-inbox', label: 'Make an inbox', icon: 'plus' } })}</div>`}</section>
 ${youBar(o.you || {})}`;
 }
 
@@ -227,10 +228,11 @@ ${youBar(o.you || {})}`;
  * o: { action, label, placeholder, max, add: the panel Add opens (pictureComposer's), hint }
  */
 function composer(o = {}) {
+    const questHook = o.action === '/send' ? ' data-ov-guide="chat.message"' : '';
     const add = o.add || '';
-    return `<div class="oc-dock${add ? ' has-add' : ''}"><form class="oc-compose" method="post" action="${esc(o.action || '')}" id="oc-compose"><label for="oc-input" class="oc-sr">${esc(o.label || 'Message')}</label>
+    return `<div class="oc-dock${add ? ' has-add' : ''}"><form class="oc-compose" method="post" action="${esc(o.action || '')}" id="oc-compose" data-ovc-compose data-ovc-preset="chat"><label for="oc-input" class="oc-sr">${esc(o.label || 'Message')}</label>
 <div class="oc-compose-box"><div class="oc-compose-tray" data-oc-tray hidden></div>
-<div class="oc-compose-row">${add ? `<button type="button" class="oc-compose-add" data-oc-attach aria-expanded="false" aria-controls="oc-add-panel" aria-label="Add a picture" title="Add a picture">${IC.plus}</button>` : ''}<textarea id="oc-input" name="message" maxlength="${Number(o.max) || 2000}" rows="1" required placeholder="${esc(o.placeholder || 'Write a message')}"></textarea><button type="submit" class="oc-send" aria-label="Send" title="Send">${IC.send}</button></div></div></form>${add}</div>`;
+<div class="oc-compose-row">${add ? `<button type="button" class="oc-compose-add" data-oc-attach aria-expanded="false" aria-controls="oc-add-panel" aria-label="Add a picture" title="Add a picture">${IC.plus}</button>` : ''}<textarea id="oc-input" name="message" maxlength="${Number(o.max) || 2000}" rows="1" required placeholder="${esc(o.placeholder || 'Write a message')}"></textarea><button type="submit" class="oc-send"${questHook} aria-label="Send" title="Send">${IC.send}</button></div></div></form>${add}</div>`;
 }
 
 /** The you-bar: your mark, your status, mute, deafen and settings (the foot of the side column). */

@@ -36,7 +36,7 @@ async function dmSettingsOf(target) {
 
 // Chat-internal columns (the Network subject next to Live's ids) are not part of Live's API.
 function publicMessage(m) {
-    if (m) delete m.sender_subject_id;
+    if (m) { delete m.sender_subject_id; delete m.edit_history; }
     return m;
 }
 
@@ -562,6 +562,25 @@ router.delete('/conversations/:id/messages/:msgId', deleteLimit, async (req, res
         console.error('[DM] Delete message error:', err.message);
         res.status(500).json({ error: 'Failed to delete message' });
     }
+});
+
+router.patch('/conversations/:id/messages/:msgId', sendLimit, async (req, res) => {
+    const convId = Number(req.params.id), msgId = Number(req.params.msgId);
+    if (!await dm.isParticipant(convId, req.user.id)) return res.status(403).json({ error: 'Not a participant' });
+    try {
+        const message = publicMessage(await dm.editMessage(convId, msgId, req.user.id, req.body && req.body.message));
+        if (!message) return res.status(404).json({ error: 'No such message' });
+        const participants = await dm.getParticipants(convId);
+        for (const p of participants) await require('./chat-server').sendDm(p.id, { type: 'dm_edited', conversation_id: convId, message });
+        return res.json({ message });
+    } catch (err) { return res.status(err.status || 500).json({ error: err.status ? err.message : 'Failed to edit message' }); }
+});
+
+router.get('/conversations/:id/messages/:msgId/edits', async (req, res) => {
+    if (!['admin', 'global_mod'].includes(req.user.role)) return res.status(403).json({ error: 'Moderators only' });
+    const row = await database.get('SELECT edit_history FROM dm_messages WHERE id = ? AND conversation_id = ?', [Number(req.params.msgId), Number(req.params.id)]);
+    if (!row) return res.status(404).json({ error: 'No such message' });
+    return res.set('Cache-Control', 'private, no-store').json({ versions: row.edit_history || [] });
 });
 
 module.exports = router;

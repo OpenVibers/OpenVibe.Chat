@@ -20,6 +20,7 @@ const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 
 const SUBJECT = /^usr_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 let tokens = null;
+let runTokens = null;
 function tokenClient() {
     if (tokens) return tokens;
     const { createServiceTokenClient } = require('openvibe-sdk/auth');
@@ -31,6 +32,15 @@ function tokenClient() {
     });
     return tokens;
 }
+function runTokenClient() {
+    if (runTokens) return runTokens;
+    const { createServiceTokenClient } = require('openvibe-sdk/auth');
+    runTokens = createServiceTokenClient({
+        tokenUrl: `${config.networkInternalUrl}/oauth/token`, clientId: config.oauth.clientId, clientSecret: config.oauth.clientSecret,
+        audience: 'openvibe.actor', scope: 'actor.agent.run',
+    });
+    return runTokens;
+}
 
 /** What Vibe is told about an agent: no instructions back (it wrote them), and the page where the person manages it. */
 const wire = (a) => ({
@@ -41,11 +51,11 @@ const wire = (a) => ({
     page: `${ACTOR_SITE}/me/agents/${encodeURIComponent(a.id)}`,
 });
 
-async function call(method, path, subject, body, { fetchImpl = globalThis.fetch } = {}) {
+async function call(method, path, subject, body, { fetchImpl = globalThis.fetch, runScope = false } = {}) {
     if (!config.oauth.clientSecret) return { error: 'OpenVibe Agents are not available on this server' };
     if (!SUBJECT.test(String(subject || ''))) return { error: 'they need to be signed in with an OpenVibe account' };
     let token;
-    try { token = await tokenClient().getToken(); } catch { return { error: 'OpenVibe Agents are not available right now' }; }
+    try { token = await (runScope ? runTokenClient() : tokenClient()).getToken(); } catch { return { error: 'OpenVibe Agents are not available right now' }; }
     try {
         const res = await fetchImpl(`${config.actor.internalUrl}${path}`, {
             method, headers: { Authorization: `Bearer ${token}`, 'X-OV-Subject': subject, Accept: 'application/json', ...(body ? { 'Content-Type': 'application/json' } : {}) },
@@ -82,6 +92,22 @@ async function list(subject, deps = {}) {
     return { agents: agents.slice(0, 30).map(wire), manage: `${ACTOR_SITE}/me/agents` };
 }
 
-function _setTokens(t) { tokens = t; }
+/** The exact personal agent, verified by Actor against this person's subject. */
+async function detail(subject, id, deps = {}) {
+    if (!/^agt_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(id || ''))) return { error: 'Choose one of your own OpenVibe Agents' };
+    const out = await call('GET', `/api/v1/me/agents/${encodeURIComponent(id)}`, subject, null, deps);
+    return out.error ? out : { agent: out.json };
+}
 
-module.exports = { create, list, SCHEDULES, _setTokens };
+/** Start a member's turn under its owner's Actor budget and daily cap. */
+async function run(subject, id, input, deps = {}) {
+    if (!/^agt_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(id || ''))) return { error: 'That agent is no longer available' };
+    const out = await call('POST', `/api/v1/me/agents/${encodeURIComponent(id)}/run`, subject,
+        { input: String(input || '').slice(0, 8000) }, { ...deps, runScope: true });
+    return out.error ? out : { task: out.json };
+}
+
+function _setTokens(t) { tokens = t; }
+function _setRunTokens(t) { runTokens = t; }
+
+module.exports = { create, list, detail, run, SCHEDULES, _setTokens, _setRunTokens };

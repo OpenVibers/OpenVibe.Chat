@@ -14,6 +14,7 @@ let _ai = null;
 let _http = null;
 let _tokens = null;
 let _complete = null;
+let _catalog = null;   // tests: a recorded catalogue, so no model page or persona test touches the network
 // Why the last run answered nothing, when the caller can show it: `ai.resting` today. Cleared by a run that
 // succeeds. A product asks lastProblem() instead of turning "no answer" into an error.
 let _lastProblem = null;
@@ -48,6 +49,15 @@ function enabled() {
 }
 
 /**
+ * Chat's bearer token for AI (its own service token; no CHAT_AI_ENABLED gate — TTS has its own
+ * setting). For calls the SDK's AI client has no method for (the Exchange speech route).
+ */
+async function bearer() {
+    if (!_tokens) ai();
+    return _tokens.getToken();
+}
+
+/**
  * Run a workflow and return its `output` object, or null: disabled, a refusal, a failed run, or a
  * transport error all answer null — exactly Live's ai-service.structured() contract. `force` runs it even with
  * the insight job switched off (CHAT_AI_ENABLED): a room's AI members have their own switch (CHAT_AI_MEMBERS).
@@ -73,6 +83,8 @@ async function structured(workflow, input, opts = {}) {
             });
         const run = body && (body.run || body);
         _lastProblem = problemOf(run);
+        // Meter completed failed runs too: providers can bill even when no output is returned.
+        if (run && !run.synthetic && opts.onRun) await opts.onRun(run);
         if (!run || run.status !== 'succeeded' || run.synthetic) return null;
         return run.output || null;
     } catch (err) {
@@ -171,10 +183,11 @@ async function complete({ model, messages, subject, temperature = null }) {
 }
 
 async function catalog() {
+    if (_catalog) return _catalog();
     const res = await fetch(`${config.ai.internalUrl}/api/v1/exchange/catalog`, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) throw new Error(`AI catalogue answered ${res.status}`);
     return res.json();
 }
 
-module.exports = { structured, stream, complete, catalog, enabled, http, lastProblem, _setClient(c) { _ai = c; }, _setComplete(c) { _complete = c; }, _setHttp(h) { _http = h; }, _setTokens(t) { _tokens = t; },
-    _setProblem(p) { _lastProblem = p; }, _reset() { _ai = null; _http = null; _tokens = null; _complete = null; _lastProblem = null; } };
+module.exports = { structured, stream, complete, catalog, enabled, bearer, http, lastProblem, _setClient(c) { _ai = c; }, _setCatalog(c) { _catalog = c; }, _setComplete(c) { _complete = c; }, _setHttp(h) { _http = h; }, _setTokens(t) { _tokens = t; },
+    _setProblem(p) { _lastProblem = p; }, _reset() { _ai = null; _http = null; _tokens = null; _complete = null; _catalog = null; _lastProblem = null; } };

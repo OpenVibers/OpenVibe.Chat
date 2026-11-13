@@ -20,8 +20,8 @@ t('/web asset: immutable only at its own ?v=, the module window otherwise', asyn
     const v = assetVersion('chat.css');
     assert.strictEqual(v, assetVersion('chat.css'), 'the version is the same every time');
     assert.strictEqual(await cacheOf(`/web/chat.css?v=${v}`), 'public, max-age=31536000, immutable', 'the current hash is immutable');
-    assert.strictEqual(await cacheOf('/web/chat.css?v=deadbeefdeadbeef'), 'public, max-age=300, stale-while-revalidate=86400', 'a hex but wrong ?v= is not immutable');
-    assert.strictEqual(await cacheOf('/web/chat.css'), 'public, max-age=300, stale-while-revalidate=86400', 'no ?v= is not immutable');
+    assert.strictEqual(await cacheOf('/web/chat.css?v=deadbeefdeadbeef'), 'public, max-age=300, stale-while-revalidate=300', 'a hex but wrong ?v= is not immutable');
+    assert.strictEqual(await cacheOf('/web/chat.css'), 'public, max-age=300, stale-while-revalidate=300', 'no ?v= is not immutable');
 });
 
 t('robots.txt and a public page carry the module\'s HTML policy', async () => {

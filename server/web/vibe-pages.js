@@ -25,6 +25,7 @@ const workspace = require('../rooms/workspace');
 const how = require('../rooms/how');
 const memory = require('../rooms/vibe-memory');
 const { esc } = require('./layout');
+const ui = require('./ui');
 const kit = require('openvibe-shared/kit');
 const thread = require('openvibe-shared/thread');
 
@@ -156,12 +157,12 @@ function resultChips(m, slug) {
 /** What the person said, for their bubble: their words (the bubble keeps line breaks) and any picture. */
 function youOf(m, me) {
     const mine = me && Number(m.user_id) === Number(me.id);
-    return { html: `<span class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</span>${esc(m.message)}${pictures.pageHtml(m.message)}` };
+    return { html: `<span class="oc-sr">${mine ? 'You said:' : `${esc(m.display_name || m.username)} said:`}</span>${esc(m.message)}${m.edited_at ? ` <small class="vb-edited" data-edited-at="${esc(m.edited_at)}">edited</small>` : ''}${pictures.pageHtml(m.message)}` };
 }
 /** Vibe's answer: the rendered Markdown, what it did (reminders, timers), its sources and how, then Copy and Try again. */
 function answerOf(m, hows, retrySlug, slug) {
     const info = hows.get(Number(m.id));
-    return `<p class="oc-sr">Vibe said:</p>${m.vibe_model ? `<p class="vb-import-model">${esc(m.vibe_model)}</p>` : ''}${thread.answer({ html: md.render(m.message), copy: false })}${resultChips(m, slug)}${how.chips(info, m.id)}${how.html(info, m.id)}${acts(retrySlug)}`;
+    return `<p class="oc-sr">Vibe said:</p>${m.vibe_model ? `<p class="vb-import-model">${esc(m.vibe_model)}</p>` : ''}${thread.answer({ html: md.render(m.message), copy: false })}${m.card && m.card.kind === 'agent-run' ? ui.embedCard(m.card) : ''}${resultChips(m, slug)}${how.chips(info, m.id)}${how.html(info, m.id)}${acts(retrySlug)}`;
 }
 function compareOf(asked, answers) {
     return `<div class="vb-compare" data-vb-question="${Number(asked.id)}"><div class="vb-compare-tabs" role="tablist" aria-label="Models">${answers.map((a, i) => `<button type="button" role="tab" class="vb-compare-tab${i ? '' : ' is-active'}" data-vb-tab="${i}" aria-selected="${i ? 'false' : 'true'}">${esc(a.model)} <span aria-hidden="true">${a.status === 'finished' ? '●' : '○'}</span></button>`).join('')}</div><div class="vb-compare-grid">${answers.map((a, i) => `<section class="vb-compare-answer${i ? '' : ' is-active'}" data-vb-answer="${i}"><header><strong>${esc(a.model)}</strong><small>${a.provider ? `${esc(a.provider)} · ` : ''}${a.cost_usd == null ? '' : `$${Number(a.cost_usd).toFixed(4)} · `}${a.ms == null ? '' : `${(Number(a.ms) / 1000).toFixed(1)}s`}</small></header><div class="vb-compare-text" data-vb-text>${a.status === 'writing' ? '<span class="vb-pulse" aria-hidden="true"></span>Writing…' : a.status === 'failed' ? esc(a.error || 'Could not answer') : md.render(a.text)}</div><div class="vb-compare-actions"><button type="button" data-vb-copy="${i}">Copy</button><button type="button" data-vb-pick="${esc(a.model)}" data-vb-message="${Number(asked.id)}">Continue with this one</button><button type="button" data-vb-prefer="${esc(a.model)}" data-vb-message="${Number(asked.id)}">This one was better</button></div></section>`).join('')}</div></div>`;
@@ -206,7 +207,8 @@ function composer({ slug, signedIn, enabled, prefill = '', engine = null, models
         ? `<button class="ovt-btn vb-attach" type="button" data-vb-attach aria-label="${label}" title="${label}">${ICON.attach}</button>
 <dialog class="ovk-sheet vb-upload" data-vb-upload-dialog aria-labelledby="vb-upload-h"><div class="ovk-sheet-head" data-ov-sheet-head><h2 id="vb-upload-h">${label}</h2><button type="button" class="ovk-icon-btn" data-vb-upload-close aria-label="Close">${thread.icon('close')}</button></div><div class="ovk-sheet-body"><div data-vb-upload data-accept=""></div></div></dialog>`
         : '';
-    const modes = `<fieldset class="vb-modes" aria-label="What Vibe does with it">${MODES.map(([value, label, hint, placeholder], i) => `<label title="${esc(hint)}"><input type="radio" name="mode" value="${value}" data-placeholder="${esc(placeholder)}"${i ? '' : ' checked'}><span>${label}</span></label>`).join('')}</fieldset>`;
+    const offeredModes = require('../config').ai.vibeDoIt ? MODES : MODES.slice(0, 1);
+    const modes = `<fieldset class="vb-modes" aria-label="What Vibe does with it">${offeredModes.map(([value, label, hint, placeholder], i) => `<label title="${esc(hint)}"><input type="radio" name="mode" value="${value}" data-placeholder="${esc(placeholder)}"${i ? '' : ' checked'}><span>${label}</span></label>`).join('')}</fieldset>`;
     const fine = !enabled ? 'Vibe is resting right now. Try again later.' : engine && engine.own ? `Vibe thinks with ${esc(engine.you)} (<a href="/settings#oc-ai-key">change</a>). It can get things wrong: check what matters.` : 'Vibe can get things wrong. Check what matters.';
     let html = thread.composer({
         action, method: signedIn ? 'post' : 'get', name: 'message', id: 'vb-composer', attrs: signedIn ? {} : { 'data-signin': '1' },

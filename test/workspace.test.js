@@ -215,6 +215,7 @@ t('a workspace room shows its shared screen to members only; only a Bot screen l
     const page = await h.http('GET', '/r/staff', { headers: { cookie: `ov_token=${staff.token}` } });
     assert.match(page.text, new RegExp(`<iframe src="${link.replace(/\//g, '\\/')}"`));
     assert.match(page.headers.get('content-security-policy'), /frame-src 'self' https:\/\/openvibe\.bot/);
+    assert.match(page.headers.get('content-security-policy'), /frame-src[^;]* https:\/\/openvibe\.network(?:;|$)/, 'Network silent session check is allowed');
     assert.strictEqual((await api('GET', '/rooms/staff', user)).status, 404, 'others never see the link');
     assert.strictEqual((await api('PATCH', '/rooms/staff', staff, { screen_url: '' })).status, 200);
     assert.ok(!(await api('GET', '/rooms/staff', staff)).body.screen, 'cleared');

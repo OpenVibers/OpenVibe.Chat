@@ -25,16 +25,18 @@ t('the home is one pick block: a chip per section, the first picked, every secti
     const streamer = await db.get("SELECT id FROM ctx_users WHERE username = 'streamer_x'");
     await db.run("INSERT INTO ctx_streams (user_id, title, is_live, started_at) VALUES (?, 'Live from the studio', 1, ?)", [streamer.id, stamp]);
     const page = await fetch(`${h.base}/`).then((r) => r.text());
+    // A stream row opens the maker's /@username address, so it is named by its @handle.
+    assert.ok(page.includes('>@streamer_x</'), 'the live stream row is named @streamer_x');
     const start = page.indexOf('<div class="pick" id="pick-explore">');
     assert.ok(start > 0, 'the pick block is on the home');
     const block = page.slice(start, page.indexOf('<div class="pick" id="pick-', start + 10) > 0 ? page.indexOf('<div class="pick" id="pick-', start + 10) : start + 60000);
-    assert.match(block, /<nav class="pick-row" aria-label="Explore OpenVibe.Chat">/);
-    const chips = [...block.matchAll(/<a class="pick-chip" href="#(?:pp-explore-)?([a-z-]+)">()([^<]+)<\/a>/g)];
+    assert.match(block, /<div class=\"ov-parts ov-parts--front\" data-parts=\"\d+\">/, 'its parts are tabs on a phone');
+    const chips = [...block.matchAll(/<label for="ovp-[a-z0-9]+-(?:pp-explore-)?([a-z-]+)">()([^<]+)(?: <span class="ov-parts-n">[^<]*<\/span>)?<\/label>/g)];
     assert.ok(chips.length >= 3, `a chip per section (${chips.length})`);
-    assert.ok(!/type="radio"/.test(block), 'no chip is a radio: nothing is picked, every pane shows');
-    // Every section stays in the page, with the id its chip picks.
+    assert.ok(/<input type=\"radio\" class=\"ov-parts-r\"[^>]* checked>/.test(block), 'the first part is open on a phone (Shared pick(): tabs, 11-12)');
+    // Every section stays in the page, with the id its tab opens.
     const panes = [...block.matchAll(/<div class="pick-pane" id="([a-z-]+)">/g)].map((m) => m[1]);
-    assert.deepStrictEqual(panes, chips.map((m) => m[1]), 'every section is in the page, one per chip');
+    assert.deepStrictEqual(panes, chips.map((m) => m[1]), 'every section is in the page, one per tab');
     // Nothing was removed: the sections of the front page are all there.
     for (const title of ['Stream chats on OpenVibe.Live', 'Public servers', 'Public rooms', 'What OpenVibe.Chat does', 'How it works']) {
         assert.ok(page.includes(title), `${title} is on the page`);

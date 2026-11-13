@@ -1,4 +1,5 @@
 'use strict';
+const { pick } = require('openvibe-shared/showcase');
 /**
  * The home on a phone (the owner's short-pages rule, 2026-10-30): one or two screens, app-like.
  *
@@ -20,15 +21,11 @@ const { esc } = require('./layout');
  *
  *   pickBlock({ key, label, head, panes })   panes: [{ id, label, html }]
  */
-function pickBlock({ key, label, head = '', panes }) {
-    // A pane with nothing to show is left out, so the chips and the rules that show them match the page.
-    panes = (panes || []).filter((p) => p.html);
-    if (!panes.length) return '';
-    const chips = panes.map((p) => `<a class="pick-chip" href="#${esc(p.id)}">${esc(p.label)}</a>`).join('');
-    // The pane carries its own id, so a link that points into it (a heading the page links to) still opens it on a
-    // phone: the CSS shows the pane a link points at.
-    const body = panes.map((p) => `<div class="pick-pane" id="${esc(p.id)}">${p.html}</div>`).join('');
-    return `<div class="pick" id="pick-${esc(key)}"><div class="pick-bar"><div class="pick-head"><h2>${esc(head || label)}</h2></div><nav class="pick-row" aria-label="${esc(label)}">${chips}</nav></div><div class="pick-body">${body}</div></div>`;
+// 4.228.0: Shared's showcase.pick() draws the block (tabs on a phone, every pane in the page, a link to a pane opens
+// it); this copy only jumped to a pane with chips, so a phone showed them all (the owner, 11-12). The ids are this
+// site's own, so its links keep working.
+function pickBlock({ key, label, head = '', headId = '', bodyClass = '', panes, checked = '' }) {
+    return pick({ key, label, head, headId, bodyClass, checked: checked ? checked : '', panes: (panes || []).map((p) => ({ id: p.id, label: p.label, html: p.html })) });
 }
 
 

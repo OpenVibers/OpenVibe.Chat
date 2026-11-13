@@ -63,6 +63,15 @@ async function start() {
     } catch (err) {
         console.warn('[Chat] chat-app settings unavailable, the chat apps read the environment:', err && err.message);
     }
+    // Vibe personas' owner settings (chat.persona, server/persona/settings.js): the models, the re-check interval
+    // and the monthly cap. A failure turns personas off (no store, no spending) and says why in the log.
+    let personaSettings = null;
+    try {
+        personaSettings = await require('./persona/settings').createPersonaSettings({ db: db.getDb(), log: console });
+        console.log(`[Chat] owner settings ready (${personaSettings.namespace})`);
+    } catch (err) {
+        console.warn('[Chat] persona settings unavailable, Vibe personas are off:', err && err.message);
+    }
 
     // Shared per-actor rate-limit counters on Valkey (ADR-035); without VALKEY_URL they count in this
     // process, as before. openvibe-sdk/valkey's createValkey returns null when the URL is unset.
@@ -79,7 +88,7 @@ async function start() {
     callServer.init(server);
     const relay = serviceOutbox.configure({ config });
     const events = createEventsConsumer({ chatServer, secrets: config.events.secrets });
-    const { app, handleUpgrade } = createApp({ chatServer, relay, events, callServer, settings, chatAppSettings });
+    const { app, handleUpgrade } = createApp({ chatServer, relay, events, callServer, settings, chatAppSettings, personaSettings });
     void app.locals.chatApps.start();
     server.on('request', app);
     server.on('upgrade', (req, socket, head) => { handleUpgrade(req, socket, head).catch(() => { try { socket.destroy(); } catch { /* */ } }); });
@@ -88,8 +97,10 @@ async function start() {
     // The chat-AI job (Live's server/ai/chat-ai.js, now Chat's): off unless CHAT_AI_ENABLED=1; it
     // writes Chat's own chat_ai_summaries/chat_timeline_events rows directly (C-04 done).
     chatAi.start();
+    require('./ai/person-memory').start();
     // Workspace rooms' queues (server/rooms/workspace.js): the OpenVibe.Actor tasks they started, followed every 10 s.
     require('./rooms/workspace').start();
+    require('./chat/room-slash').start();
     // OpenVibe's own computers for parties (server/rooms/party-pool.js): release holds that went idle and seat the
     // line once a minute. The owner switch is read at each placement, so this is safe while it is off.
     require('./rooms/party-pool').start({ intervalMs: 60_000 });

@@ -759,7 +759,9 @@ class ChatServer {
                 const room = client.roomId ? await rooms.bySlug(client.roomSlug) : null;
                 if (!room || room.id !== client.roomId) { this.sendTo(ws, { type: 'room_error', code: 'rooms.not_joined', message: 'Open a room first' }); break; }
                 try {
-                    const message = await rooms.post(room, client.user, msg.message);
+                    const command = await require('./room-slash').parse(room, client.user, msg.message);
+                    if (command.handled && !command.text) { this.sendTo(ws, { type: 'system', message: command.reply }); break; }
+                    const message = await rooms.post(room, client.user, command.handled ? command.text : msg.message);
                     this.broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
                 } catch (err) {
                     this.sendTo(ws, { type: 'room_error', room: room.slug, code: err.code || 'rooms.error', message: err.code ? err.message : 'Your message could not be sent' });
@@ -1189,7 +1191,7 @@ class ChatServer {
                 card,
             });
             if (result.lastInsertRowid) chatMsg.id = Number(result.lastInsertRowid);
-            if (pending && result.lastInsertRowid) linkCards.fillLater('chat_messages', Number(result.lastInsertRowid), pending);
+            if (pending && result.lastInsertRowid) linkCards.fillLater('chat_messages', Number(result.lastInsertRowid), pending, text);
             // General address previews run after the line is out (server/chat/link-previews.js): the saved message
             // carries embeds: [] and a later frame carries the filled list. Channel/global viewers get the same frame.
             if (result.lastInsertRowid) {
@@ -1511,6 +1513,20 @@ class ChatServer {
     async handleBangCommand(ws, client, text) {
         const parts = text.trim().split(/\s+/);
         const cmd = parts[0].toLowerCase();
+
+        // A !command may be an Element trigger (Elements, stage 1). Commands bypass the normal chat
+        // line path, so this is the one place they reach Live's existing chat-message effect; Live runs
+        // an element only if its library listens for that command, and a signed-in person is required.
+        if (client.channelUserId && client.user?.id) {
+            try {
+                ctx.effects.chatMessage({
+                    element: true, element_command: true,
+                    stream_id: client.streamId || null, channel_user_id: client.channelUserId,
+                    user_id: client.user.id, username: client.user.display_name || client.user.username,
+                    message: text,
+                }).catch(() => { /* the element trigger is not worth a user-visible error */ });
+            } catch { /* non-critical */ }
+        }
 
         // Arena: !hype / !beef / !arena (Live server/arena/arena-chat.js) — chat can only hype; the Arena
         // is pure mic. Live runs the command. When Live delivers through Chat's ingress (LIVE_CHAT_INGRESS)
@@ -2914,6 +2930,15 @@ class ChatServer {
             if (state) this.sendTo(ws, { type: 'sync', room: room.slug, state });
         } catch (err) {
             console.warn('[Sync] state:', err && err.message);
+        }
+        // A party room's music is the room's too: the joiner starts at the room's own second, not at zero.
+        try {
+            if (room.kind === 'party') {
+                const state = await require('../rooms/party-music').stateForRoom(room);
+                if (state !== undefined) this.sendTo(ws, { type: 'music', room: room.slug, state });
+            }
+        } catch (err) {
+            console.warn('[Music] state:', err && err.message);
         }
         await this._broadcastLease(room);
     }

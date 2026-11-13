@@ -160,6 +160,9 @@ function getTTSSettings() {
     if (_settingsCache && (now - _settingsCacheTime) < SETTINGS_CACHE_TTL) return _settingsCache;
     _settingsCache = {
         enabled:               ctx.getSetting('tts_enabled') !== false,
+        // Exchange TTS (off): cloud voices synthesize through AI's POST /v1/audio/speech instead of
+        // the providers directly, so no provider host is called with the setting on.
+        exchange:              (() => { const v = ctx.getSetting('tts_exchange'); return v === true || v === 'true' || v === 1 || v === '1'; })(),
         provider:              ctx.getSetting('tts_provider') || 'espeak-ng',
         googleApiKey:          ctx.getSetting('tts_google_api_key') || '',
         googleServiceAccount:  owner.value('google_cloud_service_account_json', 'CHAT_GOOGLE_SERVICE_ACCOUNT_JSON', ctx.getSetting('tts_google_service_account') || ''),
@@ -553,6 +556,28 @@ function sanitize(text, maxLen, username) {
     return clean;
 }
 
+// ── Exchange TTS (behind tts_exchange, off) ───────────────────
+// Cloud voices synthesize through AI's POST /v1/audio/speech instead of the providers directly:
+// Chat's voice id travels as the Exchange voice, one to one, so nobody hears a difference. With the
+// setting on no provider host is ever called (a failure falls back to local espeak, never direct).
+async function synthesizeViaExchange(text, voiceDef, voiceId) {
+    const client = require('../ai/client');
+    const token = await client.bearer();
+    const { ai } = require('../config');
+    const res = await fetch(`${String(ai.internalUrl).replace(/\/+$/, '')}/v1/audio/speech`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'audio/mpeg, audio/ogg, audio/wav' },
+        // The voice id travels unchanged: Chat's voice ids map one to one onto Exchange voices.
+        body: JSON.stringify({ model: 'tts-1', input: text, voice: voiceId, response_format: 'mp3' }),
+        signal: AbortSignal.timeout(60000),
+    });
+    if (!res.ok) throw new Error(`exchange TTS answered ${res.status}`);
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (!buf.length) throw new Error('exchange TTS returned no audio');
+    return { audio: buf.toString('base64'), mimeType: res.headers.get('content-type') || 'audio/mpeg',
+        engine: voiceDef.engine, voiceName: (voiceDef.cloudVoice && voiceDef.cloudVoice.name) || (voiceDef.pollyVoice && voiceDef.pollyVoice.voiceId) || 'exchange' };
+}
+
 // ── Main synthesis function ───────────────────────────────────
 /**
  * Synthesize TTS audio for a chat message.
@@ -605,6 +630,17 @@ async function _synthesizeWithDef(text, voiceDef, voiceId) {
         } catch (err) {
             console.error(`[TTS] Browser-voice espeak render failed (${voiceId}):`, err.message);
             return null;
+        }
+    }
+
+    // Behind tts_exchange a cloud voice never touches a provider host: it speaks through Exchange,
+    // and an Exchange failure falls back to local espeak, never to the providers directly.
+    if (settings.exchange && (voiceDef.engine === 'google-cloud' || voiceDef.engine === 'amazon-polly')) {
+        try {
+            return { ...(await synthesizeViaExchange(text, voiceDef, voiceId)), voiceId };
+        } catch (err) {
+            console.error(`[TTS] Exchange synthesis failed (${voiceId}):`, err.message);
+            return _espeakFallback(text, voiceId);
         }
     }
 

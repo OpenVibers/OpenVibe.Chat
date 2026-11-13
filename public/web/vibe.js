@@ -42,7 +42,7 @@
   var modelList = document.getElementById('vb-model-list');
   var compareSwitch = document.getElementById('vb-model-compare');
   var modelCatalog = [];
-  function modelLabel(id) { var m = modelCatalog.find(function (x) { return x.slug === id; }); return m ? m.name : id; }
+  function modelLabel(id) { var m = modelCatalog.find(function (x) { return x.slug === id; }); return m ? (m.uncensored ? '18+ · ' : '') + m.name : id; }
   function syncModelChip() {
     if (modelChip) modelChip.textContent = (chosenModels.length > 1 ? chosenModels.length + ' models' : chosenModels.length ? modelLabel(chosenModels[0]) : 'Auto') + ' ▾';
     if (compareSwitch) compareSwitch.checked = chosenModels.length > 1 || compareSwitch.checked;
@@ -58,7 +58,7 @@
       models.forEach(function (m) {
         var row = document.createElement('div'); row.className = 'vb-model-row';
         var choice = document.createElement('button'); choice.type = 'button'; choice.className = 'vb-model-choice';
-        choice.textContent = (chosenModels.includes(m.slug) ? '✓ ' : '') + m.name;
+        choice.textContent = (chosenModels.includes(m.slug) ? '✓ ' : '') + modelLabel(m.slug);
         choice.addEventListener('click', function () {
           if (compareSwitch && compareSwitch.checked) {
             if (chosenModels.includes(m.slug)) chosenModels = chosenModels.filter(function (id) { return id !== m.slug; });
@@ -68,7 +68,7 @@
         }); row.appendChild(choice);
         var offer = (m.offers || []).find(function (x) { return x.price; });
         var facts = document.createElement('small');
-        facts.textContent = offer ? '$' + Number(offer.price.in).toFixed(2) + ' in · $' + Number(offer.price.out).toFixed(2) + ' out / million · ' + (offer.speed && offer.speed.p50_ms ? (offer.speed.p50_ms / 1000).toFixed(1) + 's' : 'speed varies') : 'Price and speed vary';
+        facts.textContent = (m.uncensored ? 'Age confirmation required · ' : '') + (offer ? '$' + Number(offer.price.in).toFixed(2) + ' in · $' + Number(offer.price.out).toFixed(2) + ' out / million · ' + (offer.speed && offer.speed.p50_ms ? (offer.speed.p50_ms / 1000).toFixed(1) + 's' : 'speed varies') : 'Price and speed vary');
         row.appendChild(facts);
         var ranks = document.createElement('a'); ranks.href = 'https://openvibe.report/ai/models/' + encodeURIComponent(m.slug); ranks.textContent = 'How it ranks'; row.appendChild(ranks);
         modelList.appendChild(row);
@@ -286,7 +286,9 @@
     b.appendChild(el('span', 'oc-sr', 'You said:'));
     b.appendChild(document.createTextNode(String(text)));
     if (localPicture) { var img = el('img', 'vb-local'); img.src = localPicture; img.alt = 'Your picture'; b.appendChild(img); }
+    b.dataset.raw = String(text);
     you.appendChild(b); li.appendChild(you);
+    if (id) vibeActions(li);
     return li;
   }
   // The answer side of a turn: Vibe's mark, then its reply.
@@ -307,6 +309,15 @@
     var ans = el('div', 'ovt-answer'); ans.setAttribute('data-ovt-answer', '');
     if (MD) ans.innerHTML = MD.render(m.message); else ans.textContent = m.message;
     reply.appendChild(ans);
+    if (m.card && m.card.kind === 'agent-run') {
+      var run = String(m.card.run_url || ''), events = String(m.card.events_url || '');
+      if (/^https:\/\/openvibe\.network\/api\/frame\/(?:codes-runs|agent-runs\/actor)\/tsk_[0-9A-HJKMNP-TV-Z]{26}(?:~[1-9][0-9]*)?$/.test(run) && events === run + '/events') {
+        var card = el('div', 'oc-agent-run'); card.dataset.ovRunUrl = run; card.dataset.ovEventsUrl = events; card.dataset.ovRunTitle = String(m.card.title || 'Agent run');
+        var link = el('a', '', String(m.card.title || 'Agent run')); link.href = /^https:\/\/openvibe\.actor\/tasks\/tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(m.card.url || '')) ? m.card.url : '#'; card.appendChild(link);
+        reply.appendChild(card);
+        if (window.OpenVibeAgentRunCards) window.OpenVibeAgentRunCards.mountAll(reply);
+      }
+    }
     var res = Array.isArray(m.results) ? m.results : [];
     if (res.length && room) {
       var resBox = el('div', 'vb-res');
@@ -499,6 +510,80 @@
     }
     if (stick) toBottom();
   }
+  function vibeActions(li) {
+    if (!li || !window.OVMessages || !room) return;
+    var id = li.getAttribute('data-me'); if (!id) return;
+    var bubble = li.querySelector('.ovt-you .ovt-bubble'); if (!bubble) return;
+    var raw = bubble.dataset.raw || String(bubble.textContent || '').replace(/^You said:/, '');
+    window.OVMessages.actions(li, ['edit'], { mine: true, message: { id: Number(id), message: raw, edited_at: bubble.dataset.editedAt || null }, onAction: function (a) { if (a === 'edit') startVibeEdit(li); } });
+  }
+  function applyEdited(m) {
+    var li = have(m && m.id), bubble = li && li.querySelector('.ovt-you .ovt-bubble');
+    if (!bubble) return;
+    bubble.textContent = '';
+    bubble.appendChild(el('span', 'oc-sr', 'You said:'));
+    bubble.appendChild(document.createTextNode(String(m.message || '')));
+    bubble.dataset.raw = String(m.message || '');
+    Array.prototype.forEach.call(li.querySelectorAll('.vb-edited, .ovm-edited'), function (x) { x.remove(); });
+    if (m.edited_at && window.OVMessages) window.OVMessages.edited(bubble, m.edited_at);
+    vibeActions(li);
+  }
+  // Editing your own message, in Vibe's box: the same bar and keys as the shared composer (rule 138).
+  var vibeEditing = null;
+  function startVibeEdit(li) {
+    if (!li || !room || !form) return;
+    var bubble = li.querySelector('.ovt-you .ovt-bubble'); if (!bubble) return;
+    var id = li.getAttribute('data-me'); if (!id) return;
+    var raw = bubble.dataset.raw || String(bubble.textContent || '').replace(/^You said:/, '');
+    cancelVibeEdit();
+    var draft = input.value;
+    var bar = el('div', 'oc-bar vb-edit-bar');
+    bar.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16v4z"/></svg><b>Editing your message</b><span>Enter saves · Esc cancels</span>';
+    var x = el('button', 'oc-bar-x', '×'); x.type = 'button'; x.setAttribute('aria-label', 'Stop editing');
+    bar.appendChild(x);
+    form.insertBefore(bar, form.firstChild);
+    form.classList.add('is-editing');
+    input.value = raw; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+    function stop(restore) {
+      input.removeEventListener('keydown', keys, true);
+      form.removeEventListener('submit', submit, true);
+      if (bar.parentNode) bar.remove();
+      form.classList.remove('is-editing');
+      input.value = restore ? draft : draft;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      vibeEditing = null;
+      input.focus();
+    }
+    function save() {
+      var body = input.value.trim();
+      if (!body) { notice('A message can\'t be empty.'); return; }
+      fetch('/api/chat/rooms/' + encodeURIComponent(room) + '/messages/' + encodeURIComponent(id), { method: 'PATCH', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: body }) })
+        .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw Error(d.error || 'Could not edit'); applyEdited(d.message); stop(false); }); })
+        .catch(function (err) { notice(err.message); });
+    }
+    function keys(e) {
+      if (!vibeEditing) return;
+      if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); stop(true); }
+      else if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); e.stopImmediatePropagation(); save(); }
+    }
+    function submit(e) { if (!vibeEditing) return; e.preventDefault(); e.stopImmediatePropagation(); save(); }
+    x.addEventListener('click', function () { stop(true); });
+    input.addEventListener('keydown', keys, true);
+    form.addEventListener('submit', submit, true);
+    vibeEditing = { stop: stop };
+  }
+  function cancelVibeEdit() { if (vibeEditing) vibeEditing.stop(true); }
+  function hydrateVibe() {
+    if (!window.OVMessages) return;
+    Array.prototype.forEach.call(app.querySelectorAll('.ovt-turn[data-me]'), function (li) {
+      var bubble = li.querySelector('.ovt-you .ovt-bubble'); if (!bubble) return;
+      var mark = li.querySelector('.vb-edited');
+      if (mark) { var at = mark.getAttribute('data-edited-at'); mark.remove(); if (at) { bubble.dataset.editedAt = at; window.OVMessages.edited(bubble, at); } }
+      if (!bubble.dataset.raw) bubble.dataset.raw = String(bubble.textContent || '').replace(/^You said:/, '');
+      vibeActions(li);
+    });
+  }
 
   // ── The canvas (plan HO9): the agent's data panel beside the chat ─────────────────────────────────────────────
   // Only the newest task in the chat, and only when OpenVibe.Actor holds it (the task's actor_task is the tsk_…
@@ -656,6 +741,7 @@
       var m; try { m = JSON.parse(ev.data); } catch (e) { return; }
       if (m.type === 'room_joined') catchUp();
       else if (m.type === 'room_message' && m.room === room) add(m.message);
+      else if (m.type === 'room_message_edited' && m.room === room) applyEdited(m.message);
       else if (m.type === 'room_ai_typing' && m.room === room) { showWait(); if (nearBottom()) toBottom(); }
       else if (m.type === 'room_ai_delta' && m.room === room) streamText(m.text);
       else if (m.type === 'room_message_deleted' && m.room === room) removeMessage(m.id);
@@ -847,6 +933,7 @@
     }
     refreshCompare(); setInterval(refreshCompare, 1500);
   }
+  hydrateVibe();
   canvasInit();
   connect();
   window.addEventListener('pagehide', function () { var w = ws; room = null; if (w) w.close(); });

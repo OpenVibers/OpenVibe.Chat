@@ -171,8 +171,8 @@ t('a model on your own computer: the machine and no key; the settings form comes
     const page = await web('GET', `/settings?own=link&machine=${MACHINE}&model=qwen2.5:7b`, cy);
     const sect = page.text.slice(page.text.indexOf('id="oc-ai-key"'));
     assert.ok(sect.includes('<option value="link" selected>A model on my own computer</option>'), 'own computer chosen');
-    assert.ok(sect.includes(`name="machine" maxlength="40"`) && sect.includes(`value="${MACHINE}"`));
-    assert.ok(sect.includes('class="oc-form oc-ai-form"') && sect.includes('<label class="oc-if-node">Computer') && sect.includes('<label class="oc-not-node">API key') && sect.includes('<label class="oc-if-openai">Endpoint'), 'each field says which providers take it (chat.css hides the rest)');
+    assert.ok(sect.includes(`data-name="machine"`) && sect.includes(`data-value="${MACHINE}"`) && sect.includes('data-needs="models"'));
+    assert.ok(sect.includes('class="oc-form oc-ai-form"') && sect.includes('class="oc-if-node" data-ov-machines') && sect.includes('<label class="oc-not-node">API key') && sect.includes('<label class="oc-if-openai">Endpoint'), 'each field says which providers take it (chat.css hides the rest)');
     assert.ok(sect.includes('value="qwen2.5:7b"'), 'the model from the link');
     assert.ok(sect.includes('Save to let your AI members think with qwen2.5:7b on your own computer.'));
     assert.ok(sect.includes('your own computer · llama3.1:8b') && sect.includes('nothing spent'), 'what is saved now');

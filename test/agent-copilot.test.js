@@ -9,6 +9,7 @@
  * and the owner or a moderator can close or veto.
  */
 const assert = require('assert');
+const crypto = require('node:crypto');
 const { ids, serviceAuth } = require('openvibe-contracts');
 const { boot, suite } = require('./helpers');
 
@@ -50,6 +51,39 @@ t('boot and the room', async () => {
     assert.strictEqual(room.owner_subject, ann.subject_id);
     assert.strictEqual(room.topic, agentRoom.BANNER, 'the banner is there before anyone types');
     await db.run('INSERT INTO room_member_timeouts (room_id, user_id, until_at) VALUES (?, ?, now() + interval \'1 hour\')', [room.id, muted.id]);
+});
+
+t('an unlisted room follows its link, and a public room opens without one', async () => {
+    const agentRoom = require('../server/chat/agent-room');
+    const id = ids.newId('ags');
+    const first = 'abcdefghijklmnopqrstuv';
+    const second = 'zyxwvutsrqponmlkjihgfed';
+    const hash = (s) => crypto.createHash('sha256').update(s).digest('hex');
+    const view = require('../server/chat/agent-room-view');
+    let liveVisibility = 'unlisted', liveSecret = first;
+    view._setAccessCheck(async (_id, key) => liveVisibility === 'public' || (liveVisibility === 'unlisted' && key === liveSecret) ? liveVisibility : null);
+    try {
+    let hidden = await agentRoom.ensureRoom(`agent:${id}`, { name: 'A private link', subject: ann.subject_id, visibility: 'unlisted', linkSecretHash: hash(first) });
+    assert.strictEqual(hidden.visibility, 'private');
+    assert.strictEqual(hidden.owner_id, ann.id);
+    assert.strictEqual((await h.http('GET', `/api/chat/rooms/${hidden.slug}`)).status, 404);
+    assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}`)).status, 404);
+    assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}?k=${first}`)).status, 200);
+    assert.strictEqual((await h.http('GET', `/embed/agent/${id}?k=${first}`)).status, 200);
+    const line = await h.http('POST', `/api/chat/agent-rooms/${id}/messages?k=${first}`, { token: young.token, body: { message: 'The checkout looks good.' } });
+    assert.strictEqual(line.status, 201, line.text);
+    assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}/messages?k=${first}`)).body.messages.at(-1).message, 'The checkout looks good.');
+    hidden = await agentRoom.ensureRoom(`agent:${id}`, { subject: ann.subject_id, visibility: 'unlisted', linkSecretHash: hash(second) });
+    liveSecret = second;
+    assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}?k=${first}`)).status, 404);
+    assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}?k=${second}`)).status, 200);
+    await agentRoom.ensureRoom(`agent:${id}`, { subject: ann.subject_id, visibility: 'public' });
+    liveVisibility = 'public';
+    assert.strictEqual((await h.http('GET', `/api/chat/rooms/${hidden.slug}`)).status, 404, 'the storage room stays private during visibility changes');
+    assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}`)).status, 200);
+    liveVisibility = 'private';
+    assert.strictEqual((await h.http('GET', `/api/chat/agent-rooms/${id}`)).status, 404);
+    } finally { view._setAccessCheck(null); }
 });
 
 t('the digest: who is left out, domains, and the caps', async () => {

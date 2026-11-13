@@ -127,6 +127,14 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
     Routes (Live's paths, parameters, shapes and public visibility, now under `/api/chat/ai/`):
     `GET /global`, `/timeline` (`?before=&since=&q=&limit=`), `/user/:id`, `/anon/:anonId`,
     `/relay/:platform/:username`, `/timeline/:username`.
+  - **Person chat memory** (`server/ai/person-memory.js`) is a separate default-off worker
+    (`CHAT_PERSON_MEMORY_ENABLED=1`). It summarizes new messages into channel day records,
+    folds days into weeks and weeks into months, and keeps an own-view cross-channel rollup.
+    The `chat.person-memory` workflow in OpenVibe.AI routes model calls through Exchange;
+    the worker checks its $0.25 UTC-day spend ledger before calls (maximum 25 calls, 450 output tokens each).
+    `GET /api/v1/people/:username/memory?channel=&level=day|week|month` returns public
+    fields; the person and channel owner see the private fields. A person's `DELETE` erases
+    their records and opts out; `PUT .../preferences` with `{"opted_out":false}` opts back in.
 
 ## How it fits the network
 
@@ -140,6 +148,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 | Emote image bytes | **OpenVibe.Media** (namespace `chat`) | `server/media/client.js` (openvibe-sdk `createObjectsClient`), Chat's service token (`media.object.upload` / `.delete`); the row keeps `media_url` + `media_asset_id` |
 | Chat-AI summaries (global / per-chatter insight + timeline) | **OpenVibe.AI** (namespace `chat.*`) | `server/ai/client.js` (openvibe-sdk `createAiClient`), Chat's service token (`ai.run.create` / `ai.run.read`); workflows `chat.global` / `chat.profile`; extractive fallback when AI does not answer |
 | Vibe's search (OpenVibe and the web) | **OpenVibe.Search** (Search Fabric, `GET /api/v1/query`) | `server/rooms/search-fabric.js` (openvibe-sdk/search 0.70), Chat's service token (Network grants `search.query.delegate` on `openvibe.search`), the person in `X-OV-Subject`; each result keeps its provider, date and URL; Search's `/api/v1/search` and Actor's web task are the fallbacks only when the fabric is down |
+| Vibe personas (name, glyph, hue, topic, avatar) | **OpenVibe.AI / Exchange** and **OpenVibe.Media** | `server/persona/index.js`: `ai.complete` with an explicit catalogue model and `chat.persona.image` for a picture, Chat's service token; each run's `usage.cost_usd` is kept in `vibe_persona_spend` under the owner's cap; avatar bytes go to Media (namespace `chat`) |
 | Identity | **OpenVibe.Network** | user tokens are resolved by Live (its account links); service tokens from `/oauth/token` |
 | Events | **OpenVibe.Events** | `service_outbox` (openvibe-sdk outbox) → `POST /api/v1/events` when `EVENTS_URL` and `OV_OAUTH_CLIENT_SECRET` are set (`events.event.publish`); Chat's subscriptions deliver to `POST /internal/events` (`server/events/consumer.js`, `events.subscription.manage`) |
 
@@ -334,7 +343,15 @@ quiet (independent of the insight job's `CHAT_AI_ENABLED`). An AI member linked 
 `CHAT_FOOD_INTERNAL_URL`). API: `GET|POST /api/chat/rooms/:slug/ai-members`, `PATCH|DELETE …/ai-members/:id` (people
 only; members see names and handles, managers the set-up); the settings page manages them without JavaScript. A room
 member can also be added by account subject: `POST /api/chat/rooms/:slug/members { subject: "usr_…" }`. Deleting an
-account keeps the AI members it added (they belong to the room) without its subject on them, and exports them.
+account keeps the ordinary AI members it added (they belong to the room) without its subject on them, and exports them.
+
+**Actor agents in server channels** (`actor_members_enabled` in Chat owner settings, on by default; `CHAT_ACTOR_MEMBERS=1` forces it on): a server manager can attach one of their own
+OpenVibe.Actor agents to a channel from its AI members settings. Anyone who can post in that channel can mention the
+agent; Chat starts the owner's personal agent through `actor.agent.run`, records a durable room task, and follows it
+through the existing workspace poller. The answer returns as that agent's room message. Actor applies the owner's
+budget, daily cap and approvals. The settings form says the answer is public to the channel. Deleting the owner's
+account removes its attached Actor agents; ordinary room AI members remain. Network must grant Chat `actor.agent.run`
+and Actor must allow Chat to read only the personal agent tasks it started.
 
 **Tools** (`server/rooms/ai-tools.js`; the owner's "modular AI conversation… tool calling"). An AI member's answer
 is a few turns of OpenVibe.AI's `chat.member.turn` (a Chat Completions passthrough with tools, AI#96): the model may
@@ -370,6 +387,20 @@ turned on "Let my AI use this computer's models".
   says "Vibe thinks with … (change)", "How Vibe did this" says which model answered, and a computer that does not answer
   is named, with what to check. Removing the key ends it.
 
+**Vibe personas** (`server/persona/`, `migrations/0078_vibe_personas.sql`; the owner, 2026-11-12). Each Vibe
+conversation gets a name and a face made from what it is about, and a new one when the topic changes. The shape is
+`persona { name, glyph, hue, image_url|null, topic, made_at }`, on every item of `GET /api/vibe/conversations` and on
+`chat` in `GET /api/vibe/chat` (null until the first answer, and past the cap). The name also names the chat until the
+person renames it. The first is made after the first answer; then every 8 messages (configurable) the cheapest chat
+model answers one word, `YES` or `NO`, to "has the topic changed?". The glyph is one name from
+`openvibe-shared/glyphs`; an invalid answer is retried once and then replaced from the registry. Auto models are the
+cheapest chat and image models in Exchange's catalogue; every call is `ai.complete` (or Chat's
+`chat.persona.image` workflow for a picture) under Chat's own grant, billed to Chat, with its `usage.cost_usd`
+recorded against the owner's monthly cap. Images are off by default and go to OpenVibe.Media. The owner page is
+`/admin/persona` (spend shown, model choices, interval, cap, remake one chat); the same values are the revisioned
+`chat.persona` namespace, and `GET|POST /api/admin/persona` + `POST /api/admin/persona/remake` are owner-sign-in
+only. `docs/vibe-personas.md` has the shape, settings and test notes.
+
 **Servers** (`server/rooms/servers.js`, `server/rooms/server-routes.js`, `server/web/server-pages.js`,
 `migrations/0013_chat_servers.sql`; the owner's Q14: friend groups and couples first, then communities with servers,
 channels and voice). A server is a group of rooms, its channels, with one membership and one set of roles: a text
@@ -390,6 +421,11 @@ servers run across the top and the channel list folds away. API: `/api/chat/serv
 delete, join `{ invite? }`, leave, members, channels, invites, `GET /invites/:code`). Deleting an account removes its
 memberships; a server it owned stays without an owner while anyone else is in it, and goes with its channels when
 nobody is.
+
+Forum channels are available by default for a server manager who can connect a Community forum they moderate;
+the owner can disable them with `forum_channels_enabled`. Slash commands and custom server emoji are available by
+default and can be disabled with `CHAT_SLASH_COMMANDS_ENABLED=0` and `CHAT_SERVER_EMOJI_ENABLED=0`. Stage channels
+use Chat's voice rooms and are available by default; the owner can disable them with `stage_channels_enabled`.
 
 **Pictures** (`server/rooms/pictures.js`; the owner's "files and pics" for Chat, through OpenVibe.Pics). A person who
 may post sends a picture from the room's or channel's "Add a picture" form (it works without JavaScript; with it, the
@@ -844,6 +880,7 @@ server/prefs/              chat preferences in the Network user module chat.pref
 server/calls/              moved from Live: the call server (/ws/call), its REST routes, Live's stream hooks (/internal/calls), the calls lifecycle
 server/media/client.js     OpenVibe.Media objects (namespace chat): emote image bytes, with Chat's own service token
 server/ai/                 moved from Live: chat-ai.js (the rolling insight job, off unless CHAT_AI_ENABLED), client.js (OpenVibe.AI runs, namespace chat.*), extractive.js (the fallback summary)
+server/persona/            Vibe personas: settings.js (chat.persona owner settings), index.js (the first name, the topic check, the cap, the avatar)
 server/db/                 database.js (Live's chat functions, same names and arguments; PostgreSQL, migrations/)
 scripts/                   parity, subscribe-events, n-1-record
 docs/                      calls-cutover.md, parity.md, chat-ingress.md, capabilities-proposal/
@@ -886,7 +923,7 @@ Events: `chat.message.created`, `chat.message.deleted`, `chat.dm.created`, `chat
 `chat.call.*`, `chat.tts.queued|played|failed`. Consumed at `POST /internal/events` (signature v2,
 `CHAT_EVENTS_SECRET`, openvibe-sdk inbox): `live.release.deployed`, `network.module.updated`,
 `network.user.token_valid_after`, `vip.membership.changed`, `network.block.changed`,
-`network.subject.merged`, `network.account.export_requested` and `network.account.deleted` (Chat's own
+`network.account.export_requested` and `network.account.deleted` (Chat's own
 subscriptions, created at boot when missing).
 
 Called elsewhere, as the service principal `chat` ([server/net/service-auth.js](server/net/service-auth.js)):
@@ -981,7 +1018,7 @@ left OpenVibe.Sites, and this repository's vhost serves it.
 Part of the [OpenVibe network](https://openvibe.network). Built in the open by [OpenVibers](https://github.com/OpenVibers).
 
 <!-- versions:start -->
-- openvibe-contracts: v0.384.0
-- openvibe-sdk: v0.135.0
-- openvibe-shared: v4.190.0
+- openvibe-contracts: v0.419.0
+- openvibe-sdk: v0.161.0
+- openvibe-shared: v4.231.0
 <!-- versions:end -->

@@ -138,6 +138,29 @@ t('chat into a stream room: room delivery, global cross-feed, persistence, outbo
     assert.strictEqual(reaction.body.powerchat_chat.externalChatterId, `u${alice.id}`);
 });
 
+t('a chat command is marked for Elements on the existing chat-message effect', async () => {
+    const carol = h.addUser('carol', { subject: 'usr_01J9CCCCCCCCCCCCCCCCCCCCCC' });
+    const ws = await h.ws({ ip: '198.51.100.22', token: carol.token, stream: streamId });
+    ws.sendJson({ type: 'join', streamId, token: carol.token });
+    await ws.next((m) => m.type === 'auth');
+    ws.sendJson({ type: 'chat', message: '!dance please' });
+    let fx = null;
+    for (let i = 0; i < 60 && !fx; i++) {
+        fx = h.live.effects.find((e) => e.name === 'chat-message' && e.body.message === '!dance please');
+        if (!fx) await h.sleep(25);
+    }
+    assert.ok(fx, 'the command reaches Live on the one chat-message effect');
+    assert.strictEqual(fx.body.element_command, true);
+    assert.strictEqual(fx.body.element, true);
+    assert.strictEqual(fx.body.channel_user_id, streamer.id);
+    assert.strictEqual(fx.body.user_id, carol.id);
+    assert.strictEqual(fx.body.award, undefined, 'a command does not carry the coin bonus');
+    // A normal line goes the ordinary path; its effect is not an element command.
+    const plain = h.live.effects.find((e) => e.name === 'chat-message' && e.body.message === 'hello stream');
+    assert.strictEqual(plain.body.element_command, undefined, 'a normal line is not an element trigger');
+    ws.close();
+});
+
 t('a message that could not be saved is not broadcast; the sender is told', async () => {
     const orig = h.db.saveChatMessage;
     h.db.saveChatMessage = () => { throw new Error('disk full'); };
@@ -395,6 +418,10 @@ t('a token in the socket address is not read, and the socket says how to send it
 });
 
 t('upgrade guards: foreign origin refused, banned address refused (admins exempt)', async () => {
+    const dock = await h.ws({ origin: 'https://openvibe.video' });
+    dock.sendJson({ type: 'join', token: alice.token });
+    assert.strictEqual((await dock.next((m) => m.type === 'auth')).authenticated, true, 'the shared Dock connects from a first-party site');
+    dock.close();
     assert.strictEqual(await h.wsRefused({ origin: 'https://evil.example' }), true);
     h.live.addBan({ ip_address: '192.0.2.0/24' });
     await h.ctx.invalidateBans();

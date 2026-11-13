@@ -38,6 +38,10 @@ t('global chat reads without JavaScript; signing in shows the composer', async (
     assert.match(r.text, /Sign in with OpenVibe/);
     assert.match(r.text, /<meta name="robots" content="index, follow">/);
     assert.match(r.text, /\/shared\/navbar\.js\?v=/, 'the Frame from this site\'s own /shared/');
+    // The first HTML carries the site's navigation for a crawler, not only the scripts that draw it.
+    const serverNav = /<div id="navbar-mount"><nav class="openvibe-navbar"[^>]*data-ov-server-nav="true"[\s\S]*?<\/nav><\/div>/.exec(r.text);
+    assert.ok(serverNav, 'the first HTML has the server navigation');
+    assert.match(serverNav[0], /href="\/rooms"[^>]*>Rooms</, 'and its places');
     // A Content-Security-Policy with a per-response nonce, carried by every inline script and only by them.
     const csp = r.headers.get('content-security-policy') || '';
     const nonce = (/'nonce-([^']+)'/.exec(csp) || [])[1];
@@ -54,6 +58,7 @@ t('global chat reads without JavaScript; signing in shows the composer', async (
     assert.ok(!/id="oc-compose"/.test(r.text), 'no composer for a guest');
     const me = await req('GET', '/', { headers: cookie(alice) });
     assert.match(me.text, /id="oc-compose"/);
+    assert.match(me.text, /data-ov-guide="chat.message"/, 'public composer exposes its quest control');
     // Under the room, what openvibe.chat does: six cards, each a place to go, with the showcase stylesheet. A guest's
     // messages and settings cards go through sign-in; a signed-in person's go straight there.
     const what = (/<section class="sc-sec" id="what-chat-does"[\s\S]*?<\/section>/.exec(r.text) || [''])[0];
@@ -125,12 +130,28 @@ t('settings save to the chat.preferences record', async () => {
     assert.strictEqual(r.status, 200);
     assert.match(r.text, /name="timestamps"/);
     assert.match(r.text, /name="agents_read_messages"/, 'the agents-don\'t-read setting is on the page');
+    assert.match(r.text, /name="dm_link_previews" value="1" checked/, 'link previews in DMs are on by default');
     r = await req('POST', '/settings', form(alice, { timestamps: '1', compact: '1', font_size: 'large' }));
     assert.strictEqual(r.headers.get('location'), '/settings?saved=1');
     const rec = h.netModules.records.get(h.netModules.key('chat.preferences', alice.subject_id));
     assert.deepStrictEqual(rec && rec.data, { timestamps: true, compact: true, show_badges: false, font_scale: 1.18, agents_read_messages: false });
     const page = await req('GET', '/', { headers: cookie(alice) });
     assert.match(page.text, /<body class="oc-compact oc-times oc-nobadges" style="--oc-scale:1.18">/, 'the site follows them too');
+});
+
+t('the direct-message link preview switch is on by default, saves off, and shows its state', async () => {
+    const settings = require('../server/chat/dm-preview-settings');
+    await settings.setEnabled(alice.id, true);
+    assert.strictEqual(await settings.enabledFor(alice.id), true);
+    let r = await req('GET', '/settings', { headers: cookie(alice) });
+    assert.match(r.text, /name="dm_link_previews" value="1" checked/, 'the switch is on on the page');
+    r = await req('POST', '/settings', form(alice, { timestamps: '1' }));
+    assert.strictEqual(r.headers.get('location'), '/settings?saved=1');
+    assert.strictEqual(await settings.enabledFor(alice.id), false, 'absent from the form means off');
+    r = await req('GET', '/settings', { headers: cookie(alice) });
+    assert.ok(!/name="dm_link_previews" value="1" checked/.test(r.text), 'the page shows it off');
+    r = await req('POST', '/settings', form(alice, { timestamps: '1', dm_link_previews: '1' }));
+    assert.strictEqual(await settings.enabledFor(alice.id), true, 'and on again');
 });
 
 t('rooms: start one, post and join without JavaScript, private rooms stay private, owners manage', async () => {

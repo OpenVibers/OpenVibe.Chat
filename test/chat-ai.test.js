@@ -221,6 +221,24 @@ t('a consent check that fails leaves everyone out (fail closed)', async () => {
     consent._reset();
 });
 
+t('a personal summary is erased when Network consent is absent', async () => {
+    const consent = require('../server/net/consent');
+    consent._reset();
+    await msg({ user_id: alice.id, username: 'alice', message: 'a private topic' });
+    await db.upsertChatAiSummary({
+        scope: 'user', subject_id: alice.id, window: 'rolling', overview: 'cached',
+        memory_json: 'cached memory', timeline_json: '[{"ts":"2026-01-01 00:00:00","label":"cached"}]',
+    });
+    await db.addChatTimelineEvents('user', alice.id, [{ ts: '2026-01-01 00:00:00', label: 'cached' }]);
+    h.consent.allowed.delete(alice.subject_id);
+
+    await chatAi._refreshUser(alice.id, 1);
+
+    assert.strictEqual(await db.getChatAiSummary('user', alice.id, 'rolling'), null);
+    const events = await db.getChatTimelineEvents({ scope: 'user', subjectId: alice.id, limit: 10 });
+    assert.deepStrictEqual(events, []);
+});
+
 t('GET /api/v1/rooms/global/insight answers the room shape, publicly', async () => {
     await db.upsertChatAiSummary({
         scope: 'global', subject_id: 0, window: 'global', overview: 'arrivals see this', memory_json: 'm',

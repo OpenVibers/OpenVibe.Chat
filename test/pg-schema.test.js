@@ -23,12 +23,14 @@ async function get(sql, params) { return await db.prepare(sql).get(...(params ||
 // Every table Chat owns, including the Chat ingress retry ledger and runtime-created modules.
 const TABLES = [
     'vibe_model_turns', 'vibe_chat_settings', 'vibe_model_preferences', 'vibe_import_notices',   // 0048: multi-model Vibe and the Exchange import
-    'chat_messages', 'dm_conversations', 'dm_participants', 'dm_messages', 'dm_blocks', 'tts_voice_overrides',
+    'vibe_personas', 'vibe_persona_spend',   // 0078: Vibe personas
+    'chat_messages', 'person_chat_memory', 'person_chat_memory_settings', 'person_chat_memory_spend',
+    'dm_conversations', 'dm_participants', 'dm_messages', 'dm_blocks', 'tts_voice_overrides',
     'channel_sounds', 'relay_users', 'hidden_relay_users', 'pending_ip_messages', 'stream_first_chats', 'moderation_actions',
     'channel_moderators', 'channel_moderation_settings', 'emotes', 'user_tags', 'chat_ai_summaries', 'chat_timeline_events',
     'ctx_users', 'ctx_streams', 'ctx_managed_streams', 'ctx_channels', 'ctx_sync', 'events_outbox', 'service_outbox',
     'chat_ingress_applied', 'audio_requests', 'import_hold', 'import_runs', 'chat_meta', 'deploy_releases',
-    'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'room_ai_members', 'room_ai_usage', 'room_tasks', 'room_hooks', 'vibe_usage', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_asks', 'vibe_deliveries', 'inboxes', 'inbox_members', 'inbox_conversations', 'inbox_messages', 'inbox_ai_usage', 'inbox_saved_replies', 'inbox_webhooks', 'inbox_actions', 'inbox_translations', 'feeds', 'feed_sessions', 'feed_events', 'chat_servers', 'chat_server_members', 'chat_server_invites', 'token_revocations', 'chat_control_log',
+    'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'room_ai_members', 'room_ai_usage', 'room_tasks', 'room_hooks', 'vibe_usage', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_asks', 'vibe_deliveries', 'vibe_canvases', 'vibe_canvas_versions', 'inboxes', 'inbox_members', 'inbox_conversations', 'inbox_messages', 'inbox_ai_usage', 'inbox_visitor_turns', 'inbox_saved_replies', 'inbox_webhooks', 'inbox_actions', 'inbox_translations', 'feeds', 'feed_sessions', 'feed_events', 'chat_servers', 'chat_server_members', 'chat_server_invites', 'token_revocations', 'chat_control_log',
     'network_blocks', 'account_data_events', 'ticket_conversations', 'ticket_messages', 'telemetry_samples',
     'dm_contacts', 'dm_view_defaults', 'dm_view_preferences',
     'chat_app_link_tokens', 'chat_app_settings', 'chat_app_callbacks', 'chat_app_deliveries', 'chat_app_rates',
@@ -38,6 +40,9 @@ const TABLES = [
     'agent_play_requests', 'agent_play_votes', 'agent_play_log',
     'party_pool_settings', 'party_pool_machines', 'party_pool_holds',   // 0064: OpenVibe's own computers for parties
     'link_previews', 'link_preview_cache',   // 0065: address previews beside the message, and the address cache
+    'dm_link_preview_settings',              // 0070: a person's link previews in DMs (on unless they say otherwise)
+    'chat_server_timeouts', 'chat_command_polls', 'chat_command_poll_votes', 'chat_command_reminders', 'chat_registered_commands',
+    'room_memory',                           // 0071: what a room keeps between summaries
 ];
 const INDEXES = [
     'idx_chat_ts_deleted', 'idx_chat_page_live', 'idx_chat_channel_user_ts', 'idx_chat_stream_ts', 'idx_emotes_channel_code', 'idx_chat_tl_dedup',

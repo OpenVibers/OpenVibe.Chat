@@ -37,6 +37,7 @@ const cache = require('openvibe-shared/cache-policy');
 const { requireAuth, optionalAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const rooms = require('./rooms');
+const linkPreviews = require('../chat/link-previews');
 const parties = require('./parties');
 const ctx = require('../live-context');
 const db = require('../db/database');
@@ -214,14 +215,27 @@ router.get('/:slug/messages', optionalAuth, async (req, res) => {
 router.post('/:slug/messages', requireAuth, postLimit, async (req, res) => {
     const room = await readable(req, res); if (!room) return;
     try {
-        const message = await rooms.post(room, req.user, req.body && req.body.message, {
+        const command = await require('../chat/room-slash').parse(room, req.user, req.body && req.body.message);
+        if (command.handled && !command.text) return res.json({ reply: command.reply });
+        const message = await rooms.post(room, req.user, command.handled ? command.text : req.body && req.body.message, {
             timezone: req.body && req.body.timezone,
             files: require('./files').attachmentsFromBody(req.body),
             reply_to_id: req.body && req.body.reply_to_id,
         });
         chatServer().broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
-        res.status(201).json({ message });
+        res.status(201).json({ message, ...(command.poll_id ? { poll_id: command.poll_id } : {}) });
     } catch (err) { send(res, err); }
+});
+
+router.post('/:slug/polls/:id/vote', requireAuth, postLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try { res.json(await require('../chat/room-slash').vote(room, req.user, req.params.id, req.body && req.body.option)); }
+    catch (err) { send(res, err); }
+});
+router.get('/:slug/polls/:id', optionalAuth, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try { res.json({ poll: await require('../chat/room-slash').pollView(room, req.params.id) }); }
+    catch (err) { send(res, err); }
 });
 
 // A reaction on a room message (room_message_reactions, migration 0038): the same one again takes it back. The
@@ -270,6 +284,48 @@ router.delete('/:slug/messages/:id', requireAuth, deleteLimit, async (req, res) 
         const id = await rooms.deleteMessage(room, req.user, parseInt(req.params.id, 10));
         chatServer().broadcastToRoom(room.id, { type: 'room_message_deleted', room: room.slug, id });
         res.json({ ok: true, id });
+    } catch (err) { send(res, err); }
+});
+
+router.patch('/:slug/messages/:id', requireAuth, postLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try {
+        const message = await rooms.editMessage(room, req.user, parseInt(req.params.id, 10), req.body && req.body.message);
+        chatServer().broadcastToRoom(room.id, { type: 'room_message_edited', room: room.slug, message });
+        res.json({ message });
+    } catch (err) { send(res, err); }
+});
+
+router.get('/:slug/messages/:id/edits', requireAuth, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    const can = await rooms.access(room, req.user);
+    if (!can.moderate) return res.status(403).json({ error: 'Moderators only' });
+    const row = await db.get('SELECT edit_history FROM room_messages WHERE id = ? AND room_id = ?', [Number(req.params.id), room.id]);
+    if (!row) return res.status(404).json({ error: 'No such message' });
+    return res.set('Cache-Control', 'private, no-store').json({ versions: row.edit_history || [] });
+});
+
+/**
+ * A preview on a room message, taken back by its author or a room moderator (server/chat/link-previews.js): with a
+ * position, that one address; without, every preview on the line. The row becomes a tombstone, so a job still
+ * running cannot put it back.
+ */
+router.delete('/:slug/messages/:id/embeds/:position?', requireAuth, deleteLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try {
+        const id = parseInt(req.params.id, 10);
+        const message = await db.get('SELECT id, user_id FROM room_messages WHERE id = ? AND room_id = ?', [id, room.id]);
+        if (!message) throw new rooms.RoomError(404, 'rooms.no_message', 'No such message');
+        const a = await rooms.access(room, req.user);
+        if (Number(message.user_id) !== Number(req.user.id) && !a.moderate) throw new rooms.RoomError(403, 'rooms.embeds', 'Only the author or a room moderator removes a preview');
+        let position = null;
+        if (req.params.position != null) {
+            position = Number(req.params.position);
+            if (!Number.isInteger(position) || position < 0 || position > 2) throw new rooms.RoomError(422, 'rooms.embed_position', 'A preview is 0, 1 or 2');
+        }
+        const embeds = await linkPreviews.remove('room', id, position, req.user.id);
+        chatServer().broadcastToRoom(room.id, { type: 'room_message_embeds', room: room.slug, id, embeds });
+        res.json({ embeds });
     } catch (err) { send(res, err); }
 });
 

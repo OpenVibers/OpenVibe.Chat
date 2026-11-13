@@ -7,9 +7,9 @@
   "runtime": "node 22, express, ws, PostgreSQL through openvibe-sdk/db (DATABASE_URL via PgBouncer, DATABASE_DIRECT_URL for migrations/; embedded PGlite outside production), Valkey for the per-actor limits (VALKEY_URL)",
   "port": 4400,
   "domain": "openvibe.chat (Chat's own site: global chat, messages, rooms, settings; the service manifest records it live since 2026-09-24) and openvibe.live (/ws/chat, /api/chat/, /api/dm/, /api/tts/, /api/sounds via an nginx include in openvibe.live's vhost)",
-  "contracts": "openvibe-contracts v0.384.0",
-  "sdk": "openvibe-sdk v0.135.0",
-  "shared": "openvibe-shared v4.190.0",
+  "contracts": "openvibe-contracts v0.419.0",
+  "sdk": "openvibe-sdk v0.161.0",
+  "shared": "openvibe-shared v4.231.0",
   "capabilities": [
     "chat.message.send",
     "chat.event.publish",
@@ -46,7 +46,7 @@
     "chat.room.message.created",
     "chat.room.message.deleted"
   ],
-  "eventsConsumed": "live.release.deployed, network.module.updated, network.user.token_valid_after, vip.membership.changed, network.block.changed, network.subject.merged, network.account.export_requested and network.account.deleted at POST /internal/events (signature v2, openvibe-sdk inbox); subscriptions created at boot when missing (CHAT_EVENTS_SECRET and the Network grant chat events.subscription.manage openvibe.events)",
+  "eventsConsumed": "live.release.deployed, network.module.updated, network.user.token_valid_after, vip.membership.changed, network.block.changed, network.account.export_requested and network.account.deleted at POST /internal/events (signature v2, openvibe-sdk inbox); subscriptions created at boot when missing (CHAT_EVENTS_SECRET and the Network grant chat events.subscription.manage openvibe.events)",
   "liveAuthorityFlag": "CHAT_AUTHORITY=chat is required in every mode since the cutover (2026-09-23 02:03 UTC): Live mounts no local chat routes and there is no rollback to Live; Live reads Chat's chat tables through Chat's internal read API (the read mirror was retired on 2026-10-05, so the cutover rollback through it no longer exists)",
   "vip": "Member badges from OpenVibe.VIP (server/vip/badges.js: entitlements/check with product chat, cached 60 s, never blocks sending, fails closed; vip.membership.changed drops the cache). Needs the Network grant chat vip.entitlement.check openvibe.vip",
   "preferences": "Chat preferences in the Network user module chat.preferences, plus chat.tts_defaults, chat.dm_settings and chat.presence_prefs (server/prefs/: /api/chat/preferences and siblings with Chat's service token, cached 60 s, If-Match on every write). Needs the grants chat network.modules.read/write",
@@ -63,11 +63,11 @@
     "openvibe.chat site: global chat, messages, rooms, settings, history download",
     "chat preferences in Network user modules",
     "VIP subscriber badges",
-    "network blocks, revocation, account merge, export and deletion from Network events",
+    "network blocks, revocation, export and deletion from Network events",
     "openvibe-sdk service_outbox events and chat.room.message.* on the realtime plane",
     "N-1 compatibility tests",
     "per-actor limits (openvibe-sdk/limits)",
     "Vibe search through the Search Fabric (network and web scopes, cited provider/date/URL; pre-fabric fallbacks)"
   ],
-  "updated": "2026-11-10"
+  "updated": "2026-11-12"
 }

@@ -31,7 +31,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .oc-tabs a { color: var(--oc-muted); text-decoration: none; padding: 4px 10px; border-radius: 999px; }
 .oc-tabs a[aria-current="page"], .oc-tabs a:hover { color: var(--oc-text); background: var(--oc-panel); }
 .oc-account { font-size: 14px; color: var(--oc-muted); margin-left: auto; }
-.oc-main { max-width: 960px; margin: 0 auto; padding: 16px 16px 48px; overflow-wrap: anywhere; }
+.oc-main { max-width: 960px; margin: 0 auto; padding: 16px 16px 0; overflow-wrap: anywhere; }
 /* The front page's showcase section under the room: the page column already has the gutter. */
 .oc-main .sc-sec { padding-left: 0; padding-right: 0; margin-top: 40px; }
 h1 { font-size: 1.6rem; line-height: 1.25; margin: .3em 0 .2em; }
@@ -83,9 +83,8 @@ button[disabled] { opacity: .6; cursor: default; }
 .oc-ai-form:has(select[name="provider"] option[value="node"]:checked) .oc-not-node,
 .oc-ai-form:not(:has(select[name="provider"] option[value="node"]:checked)) .oc-if-node,
 .oc-ai-form:not(:has(select[name="provider"] option[value="openai"]:checked)) .oc-if-openai { display: none; }
-.oc-ai-form input[name="machine"] { display: block; width: 100%; max-width: 36ch; box-sizing: border-box; margin-top: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.92em; }   /* a whole dev_ id, even at 320 px */
 @media (max-width: 560px) {
-  .oc-main { padding: 12px 12px 40px; }
+  .oc-main { padding: 12px 12px 0; }
   .oc-feed { max-height: 60vh; }
   .oc-account { margin-left: 0; }
 }
@@ -639,6 +638,10 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-snip > pre { max-height: 50vh; overflow: auto; padding-right: 48px; }
 /* A header's "more" menu (a conversation's Block): a small panel under its button. */
 .oc-more { position: relative; }
+/* The room's AI overview sits in the header's tools (it wrapped onto a row of its own: .oc-more is also the grid of
+   "more" links above). Opus, 2026-11-11. */
+.oc-chan-tools .oc-more { display: inline-flex; margin: 0; grid-template-columns: none; }
+.oc-chan-tools .oc-insight-pop { width: min(340px, calc(100vw - 32px)); }
 .oc-more > summary { list-style: none; }
 .oc-more > summary::-webkit-details-marker { display: none; }
 .oc-pop { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; padding: 6px; border-radius: 12px; border: 1px solid var(--oc-line); background: var(--oc-panel); box-shadow: 0 12px 28px rgba(0, 0, 0, .35); }
@@ -808,3 +811,45 @@ div.oc-set-row { cursor: default; }
 .oc-agent-poll-vote small { color: var(--text-secondary, #96a7c2); white-space: nowrap; }
 .oc-kind-agent_stream { color: var(--accent, #3b82f6); border-color: color-mix(in srgb, var(--accent, #3b82f6) 45%, transparent); }
 @media (max-width: 480px) { .oc-agent-banner, .oc-agent-poll { padding: 9px 11px; } }
+.oc-server-emoji { vertical-align: middle; object-fit: contain; }
+/* The composer's command list and emoji picker (Opus, 2026-11-11): both float above the box. A command is its name in
+   the accent and what it does under it; the marked one (arrows, Enter or Tab) is tinted. The emoji are a grid of 44 px
+   tiles; the report link sits small at the end. */
+.oc-compose { position: relative; }
+.oc-command-menu { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); z-index: 30; display: grid; gap: 2px; max-height: min(320px, 50vh); overflow: auto; padding: 6px;
+  border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel, var(--oc-bg)); box-shadow: 0 16px 40px rgba(0, 0, 0, .35); }
+.oc-command-menu[hidden] { display: none; }
+.oc-cmd { display: grid; gap: 1px; width: 100%; min-height: 44px; padding: 7px 10px; border: 0; border-radius: 10px; background: none; color: var(--oc-text); font: inherit; text-align: left; cursor: pointer; }
+.oc-cmd b { font: 650 .92rem/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--oc-accent); }
+.oc-cmd span { font-size: .84rem; color: var(--oc-muted); line-height: 1.35; overflow-wrap: anywhere; }
+.oc-cmd:hover, .oc-cmd[aria-selected="true"] { background: var(--oc-panel-2, rgba(255, 255, 255, .06)); }
+.oc-emoji-picker { position: relative; flex: none; }
+.oc-emoji-toggle { display: flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%; cursor: pointer; list-style: none; color: var(--oc-muted); }
+.oc-emoji-toggle::-webkit-details-marker { display: none; }
+.oc-emoji-toggle:hover, .oc-emoji-picker[open] .oc-emoji-toggle { color: var(--oc-text); background: var(--oc-panel-2, rgba(255, 255, 255, .06)); }
+.oc-emoji-toggle .oc-i { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+.oc-emoji-choices { position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 30; width: min(320px, calc(100vw - 32px)); display: grid; grid-template-columns: repeat(auto-fill, minmax(44px, 1fr)); gap: 4px;
+  max-height: 14rem; overflow: auto; padding: 8px; border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel, var(--oc-bg)); box-shadow: 0 16px 40px rgba(0, 0, 0, .35); }
+.oc-emoji-choice { display: grid; place-items: center; height: 44px; border: 0; border-radius: 10px; background: none; cursor: pointer; }
+.oc-emoji-choice:hover, .oc-emoji-choice:focus-visible { background: var(--oc-panel-2, rgba(255, 255, 255, .06)); }
+.oc-emoji-report { grid-column: 1 / -1; justify-self: start; margin-top: 4px; font-size: .8rem; color: var(--oc-muted); }
+.oc-emoji-none { grid-column: 1 / -1; margin: 6px 4px; color: var(--oc-muted); font-size: .88rem; }
+@media (min-width: 761px) { .oc-command-menu { right: auto; width: min(420px, 100%); } }
+
+/* A message's actions ride the shared messages.css cluster (openvibe.design rule 138). The box's editing bar and
+   the moderators' Earlier versions sheet are the same on every view. */
+.oc-bar { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 4px 4px 10px; border-radius: 12px; background: color-mix(in srgb, var(--oc-accent) 14%, transparent); font-size: 13px; line-height: 1.3; }
+.oc-bar > svg { flex: none; width: 15px; height: 15px; color: var(--oc-accent); }
+.oc-bar > b { flex: none; font-weight: 700; color: var(--oc-text); }
+.oc-bar > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--oc-muted); }
+.oc-bar-x { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 50%; background: transparent; color: var(--oc-muted); cursor: pointer; font-size: 18px; }
+.oc-bar-x:hover, .oc-bar-x:focus-visible { background: color-mix(in srgb, var(--oc-text) 10%, transparent); color: var(--oc-text); }
+.oc-edits-sheet { width: min(460px, calc(100vw - 24px)); max-height: min(640px, calc(100vh - 32px)); padding: 0; border: 1px solid var(--oc-line); border-radius: 18px; background: var(--oc-panel); color: var(--oc-text); box-shadow: 0 30px 80px rgba(0, 0, 0, .5); }
+.oc-edits-sheet::backdrop { background: rgba(2, 6, 14, .55); }
+.oc-edits-sheet header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 8px; }
+.oc-edits-sheet header button { width: 36px; height: 36px; border: 0; border-radius: 50%; background: transparent; color: var(--oc-muted); font-size: 22px; cursor: pointer; }
+.oc-edits-sheet header button:hover { background: var(--oc-panel-2); color: var(--oc-text); }
+.oc-edits-sheet ol { list-style: none; margin: 0; padding: 0 16px 16px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; overflow: auto; }
+.oc-edits-sheet li { padding: 10px 12px; border-radius: 12px; background: var(--oc-panel-2); }
+.oc-edits-sheet time { display: block; font-size: 12px; color: var(--oc-muted); }
+.oc-edits-sheet p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }

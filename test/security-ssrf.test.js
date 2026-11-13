@@ -114,11 +114,13 @@ t('DNS rebinding: public at the check, loopback at the download — refused wher
 t('ratchet: every file that makes an outbound request itself is reviewed', () => {
     const REVIEWED = {
         'server/ai/client.js': 'AI internal API (configured), fixed paths: runs and the Exchange catalogue',
+        'server/persona/index.js': 'a Vibe persona\'s picture address from the image provider (not a person\'s): https only, every hop through openvibe-shared/egress (assertPublicUrl and safeLookup), two redirects at most, 20 s, 2 MB',
         'server/rooms/vibe-import.js': 'Exchange internal API (configured), a fixed path: the signed-in person\'s chat export',
         'server/rooms/vibe-compare.js': 'Bench (configured), fixed paths: the compare round and its vote',
         'server/rooms/community-forum.js': 'Community API (configured internal URL), fixed space/thread endpoints; slugs and ids are validated and request paths are not user URLs',
         'server/net/service-auth.js': 'Network JWKS (configured)',
         'server/chat/account-data.js': 'Network internal API (configured), fixed paths: export parts and deletion confirmations',
+        'server/chat/agent-room-view.js': 'Live internal API (configured), fixed chat-access path with an encoded stream id and optional link key; configured timeout (4 s default), fail-closed',
         'server/prefs/network-modules.js': 'Network user modules (configured)',
         'server/presence.js': 'Network internal presence (configured internal URL), fixed /internal/presence path, the subject list in the query, a service token, 1.5 s, held 30 s',
         'server/net/consent.js': 'Network internal consent check (configured internal URL), fixed /internal/consent/check path, up to 500 subject ids in the body (never a URL), a service token, 5 s, fail-closed',

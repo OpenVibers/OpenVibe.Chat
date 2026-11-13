@@ -12,7 +12,8 @@
  *                             POST /messages/:id/block blocks the other person of a 1:1 conversation;
  *                             POST /messages/:id/call rings them (the call-user route) and opens /call/<channel>
  *   GET  /call/:channel       a 1:1 call's page (its caller and the people it invited): public/web/call.js joins
- *                             it, and while the caller waits it says ringing until the answer comes
+ *                             it only when the person presses "Turn on microphone", and while the caller waits
+ *                             it says ringing until the answer comes
  *   GET  /rooms, /r/:slug     rooms: community, call (a voice/video call in the page, public/web/call.js)
  *                             and system (staff announcements); /r/:slug/settings for moderators
  *   GET  /settings            your portable chat settings (Network module chat.preferences); POST saves
@@ -125,13 +126,13 @@ function globalMessage(m) {
     const name = fx ? `<span class="ov-fx ${fx}">${esc(m.display_name || m.username || m.anon_id || 'someone')}</span>` : esc(m.display_name || m.username || m.anon_id || 'someone');
     const who = handle ? `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(handle)}" style="--nc:${esc(/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? m.profile_color : 'inherit')}">${hatHtml(m)}${name}</a>` : `<span class="oc-name oc-anon">${name}</span>`;
     const where = m.stream_channel ? ` <a class="oc-where" href="${LIVE}/@${encodeURIComponent(m.stream_channel)}" title="Sent from ${esc(m.stream_channel)}'s channel">@${esc(m.stream_channel)}</a>` : '';
-    return `<li class="oc-msg" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who}${roleBadge(m.role)}${where} <span class="oc-text">${linkify(m.message)}</span>${ui.linkCard(m.card)}</li>`;
+    return `<li class="oc-msg" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who}${roleBadge(m.role)}${where} <span class="oc-text">${linkify(m.message)}</span>${m.edited_at ? ` <span class="oc-muted oc-edited" data-edited-at="${esc(m.edited_at)}">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ui.messageCards(m)}</li>`;
 }
 function dmMessage(m, me, view = 'room') {
     const t = hhmm(m.created_at);
     const mine = me && m.sender_id === me.id;
-    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div>${ui.linkCard(m.card)}<time class="oc-bubble-time" datetime="${t.iso}">${t.text}</time></li>`;
-    return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${ui.linkCard(m.card)}</li>`;
+    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.sender_id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div>${ui.messageCards(m)}<time class="oc-bubble-time" datetime="${t.iso}">${t.text}${m.edited_at ? ` <span class="oc-edited" data-edited-at="${esc(m.edited_at)}">· edited ${esc(hhmm(m.edited_at).text)}</span>` : ''}</time></li>`;
+    return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.sender_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${m.edited_at ? ` <span class="oc-muted oc-edited" data-edited-at="${esc(m.edited_at)}">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ui.messageCards(m)}</li>`;
 }
 // Vibe, OpenVibe's assistant, as a room's AI member (one click on the room's settings; a person's own chats with it are
 // server/rooms/vibe.js): how it should be in a group.
@@ -323,7 +324,7 @@ function createWebRoutes({ config }) {
                 rail: shell.rail({ global: true, dmUnread: dms.reduce((n, d) => n + d.unread, 0), servers: shell.railServers(mineServers) }),
                 side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
-                main: `<header class="oc-chan-head">${shell.toList}<h1 id="oc-h" class="oc-chan-title">Global chat</h1><span class="oc-muted oc-chan-topic">Everyone on OpenVibe${home.peopleLine(activity)}</span><span class="oc-chan-tools"><span class="oc-live" id="oc-live" hidden>● live</span><a class="oc-icon-btn" href="/vibe" aria-label="Chat with Vibe" title="Chat with Vibe">${IC.spark}</a><a class="oc-icon-btn" href="/settings" aria-label="Chat settings" title="Chat settings">${IC.gear}</a></span>${insightHtml}</header>
+                main: `<header class="oc-chan-head">${shell.toList}<h1 id="oc-h" class="oc-chan-title">Global chat</h1><span class="oc-muted oc-chan-topic">Everyone on OpenVibe${home.peopleLine(activity)}</span><span class="oc-chan-tools"><span class="oc-live" id="oc-live" hidden>● live</span>${insightHtml}<a class="oc-icon-btn" href="/vibe" aria-label="Chat with Vibe" title="Chat with Vibe">${IC.spark}</a><a class="oc-icon-btn" href="/settings" aria-label="Chat settings" title="Chat settings">${IC.gear}</a></span></header>
 ${error}
 ${feedList}
 ${composer}`,
@@ -669,13 +670,14 @@ ${composer}`,
             : '<li class="oc-muted">Nobody is in the call yet.</li>';
         await page(req, res, 200, {
             actor, title, path: `/call/${ch.id}`, active: 'messages', robots: 'noindex, nofollow', callScript: true,
-            page: { view: 'call', me: me.id, call: { channel: ch.id, join: true, talk: true, auto: true, ring: ringing ? { id: Number(ringing.id), name: nameOf(ringing) } : null } },
+            page: { view: 'call', me: me.id, call: { channel: ch.id, join: true, talk: true, ring: ringing ? { id: Number(ringing.id), name: nameOf(ringing) } : null } },
             body: `<p><a href="${backLink}">← Back to the conversation</a></p>
 <section class="oc-call oc-call-page" aria-labelledby="oc-call-h" id="oc-call">
 <h1 id="oc-call-h">${esc(title)} <span class="oc-muted oc-call-count" id="oc-call-count">${ch.participantCount ? `· ${ch.participantCount} in` : ''}</span></h1>
 <p class="oc-muted" id="oc-call-how">A voice call, peer to peer: your microphone goes only to the people in it.</p>
 <ul class="oc-call-people" id="oc-call-people">${people}</ul>
-<p class="oc-call-controls"><button type="button" id="oc-call-join" hidden>Join the call</button> <button type="button" id="oc-call-mute" hidden aria-pressed="false">Mute</button> <button type="button" id="oc-call-leave" hidden>Leave the call</button></p>
+<p class="oc-call-controls"><button type="button" id="oc-call-join" hidden>Turn on microphone</button> <button type="button" id="oc-call-mute" hidden aria-pressed="false">Mute</button> <button type="button" id="oc-call-leave" hidden>Leave the call</button></p>
+<p class="oc-muted oc-call-join-note">Join the voice call with the people listed above. Nothing is asked until you press it.</p>
 <p class="oc-muted oc-call-status" id="oc-call-status" role="status" aria-live="polite"></p>
 <noscript><p class="oc-muted">A call needs JavaScript.</p></noscript>
 </section>`,
@@ -712,6 +714,7 @@ ${composer}`,
         const actor = await needUser(req, res); if (!actor) return;
         const sid = actor.user.subject_id;
         const [p, tts, dmSet, pres, viewDefaults] = await Promise.all([prefsOf(actor), prefStores.settingsOf(prefStores.tts, sid), prefStores.settingsOf(prefStores.dm, sid), prefStores.settingsOf(prefStores.presence, sid), require('../chat/view-defaults').of(actor.user.id)]);
+        const dmPreviews = await require('../chat/dm-preview-settings').enabledFor(actor.user.id);
         const src = tts.sources || {};
         // A settings row: what it does on the left (with one muted line when it needs saying), the switch on the right.
         const box = (name, label, on, hint = '') => `<label class="oc-set-row"><span class="oc-set-text">${label}${hint ? `<small>${hint}</small>` : ''}</span><input type="checkbox" class="oc-switch" name="${name}" value="1"${on ? ' checked' : ''}></label>`;
@@ -751,6 +754,7 @@ ${[['one_to_one','One-to-one chats','bubbles'],['ai','Chats with Vibe','bubbles'
 <label class="oc-set-row"><span class="oc-set-text">Who can start one with you</span><select name="new_conversations"><option value="everyone"${dmSet.new_conversations !== 'nobody' ? ' selected' : ''}>Everyone</option><option value="nobody"${dmSet.new_conversations === 'nobody' ? ' selected' : ''}>Nobody</option></select></label>
 ${box('group_invites', 'People can add me to groups', dmSet.group_invites !== false)}
 ${box('previews', 'Message text in notifications', dmSet.previews !== false)}
+${box('dm_link_previews', 'Link previews in direct messages', dmPreviews, 'Only when everyone in the conversation has them on')}
 ${box('show_in_user_list', 'My name in chat user lists', pres.show_in_user_list !== false, 'Off: you are counted, not named')}
 </section>
 <section class="oc-set" aria-labelledby="oc-set-agents"><h2 id="oc-set-agents">AI agents</h2>
@@ -799,7 +803,7 @@ ${offered ? notice('ok', `Save to let your AI members think with ${offered.model
 ${unreachable ? notice('error', 'OpenVibe.AI did not answer, so your key cannot be shown or changed right now.') : `${key ? `<p><strong>${esc(credentials.label(key))}</strong> <span class="oc-muted">· ${keyLine}${vibeOwn ? ' · Vibe thinks with it' : ''}</span></p>` : '<p class="oc-muted">No key yet.</p>'}
 <form class="oc-form oc-ai-form" method="post" action="/settings/ai-key">
 <label>Provider <select name="provider">${opt('openai', 'OpenAI or OpenAI-compatible', provider)}${opt('anthropic', 'Anthropic', provider)}${opt('link', 'A model on my own computer', provider)}</select></label>
-<label class="oc-if-node">Computer <input name="machine" maxlength="40" pattern="dev_[0-9A-Z]{26}" placeholder="dev_… (a model on your own computer only)" value="${esc(machineValue === 'any' ? '' : machineValue)}" autocomplete="off" spellcheck="false"></label>
+<div class="oc-if-node" data-ov-machines data-needs="models" data-name="machine" data-value="${esc(machineValue === 'any' ? '' : machineValue)}"></div>
 <label class="oc-check oc-if-node"><input type="checkbox" name="machine_any" value="1"${machineValue === 'any' ? ' checked' : ''}> Any of my computers that is on with this model (the fastest first, the next when one is busy)</label>
 <label class="oc-if-openai">Endpoint <input name="base_url" type="url" maxlength="300" inputmode="url" placeholder="https://openrouter.ai/api/v1 (leave empty for OpenAI itself)" value="${esc((key && key.base_url) || '')}"></label>
 <label>Model <input name="model" required maxlength="120" placeholder="gpt-4o-mini, or llama3.1:8b on your computer" value="${esc(modelValue)}" autocomplete="off" spellcheck="false"></label>
@@ -846,6 +850,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
         const sources = Object.fromEntries(TTS_SOURCES.filter(([k]) => !on(`tts_src_${k}`)).map(([k]) => [k, false]));
         const sid = actor.user.subject_id;
         try {
+            await require('../chat/dm-preview-settings').setEnabled(actor.user.id, on('dm_link_previews'));
             await prefs.update(sid, patch);
             // The view defaults are Chat's own (server/chat/view-defaults.js): the Network module has no field for
             // them yet, and a refused patch would lose the whole save.
@@ -921,7 +926,7 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
 <p class="oc-muted">One vote each. ${v.options.length > 1 ? `Type !1 to !${v.options.length} too.` : ''}</p>${can && can.moderate ? `<form method="post" action="/r/${esc(r.slug)}/poll/close" class="oc-inline"><input type="hidden" name="poll_id" value="${esc(v.poll_id)}"><button class="oc-pill" type="submit" name="action" value="close">Close poll</button><button class="oc-pill" type="submit" name="action" value="veto">Veto result</button></form>` : ''}</section>`;
     const roomCard = (r) => `<li class="oc-row${r.unread ? ' oc-unread' : ''}"><a href="/r/${esc(r.slug)}">${ui.initials(r.name)}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(r.name)}</strong>${kindBadge(r)}${r.visibility === 'private' ? `<span class="oc-row-lock" title="Private">${IC.lock}<span class="oc-sr">private</span></span>` : ''}</span>`
         + `<span class="oc-row-sub">${esc(r.topic || `${r.members} member${r.members === 1 ? '' : 's'}`)}${r.unread ? `<span class="oc-dot" aria-label="${r.unread} new">${r.unread > 9 ? '9+' : r.unread}</span>` : ''}</span></span></a></li>`;
-    const roomMessage = (m, can, slug, me) => {
+    const roomMessage = (m, can, slug, me, emojis = null) => {
         const t = hhmm(m.created_at);
         const ai = m.ai_member_id != null;
         const agent = !!m.agent_stream;
@@ -932,8 +937,8 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
             ? `<span class="oc-name oc-ai-name">${esc(m.display_name || 'AI')}</span> <span class="oc-badge oc-ai" title="An AI member of this room">AI</span>`
             : `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)}`;
         // An AI member writes Markdown (lists, bold, links): vibe-md.js escapes every character first, then marks it up.
-        const text = ai ? `<div class="oc-text vb-md">${md.render(m.message)}</div>` : `<span class="oc-text">${linkify(m.message)}</span>`;
-        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${ai ? '' : pictures.pageHtml(m.message)}${ui.linkCard(m.card)}${del}</li>`;
+        const text = ai ? `<div class="oc-text vb-md">${md.render(m.message)}</div>` : `<span class="oc-text">${emojis ? require('../chat/emoji-text').render(m.message, emojis, linkify, esc) : linkify(m.message)}</span>`;
+        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${m.edited_at ? ` <span class="oc-muted oc-edited" data-edited-at="${esc(m.edited_at)}">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ai ? '' : pictures.pageHtml(m.message)}${ui.messageCards(m)}${can.moderate && m.edited_at ? '<button type="button" class="ovk-btn ovk-btn--quiet oc-edits">Earlier versions</button>' : ''}${del}</li>`;
     };
     const applyRoomChange = async (room) => await roomRoutes.applyRoomChange(room);
 
@@ -1230,6 +1235,9 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         const addRole = rooms.joinRoleOf(room);
         const attachments = can.manage ? await rooms.attachments(room) : [];
         const ais = can.manage && room.kind !== 'system' ? await aiMembers.list(room) : [];
+        const actorMembersOn = !!(aiMembers.actorMembersEnabled() && room.server_id);
+        const actorAgents = actorMembersOn && can.manage && actor.user.subject_id
+            ? (await require('../rooms/vibe-agents').list(actor.user.subject_id)).agents || [] : [];
         let myKey = null;
         if (can.manage && room.kind !== 'system' && aiMembers.enabled()) { try { myKey = await credentials.get(actor.user.subject_id); } catch { myKey = null; } }
         const engineField = (a) => {
@@ -1238,7 +1246,9 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
             return `<label>Thinks with <select name="engine"><option value="openvibe"${cur === 'openvibe' ? ' selected' : ''}>OpenVibe's model</option><option value="own"${cur === 'own' ? ' selected' : ''}${cur === 'own' || myKey ? '' : ' disabled'}>${esc(ownLabel)}</option></select></label>
 ${myKey || cur === 'own' ? '' : '<p class="oc-muted">To give it a different model (yours, from OpenAI, Anthropic or an OpenAI-compatible provider, or a model on your own computer), <a href="/settings#oc-ai-key">add your AI key</a>.</p>'}`;
         };
-        const aiForm = (a) => `<form class="oc-form oc-ai-form oc-grid-form" method="post" action="/r/${esc(room.slug)}/ai-members${a ? `/${Number(a.id)}` : ''}">
+        const aiForm = (a) => a && a.link_service === 'actor'
+            ? `<form class="oc-form oc-ai-form" method="post" action="/r/${esc(room.slug)}/ai-members/${Number(a.id)}"><p>Runs as your OpenVibe Actor agent. Its owner can change its instructions and budget on <a href="https://openvibe.actor/me/agents/${esc(a.link_resource)}">Actor</a>.</p><label class="oc-check"><input type="checkbox" name="enabled" value="1"${Number(a.enabled) ? ' checked' : ''}> Answers when someone writes @${esc(a.handle)}</label><button class="ovk-btn ovk-btn--quiet" type="submit">Save</button></form>`
+            : `<form class="oc-form oc-ai-form oc-grid-form" method="post" action="/r/${esc(room.slug)}/ai-members${a ? `/${Number(a.id)}` : ''}">
 ${a ? '' : '<h3>Add an AI member</h3>'}
 <label>Name <input name="name" required minlength="2" maxlength="24" value="${a ? esc(a.name) : ''}" placeholder="Pantry"></label>
 <label>How it should be <textarea name="persona" rows="2" maxlength="1000" placeholder="A cheerful cook who keeps meals cheap and quick">${a ? esc(a.persona) : ''}</textarea></label>
@@ -1248,9 +1258,10 @@ ${a ? `<label class="oc-check"><input type="checkbox" name="enabled" value="1"${
 <p><button type="submit">${a ? 'Save' : 'Add'}</button></p></form>`;
         const aiSection = can.manage && room.kind !== 'system' ? `<details class="oc-card oc-fold" id="oc-ai"${ais.length ? '' : ' open'}><summary><span>AI members${ais.length ? ` <span class="oc-muted">· ${ais.map((a) => esc(a.name)).join(', ')}</span>` : ''}</span>${IC.chevron}</summary>
 ${aiMembers.enabled() ? '' : notice('error', 'AI members are switched off on this server right now.')}
-<p class="oc-muted oc-small">An AI member answers when someone writes its name with an @ (for example @${esc(ais[0] ? ais[0].handle : 'pantry')}). It reads the room's recent messages and the notes you give it, through OpenVibe.AI, with OpenVibe's model or with your own key's (several members with different models make a multi-model group chat). It cannot do anything outside the chat. At most ${aiMembers.MAX_PER_ROOM}.</p>
+<p class="oc-muted oc-small">An AI member answers when someone writes its name with an @ (for example @${esc(ais[0] ? ais[0].handle : 'pantry')}). Standard members use OpenVibe.AI or your own key and stay in chat. An attached Actor agent uses its owner's budget and approval rules, and posts its result here. At most ${aiMembers.MAX_PER_ROOM}.</p>
 ${ais.map((a) => `<section class="oc-ai-member"><h3><span class="oc-badge oc-ai">AI</span> ${esc(a.name)} <span class="oc-muted">@${esc(a.handle)} · ${esc(aiMembers.modelOf(a))}</span>${a.link_service === 'food' ? ' <span class="oc-badge">knows the household\'s pantry (OpenVibe.Food)</span>' : ''}</h3>${aiForm(a)}<form class="oc-inline" method="post" action="/r/${esc(room.slug)}/ai-members/${Number(a.id)}/delete"><button type="submit" class="oc-pill oc-pill-danger">${IC.trash}<span>Remove ${esc(a.name)}</span></button></form></section>`).join('')}
 ${ais.length < aiMembers.MAX_PER_ROOM && !ais.some((a) => a.handle === 'vibe') ? `<form class="oc-form oc-ai-quick" method="post" action="/r/${esc(room.slug)}/ai-members"><input type="hidden" name="name" value="Vibe"><input type="hidden" name="persona" value="${esc(VIBE_IN_ROOMS)}"><p><button type="submit">Add Vibe</button> <span class="oc-muted">OpenVibe's assistant joins the room: anyone here can ask it with @vibe.</span></p></form>` : ''}
+${actorMembersOn && ais.length < aiMembers.MAX_PER_ROOM ? `<form class="oc-form" method="post" action="/r/${esc(room.slug)}/ai-members"><h3>Add one of your Actor agents</h3><p class="oc-muted">Anyone who can post here can ask it. Runs use your Actor budget and daily cap; the answer is public to this channel. Its approval rules still apply.</p><label>Agent <select name="actor_agent_id" required><option value="">Choose an agent</option>${actorAgents.map((a) => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select></label><button class="ovk-btn ovk-btn--primary" type="submit"${actorAgents.length ? '' : ' disabled'}>Add agent</button>${actorAgents.length ? '' : '<p><a href="https://openvibe.actor/me/agents">Create an agent on Actor</a> first.</p>'}</form>` : ''}
 ${ais.length < aiMembers.MAX_PER_ROOM ? aiForm(null) : ''}</details>` : '';
         const mineServers = (await require('../rooms/servers').list(actor.user)).mine;
         const listedRooms = await rooms.list(actor.user);
@@ -1506,7 +1517,7 @@ ${notice('ok', 'Copy the secret now: it is not shown again. Anyone with the addr
         }
         res.redirect(303, `/r/${room.slug}/settings?saved=1`);
     });
-    router.post('/r/:slug/ai-members', formLimit, sameSite, aiMemberForm(async (room, actor, can, b) => { await aiMembers.add(room, actor.user, can, { name: b.name, persona: b.persona, memory: b.memory, engine: b.engine }); }));
+    router.post('/r/:slug/ai-members', formLimit, sameSite, aiMemberForm(async (room, actor, can, b) => { await aiMembers.add(room, actor.user, can, { name: b.name, persona: b.persona, memory: b.memory, engine: b.engine, actor_agent_id: b.actor_agent_id }); }));
     router.post('/r/:slug/ai-members/:id', formLimit, sameSite, aiMemberForm(async (room, actor, can, b, req) => { await aiMembers.update(room, can, req.params.id, { name: b.name, persona: b.persona, memory: b.memory, enabled: b.enabled === '1', engine: b.engine }, actor.user); }));
     router.post('/r/:slug/ai-members/:id/delete', formLimit, sameSite, aiMemberForm(async (room, actor, can, b, req) => { await aiMembers.remove(room, can, req.params.id); }));
 
@@ -1522,6 +1533,7 @@ ${notice('ok', 'Copy the secret now: it is not shown again. Anyone with the addr
     // ── What shipped, robots, sitemap ──
     // ── Servers (server/rooms/servers.js): text and voice channels, roles, invites ──
     require('./vibe-pages').mountVibePages(router, { page, viewerOf, needUser, sameSite, formLimit, notice });
+    require('./persona-admin').mountPersonaAdmin(router, { page, needUser, sameSite, formLimit, notice });
     require('./inbox-pages').mountInboxPages(router, { page, viewerOf, needUser, sameSite, formLimit, notice, config });
     require('./room-embed-pages').mountRoomEmbedPages(router, { viewerOf, sameSite, config });
     require('./developer-pages').mountDeveloperPages(router, { page, config });

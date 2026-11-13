@@ -135,6 +135,32 @@ async function add(room, user, { title, details = '', kind = 'research', via = '
     return task;
 }
 
+/** A server member asked an attached Actor agent. Its owner opted in when attaching it to this channel. */
+async function addAgentMemberRun(room, user, member, message, deps = {}) {
+    if (!require('./ai-members').actorMembersEnabled() || !room.server_id || member.link_service !== 'actor' || !member.created_by_subject)
+        fail(403, 'work.actor_member_disabled', 'Actor agents are not enabled in this channel');
+    const title = oneLine(String(message.message || '').replace(new RegExp(`@${member.handle}\\b`, 'i'), ''), LIMITS.title) || `Ask ${member.name}`;
+    const history = await rooms.history(room, { limit: 16 });
+    const context = history.map((m) => `${oneLine(m.display_name || m.username || 'Member', 40)}: ${oneLine(m.message, 500)}`).join('\n').slice(-6000);
+    const input = `You are answering in the OpenVibe.Chat server channel #${room.name}. ${user.display_name || user.username || 'A member'} asked you. Your answer will be posted for everyone in that channel. Do not include private memory, credentials or account details in the public answer. Recent channel messages:\n${context}\n\nAnswer the latest message directly.`.slice(0, 8000);
+    const inserted = await db.run(`INSERT INTO room_tasks (room_id, title, details, kind, requested_by, requested_subject, via, source_message, runner, actor_member_id)
+        VALUES (?, ?, '', 'answer', ?, ?, 'api', ?, ?, ?)`,
+    [room.id, title, user.id, member.created_by_subject, message.id, `agent:${member.link_resource}`, member.id]);
+    const id = Number(inserted.lastInsertRowid);
+    const agent = require('./vibe-agents');
+    const started = await agent.run(member.created_by_subject, member.link_resource, input, deps);
+    if (!started.task || !ACTOR_TASK.test(String(started.task.id || ''))) {
+        await setStatus(room, id, { status: 'failed', error: oneLine(started.error || 'OpenVibe Actor did not start this agent', LIMITS.error), finished_at: nowText() });
+        await announce(room, await row(room, id), deps).catch(() => {});
+        return shape(await row(room, id), room);
+    }
+    await setStatus(room, id, { actor_task: started.task.id, status: 'running', started_at: nowText() });
+    const task = shape(await row(room, id), room);
+    await announceStep(room, await row(room, id), { status: 'running' });
+    changed(room, task);
+    return task;
+}
+
 async function setStatus(room, id, patch) {
     const sets = [];
     const vals = [];
@@ -257,6 +283,19 @@ async function startOnActor(room, t, deps = {}) {
         // A task a worker could take stays taken while Actor holds it, so nobody claims it twice.
         await setStatus(room, t.id, { actor_task: String(task.id), runner: 'actor', status: task.state === 'running' || !QUICK.has(t.kind) ? 'running' : 'queued', started_at: nowText() });
         await announceStep(room, await row(room, t.id), { status: task.state === 'running' || !QUICK.has(t.kind) ? 'running' : 'queued' });
+        if (Number(room.assistant) === 1 && ACTOR_TASK.test(String(task.id || ''))) {
+            try {
+                const member = await db.get("SELECT * FROM room_ai_members WHERE room_id = ? AND enabled = 1 ORDER BY (handle = 'vibe') DESC, id LIMIT 1", [room.id]);
+                if (member) {
+                    const runUrl = `https://openvibe.network/api/frame/agent-runs/actor/${task.id}`;
+                    const posted = await (deps.rooms || rooms).postAsAi(room, member, `Working on “${t.title}”`, { card: {
+                        kind: 'agent-run', title: t.title, status: 'running', url: `https://openvibe.actor/tasks/${task.id}`,
+                        run_url: runUrl, events_url: `${runUrl}/events`, at: Date.now()
+                    } });
+                    try { require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message: posted }); } catch { /* sockets are optional */ }
+                }
+            } catch { /* the task keeps running if its chat card cannot be posted */ }
+        }
     } catch (err) {
         await setStatus(room, t.id, { status: 'failed', runner: 'actor', error: oneLine(err.message, LIMITS.error), finished_at: nowText() });
         await announceStep(room, await row(room, t.id), { status: 'failed', reason: oneLine(err.message, LIMITS.error) });
@@ -340,7 +379,10 @@ async function showDesk(room, t, desk, deps = {}) {
 /** The room hears how a task ended, from its Vibe (or its first AI member), once. */
 async function announce(room, t, deps = {}) {
     if (!t || t.posted_message || !DONE.has(t.status)) { changed(room, t && shape(t, room)); return null; }
-    const members = await db.all('SELECT * FROM room_ai_members WHERE room_id = ? AND enabled = 1 ORDER BY (handle = \'vibe\') DESC, id LIMIT 1', [room.id]);
+    if (String(t.runner || '').startsWith('agent:') && !t.actor_member_id) { changed(room, shape(t, room)); return null; }
+    const members = t.actor_member_id
+        ? await db.all('SELECT * FROM room_ai_members WHERE room_id = ? AND id = ? LIMIT 1', [room.id, t.actor_member_id])
+        : await db.all('SELECT * FROM room_ai_members WHERE room_id = ? AND enabled = 1 ORDER BY (handle = \'vibe\') DESC, id LIMIT 1', [room.id]);
     const member = members[0];
     const who = t.requester_name || t.requester_username || 'someone';
     const asked = Number(room.assistant) === 1 ? '' : ` (asked by ${who})`;   // a Vibe chat has one person in it
@@ -382,4 +424,4 @@ function stop() { if (timer) clearInterval(timer); timer = null; }
 
 function _setTokens(t) { tokens = t; }
 
-module.exports = { KINDS, QUICK, WorkError, list, get, newestActor, add, cancel, claim, report, runOnComputer, poll, announce, start, stop, shape, _setTokens };
+module.exports = { KINDS, QUICK, WorkError, list, get, newestActor, add, addAgentMemberRun, cancel, claim, report, runOnComputer, poll, announce, start, stop, shape, _setTokens };

@@ -77,10 +77,17 @@ module.exports = {
     // verified visitors to new conversations.
     inbox: { aiRepliesPerDay: Math.max(1, int(process.env.CHAT_INBOX_AI_REPLIES_PER_DAY, 500)), notify: process.env.CHAT_INBOX_NOTIFY !== '0', identityKey: process.env.CHAT_INBOX_IDENTITY_KEY || '',
         postsPerMinute: Math.max(1, int(process.env.CHAT_INBOX_POSTS_PER_MINUTE, 20)),   // a visitor's address, widget writes
-        translationsPerDay: Math.max(0, int(process.env.CHAT_INBOX_TRANSLATIONS_PER_DAY, 300)) },   // new translations an inbox a UTC day
+        translationsPerDay: Math.max(0, int(process.env.CHAT_INBOX_TRANSLATIONS_PER_DAY, 300)),   // new translations an inbox a UTC day
+        // What one inbox turn may cost on OpenVibe.Actor (one-engine slice). The turn is the visitor's when they are
+        // signed in (their allowance pays for it) and Chat's own when they are not (Chat's cap).
+        actorPerTurnUsd: Math.max(0.001, Number(process.env.CHAT_INBOX_ACTOR_PER_TURN_USD) || 0.05),
+        // How many turns one visitor's own widget session may ask for, in an hour and in a UTC day. Inside the
+        // inbox's own daily cap (aiRepliesPerDay), which stays the outer limit: one visitor cannot spend the day.
+        visitorTurnsPerHour: Math.max(1, int(process.env.CHAT_INBOX_VISITOR_TURNS_PER_HOUR, 10)),
+        visitorTurnsPerDay: Math.max(1, int(process.env.CHAT_INBOX_VISITOR_TURNS_PER_DAY, 40)) },
     // OpenVibe.Actor, the fallback for Vibe's web search when the Search Fabric is down (server/rooms/web-search.js):
     // tasks for the person, with Chat's own token.
-    actor: { internalUrl: strip(process.env.CHAT_ACTOR_INTERNAL_URL || 'http://127.0.0.1:4950') },
+    actor: { internalUrl: strip(process.env.CHAT_ACTOR_INTERNAL_URL || 'http://127.0.0.1:4950'), members: bool(process.env.CHAT_ACTOR_MEMBERS) },
     // OpenVibe.Today: a person's own reminders, set by Vibe ("remind me…", plan L48), with Chat's own token.
     today: { internalUrl: strip(process.env.CHAT_TODAY_INTERNAL_URL || 'http://127.0.0.1:5100') },
 
@@ -116,7 +123,7 @@ module.exports = {
         maxBytes: int(process.env.CHAT_PICS_MAX_BYTES, 20 * 1024 * 1024),
     },
     cookies: { secure: process.env.COOKIE_SECURE ? process.env.COOKIE_SECURE === 'true' : isProduction },
-    slashCommands: { enabled: bool(process.env.CHAT_SLASH_COMMANDS_ENABLED, false) },
+    slashCommands: { enabled: bool(process.env.CHAT_SLASH_COMMANDS_ENABLED, true) },
 
     // OpenVibe.Live — users, streams, channels, bans and every side effect chat triggers.
     live: {
@@ -193,7 +200,7 @@ module.exports = {
     // Custom emotes (Live's /api/emotes moved here, plan T3 step 1). Uploaded image bytes go to
     // OpenVibe.Media (media, below); the limits and provider cache TTLs are Live's own values.
     emotes: {
-        serverEmojiEnabled: bool(process.env.CHAT_SERVER_EMOJI_ENABLED, false),
+        serverEmojiEnabled: bool(process.env.CHAT_SERVER_EMOJI_ENABLED, true),
         maxSizeKb: int(process.env.MAX_EMOTE_SIZE_KB, 2048),
         maxPerUser: int(process.env.MAX_EMOTES_PER_USER, 30),
         maxPerChannel: int(process.env.MAX_EMOTES_PER_CHANNEL, 30),
@@ -236,6 +243,12 @@ module.exports = {
         // Vibe, OpenVibe's assistant (server/rooms/vibe.js): on unless CHAT_VIBE=0 (it also needs AI members on); a person
         // gets this many answers a UTC day across all their Vibe chats.
         vibe: process.env.CHAT_VIBE !== '0',
+        // C3 editable Vibe canvases (versioned Chat artifacts); site owner opt-in.
+        vibeCanvas: bool(process.env.CHAT_VIBE_CANVAS_ENABLED, false),
+        // C3's explicit "do it for me" task modes (Actor-backed Research, Agent and Code); site owner opt-in.
+        vibeDoIt: bool(process.env.CHAT_VIBE_DO_IT_ENABLED, false),
+        // C3 web search in Vibe's composer (the existing Search Fabric tool and cited results); owner enables it explicitly.
+        vibeWebSearch: bool(process.env.CHAT_VIBE_WEB_SEARCH_ENABLED, false),
         vibeRepliesPerDay: Math.max(1, int(process.env.CHAT_VIBE_REPLIES_PER_DAY, 100)),
     },
     bench: {

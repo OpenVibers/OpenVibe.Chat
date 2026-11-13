@@ -124,6 +124,22 @@ t('a video watch page is a card with Watch together, and the stored card comes b
     assert.ok(html.text.includes('oc-card-pic'), 'the picture');
 });
 
+t('an agent-run embed keeps its authorized stream and escapes its title', async () => {
+    const id = 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3';
+    const run = `https://openvibe.network/api/frame/agent-runs/actor/${id}`;
+    const card = { kind: 'agent-run', title: '<Read files>', url: `https://openvibe.actor/tasks/${id}`, run_url: run, events_url: `${run}/events` };
+    const rows = [{ card: JSON.stringify(card) }];
+    await require('../server/chat/link-cards').hydrate(rows, 'room_messages');
+    assert.deepStrictEqual(rows[0].card, card, 'the run card is never replaced by a stale link preview');
+    const html = require('../server/web/ui').messageCards(rows[0]);
+    assert.match(html, /class="oc-agent-run"/);
+    assert.match(html, /&lt;Read files&gt;/);
+    assert.ok(!html.includes('<Read files>'));
+    const codes = require('../server/web/ui').embedCard({ ...card, url: `https://openvibe.codes/run/tasks/${id}`, run_url: `https://openvibe.network/api/frame/codes-runs/${id}`, events_url: `https://openvibe.network/api/frame/codes-runs/${id}/events` });
+    assert.ok(codes.includes(`href="https://openvibe.codes/run/tasks/${id}"`), 'a Codes card links to its full task');
+    assert.strictEqual(require('../server/web/ui').embedCard({ ...card, events_url: 'https://elsewhere.example/events' }), '');
+});
+
 t('a private video and a page Video does not vouch for are no card', async () => {
     const priv = await dmSend(bob, 'https://openvibe.video/v/777');
     assert.strictEqual(priv.status, 200, priv.text);
@@ -218,6 +234,26 @@ t('a room message stores and draws its card too', async () => {
     const html = await page(`/r/${room.slug}`, bob);
     assert.match(html.text, /<div class="oc-card" data-kind="video">/);
     assert.ok(html.text.includes('Watch together'));
+});
+
+t('editing a link refreshes the current card in rooms, DMs and chat', async () => {
+    const first = 'https://openvibe.video/v/123';
+    const next = 'https://openvibe.video/v/456';
+    const roomSent = await h.http('POST', `/api/chat/rooms/${room.slug}/messages`, { token: ann.token, body: { message: first } });
+    const roomEdit = await h.http('PATCH', `/api/chat/rooms/${room.slug}/messages/${roomSent.body.message.id}`, { token: ann.token, body: { message: next } });
+    assert.strictEqual(roomEdit.status, 200, roomEdit.text);
+    assert.strictEqual(roomEdit.body.message.card.url, next);
+    const dmSent = await dmSend(ann, first);
+    const dmEdit = await h.http('PATCH', `/api/dm/conversations/${conv}/messages/${dmSent.body.message.id}`, { token: ann.token, body: { message: next } });
+    assert.strictEqual(dmEdit.status, 200, dmEdit.text);
+    assert.strictEqual(dmEdit.body.message.card.url, next);
+    await globalSend(ann, first);
+    const global = (await h.http('GET', '/api/chat/global/history?limit=50', { token: ann.token })).body.messages.find((m) => m.message === first);
+    const globalEdit = await h.http('PATCH', `/api/chat/messages/${global.id}`, { token: ann.token, body: { message: next } });
+    assert.strictEqual(globalEdit.status, 200, globalEdit.text);
+    assert.strictEqual(globalEdit.body.message.card.url, next);
+    const cleared = await h.http('PATCH', `/api/chat/messages/${global.id}`, { token: ann.token, body: { message: 'no link now' } });
+    assert.strictEqual(cleared.body.message.card, null);
 });
 
 t('global chat stores and draws its card, and the card is one per message', async () => {

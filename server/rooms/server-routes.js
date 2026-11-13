@@ -169,7 +169,7 @@ router.post('/:slug/channels', requireAuth, manageLimit, async (req, res) => {
     try {
         const b = req.body || {};
         if (b.kind === 'forum' && req.authSource === 'api_token') return res.status(403).json({ error: 'Connect a forum with your own sign-in', code: 'forum.person_only' });
-        if (b.kind === 'forum' && require('../settings').value('forum_channels_enabled', null, false) !== true) return res.status(403).json({ error: 'Forum channels are not enabled', code: 'servers.forum_disabled' });
+        if (b.kind === 'forum' && require('../settings').value('forum_channels_enabled', null, true) !== true) return res.status(403).json({ error: 'Forum channels are not enabled', code: 'servers.forum_disabled' });
         if (b.kind === 'forum' && !(await servers.access(server, req.user)).manage) return res.status(403).json({ error: 'Only the server owner and admins add channels', code: 'servers.not_admin' });
         if (b.kind === 'forum') await communityForum.verifyManage(b.community_space, forumToken(req));
         const room = await servers.createChannel(server, req.user, { name: b.name, kind: b.kind || 'text', topic: b.topic, community_space: b.community_space });

@@ -45,12 +45,20 @@ async function liveIds(d, subjects) {
 const LIMIT = ROW_LIMIT + 1;
 const EXPORTS = [
     ['chat_messages.json', `SELECT * FROM chat_messages WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['person_chat_memory.json', `SELECT * FROM person_chat_memory WHERE user_id = ANY(@ids) ORDER BY period_start DESC LIMIT ${LIMIT}`],
+    ['person_chat_memory_settings.json', `SELECT * FROM person_chat_memory_settings WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['room_messages.json', `SELECT * FROM room_messages WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['vibe_canvases.json', `SELECT c.* FROM vibe_canvases c JOIN rooms r ON r.id = c.room_id WHERE r.owner_subject = ANY(@s) OR r.owner_id = ANY(@ids) ORDER BY c.updated_at DESC LIMIT ${LIMIT}`],
+    ['vibe_canvas_versions.json', `SELECT v.* FROM vibe_canvas_versions v JOIN vibe_canvases c ON c.id = v.canvas_id JOIN rooms r ON r.id = c.room_id WHERE r.owner_subject = ANY(@s) OR r.owner_id = ANY(@ids) ORDER BY v.created_at DESC LIMIT ${LIMIT}`],
     ['direct_messages.json', `SELECT * FROM dm_messages WHERE sender_subject_id = ANY(@s) OR sender_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['conversations.json', `SELECT * FROM dm_participants WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['rooms_owned.json', `SELECT * FROM rooms WHERE (owner_subject = ANY(@s) OR owner_id = ANY(@ids)) AND server_id IS NULL ORDER BY id DESC LIMIT ${LIMIT}`],
     ['servers_owned.json', `SELECT * FROM chat_servers WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
-    ['server_memberships.json', `SELECT m.server_id, s.slug, s.name, m.role, m.roles, m.joined_at FROM chat_server_members m JOIN chat_servers s ON s.id = m.server_id WHERE m.user_id = ANY(@ids) ORDER BY m.joined_at DESC LIMIT ${LIMIT}`],
+    ['server_memberships.json', `SELECT m.server_id, s.slug, s.name, m.role, m.roles, m.nickname, m.joined_at FROM chat_server_members m JOIN chat_servers s ON s.id = m.server_id WHERE m.user_id = ANY(@ids) ORDER BY m.joined_at DESC LIMIT ${LIMIT}`],
+    ['command_polls.json', `SELECT id, room_id, question, options, created_at, closes_at FROM chat_command_polls WHERE author_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['command_poll_votes.json', `SELECT poll_id, option_index FROM chat_command_poll_votes WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
+    ['command_reminders.json', `SELECT room_id, due_at, text, delivered_at FROM chat_command_reminders WHERE user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['server_timeouts.json', `SELECT server_id, expires_at FROM chat_server_timeouts WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['stage_speaker_actions.json', `SELECT room_id, user_id, hand_raised, invited_by, updated_at FROM chat_stage_speakers WHERE user_id = ANY(@ids) OR invited_by = ANY(@ids) ORDER BY updated_at DESC LIMIT ${LIMIT}`],
     ['server_invites_made.json', `SELECT code, server_id, uses, max_uses, expires_at, revoked_at, created_at FROM chat_server_invites WHERE created_by_subject = ANY(@s) OR created_by = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['calls.json', `SELECT * FROM calls WHERE created_by_subject = ANY(@s) OR target_subject = ANY(@s) OR created_by = ANY(@ids) OR target_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
@@ -81,6 +89,7 @@ const EXPORTS = [
     ['dm_contacts.json', `SELECT user_id, contact_id, status, created_at FROM dm_contacts WHERE user_id = ANY(@ids) OR contact_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['dm_view_defaults.json', `SELECT kind, view FROM dm_view_defaults WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['dm_view_preferences.json', `SELECT conversation_id, view, updated_at FROM dm_view_preferences WHERE user_id = ANY(@ids) ORDER BY updated_at DESC LIMIT ${LIMIT}`],
+    ['dm_link_preview_settings.json', `SELECT enabled, updated_at FROM dm_link_preview_settings WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['inboxes_owned.json', `SELECT * FROM inboxes WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY created_at DESC LIMIT ${LIMIT}`],
     ['inbox_memberships.json', `SELECT * FROM inbox_members WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     ['inbox_replies.json', `SELECT * FROM inbox_messages WHERE author = 'agent' AND author_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
@@ -126,6 +135,10 @@ const ERASE_FIRST = [
     ['conversations', 'DELETE FROM dm_conversations WHERE id NOT IN (SELECT conversation_id FROM dm_participants)'],
     ['room_memberships', 'DELETE FROM room_members WHERE user_id = ANY(@ids)'],
     ['room_attachments', 'DELETE FROM room_attachments WHERE attached_by_subject = ANY(@s)'],
+    ['command_poll_votes', 'DELETE FROM chat_command_poll_votes WHERE user_id = ANY(@ids)'],
+    ['command_reminders', 'DELETE FROM chat_command_reminders WHERE user_id = ANY(@ids)'],
+    ['server_timeouts', 'DELETE FROM chat_server_timeouts WHERE user_id = ANY(@ids) OR actor_user_id = ANY(@ids)'],
+    [null, 'UPDATE chat_command_polls SET author_user_id = 0 WHERE author_user_id = ANY(@ids)'],
 ];
 const ERASE_AFTER_ROOMS = [
     ['stage_speaker_roles', 'DELETE FROM chat_stage_speakers WHERE user_id = ANY(@ids)'],
@@ -136,6 +149,8 @@ const ERASE_AFTER_ROOMS = [
     // A person's own summaries and timeline are keyed by their Live id (scope 'user').
     ['ai_summaries', "DELETE FROM chat_ai_summaries WHERE scope = 'user' AND subject_id = ANY(@ids)"],
     ['timeline', "DELETE FROM chat_timeline_events WHERE scope = 'user' AND subject_id = ANY(@ids)"],
+    ['person_chat_memory', 'DELETE FROM person_chat_memory WHERE user_id = ANY(@ids)'],
+    ['person_chat_memory_settings', 'DELETE FROM person_chat_memory_settings WHERE user_id = ANY(@ids)'],
     ['tags', 'DELETE FROM user_tags WHERE user_id = ANY(@ids)'],
     ['moderator_roles', 'DELETE FROM channel_moderators WHERE user_id = ANY(@ids)'],
     ['pending_messages', 'DELETE FROM pending_ip_messages WHERE user_id = ANY(@ids)'],
@@ -155,6 +170,7 @@ const ERASE_AFTER_ROOMS = [
     ['dm_contacts', 'DELETE FROM dm_contacts WHERE user_id = ANY(@ids) OR contact_id = ANY(@ids)'],
     ['dm_view_defaults', 'DELETE FROM dm_view_defaults WHERE user_id = ANY(@ids)'],
     ['dm_view_preferences', 'DELETE FROM dm_view_preferences WHERE user_id = ANY(@ids)'],
+    ['dm_link_preview_settings', 'DELETE FROM dm_link_preview_settings WHERE user_id = ANY(@ids)'],
     // Support inboxes (server/inbox/inbox.js): the inboxes they own go with every conversation in them; in others,
     // their replies stay for the visitor without their name, and their place on the team goes.
     [null, 'DELETE FROM inbox_translations WHERE message_id IN (SELECT m.id FROM inbox_messages m JOIN inbox_conversations c ON c.id = m.conversation_id JOIN inboxes i ON i.id = c.inbox_id WHERE i.owner_subject = ANY(@s) OR i.owner_id = ANY(@ids))'],
@@ -174,12 +190,13 @@ const ERASE_AFTER_ROOMS = [
     ['feed_events', 'DELETE FROM feed_events WHERE feed_id IN (SELECT id FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     [null, 'DELETE FROM feed_sessions WHERE feed_id IN (SELECT id FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids))'],
     ['feeds', 'DELETE FROM feeds WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids)'],
-    // An AI member belongs to its room, not to whoever added it: it stays, without their name on it.
+    // An attached Actor agent belongs to its owner; an ordinary room AI member belongs to the room.
+    ['actor_ai_members', "DELETE FROM room_ai_members WHERE link_service = 'actor' AND created_by_subject = ANY(@s)"],
     [null, 'UPDATE room_ai_members SET created_by_subject = NULL WHERE created_by_subject = ANY(@s)'],
     // A hook queues work as the person who made it: it goes with them.
     ['room_hooks', 'DELETE FROM room_hooks WHERE created_by = ANY(@ids)'],
     // A workspace room's queue keeps the work the team relies on, without who asked or who took it.
-    [null, "UPDATE room_tasks SET requested_by = 0, requested_subject = NULL WHERE requested_subject = ANY(@s) OR requested_by = ANY(@ids)"],
+    [null, "UPDATE room_tasks SET requested_by = CASE WHEN requested_by = ANY(@ids) THEN 0 ELSE requested_by END, requested_subject = CASE WHEN requested_subject = ANY(@s) THEN NULL ELSE requested_subject END WHERE requested_subject = ANY(@s) OR requested_by = ANY(@ids)"],
     [null, "UPDATE room_tasks SET runner = 'a former member' WHERE runner ~ '^user:[0-9]+$' AND substr(runner, 6)::bigint = ANY(@ids)"],
     // Their own AI key is gone with them (OpenVibe.AI erases it): members that thought with it go back to OpenVibe's model.
     [null, "UPDATE room_ai_members SET engine = 'openvibe', engine_subject = NULL, engine_label = NULL WHERE engine_subject = ANY(@s)"],

@@ -63,7 +63,7 @@ function navConfig(o, config, site = {}, siteLinks = null) {
         service: site.service || 'chat',
         apiBase: NETWORK_URL,
         links: (siteLinks || site.links || links(o)).map((l) => ({ label: l.label, href: l.href, ...(l.icon ? { icon: l.icon } : {}), ...(l.more ? { more: true } : {}), active: o.active === l.key })),
-        history: { type: 'page', title: o.title || site.name || SITE_NAME },
+        history: { type: 'conversation', title: o.title || site.name || SITE_NAME, image_url: o.historyImage || null, private: !!o.private, mature: !!o.mature },
         // The phone's bottom bar (Shared's app bar, appbar.js): Home, Servers, Vibe, Activity and You — one
         // bar for every OpenVibe app (the plan, 2026-11-09, stage V2).
         // The Activity place carries a dot while something in it is unread (Shared's appbar.js draws `dot`).
@@ -96,9 +96,9 @@ function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat', partyPro
         // still call Chat's DM API there (openvibe.party is on the credentialed CORS list, server/app.js).
         // https://openvibe.actor: a Vibe chat draws the agent's canvas beside it (plan HO9), only the two canvas
         // GETs and only with the person's own Bearer (the Actor API's CORS route).
-        `connect-src 'self' ${wsOrigin} https://openvibe.chat https://openvibe.actor https://openvibe.network wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com`,
+        `connect-src 'self' ${wsOrigin} https://openvibe.chat https://openvibe.actor https://openvibe.network https://openvibe.quest wss://openvibe.network https://openvibe.events wss://openvibe.events https://cloudflareinsights.com`,
         // A workspace room's shared screen: a screen share page from OpenVibe.Bot (rooms.screen_url).
-        `frame-src 'self' https://openvibe.bot https://*.openvibe.link${partyProviders ? ' https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv' : ''}`,
+        `frame-src 'self' https://openvibe.bot https://*.openvibe.link https://openvibe.network${partyProviders ? ' https://www.youtube-nocookie.com https://player.twitch.tv https://embed.twitch.tv' : ''}`,
         "frame-ancestors 'self'",
         "base-uri 'self'",
         "object-src 'none'",
@@ -162,19 +162,25 @@ ${head}
 ${appIcon.headTags({ site: 'network' })}
 ${INSTALL_LINKS}
 <link rel="stylesheet" href="${asset('chat.css')}">
+<link rel="stylesheet" href="${ovServe.url('messages.css')}">
 ${o.shell ? `<link rel="stylesheet" href="${asset('chat-shell.css')}">` : ''}
 <link rel="stylesheet" href="${ovServe.url('items.css')}">
 ${o.showcase ? `<link rel="stylesheet" href="${ovServe.url('showcase.css')}">` : ''}
 ${o.upload ? `<link rel="stylesheet" href="${ovServe.url('ov-upload.css')}">` : ''}
 ${(o.inlineStyles || []).map((css) => `<style>${css}</style>`).join('\n')}
-${o.kit ? `<link rel="stylesheet" href="${ovServe.url('kit.css')}">\n<link rel="stylesheet" href="${ovServe.url('thread.css')}">` : ''}
+${o.kit || o.shell ? `<link rel="stylesheet" href="${ovServe.url('kit.css')}">` : ''}
+${o.kit ? `<link rel="stylesheet" href="${ovServe.url('thread.css')}">` : ''}
 ${o.app || o.appStyle ? `<link rel="stylesheet" href="${asset(o.appStyle || 'vibe.css')}">` : ''}
 ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
 ${o.partyHome ? `<link rel="stylesheet" href="${asset('party-home.css')}">` : ''}
 ${o.party ? `<link rel="stylesheet" href="${ovServe.url('player.css')}">\n<link rel="stylesheet" href="${asset('party.css')}">\n<script src="${ovServe.url('player.js')}" defer></script>\n<script src="${ovServe.url('ov-sync.js')}" defer></script>\n<script src="${asset('party-providers.js')}" defer></script>\n<script src="${asset('party-provider-sync.js')}" defer></script>\n<script src="${asset('party.js')}" defer></script>` : ''}
+${o.script || o.app ? `<script src="${asset('agent-run-card.js')}" defer></script>` : ''}
+${String(o.body || '').includes('id="oc-compose"') || o.app ? `<script src="${ovServe.url('messages.js')}" defer></script>` : ''}
+${String(o.body || '').includes('id="oc-compose"') ? `<script src="${ovServe.url('ov-composer.js')}" defer></script>\n<script src="${asset('composer.js')}" defer></script>` : ''}
 ${(o.scripts || []).map((n) => `<script src="${asset(n)}" defer></script>`).join('\n')}
 <script src="${ovServe.url('theme-loader.js')}" defer></script>
 <script src="${ovServe.url('navbar.js')}" defer></script>
+${String(o.body || '').includes('data-ov-machines') ? '<script src="/shared/machines.js" defer></script>' : ''}
 <script src="${ovServe.url('footer.js')}" defer></script>
 ${o.script ? `<script src="${asset('chat-history.js')}" defer></script>
 <script src="${asset('chat.js')}" defer></script>` : ''}
@@ -188,8 +194,7 @@ ${o.app ? `<script src="${asset('vibe-md.js')}" defer></script>\n<script src="${
 </head>
 <body class="${[cls, o.app ? 'oc-app-body' : ''].filter(Boolean).join(' ')}"${scale}>
 <a class="oc-skip" href="#main">Skip to content</a>
-<div id="navbar-mount"></div>
-${frame.noscriptNav({ name: siteName, home: '/', links: siteLinks.map(({ label, href }) => ({ label, href })) })}
+${frame.serverNav({ name: siteName, service: siteService, home: '/', links: siteLinks.map(({ label, href }) => ({ label, href })) })}
 <main id="main" class="${o.app ? 'vb-wrap' : `oc-main${o.shell ? ' oc-main--shell' : (o.wide ? ' oc-main--wide' : '')}`}"${o.mainAttrs ? ` ${o.mainAttrs}` : ''}>
 <noscript><p class="oc-account">${who}</p></noscript>
 ${o.body || ''}

@@ -12,16 +12,18 @@ const { boot, suite } = require('./helpers');
 
 const t = suite('vibe modes');
 const SITE = 'https://openvibe.chat';
-let h, ann, bob, workspace;
+let h, ann, bob, workspace, config;
 const turns = [];
 const actorCalls = [];
-let actorTask = { id: 'tsk_r1', state: 'queued' };
+let actorTask = { id: 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3', state: 'queued' };
 const vibeApi = (method, path, u, body) => h.http(method, `/api/chat/vibe${path}`, { token: u && u.token, body });
 const messagesOf = async (slug, as = ann) => ((await h.http('GET', `/api/chat/rooms/${slug}/messages`, { token: as.token })).body.messages || []).slice().reverse();
 const realFetch = globalThis.fetch;
 
 t('boot', async () => {
     h = await boot({ env: { CHAT_WEB_URL: SITE } });
+    config = require('../server/config');
+    config.ai.vibeDoIt = false;
     workspace = require('../server/rooms/workspace');
     workspace._setTokens({ getToken: async () => 'chat-actor-token' });
     require('../server/ai/client')._setClient({
@@ -39,7 +41,10 @@ t('boot', async () => {
     };
 });
 
-t('Research in a new chat: a task on Actor as the person, Vibe says it is on it, no instant answer', async () => {
+t('Research in a new chat: a task on Actor as the person, Vibe posts a live run card', async () => {
+    const disabled = await vibeApi('POST', '', ann, { message: 'Research this first', mode: 'research' });
+    assert.strictEqual(disabled.status, 503, 'the owner switch is off by default');
+    config.ai.vibeDoIt = true;
     const r = await vibeApi('POST', '', ann, { message: 'Compare the three cheapest cloud browsers for agents', mode: 'research' });
     assert.strictEqual(r.status, 201, r.text);
     const slug = r.body.room.slug;
@@ -50,11 +55,13 @@ t('Research in a new chat: a task on Actor as the person, Vibe says it is on it,
     await new Promise((res) => setTimeout(res, 150));
     const msgs = await messagesOf(slug);
     assert.deepStrictEqual(msgs.map((m) => (m.ai_member_id ? 'vibe' : 'ann')), ['ann', 'vibe']);
-    assert.match(msgs[1].message, new RegExp(`^On it: I am researching this[\\s\\S]*${SITE}/r/${slug}/tasks/${r.body.task.id}$`));
+    assert.match(msgs[1].message, /^Working on “Compare the three cheapest cloud browsers for agents”$/);
+    assert.strictEqual(msgs[1].card.kind, 'agent-run');
+    assert.strictEqual(msgs[1].card.events_url, `https://openvibe.network/api/frame/agent-runs/actor/${actorTask.id}/events`);
     assert.strictEqual(turns.length, 0, 'no instant answer');
     // Actor finishes: the answer comes back into the chat, without "asked by".
     actorTask = {
-        id: 'tsk_r1', state: 'succeeded', cost: { usd: 0.0042, free_allowance_used: 0.0042 },
+        id: 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3', state: 'succeeded', cost: { usd: 0.0042, free_allowance_used: 0.0042 },
         result: { answer: 'Browser Use Cloud is cheapest at $0.02 an hour.', sources: ['https://browser-use.com/cloud-browsers'], agent: 'openvibe-runtime', model: 'deepseek-v4-flash', class: 'research', checked: { by: 'qwen', cross_family: true, reason: 'The sources back the answer.' } },
     };
     await workspace.poll();
@@ -64,14 +71,15 @@ t('Research in a new chat: a task on Actor as the person, Vibe says it is on it,
     assert.ok(!/asked by/.test(done.message), 'a Vibe chat has one person in it');
     // "How Vibe did this", folded under the answer: what ran it, the check, time and cost, the sources, every step on Actor.
     const page = await fetch(`${h.base}/vibe/${slug}`, { headers: { cookie: `ov_token=${ann.token}` } }).then((x) => x.text());
+    assert.match(page, /class="oc-agent-run" data-ov-run-url="https:\/\/openvibe\.network\/api\/frame\/agent-runs\/actor\//, 'the saved message renders the live card');
     assert.ok(page.includes('<details class="vb-how"><summary>How Vibe did this</summary><ul><li>Researched by OpenVibe runtime (deepseek-v4-flash)</li>'
         + '<li>Checked by a second model (qwen): The sources back the answer.</li><li>Took under a minute · cost $0.0042 of your daily allowance</li>'), 'the fold under the answer');
     assert.match(page, new RegExp(`<li class="vb-how-sources"><a href="#vb-sources-${done.id}">Sources \\(1\\) under this answer</a></li>`), 'How links to the chips');
-    assert.ok(page.includes('<li><a href="https://openvibe.actor/tasks/tsk_r1">Every step on OpenVibe Agents</a></li>'), 'every step on Actor');
+    assert.ok(page.includes('<li><a href="https://openvibe.actor/tasks/tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3">Every step on OpenVibe Agents</a></li>'), 'every step on Actor');
     assert.match(page, new RegExp(`<ul class="vb-sources" aria-label="Sources" id="vb-sources-${done.id}">[\\s\\S]*?browser-use\\.com[\\s\\S]*?<\\/ul>`), 'the source as a chip under the answer, once');
     const how = await vibeApi('GET', `/${slug}/how`, ann);
     assert.strictEqual(how.status, 200);
-    assert.strictEqual(how.body.how[String(done.id)].actor_url, 'https://openvibe.actor/tasks/tsk_r1', 'the same, for an answer that arrives while the page is open');
+    assert.strictEqual(how.body.how[String(done.id)].actor_url, 'https://openvibe.actor/tasks/tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2A3', 'the same, for an answer that arrives while the page is open');
     assert.strictEqual((await vibeApi('GET', `/${slug}/how`, bob)).status, 404, 'someone else\'s chat is not there');
 });
 
@@ -80,19 +88,19 @@ t('Code in an existing chat: Codes on their own computer; Agent too; Chat mode a
     const slug = start.body.room.slug;
     await new Promise((res) => setTimeout(res, 150));
     assert.strictEqual(turns.length, 1, 'Chat mode: Vibe answers at once');
-    actorTask = { id: 'tsk_c1', state: 'queued' };
+    actorTask = { id: 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2A4', state: 'queued' };
     actorCalls.length = 0;
     let r = await vibeApi('POST', `/${slug}/ask`, ann, { message: 'Add a dark favicon to OpenVibe.Tools', mode: 'code' });
     assert.strictEqual(r.status, 201, r.text);
     assert.deepStrictEqual([r.body.task.kind, r.body.task.status, r.body.task.runner], ['code', 'running', 'actor']);
     assert.match(actorCalls.find((c) => c.method === 'POST').body.task, /^Make this code change with OpenVibe\.Codes on my own computer/);
-    actorTask = { id: 'tsk_a1', state: 'queued' };
+    actorTask = { id: 'tsk_01J8Z3Q4R5S6T7V8W9X0Y1Z2A5', state: 'queued' };
     r = await vibeApi('POST', `/${slug}/ask`, ann, { message: 'Tidy my Downloads folder', mode: 'agent' });
     assert.deepStrictEqual([r.body.task.kind, r.body.task.status], ['computer', 'running']);
     await new Promise((res) => setTimeout(res, 150));
     const vibeLines = (await messagesOf(slug)).filter((m) => m.ai_member_id).map((m) => m.message);
-    assert.ok(vibeLines.some((l) => /^On it: I sent this to OpenVibe\.Codes on your own computer/.test(l)));
-    assert.ok(vibeLines.some((l) => /^On it: I am doing this on your own computer, through OpenVibe Link/.test(l)));
+    assert.ok(vibeLines.includes('Working on “Add a dark favicon to OpenVibe.Tools”'));
+    assert.ok(vibeLines.includes('Working on “Tidy my Downloads folder”'));
     assert.strictEqual(turns.length, 1, 'no instant answers to the tasks');
 });
 
@@ -151,6 +159,7 @@ t('refusals: an unknown mode, someone else\'s chat, no sign-in', async () => {
 });
 
 t('the composer shows the four modes, Chat chosen, each saying what it does', async () => {
+    config.ai.vibeDoIt = true;
     const page = await h.http('GET', '/vibe', { headers: { cookie: `ov_token=${ann.token}` } });
     assert.match(page.text, /<fieldset class="vb-modes" aria-label="What Vibe does with it">/);
     assert.match(page.text, /value="chat" data-placeholder="Message Vibe" checked><span>Chat<\/span>/);

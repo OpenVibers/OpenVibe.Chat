@@ -65,9 +65,11 @@ function getAllowedOrigins() {
     return allowed;
 }
 
-function createApp({ chatServer, relay, events = null, callServer = null, settings = null, chatAppSettings = null }) {
+function createApp({ chatServer, relay, events = null, callServer = null, settings = null, chatAppSettings = null, personaSettings = null }) {
     const allowedOrigins = getAllowedOrigins();
     const app = express();
+    // Times leave with their zone (openvibe.design rule 148): the SQLite-era text columns are UTC.
+    app.use(require('./iso-times').isoJsonTimes);
     // GET /openapi.json (SEO-3): this service's public API as OpenAPI 3.1, generated from the contracts
     // (openvibe-contracts); the operations they mark internal-only are left out.
     app.get('/openapi.json', (_req, res) => {
@@ -145,6 +147,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     app.use('/internal/chat', express.json({ limit: '64kb' }), require('./chat/internal-tickets'));
     // Vibe answers a person through another service (Bot's Vibe by voice; capability chat.vibe.ask).
     app.use('/internal/chat', express.json({ limit: '64kb' }), require('./chat/internal-vibe'));
+    app.use('/api/chat/commands/registered', express.json({ limit: '16kb' }), require('./chat/slash-commands').internalRouter);
     // OpenVibe.Events deliveries (live.release.deployed, network.module.updated): signature v2 over
     // the raw body, so this router reads the body itself (server/events/consumer.js).
     if (events) app.use('/internal/events', events.router);
@@ -157,11 +160,11 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // or x-danger change needs X-OV-Fresh: 1, and the test route synthesizes one short line without echoing a key.
     // chat.apps (the Telegram, Discord and Slack bots) is served by the same routes; its Test button is mounted first,
     // because the voices' test route answers 404 for every other namespace.
-    if (settings || chatAppSettings) {
+    if (settings || chatAppSettings || personaSettings) {
         const guard = serviceAuth.guard('chat.config.manage');
         app.use('/internal/config', express.json({ limit: '64kb' }));
         if (chatAppSettings) app.post(`/internal/config/${chatAppSettings.namespace}/test/:key`, guard, require('./chat-apps/owner-settings').testRoute(chatAppSettings));
-        const also = chatAppSettings ? [chatAppSettings.store] : [];
+        const also = [chatAppSettings && chatAppSettings.store, personaSettings && personaSettings.store].filter(Boolean);
         if (settings) settings.mount(app, { guard, also });
         else require('./settings').mountStores(app, { guard, stores: also });
     }
@@ -181,6 +184,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     app.use('/api/v1/rooms', require('./chat/room-insight-routes'));
     // A room's memory (part 3): what the summariser keeps between summaries, for its members.
     app.use('/api/v1/rooms', require('./chat/memory-routes'));
+    app.use('/api/v1/people', require('./chat/person-memory-routes'));
     app.get('/health', (req, res) => res.json({ ok: true, service: 'chat' }));
     // Readiness in the openvibe-shared/ready shape (status ready/degraded/not_ready, named checks):
     // 503 only when the required check fails. `db` is Chat's own database, which it cannot serve
@@ -347,6 +351,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // Chat rooms (server/rooms/): before /api/chat, whose /:streamId routes would take /rooms/…
     // The people of a Co-pilot room vote on the agent's poll (Agent Streams S5).
     app.use('/api/chat/rooms', require('./chat/agent-poll-routes'));
+    app.use('/api/chat/agent-rooms', require('./chat/agent-room-view').router);
     // The chat plays queue of a room (Agent Streams S6): the votes and the moderators' hand.
     app.use('/api/chat/rooms', require('./chat/play-queue-routes').member);
     app.use('/api/chat/rooms', require('./rooms/routes'));
@@ -372,6 +377,8 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     app.use('/api/dm', require('./chat/dm-routes'));
     // Vibe from any OpenVibe site (the Dock, plan L48 V2): ask, and read the answer, with the person's own token.
     app.use('/api/vibe', require('./rooms/vibe-api'));
+    // The owner's Vibe persona settings (server/rooms/persona-api.js): owner sign-in only, never an API token.
+    app.use('/api/admin/persona', limits.identify, require('./rooms/persona-api'));
     // A companion's answer, read aloud in the character's own voice (the person's own token, the agent
     // voice's per-person limiter).
     app.use('/api/tts', require('./chat/tts-person'));
@@ -419,7 +426,8 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     async function handleUpgrade(req, socket, head) {
         const url = req.url || '';
         const origin = normalizeOrigin(req.headers.origin);
-        if (origin && !allowedOrigins.has(origin)) {
+        // The shared Dock opens a bearer-authenticated chat socket from every first-party site.
+        if (origin && !allowedOrigins.has(origin) && !(url.startsWith('/ws/chat') && FIRST_PARTY.has(origin))) {
             console.warn(`[Server] WebSocket upgrade rejected — origin "${origin}" not in allowed origins`);
             socket.destroy();
             return;

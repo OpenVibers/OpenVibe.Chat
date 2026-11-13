@@ -3,7 +3,8 @@
    server/calls/call-server.js: the newcomer offers to everyone already in, the others answer. The room's
    roles decide who talks (the server force-mutes listeners; this client never sends a microphone it may
    not use). Names are set with textContent. The room's chat works without this file.
-   A 1:1 call's page (/call/<channel>, cfg.call.auto) joins as it opens; while its caller waits (cfg.call.ring) it says
+   A 1:1 call's page (/call/<channel>) joins only when the person presses "Turn on microphone":
+   opening or refreshing the page asks for nothing. While its caller waits (cfg.call.ring) it says
    ringing and listens on a /ws/chat socket for the callee's vc-call-response: accepted (they are on their way),
    declined, busy or no-answer (then the call is left). */
 (function () {
@@ -162,7 +163,7 @@
       if (m.type !== 'vc-call-response' || !ringing || String(m.channelId) !== String(cfg.call.channel)) return;
       if (Number(m.fromUserId) !== Number(ringing.id)) return;
       var who = ringing.name, st = String(m.status || '').toLowerCase();
-      if (st === 'accepted') { status(who + ' answered. Connecting…'); return; }
+      if (st === 'accepted') { status(joined ? who + ' answered. Connecting…' : who + ' answered. Press "Turn on microphone" to join.'); return; }
       stopRinging();
       teardown(st === 'busy' ? who + ' is in another call.' : st === 'no-answer' ? 'No answer from ' + who + '.' : who + ' declined the call.');
     };
@@ -224,5 +225,5 @@
   });
   window.addEventListener('pagehide', function () { stopRinging(); if (joined) teardown(null); });
   if (ringing) listenForAnswer();
-  if (cfg.call.auto) join();
+  // The microphone opens only from the "Turn on microphone" press above — no auto-join on load.
 })();
