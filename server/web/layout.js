@@ -26,11 +26,11 @@ const PUBLIC_DIR = path.join(__dirname, '..', '..', 'public', 'web');
 // important stuff is"): the five people use every visit carry an icon, the rest fold into the navbar's More (Shared
 // 4.22). Search is the menu's orb by the logo and what shipped is the footer's.
 const LINKS = [
-    { key: 'vibe', label: 'Vibe', href: '/vibe', icon: 'fa-wand-magic-sparkles' },
-    { key: 'global', label: 'Global chat', href: '/', icon: 'fa-earth-americas' },
-    { key: 'rooms', label: 'Rooms', href: '/rooms', icon: 'fa-hashtag' },
-    { key: 'messages', label: 'Messages', href: '/messages', icon: 'fa-comment-dots' },
-    { key: 'inbox', label: 'Inbox', href: '/inbox', icon: 'fa-inbox' },
+    { key: 'vibe', label: 'Vibe', href: '/vibe', icon: 'wand' },
+    { key: 'global', label: 'Global chat', href: '/', icon: 'globe' },
+    { key: 'rooms', label: 'Rooms', href: '/rooms', icon: 'hash' },
+    { key: 'messages', label: 'Messages', href: '/messages', icon: 'chat' },
+    { key: 'inbox', label: 'Inbox', href: '/inbox', icon: 'inbox' },
     { key: 'servers', label: 'Servers', href: '/servers', more: true },
     { key: 'settings', label: 'Settings', href: '/settings', more: true },
 ];
