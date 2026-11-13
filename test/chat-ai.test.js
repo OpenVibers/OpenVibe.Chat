@@ -175,7 +175,7 @@ t('the six routes answer with Live\'s shapes, publicly', async () => {
     assert.strictEqual(r.status, 404);
 });
 
-t('the summariser reads only people who allowed AI use, and stores people and topics', async () => {
+t('the room\'s summary reads its public messages, leaving out people who turned AI off, and stores people and topics', async () => {
     const calls = [];
     aiClient._setClient({
         runs: {
@@ -188,9 +188,12 @@ t('the summariser reads only people who allowed AI use, and stores people and to
             },
         },
     });
-    const carol = h.addUser('carol', { subject: 'usr_01J8Z3Q4R5S6T7V8W9X0Y1Z2A4' });   // no consent
+    const carol = h.addUser('carol', { subject: 'usr_01J8Z3Q4R5S6T7V8W9X0Y1Z2A4' });   // turned AI off for her chat
+    await db.run('INSERT INTO person_chat_memory_settings (user_id, opted_out) VALUES (?, 1)', [carol.id]);
+    const dave = h.addUser('dave', { subject: 'usr_01J8Z3Q4R5S6T7V8W9X0Y1Z2A5' });     // never chose: his public line counts
     await db.run("UPDATE chat_ai_summaries SET updated_at = ? WHERE scope = 'global'", [sqliteNow(-60 * 60 * 1000)]);
     await msg({ user_id: carol.id, username: 'carol', message: 'carol secret line' });
+    await msg({ user_id: dave.id, username: 'dave', message: 'dave says zelda too' });
     await msg({ user_id: alice.id, username: 'alice', message: 'zelda talk is good' });
     await msg({ user_id: bob.id, username: 'bob', message: 'zelda again' });
 
@@ -199,24 +202,24 @@ t('the summariser reads only people who allowed AI use, and stores people and to
     const global = calls.find((c) => c.workflow === chatAi.WORKFLOW_GLOBAL);
     assert.ok(global, 'the global workflow was called');
     const authors = global.input.messages.map((m) => m.author);
-    assert.ok(!authors.includes('carol'), 'carol is left out');
-    assert.ok(authors.includes('alice') && authors.includes('bob'), JSON.stringify(authors));
+    assert.ok(!authors.includes('carol'), 'carol turned AI off: left out');
+    assert.ok(authors.includes('alice') && authors.includes('bob') && authors.includes('dave'), JSON.stringify(authors));
     const row = await db.getChatAiSummary('global', 0, 'global');
     assert.strictEqual(row.overview, 'consenting talk');
-    assert.strictEqual(Number(row.people), 2);
+    assert.strictEqual(Number(row.people), 3);
     const topics = JSON.parse(row.topics_json);
     assert.ok(topics.some((x) => x.label === 'zelda' && x.count >= 2), JSON.stringify(topics));
 });
 
-t('a consent check that fails leaves everyone out (fail closed)', async () => {
+t('the room\'s summary does not wait on Network (it reads Chat\'s own opt-out)', async () => {
     const consent = require('../server/net/consent');
     consent._reset();
     h.consent.down = true;
     const before = (await db.getChatAiSummary('global', 0, 'global')).message_count;
     await db.run("UPDATE chat_ai_summaries SET updated_at = ? WHERE scope = 'global'", [sqliteNow(-60 * 60 * 1000)]);
-    await msg({ user_id: alice.id, username: 'alice', message: 'not read while Network is down' });
+    await msg({ user_id: alice.id, username: 'alice', message: 'read while Network is down' });
     await chatAi._tick();
-    assert.strictEqual((await db.getChatAiSummary('global', 0, 'global')).message_count, before);
+    assert.ok((await db.getChatAiSummary('global', 0, 'global')).message_count > before, 'summarised');
     h.consent.down = false;
     consent._reset();
 });
