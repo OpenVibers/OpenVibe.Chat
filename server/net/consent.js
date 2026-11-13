@@ -85,4 +85,31 @@ async function filterRows(rows) {
     return list.filter((r) => r && r.subject_id && allowed.has(String(r.subject_id)));
 }
 
-module.exports = { allowedSubjects, filterRows, _reset() { cache.clear(); blockedUntil = 0; lastLog = ''; } };
+/**
+ * What a room's own summary may read (the owner's rule, 2026-10-31 and 11-13: opt-in is for training, public datasets,
+ * faces, looks and apps; a room's summary of its public messages, shown back to that room, is none of those, as the
+ * Rundown's write-ups of what streamers said are not). Every message in the window, except the people who turned
+ * "leave my chat out of AI" on: Chat's own switch, person_chat_memory_settings.opted_out, the one that also forgets
+ * their chat memory. Fail-closed: if the switch cannot be read, nobody is read.
+ */
+async function roomRows(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    const ids = [...new Set(list.map((r) => Number(r && r.user_id)).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return list;
+    let out;
+    try {
+        const db = require('../db/database');
+        out = new Set();
+        for (let i = 0; i < ids.length; i += MAX_BATCH) {
+            const part = ids.slice(i, i + MAX_BATCH);
+            const found = await db.all(`SELECT user_id FROM person_chat_memory_settings WHERE opted_out = 1 AND user_id IN (${part.map(() => '?').join(',')})`, part);
+            for (const r of found) out.add(Number(r.user_id));
+        }
+    } catch (err) {
+        _log(`the AI opt-out could not be read, leaving everyone out: ${(err && err.message) || err}`);
+        return [];
+    }
+    return list.filter((r) => r && !out.has(Number(r.user_id)));
+}
+
+module.exports = { allowedSubjects, filterRows, roomRows, _reset() { cache.clear(); blockedUntil = 0; lastLog = ''; } };

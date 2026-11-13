@@ -191,16 +191,13 @@ async function _refreshGlobal() {
     const windowStart = _sqlTime(startMs);
     const windowLabel = _windowLabel(now - startMs);
 
-    // The room's read includes only people who allowed AI use of their messages (network.consent@1,
-    // ai.train on kind chat). Anon and relay authors have no Network subject and are left out; when
-    // Network cannot answer, the check fails closed and this window is skipped.
+    // The room's own summary reads its public messages, leaving out the people who turned AI off for their chat
+    // (consent.roomRows, 2026-11-13; it read only those who allowed AI training, so it read nobody and the room's line
+    // was three days old). A person's own profile still asks Network for consent (filterRows, below).
     const batch = await db.getChatMessagesForAi({ sinceTs: windowStart, order: 'desc', limit: MAX_BATCH_MESSAGES });
     if (!batch.length) return false;
-    const rows = await consent.filterRows(batch);
-    if (!rows.length) {
-        console.log('[ChatAI] global window has no consenting messages; nothing summarised');
-        return false;
-    }
+    const rows = await consent.roomRows(batch);
+    if (!rows.length) return false;
     const priorMemory = prior ? (prior.memory_json || '') : '';
     let priorTl = [];
     try { priorTl = JSON.parse(prior ? (prior.timeline_json || '[]') : '[]'); } catch { priorTl = []; }
@@ -229,7 +226,7 @@ async function _refreshGlobal() {
         people: _people(rows),
         topics_json: JSON.stringify(_topics(rows)),
     });
-    console.log(`[ChatAI] global refreshed (${newCount} new, ${rows.length} consenting, window=${windowLabel})`);
+    console.log(`[ChatAI] global refreshed (${newCount} new, ${rows.length} read, window=${windowLabel})`);
     return true;
 }
 
@@ -251,7 +248,7 @@ async function _refreshRoom(room) {
     const prior = await db.getChatAiSummary('room', room.id, 'rolling');
     const raw = await db.getRoomMessagesForAi({ roomId: room.id, limit: ROOM_BATCH });
     if (!raw.length) return false;
-    const rows = await consent.filterRows(raw);
+    const rows = await consent.roomRows(raw);
     if (!rows.length) return false;
     const now = Date.now();
     const { label: windowLabel, start: windowStart } = _windowOf(rows, now);
@@ -297,7 +294,7 @@ async function _refreshRoom(room) {
             confidence: 45,
         }).catch((e) => { console.warn(`[ChatAI] room ${room.slug} memory:`, e.message); return 0; });
     }
-    console.log(`[ChatAI] room ${room.slug} refreshed (${newCount} new, ${rows.length} consenting, ${remembered} remembered, window=${windowLabel})`);
+    console.log(`[ChatAI] room ${room.slug} refreshed (${newCount} new, ${rows.length} read, ${remembered} remembered, window=${windowLabel})`);
     return true;
 }
 
@@ -319,7 +316,7 @@ async function _refreshChannel(channel) {
     const prior = await db.getChatAiSummary('channel', subjectId, 'rolling');
     const raw = await db.getChannelMessagesForAi({ channelUserId: subjectId, limit: ROOM_BATCH });
     if (!raw.length) return false;
-    const rows = await consent.filterRows(raw);
+    const rows = await consent.roomRows(raw);
     if (!rows.length) return false;
     const now = Date.now();
     const { label: windowLabel, start: windowStart } = _windowOf(rows, now);
@@ -352,7 +349,7 @@ async function _refreshChannel(channel) {
         people: _people(rows),
         topics_json: JSON.stringify(_topics(rows)),
     });
-    console.log(`[ChatAI] channel ${subjectId} refreshed (${newCount} new, ${rows.length} consenting, window=${windowLabel})`);
+    console.log(`[ChatAI] channel ${subjectId} refreshed (${newCount} new, ${rows.length} read, window=${windowLabel})`);
     return true;
 }
 
