@@ -23,6 +23,7 @@
 .fv-prompt, .fv-answer, .fv-step, .fv-count, .fv-more, .fv-working { display: flex; gap: 7px; align-items: baseline; margin: 3px 0; min-width: 0; }
 .fv-prompt { font-weight: 600; }
 .fv-ic { flex: none; width: 1.1em; text-align: center; color: var(--fv-muted); }
+.fv-ic svg { width: 14px; height: 14px; vertical-align: -2px; }
 .fv-prompt .fv-ic { color: var(--fv-accent); }
 .fv-answer .fv-ic { color: var(--fv-ok); }
 .fv-txt { overflow-wrap: anywhere; }

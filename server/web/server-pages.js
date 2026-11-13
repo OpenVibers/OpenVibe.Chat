@@ -525,7 +525,7 @@ ${roles.length ? `<fieldset class="oc-set oc-role-set"><legend id="oc-onboard-ro
         const active = people.filter((p) => p.role !== 'blocked');
         const banned = people.filter((p) => p.role === 'blocked');
         const chanRow = (c) => `<li><span>${c.kind === 'forum' ? '▤' : c.kind === 'stage' ? '◉' : c.kind === 'voice' ? VOICE_ICON : '#'} <strong>${esc(c.name)}</strong>${c.topic ? ` <span class="oc-muted">${esc(c.topic)}</span>` : ''}</span>
-<form class="oc-inline oc-moves" method="post" action="/s/${esc(server.slug)}/channels/${esc(c.slug)}"><button type="submit" name="move" value="up" class="oc-move" aria-label="Move ${esc(c.name)} up" title="Move up">↑</button><button type="submit" name="move" value="down" class="oc-move" aria-label="Move ${esc(c.name)} down" title="Move down">↓</button></form>
+<form class="oc-inline oc-moves" method="post" action="/s/${esc(server.slug)}/channels/${esc(c.slug)}"><button type="submit" name="move" value="up" class="oc-move" aria-label="Move ${esc(c.name)} up" title="Move up">${IC.up}</button><button type="submit" name="move" value="down" class="oc-move" aria-label="Move ${esc(c.name)} down" title="Move down">${IC.down}</button></form>
 <details class="oc-chan-edit"><summary>Edit</summary><form class="oc-form" method="post" action="/s/${esc(server.slug)}/channels/${esc(c.slug)}">
 <label>Name <input name="name" required maxlength="40" value="${esc(c.name)}"></label>
 <label>Topic <input name="topic" maxlength="200" value="${esc(c.topic || '')}"></label>
@@ -545,7 +545,7 @@ ${can.manage && c.kind !== 'voice' && require('../rooms/ai-members').enabled() ?
                     you: me ? { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } : {},
                 }),
                 sideLabel: server.name,
-                main: `<p><a href="/s/${esc(server.slug)}">← ${esc(server.name)}</a></p><h1>Server settings</h1>${saved}${errorOf(req)}
+                main: `<p><a href="/s/${esc(server.slug)}">${IC.back} ${esc(server.name)}</a></p><h1>Server settings</h1>${saved}${errorOf(req)}
 ${can.manage ? `<h2>Overview</h2><form class="oc-form" method="post" action="/s/${esc(server.slug)}/settings">
 <label>Name <input name="name" required minlength="2" maxlength="40" value="${esc(server.name)}"></label>
 <label>Description <input name="description" maxlength="300" value="${esc(server.description || '')}"></label>

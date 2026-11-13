@@ -3333,7 +3333,7 @@ class ChatServer {
                 if (client.user?.id === streamOwnerId && client.streamId === streamId) {
                     this.sendTo(ws, {
                         type: 'system',
-                        message: `⏳ New IP needs approval: ${username} (${ip}). Open Dashboard → Moderation to review.`,
+                        message: `⏳ New IP needs approval: ${username} (${ip}). Open Dashboard, then Moderation, to review.`,
                         ip_approval_alert: true,
                     });
                     break;

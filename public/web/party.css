@@ -36,6 +36,7 @@ main[data-party] [hidden] { display: none !important; }
 .pt-title { flex: 1 1 auto; min-width: 0; margin: 0; font-size: 1.15rem; font-weight: 800; letter-spacing: -.01em; line-height: 1.25; overflow-wrap: anywhere; text-wrap: balance; }
 .pt-from { flex: none; color: var(--pt-muted); font-size: 13.5px; text-decoration: none; }
 .pt-from:hover, .pt-from:focus-visible { color: var(--pt-text); text-decoration: underline; }
+.pt-from .pt-open { margin-left: 5px; vertical-align: -2px; }
 [data-party-invite] { flex: none; }
 .pt-invite { min-height: 40px; padding: 0 18px; border: 0; border-radius: 999px; background: var(--pt-accent); color: var(--pt-on-accent); font: inherit; font-size: 14px; font-weight: 750; cursor: pointer; }
 .pt-invite:hover { filter: brightness(1.08); }

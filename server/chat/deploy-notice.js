@@ -130,7 +130,7 @@ function broadcast({ chatServer, saved, list, log = console }) {
         }
         return n;
     };
-    ATTEMPTS_MS.forEach((ms, i) => { const t = setTimeout(() => { const n = push(); if (n) log.log(`[Deploy notice] ${list.length} commit(s) → ${n} client(s) (pass ${i + 1})`); }, ms); if (t.unref) t.unref(); });
+    ATTEMPTS_MS.forEach((ms, i) => { const t = setTimeout(() => { const n = push(); if (n) log.log(`[Deploy notice] ${list.length} commit(s) sent to ${n} client(s) (pass ${i + 1})`); }, ms); if (t.unref) t.unref(); });
 }
 
 /** The release a live.release.deployed envelope announces ({ head, commits }), or an 'ignored:*' outcome. No I/O. */
