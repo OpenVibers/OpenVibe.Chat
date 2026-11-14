@@ -9,7 +9,12 @@
  */
 const db = require('../db/database');
 
-/** The contacts of `userId`: their friends and the requests they sent or received. */
+/**
+ * The contacts of `userId`: their friends and the requests they sent or received.
+ *
+ * The person's Network friends are merged in (plan §AB.51): the friend system is one across every site, so the
+ * friends they made on OpenVibe.Network are here too, first. Chat's own contacts stay as they are.
+ */
 async function of(userId) {
     const rows = await db.all(`
         SELECT c.contact_id, c.status, u.username, u.display_name, u.avatar_url, u.subject_id
@@ -24,7 +29,12 @@ async function of(userId) {
         else if (r.status === 'incoming') requests.push(person);   // they asked: it waits for you
         else if (r.status === 'outgoing') asked.push(person);      // you asked: it waits for them
     }
-    return { friends, requests, asked };
+    // The person's Network friends, read with Chat's service token (network.friends.read) and kept for a
+    // minute. A Network that cannot be reached is not an error here: the person's own contacts stand alone.
+    const subject = await db.subjectFor(userId);
+    const networkFriends = subject ? await require('./network-friends').peopleOf(subject) : [];
+    const seen = new Set(networkFriends.map((f) => f.subject_id || f.id));
+    return { friends: [...networkFriends, ...friends.filter((f) => !seen.has(f.subject_id || f.id))], requests, asked };
 }
 
 /** The people who asked `userId` to be their friend (they answer in the side column). */

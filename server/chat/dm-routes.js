@@ -19,6 +19,7 @@ const { requireAuth } = require('../auth/auth');
 const { limits } = require('../net/actor-limits');
 const dm = require('./dm');
 const contacts = require('./contacts');
+const networkFriends = require('./network-friends');
 const ctx = require('../live-context');
 const prefStores = require('../prefs/stores');
 const database = require('../db/database');
@@ -136,11 +137,16 @@ router.post('/conversations', startLimit, async (req, res) => {
         // instead of Chat's own ids: { usernames: ['maya'] }, resolved as the friends route resolves them.
         if ((!Array.isArray(user_ids) || !user_ids.length) && Array.isArray(req.body.usernames)) {
             user_ids = [];
-            for (const u of req.body.usernames.slice(0, 10)) {
-                const name0 = String(u || '').trim().replace(/^@/, '');
-                if (!/^[A-Za-z0-9_]{2,32}$/.test(name0)) continue;
+            const wanted = req.body.usernames.slice(0, 10)
+                .map((u) => String(u || '').trim().replace(/^@/, ''))
+                .filter((n) => /^[A-Za-z0-9_]{2,32}$/.test(n));
+            // The person's Network friends (plan §AB.51): a friend is reachable by name even when Chat has
+            // never talked to them, and their Chat row is found by subject, so a renamed account still matches.
+            for (const name0 of wanted) {
                 const t = await ctx.getUserByUsername(name0) || await ctx.ensureUserByUsername(name0).catch(() => null);
-                if (t) user_ids.push(t.id);
+                if (t) { user_ids.push(t.id); continue; }
+                const friend = await networkFriends.friendByName(req.user.subject_id, name0);
+                if (friend && friend.id) user_ids.push(friend.id);
             }
         }
         if (!user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
@@ -460,6 +466,7 @@ router.get('/users/search', async (req, res) => {
 // The people you talk to: your friends and the requests that wait for you.
 router.get('/contacts', async (req, res) => {
     try {
+        // Chat's own contacts, with the person's Network friends merged in (contacts.js).
         const list = await contacts.of(req.user.id);
         res.set('Cache-Control', 'private, no-store').json(list);
     } catch (err) {

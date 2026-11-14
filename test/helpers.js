@@ -109,6 +109,9 @@ async function boot({ env = {} } = {}) {
     // The Network's identity and its notifications (Chat's activity reaches the person through them): a subject
     // resolves to a Network user id, and a mark-read is recorded.
     const netIdentity = { ids: new Map(), calls: [], markReads: [] };
+    // The person's friends on the Network (plan §AB.51): subject -> the subjects they are mutual
+    // friends with, and the names Network gives for a subject (identity resolve).
+    const netFriends = { circle: new Map(), names: new Map(), calls: [], down: false };
     netIdentity.userId = (subject) => {
         const key = String(subject || '');
         if (!netIdentity.ids.has(key)) netIdentity.ids.set(key, 4000 + netIdentity.ids.size + 1);
@@ -144,7 +147,7 @@ async function boot({ env = {} } = {}) {
             for (const s of Array.isArray(body.subjects) ? body.subjects : []) allowed[s] = netConsent.allowed.has(s);
             return res.end(JSON.stringify({ purpose: body.purpose, kind: body.kind, allowed, checked_at: new Date().toISOString() }));
         }
-        if (req.url.startsWith('/internal/identity/resolve')) {
+        if (req.url === '/internal/identity/resolve' || req.url.startsWith('/internal/identity/resolve?')) {
             const url = new URL(req.url, ISS);
             const v = serviceAuth2(req.headers.authorization);
             if (!v.ok) { res.statusCode = 401; return res.end(JSON.stringify({ error: v.code })); }
@@ -153,6 +156,28 @@ async function boot({ env = {} } = {}) {
             netIdentity.calls.push(subject);
             if (!subject) { res.statusCode = 400; return res.end(JSON.stringify({ error: 'subject_id required' })); }
             return res.end(JSON.stringify({ subject: { type: 'user', id: subject }, network_user_id: netIdentity.userId(subject), username: 'user' }));
+        }
+        if (req.url.startsWith('/internal/friends')) {
+            const url = new URL(req.url, ISS);
+            const v = serviceAuth2(req.headers.authorization);
+            if (!v.ok) { res.statusCode = 401; return res.end(JSON.stringify({ error: v.code })); }
+            if (!(v.claims.cap || []).includes('network.friends.read')) { res.statusCode = 403; return res.end(JSON.stringify({ error: 'capability.denied' })); }
+            if (netFriends.down) { req.socket.destroy(); return; }
+            const subject = url.searchParams.get('subject') || '';
+            netFriends.calls.push(subject);
+            return res.end(JSON.stringify({ subject, friends: netFriends.circle.get(subject) || [] }));
+        }
+        if (req.url === '/internal/identity/resolve-batch') {
+            const v = serviceAuth2(req.headers.authorization);
+            if (!v.ok) { res.statusCode = 401; return res.end(JSON.stringify({ error: v.code })); }
+            if (!(v.claims.cap || []).includes('identity.subject.resolve')) { res.statusCode = 403; return res.end(JSON.stringify({ error: 'capability.denied' })); }
+            let body = {}; try { body = JSON.parse(raw || '{}'); } catch { body = {}; }
+            const results = {};
+            for (const s of (Array.isArray(body.subject_ids) ? body.subject_ids : [])) {
+                const n = netFriends.names.get(s) || {};
+                results[s] = { subject: { type: 'user', id: s }, network_user_id: netIdentity.userId(s), username: n.username || null, display_name: n.display_name || null, avatar_url: n.avatar_url || null };
+            }
+            return res.end(JSON.stringify({ results }));
         }
         if (req.url === '/internal/notifications/mark-read') {
             const v = serviceAuth2(req.headers.authorization);
@@ -370,6 +395,7 @@ async function boot({ env = {} } = {}) {
         /** What the Network answers for a person's unread count (null: it does not answer). */
         setNetUnread(n) { netUnread = n; },
         netIdentity,
+        netFriends,
         userSeq: 0,
         /** Add a Live user (projection row) with a browser token; returns { id, token, ...row }. */
         addUser(username, { role = 'user', subject = null, created_at = sqliteNow(-30 * 86400e3), apiScopes = null, is_owner = 0, display_name = null } = {}) {

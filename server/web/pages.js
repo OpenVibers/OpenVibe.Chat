@@ -564,6 +564,12 @@ ${blockedList}`,
         const name = String((req.body && req.body.username) || '').trim();
         let target = /^[A-Za-z0-9_]{3,24}$/.test(name) ? await ctx.getUserByUsername(name) : null;
         if (!target && /^[A-Za-z0-9_]{3,24}$/.test(name)) target = await ctx.ensureUserByUsername(name).catch(() => null);
+        // A Network friend (plan §AB.51): the person is in the friend's circle even when Chat has never talked
+        // to them, and their row is found by subject, so a renamed account still matches.
+        if (!target && /^[A-Za-z0-9_]{3,24}$/.test(name)) {
+            const friend = await require('../chat/network-friends').friendByName(actor.user.subject_id, name).catch(() => null);
+            if (friend && friend.id) target = friend;
+        }
         if (!target) return res.redirect(303, `/messages?error=${encodeURIComponent(`Nobody called ${name.slice(0, 24)} on OpenVibe`)}`);
         req.headers.authorization = `Bearer ${req.cookies.ov_token}`;
         return apiBridge(dmApi, '/conversations', {
