@@ -6,6 +6,11 @@
  *
  * Opening the page counts as reading it: the rows are taken first (so the newest ones still read as unread on this
  * visit), then the rows shown are marked read and the bottom bar's dot goes away on the next page.
+ *
+ * The same list is on the Network: every activity row is one OpenVibe notification (server/chat/activity-notify.js),
+ * and the menu's Alerts show them. So for someone signed in this section becomes the Network's own list, mounted
+ * with the shared notification UI (public/web/activity-notifications.js): the same rows, the same look, the same
+ * unread count. Without JavaScript, or without a token, Chat's own rows stay exactly as they are.
  */
 const { esc } = require('./layout');
 const ui = require('./ui');
@@ -38,12 +43,16 @@ function what(row, place) {
 
 /**
  * The section, or '' when there is nothing to show. `user` is the signed-in person.
+ * `network: true` adds the place the Network's own list is mounted in (the shared notification UI); the rows stay
+ * in the page until that list is really there (without JavaScript, or without a token, they are what is read).
  * → HTML for one <section> in the page's plain list markup.
  */
-async function whatHappened(user) {
+async function whatHappened(user, { network = false } = {}) {
     if (!user || !user.id) return '';
     const { items } = await activity.list(user, { limit: LIMIT });
-    if (!items.length) return '';
+    // With the Network's list in this section, the section is there even when Chat has no rows of its own: the
+    // person may still have notifications from everywhere else on OpenVibe.
+    if (!items.length && !network) return '';
     // Seen now: the rows above keep their unread mark for this visit. Only what this page showed is read; a
     // longer feed keeps the rest unread for the next visit.
     await activity.markRead(user, { ids: items.map((row) => row.id) }).catch(() => {});
@@ -55,9 +64,15 @@ ${ui.initials(who, null, { avatarUrl: row.actor.avatar_url })}
 <span class="oc-row-main"><span class="oc-row-top"><strong>${esc(who)}</strong>${at.text ? `<time datetime="${esc(at.iso)}">${esc(at.text)}</time>` : ''}</span>
 <span class="oc-row-sub">${what(row, row.where)}</span></span></a></li>`;
     }).join('\n');
+    // The Network's list takes this section's place when it is mounted (the shared notification UI).
+    const mount = network
+        ? '<div id="oc-notif-list" class="oc-notif-list" data-oc-network-list hidden></div>'
+        : '';
+    const empty = items.length ? '' : '<p class="oc-muted">Nothing has happened yet.</p>';
     return `<section class="oc-act-sec" aria-labelledby="oc-act-what">
 <h2 class="oc-list-head" id="oc-act-what">What happened</h2>
-<ul class="oc-list">${rows}</ul>
+<div id="oc-act-what-rows">${items.length ? `<ul class="oc-list">${rows}</ul>` : empty}</div>
+${mount}
 </section>`;
 }
 

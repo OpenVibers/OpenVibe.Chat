@@ -103,6 +103,21 @@ async function boot({ env = {} } = {}) {
     // which authors allowed ai.train on kind chat. Tests put subjects in h.consent.allowed; h.consent.down
     // makes the call fail, which must leave everyone out (fail closed).
     const netConsent = { allowed: new Set(), calls: [], down: false };
+    // The Network's unread count for a person (the menu's bell, and the Activity dot): null means the Network does
+    // not answer it, so Chat falls back to its own count.
+    let netUnread = null;
+    // The Network's identity and its notifications (Chat's activity reaches the person through them): a subject
+    // resolves to a Network user id, and a mark-read is recorded.
+    const netIdentity = { ids: new Map(), calls: [], markReads: [] };
+    netIdentity.userId = (subject) => {
+        const key = String(subject || '');
+        if (!netIdentity.ids.has(key)) netIdentity.ids.set(key, 4000 + netIdentity.ids.size + 1);
+        return netIdentity.ids.get(key);
+    };
+    const serviceAuth2 = (auth) => {
+        if (!String(auth || '').startsWith('Bearer ')) return { ok: false, code: 'token.missing' };
+        return serviceAuth.verifyServiceToken(auth.slice(7), { publicKey: keys.publicKey, issuer: ISS, audience: 'openvibe.network' });
+    };
     const network = http.createServer(async (req, res) => {
         const raw = await new Promise((r) => { let s = ''; req.on('data', (c) => { s += c; }); req.on('end', () => r(s)); });
         res.setHeader('Content-Type', 'application/json');
@@ -129,6 +144,24 @@ async function boot({ env = {} } = {}) {
             for (const s of Array.isArray(body.subjects) ? body.subjects : []) allowed[s] = netConsent.allowed.has(s);
             return res.end(JSON.stringify({ purpose: body.purpose, kind: body.kind, allowed, checked_at: new Date().toISOString() }));
         }
+        if (req.url.startsWith('/internal/identity/resolve')) {
+            const url = new URL(req.url, ISS);
+            const v = serviceAuth2(req.headers.authorization);
+            if (!v.ok) { res.statusCode = 401; return res.end(JSON.stringify({ error: v.code })); }
+            if (!(v.claims.cap || []).includes('identity.subject.resolve')) { res.statusCode = 403; return res.end(JSON.stringify({ error: 'capability.denied' })); }
+            const subject = url.searchParams.get('subject_id');
+            netIdentity.calls.push(subject);
+            if (!subject) { res.statusCode = 400; return res.end(JSON.stringify({ error: 'subject_id required' })); }
+            return res.end(JSON.stringify({ subject: { type: 'user', id: subject }, network_user_id: netIdentity.userId(subject), username: 'user' }));
+        }
+        if (req.url === '/internal/notifications/mark-read') {
+            const v = serviceAuth2(req.headers.authorization);
+            if (!v.ok) { res.statusCode = 401; return res.end(JSON.stringify({ error: v.code })); }
+            if (!(v.claims.cap || []).includes('network.notifications.push')) { res.statusCode = 403; return res.end(JSON.stringify({ error: 'capability.denied' })); }
+            let body = {}; try { body = JSON.parse(raw || '{}'); } catch { body = {}; }
+            netIdentity.markReads.push(body);
+            return res.end(JSON.stringify({ ok: true, marked: 1 }));
+        }
         const mm = /^\/internal\/modules\/([^/?]+)\/([^/?]+)$/.exec(req.url);
         if (mm) return modulesRoute(req, res, raw, decodeURIComponent(mm[1]), decodeURIComponent(mm[2]));
         if (req.url === '/oauth/token') {
@@ -138,6 +171,10 @@ async function boot({ env = {} } = {}) {
             return res.end(JSON.stringify({ access_token: serviceToken(cap.length ? cap : ['live.chat_context.read', 'live.chat_effects.write'], { aud: f.get('audience'), sub: 'svc:chat' }), expires_in: 300 }));
         }
         if (req.url === '/api/.well-known/jwks') return res.end(JSON.stringify({ public_key: keys.publicKey }));
+        if (req.url === '/api/notifications/unread-count') {
+            if (netUnread == null) { res.statusCode = 404; return res.end('{}'); }
+            return res.end(JSON.stringify({ unread: netUnread }));
+        }
         res.statusCode = 404; res.end('{}');
     });
 
@@ -330,6 +367,9 @@ async function boot({ env = {} } = {}) {
     const h = {
         tmp, keys, live, network, liveServer, tokenRequests, serviceToken, ISS, netModules, netPresence,
         consent: netConsent,
+        /** What the Network answers for a person's unread count (null: it does not answer). */
+        setNetUnread(n) { netUnread = n; },
+        netIdentity,
         userSeq: 0,
         /** Add a Live user (projection row) with a browser token; returns { id, token, ...row }. */
         addUser(username, { role = 'user', subject = null, created_at = sqliteNow(-30 * 86400e3), apiScopes = null, is_owner = 0, display_name = null } = {}) {

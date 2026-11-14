@@ -37,7 +37,7 @@ t('export, then erase and confirm', async () => {
                 'chat_stage_speakers', 'chat_command_poll_votes', 'chat_command_reminders', 'chat_server_timeouts',
                 'ctx_channels', 'ctx_managed_streams', 'ctx_streams', 'dm_conversations', 'dm_contacts', 'dm_participants', 'dm_view_defaults', 'dm_view_preferences', 'dm_link_preview_settings', 'emotes', 'inbox_actions',
                 'person_chat_memory', 'person_chat_memory_settings',
-                'inbox_members', 'inbox_saved_replies', 'inbox_webhooks', 'pending_ip_messages', 'room_hooks', 'room_members', 'room_messages', 'agent_room_poll_votes', 'room_message_reactions', 'chat_activity',
+                'inbox_members', 'inbox_saved_replies', 'inbox_webhooks', 'pending_ip_messages', 'room_hooks', 'room_members', 'room_messages', 'agent_room_poll_votes', 'room_message_reactions', 'chat_activity', 'chat_activity_notifications',
                 'user_tags', 'vibe_asks', 'vibe_deliveries', 'vibe_canvases', 'vibe_canvas_versions', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_usage', 'vibe_model_preferences', 'vibe_import_notices'],
             exempt: {
                 account_data_events: 'the ledger of requests itself: which export and deletion Chat applied',
