@@ -547,6 +547,9 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
    opens above the box; without the script its own button stays and Add is not shown. ── */
 .oc-dock { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
 .oc-dock > .oc-compose { display: block; min-width: 0; }
+/* The shared box (composer v2) centres itself with auto margins and no width; in this flex column that shrank it to a
+   sliver (11-14, the owner on a phone: "completely broken"). It fills the row. */
+.oc-dock > .oc-compose.ovt-composer { width: 100%; box-sizing: border-box; }
 .oc-compose-box { border: 1px solid var(--oc-line); border-radius: 26px; background: var(--oc-bg); transition: border-color .15s ease, box-shadow .15s ease; }
 .oc-compose-box:focus-within { border-color: color-mix(in srgb, var(--oc-accent) 65%, var(--oc-line)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--oc-accent) 16%, transparent); }
 .oc-compose-row { display: flex; align-items: flex-end; gap: 2px; padding: 5px; }

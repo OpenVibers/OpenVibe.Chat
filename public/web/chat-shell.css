@@ -387,7 +387,9 @@ fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
 .oc-feed.is-grouped > .oc-msg.is-first > .oc-where { order: 2; font-size: .74rem; padding: 1px 7px; border-radius: 999px; color: var(--oc-muted); background: color-mix(in srgb, var(--oc-text) 7%, transparent); text-decoration: none; }
 .oc-feed.is-grouped > .oc-msg.is-first > .oc-time { order: 3; font-size: .72rem; color: var(--oc-muted); }
 .oc-feed.is-grouped > .oc-msg.is-first > .oc-text { order: 4; flex: 1 0 100%; }
-.oc-feed.is-grouped > .oc-msg.is-cont > :is(.oc-name, .oc-where) { display: none; }
+/* A follow-up line is only its words: the name, where, the role badge and the name's decoration were all said on the first
+   line (11-14, the owner: STAFF repeated on every line of a run). */
+.oc-feed.is-grouped > .oc-msg.is-cont > :is(.oc-name, .oc-where, .oc-badge, .ov-badge) { display: none; }
 .oc-feed.is-grouped > .oc-msg.is-cont > .oc-time { position: absolute; left: 8px; top: 4px; width: 46px; text-align: right; font-size: .66rem; color: var(--oc-muted); opacity: 0; transition: opacity .12s ease; }
 .oc-feed.is-grouped > .oc-msg.is-cont:is(:hover, :active, :focus-within) > .oc-time { opacity: 1; }
 .oc-feed.is-grouped > .oc-msg:is(:hover, :active) { background: color-mix(in srgb, var(--oc-text) 3.5%, transparent); }
