@@ -117,7 +117,8 @@ function contentSecurityPolicy(nonce, wsOrigin = 'wss://openvibe.chat', partyPro
  * on Vibe's chat pages: the agent's panel beside the chat, plan HO9), appScript and appStyle (the app's own
  * script and stylesheet instead of vibe.js and vibe.css: inbox.js and inbox.css), feedView
  * (a feed's card on the page: feed-view.css + feed-view.js, server/feeds/), scripts (more of
- * public/web's scripts by name, e.g. support.js), footer ('full', the default, on front pages, directories and docs;
+ * public/web's scripts by name, e.g. support.js), player (Shared's player.css + player.js: the network's video
+ * player, for the pages that carry a video), footer ('full', the default, on front pages, directories and docs;
  * 'compact', one quiet line, on pages people work in: a room, a channel, a conversation, a task, settings),
  * inlineStyles (CSS the page needs and the site's stylesheet cannot hold: the rule that shows the picked block of a
  * pick block is written for the page, because there is one per block), site ({ name, service, links }: a page served
@@ -173,6 +174,7 @@ ${o.kit ? `<link rel="stylesheet" href="${ovServe.url('thread.css')}">` : ''}
 ${o.app || o.appStyle ? `<link rel="stylesheet" href="${asset(o.appStyle || 'vibe.css')}">` : ''}
 ${o.feedView ? `<link rel="stylesheet" href="${asset('feed-view.css')}">\n<script src="${asset('feed-view.js')}" defer></script>` : ''}
 ${o.partyHome ? `<link rel="stylesheet" href="${asset('party-home.css')}">` : ''}
+${o.player ? `<link rel="stylesheet" href="${ovServe.url('player.css')}">\n<script src="${ovServe.url('player.js')}" defer></script>` : ''}
 ${o.party ? `<link rel="stylesheet" href="${ovServe.url('player.css')}">\n<link rel="stylesheet" href="${asset('party.css')}">\n<script src="${ovServe.url('player.js')}" defer></script>\n<script src="${ovServe.url('ov-sync.js')}" defer></script>\n<script src="${asset('party-providers.js')}" defer></script>\n<script src="${asset('party-provider-sync.js')}" defer></script>\n<script src="${asset('party.js')}" defer></script>` : ''}
 ${o.script || o.app ? `<script src="${asset('agent-run-card.js')}" defer></script>` : ''}
 ${String(o.body || '').includes('id="oc-compose"') || o.app ? `<script src="${ovServe.url('messages.js')}" defer></script>` : ''}

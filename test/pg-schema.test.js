@@ -43,6 +43,7 @@ const TABLES = [
     'dm_link_preview_settings',              // 0070: a person's link previews in DMs (on unless they say otherwise)
     'chat_server_timeouts', 'chat_command_polls', 'chat_command_poll_votes', 'chat_command_reminders', 'chat_registered_commands',
     'room_memory',                           // 0071: what a room keeps between summaries
+    'room_message_attachments',              // 0081: the files a room message carries (Media's composer attachments)
 ];
 const INDEXES = [
     'idx_chat_ts_deleted', 'idx_chat_page_live', 'idx_chat_channel_user_ts', 'idx_chat_stream_ts', 'idx_emotes_channel_code', 'idx_chat_tl_dedup',

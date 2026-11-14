@@ -46,6 +46,8 @@ const messageFiles = require('./files');
  */
 const db = require('../db/database');
 const ctx = require('../live-context');
+const messageAttachments = require('./attachments');
+const mediaAttachments = require('../media/attachments');
 const wordFilter = require('../chat/word-filter');
 const permissions = require('../auth/permissions');
 const linkCards = require('../chat/link-cards');
@@ -323,7 +325,37 @@ async function editMessage(room, user, messageId, text, { now = Date.now() } = {
     return updated;
 }
 
-async function post(room, user, text, { now = Date.now(), ai = true, timezone = null, reply_to_id = null, files = [], agentView = false } = {}) {
+/**
+ * The files a message carries from Media (composer.attachment@1), checked as the sender: at most four, each
+ * one the sender's, each one a kind a message may carry. Media is asked with Chat's own service token and
+ * the sender named in X-OV-Subject, so another person's file is a 404, exactly like one that is not there.
+ */
+async function checkedAttachments(attachments, user) {
+    const list = Array.isArray(attachments) ? attachments : [];
+    if (!list.length) return [];
+    if (list.length > messageAttachments.MAX_ATTACHMENTS) {
+        fail(400, 'rooms.attachments_too_many', `At most ${messageAttachments.MAX_ATTACHMENTS} files can go with a message`);
+    }
+    if (!user || !user.subject_id) fail(400, 'rooms.attachment_invalid', 'A file can only be attached by the person who uploaded it');
+    const out = [];
+    for (const raw of list) {
+        let ref;
+        try { ref = messageAttachments.composerReference(raw); }
+        catch (err) { fail(err.status || 400, err.code || 'rooms.attachment_invalid', err.message); }
+        let att;
+        try { att = await mediaAttachments.attachment(ref.media_attachment_id, user.subject_id); }
+        catch (err) {
+            if (err && err.status === 404) fail(404, 'rooms.attachment_not_found', 'One of the attached files is not there');
+            fail(502, 'rooms.attachment_unavailable', 'One of the attached files could not be checked');
+        }
+        const kind = messageAttachments.allowedKind(att && att.kind, att && att.mime);
+        if (!kind) fail(415, 'rooms.attachment_type', 'A message may carry a picture, a video, a sound, a PDF or a text file');
+        out.push({ ...att, id: ref.media_attachment_id, kind, owner_subject: user.subject_id });
+    }
+    return out;
+}
+
+async function post(room, user, text, { now = Date.now(), ai = true, timezone = null, reply_to_id = null, files = [], attachments = [], agentView = false } = {}) {
     const a = await access(room, user);
     if (agentView && kindOf(room) === 'agent_stream' && a.role !== 'blocked' && user && !siteBanned(user)) {
         a.read = true;
@@ -337,7 +369,8 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
         fail(403, 'rooms.read_only', a.kind === 'system' ? 'Only OpenVibe staff post announcements here' : 'Your role in this room is read-only');
     }
     const body = String(text || '').replace(/\r\n/g, '\n').trim();
-    if (!body) fail(422, 'rooms.empty', 'Write something first');
+    // A message may be a file with no words (a picture alone is a message, as on any social app).
+    if (!body && !(Array.isArray(attachments) && attachments.length)) fail(422, 'rooms.empty', 'Write something first');
     // A person's own Vibe chat has no other reader: longer messages, and no spam guess (pasted text has rows of = and links).
     const ownVibe = Number(room.assistant) === 1 && Number(room.owner_id) === Number(user.id);
     const max = ownVibe ? MAX_TEXT_VIBE : MAX_TEXT;
@@ -366,6 +399,9 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
     const filtered = wordFilter.check(body);
     const message = filtered.safe ? body : filtered.filtered;
     const attached = messageFiles.cleanFiles(files, user.subject_id || null);
+    // The files Media stored for this person (composer.attachment@1): Media says whether they exist, are the
+    // sender's and may be carried. Another person's file is a 404, exactly like one that is not there.
+    const mediaFiles = await checkedAttachments(attachments, user);
     // The message's known OpenVibe link, with a second's budget: the card is stored on the row and arrives with the
     // broadcast when it is ready; a slower one fills the row later.
     const { card, pending } = await linkCards.forSend(message);
@@ -373,9 +409,24 @@ async function post(room, user, text, { now = Date.now(), ai = true, timezone = 
         const r = await db.run('INSERT INTO room_messages (room_id, user_id, subject_id, message, card, reply_to_id, files) VALUES (?, ?, ?, ?, ?, ?, ?::jsonb)', [room.id, user.id, user.subject_id || null, message, linkCards.toJson(card), replyToId, JSON.stringify(attached)]);
         await db.run('UPDATE rooms SET message_count = message_count + 1, last_message_at = ov_now() WHERE id = ?', [room.id]);
         await db.run('UPDATE room_members SET last_read_id = ?, last_seen_at = ov_now() WHERE room_id = ? AND user_id = ?', [r.lastInsertRowid, room.id, user.id]);
+        // What Media answered about the files, kept beside the message (the bytes live in Media).
+        if (mediaFiles.length) await messageAttachments.createRows(Number(r.lastInsertRowid), mediaFiles);
         await announceMessage(room, user, Number(r.lastInsertRowid), message, now);
         return Number(r.lastInsertRowid);
     });
+    // The files live as long as the message: Media keeps them with it (the kept window, not the 24 hours
+    // an unsent file has). A file that cannot be kept takes the message with it, so a room never shows a file
+    // that is already gone.
+    for (const att of mediaFiles) {
+        let kept = false;
+        try { kept = await mediaAttachments.keepAttachment(att.id, user.subject_id, String(id)); }
+        catch (err) { console.warn('[Chat] could not keep the attachment ' + att.id + ': ' + err.message); }
+        if (kept) continue;
+        await db.run('UPDATE room_messages SET is_deleted = 1, deleted_by = ? WHERE id = ?', [user.id, id]);
+        await messageAttachments.dropRows(id);
+        if (room.visibility === 'public') await announceDeleted(room, [id]);
+        fail(502, 'rooms.attachment_keep_failed', 'One of the attached files could not be kept with the message');
+    }
     const row = await messageById(id);
     if (pending) linkCards.fillLater('room_messages', id, pending, message);
     // General address previews are a background job: the message and its response never wait on another site.
@@ -415,6 +466,59 @@ async function postAsAi(room, member, text, { now = Date.now(), how = null, card
     return await messageById(id);
 }
 
+/**
+ * A video whose web copy Media was still making when the message was posted: ask Media again when the room
+ * is read, and keep the answer once it is ready (the room draws a player only for a ready copy). At most six a
+ * read, each asked again no sooner than 30 s, never longer than 1.5 s: a slow Media leaves the link as it is.
+ */
+const askedAt = new Map();
+async function freshenPlayback(rows) {
+    const now = Date.now();
+    const due = [];
+    for (const row of rows) {
+        if (due.length >= 6) break;
+        if (row.kind !== 'video' || row.playback_ready || !messageAttachments.ATTACHMENT_ID.test(String(row.attachment_id || '')) || !row.owner_subject) continue;
+        if (now - (askedAt.get(row.attachment_id) || 0) < 30_000) continue;
+        askedAt.set(row.attachment_id, now);
+        due.push(row);
+    }
+    if (askedAt.size > 5000) { for (const [k, at] of askedAt) if (now - at > 60_000) askedAt.delete(k); }
+    await Promise.all(due.map(async (row) => {
+        let att = null;
+        try {
+            att = await Promise.race([mediaAttachments.attachment(row.attachment_id, row.owner_subject), new Promise((r) => setTimeout(() => r(null), 1500))]);
+        } catch { att = null; }
+        const pb = att && att.playback;
+        if (!pb || !pb.ready || typeof pb.url !== 'string') return;
+        const url = messageAttachments.mediaUrl(pb.url);
+        if (!url) return;
+        row.playback_url = url; row.playback_mime = pb.mime || 'video/mp4'; row.playback_ready = 1;
+        const poster = messageAttachments.mediaUrl(att.poster);
+        if (poster) row.poster = poster;
+        try {
+            await db.run('UPDATE room_message_attachments SET playback_url = ?, playback_mime = ?, playback_ready = 1, poster = COALESCE(?, poster) WHERE message_id = ? AND attachment_id = ?',
+                [row.playback_url, row.playback_mime, poster || null, row.message_id, row.attachment_id]);
+        } catch { /* the next read asks again */ }
+    }));
+}
+
+/**
+ * The files a message carries, on the message itself (media_attachments): what a reader draws them from.
+ * Only a read asks Media again (a message just posted has the answer Media gave a moment ago).
+ */
+async function attachMedia(rows, { freshen = false } = {}) {
+    const list = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
+    if (!list.length) return;
+    const map = await messageAttachments.rowsFor(list.map((r) => Number(r.id) || 0));
+    const all = [];
+    for (const row of list) for (const stored of (map.get(Number(row.id)) || [])) all.push(stored);
+    // Only a read asks Media again: a message just posted has the answer Media gave a moment ago.
+    if (freshen) await freshenPlayback(all);
+    for (const row of list) {
+        row.media_attachments = (map.get(Number(row.id)) || []).map((stored) => messageAttachments.publicReference(stored)).filter(Boolean);
+    }
+}
+
 // A message an AI member wrote (ai_member_id; user_id 0) takes the member's name and handle.
 const MSG_SELECT = `SELECT m.id, m.room_id, m.user_id, m.message, m.card, m.files, m.reply_to_id, m.created_at, m.edited_at, m.is_deleted, m.ai_member_id, m.agent_stream, m.how, m.results, m.vibe_model, m.embeds_hidden,
         CASE WHEN m.ai_member_id IS NOT NULL THEN a.handle WHEN m.agent_stream THEN 'aiagent' ELSE u.username END AS username,
@@ -428,6 +532,7 @@ async function messageById(id) {
     const row = await db.get(`${MSG_SELECT} WHERE m.id = ?`, [id]) || null;
     if (row) {
         row.attachments = messageFiles.attachmentRefs(messageFiles.filesOf(row));
+        await attachMedia([row]);
         await linkCards.hydrate([row], 'room_messages');
         const setting = await db.get('SELECT link_previews FROM rooms WHERE id = ?', [row.room_id]);
         await linkPreviews.attach([row], 'room', { enabled: !setting || setting.link_previews !== false });
@@ -445,6 +550,7 @@ async function historyPage(room, { before = null, limit = 50 } = {}) {
     const rows = await db.all(`${MSG_SELECT} WHERE ${where} ORDER BY m.id DESC LIMIT ?`, params);
     const more = rows.length > lim;
     rows.length = Math.min(rows.length, lim);
+    await attachMedia(rows, { freshen: true });
     await linkCards.hydrate(rows, 'room_messages');
     await linkPreviews.attach(rows, 'room', { enabled: room.link_previews !== false });
     return { messages: rows, more };
@@ -459,6 +565,7 @@ async function history(room, { before = null, after = null, limit = 60 } = {}) {
             ? await db.all(`${MSG_SELECT} WHERE m.room_id = ? AND m.id < ? AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT ?`, [room.id, Number(before) || 0, lim])
             : await db.all(`${MSG_SELECT} WHERE m.room_id = ? AND m.is_deleted = 0 ORDER BY m.id DESC LIMIT ?`, [room.id, lim]);
     for (const row of rows) row.attachments = messageFiles.attachmentRefs(messageFiles.filesOf(row));
+    await attachMedia(rows, { freshen: true });
     await linkCards.hydrate(rows, 'room_messages');
     await linkPreviews.attach(rows, 'room', { enabled: room.link_previews !== false });
     return after != null ? rows : rows.reverse();
@@ -475,6 +582,20 @@ async function markRead(room, user, lastId) {
     await db.run('UPDATE room_members SET last_read_id = GREATEST(last_read_id, ?), last_seen_at = ov_now() WHERE room_id = ? AND user_id = ?', [to, room.id, user.id]);
 }
 
+/**
+ * The files a message carried, removed: Media is asked to delete them (the person who uploaded them is
+ * named, so Media knows whose file this is) and the rows go with the message.
+ */
+async function dropAttachments(messageId) {
+    let rows = [];
+    try { rows = await messageAttachments.rowsOf(messageId); } catch { rows = []; }
+    for (const row of rows) {
+        try { await mediaAttachments.deleteAttachment(row.attachment_id, row.owner_subject); }
+        catch (err) { console.warn('[Chat] could not remove the attachment ' + row.attachment_id + ': ' + err.message); }
+    }
+    try { await messageAttachments.dropRows(messageId); } catch { /* the rows go with the message anyway */ }
+}
+
 async function deleteMessage(room, user, messageId) {
     const m = await db.get('SELECT * FROM room_messages WHERE id = ? AND room_id = ?', [messageId, room.id]);
     if (!m || m.is_deleted) fail(404, 'rooms.no_message', 'No such message');
@@ -485,6 +606,8 @@ async function deleteMessage(room, user, messageId) {
         await db.run('UPDATE room_messages SET is_deleted = 1, deleted_by = ? WHERE id = ?', [user.id, m.id]);
         if (room.visibility === 'public') await announceDeleted(room, [m.id]);
     });
+    // The files the message carried go with it: Media keeps nothing for a message that is gone.
+    await dropAttachments(m.id);
     if (!own) await db.logModerationAction({ scope_type: 'room', scope_id: room.slug, actor_user_id: user.id, target_user_id: m.user_id, action_type: 'delete_message', details: { message_id: m.id } });
     return m.id;
 }

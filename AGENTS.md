@@ -17,7 +17,10 @@ build step**.
 ## What it owns
 
 - Rooms: global, stream, channel, community, DM/group DM, call, system; servers (groups of rooms as
-  text and voice channels, with roles and invites).
+  text and voice channels, with roles and invites). A room message may carry up to four files the person
+  picked in the room's box: they go to OpenVibe.Media's composer attachments (composer.attachment@1) as
+  they are picked, Chat checks them with Media (owner-checked), keeps each with the message and draws them
+  (a video in the network's player, a picture, a sound, a file link).
 - Messages, replies/rich payloads, edit history, membership/roles, unread/read state, presence and
   typing (ephemeral).
 - Moderation state: bans, timeouts, delete/purge, filters, slow/member-only modes, the moderation
@@ -88,7 +91,9 @@ tests use embedded PGlite, PostgreSQL in production through PgBouncer. Migration
 `migrations/NNNN_*.sql`, applied at boot with the owner connection (`DATABASE_DIRECT_URL`), then the
 app serves through the pooled runtime role (`DATABASE_URL`, DML only). Never edit an applied
 migration. The moved tables keep Live's ids and columns plus Network subject columns
-(`subject_id`, `sender_subject_id`, …). `docs/parity.md` records the parity method.
+(`subject_id`, `sender_subject_id`, …). `docs/parity.md` records the parity method. The files a room
+message carries live in Media, not here: `room_message_attachments` keeps what Media answered (the
+kind, the type, the poster, the playback, the length, the size) beside the message.
 
 ## Auth and the WebSocket rules
 

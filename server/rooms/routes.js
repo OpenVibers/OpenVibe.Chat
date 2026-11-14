@@ -222,6 +222,8 @@ router.post('/:slug/messages', requireAuth, postLimit, async (req, res) => {
         const message = await rooms.post(room, req.user, command.handled ? command.text : req.body && req.body.message, {
             timezone: req.body && req.body.timezone,
             files: require('./files').attachmentsFromBody(req.body),
+            // The files Media stored for the sender (the room's box): at most four, each one theirs.
+            attachments: require('./attachments').namedAttachments(req.body && req.body.attachments),
             reply_to_id: req.body && req.body.reply_to_id,
         });
         chatServer().broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });

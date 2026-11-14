@@ -192,8 +192,60 @@ function messageCards(m, opts) {
     return m.card && m.card.kind === 'agent-run' ? embedCard(m.card) : linkCard(m.card);
 }
 
+/**
+ * An address a message's file may point at: https on openvibe.media, under /a/ (the bytes Media serves).
+ * Anything else — another host, another scheme, another path — is no address at all.
+ */
+function mediaUrl(value) {
+    try {
+        const u = new URL(String(value || ''));
+        if (u.protocol !== 'https:' || u.port || u.username || u.password) return null;
+        if (u.hostname.toLowerCase() !== 'openvibe.media') return null;
+        if (!u.pathname.startsWith('/a/')) return null;
+        return u.href;
+    } catch { return null; }
+}
+
+/**
+ * One file a message carries (Media's composer attachments): a video plays in the network's player (Media's
+ * web copy, its poster, its size), a video whose copy is still being made shows its first frame and a link to
+ * the file, a picture shows, a sound gets a bar, a file is a link. Every string is data: escaped here.
+ */
+function mediaAttachment(a) {
+    if (!a || typeof a !== 'object') return '';
+    const url = mediaUrl(a.url);
+    if (!url) return '';
+    const poster = mediaUrl(a.poster);
+    const type = String(a.media_type || '');
+    const kind = a.kind || (type.startsWith('video/') ? 'video' : type.startsWith('image/') ? 'image' : type.startsWith('audio/') ? 'audio' : 'file');
+    const title = esc(a.name || (kind === 'video' ? 'Video' : kind === 'image' ? 'Picture' : kind === 'audio' ? 'Sound' : 'Attached file'));
+    const w = Number(a.width) || 0, h = Number(a.height) || 0;
+    const size = w > 0 && h > 0 && w <= 10000 && h <= 10000 ? ` width="${Math.round(w)}" height="${Math.round(h)}"` : '';
+    if (kind === 'video') {
+        const pb = a.playback && a.playback.ready ? mediaUrl(a.playback.url) : null;
+        const secs = Number(a.duration_s);
+        const length = Number.isFinite(secs) && secs > 0 ? `${Math.floor(secs / 60)}:${String(Math.round(secs % 60)).padStart(2, '0')}` : '';
+        if (!pb) {
+            return `<a class="oc-attach-item oc-attach-video is-preparing" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${poster ? `<img src="${esc(poster)}" alt="" loading="lazy"${size}>` : ''}<span>Getting the video ready to play here. Open the file</span></a>`;
+        }
+        return `<figure class="oc-attach-item oc-attach-video"><video data-ov-player controls preload="none" playsinline src="${esc(pb)}"${poster ? ` poster="${esc(poster)}"` : ''}${size} aria-label="${title}"></video>${length ? `<figcaption>${title} · ${length}</figcaption>` : ''}</figure>`;
+    }
+    if (kind === 'image') return `<a class="oc-attach-item oc-attach-image" href="${esc(url)}" target="_blank" rel="noopener noreferrer"><img src="${esc(poster || url)}" alt="${title}" loading="lazy" width="160"></a>`;
+    if (kind === 'audio') return `<figure class="oc-attach-item oc-attach-audio"><audio controls preload="none" src="${esc(url)}" aria-label="${title}"></audio><figcaption>${title}</figcaption></figure>`;
+    return `<a class="oc-attach-item oc-attach-file" href="${esc(url)}" target="_blank" rel="noopener noreferrer">${title}</a>`;
+}
+
+/** The files a message carries (at most four), or nothing. */
+function messageAttachments(m) {
+    const list = Array.isArray(m && m.media_attachments) ? m.media_attachments : [];
+    if (!list.length) return '';
+    const items = list.map(mediaAttachment).filter(Boolean);
+    if (!items.length) return '';
+    return `<div class="oc-attach">${items.join('')}</div>`;
+}
+
 const hueOf = (slug) => { let h = 0; for (const c of String(slug)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
 const serverLetters = (name) => String(name || '?').split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?';
 const serverMark = (s) => `<span class="oc-srv-icon oc-srv-icon--row" style="--oc-hue:${hueOf(s.slug)}" aria-hidden="true">${esc(serverLetters(s.name))}</span>`;
 
-module.exports = { head, when, initials, presenceState, presenceDot, presenceOrder, presenceLine, hueOf, serverLetters, serverMark, linkCard, embedCard, messageCards, hideForm, showForm };
+module.exports = { head, when, initials, presenceState, presenceDot, presenceOrder, presenceLine, hueOf, serverLetters, serverMark, linkCard, embedCard, messageCards, messageAttachments, mediaAttachment, mediaUrl, hideForm, showForm };
