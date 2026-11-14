@@ -120,7 +120,7 @@
 .oc-icon-btn .oc-i { width: 20px; height: 20px; }
 
 /* A page in the middle column (Explore, the Messages list): it scrolls on its own, inside the page gutter. */
-.oc-page { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 18px 24px 28px; }
+.oc-page { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 24px 28px; }
 .oc-page > .oc-page-head:first-child { margin-top: 0; }
 .oc-page > .oc-list { margin-left: -8px; margin-right: -8px; }
 
@@ -400,3 +400,5 @@ fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
 .oc-feed.is-grouped > .oc-day::before, .oc-feed.is-grouped > .oc-day::after { content: ""; flex: 1; height: 1px; background: var(--oc-line); }
 .oc-feed.is-grouped > .oc-msg.is-first > .oc-time { display: inline; margin: 0; }
 .oc-feed.is-grouped > .oc-msg.is-cont > .oc-time { display: block; margin: 0; }
+/* Design rule 201 (the owner, 11-14): a page starts within 12 px of the bar, 8 px on a phone. */
+@media (max-width: 640px) { .oc-page { padding-top: 8px; } }
