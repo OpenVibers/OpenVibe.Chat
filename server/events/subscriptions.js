@@ -114,7 +114,7 @@ function startAtBoot({ config, port, fetchImpl, log = console, retryMs = BOOT_RE
             if (stopped) return resolve(null);
             try {
                 const results = await ensure({ config, endpoint, action: 'create', fetchImpl });
-                for (const r of results) log.log(`[Events] subscription ${r.result}: ${r.id} (${r.topic} → ${endpoint}${r.enabled === false ? ', DISABLED' : ''})`);
+                for (const r of results) log.log(`[Events] subscription ${r.result}: ${r.id} (${r.topic} to ${endpoint}${r.enabled === false ? ', DISABLED' : ''})`);
                 return resolve(results);
             } catch (err) {
                 const next = retryMs[i + 1];

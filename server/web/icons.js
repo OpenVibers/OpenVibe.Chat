@@ -7,6 +7,8 @@ const svg = (d) => `<svg class="oc-i" viewBox="0 0 24 24" aria-hidden="true" foc
 
 const ICONS = {
     back: svg('<path d="M15 5l-7 7 7 7"/>'),
+    up: svg('<path d="M12 20V4M6 10l6-6 6 6"/>'),
+    down: svg('<path d="M12 4v16M6 14l6 6 6-6"/>'),
     send: svg('<path d="M12 19V5M5 12l7-7 7 7"/>'),
     image: svg('<rect x="3" y="5" width="18" height="14" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-8 8"/>'),
     trash: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>'),

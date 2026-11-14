@@ -5,7 +5,8 @@
    ones fold to their prompt. Everything is set with textContent. In a frame it tells the parent its height. */
 (function () {
   'use strict';
-  var ICON = { prompt: '›', response: '✓', thinking: '…', 'tool.call': '⚙', 'file.change': '✎', 'file.save': '✎', 'session.status': '•' };
+  var ICON = { response: '✓', thinking: '…', 'tool.call': '⚙', 'file.change': '✎', 'file.save': '✎', 'session.status': '•' };
+  var PROMPT_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m9 6 6 6-6 6"/></svg>';
   var LIVE_MS = 3 * 60 * 1000;
   function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
   function store(fn) { try { return fn(window.localStorage); } catch (e) { return null; } }
@@ -75,7 +76,7 @@
       turns.forEach(function (turn, i) {
         var last = i === turns.length - 1;
         var li = el('li', 'fv-turn' + (last ? ' fv-cur' : ''));
-        if (turn.prompt) { var p = el('p', 'fv-prompt'); p.appendChild(el('span', 'fv-ic', ICON.prompt)); p.appendChild(el('span', 'fv-txt', turn.prompt.summary)); li.appendChild(p); }
+        if (turn.prompt) { var p = el('p', 'fv-prompt'); var pi = el('span', 'fv-ic'); pi.innerHTML = PROMPT_ICON; p.appendChild(pi); p.appendChild(el('span', 'fv-txt', turn.prompt.summary)); li.appendChild(p); }
         if (last || !turn.prompt) {
           var steps = el('ol', 'fv-steps');
           var shown = turn.steps.slice(-6);

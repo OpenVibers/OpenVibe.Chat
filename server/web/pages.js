@@ -31,6 +31,7 @@
  * test/live-down.test.js renders every page and uses the core APIs with Live refusing and hanging.
  */
 const showcase = require('openvibe-shared/showcase');
+const { ICONS } = require('./icons');
 const shell = require('./shell');
 const path = require('path');
 const express = require('express');
@@ -671,7 +672,7 @@ ${composer}`,
         await page(req, res, 200, {
             actor, title, path: `/call/${ch.id}`, active: 'messages', robots: 'noindex, nofollow', callScript: true,
             page: { view: 'call', me: me.id, call: { channel: ch.id, join: true, talk: true, ring: ringing ? { id: Number(ringing.id), name: nameOf(ringing) } : null } },
-            body: `<p><a href="${backLink}">← Back to the conversation</a></p>
+            body: `<p><a href="${backLink}">${ICONS.back} Back to the conversation</a></p>
 <section class="oc-call oc-call-page" aria-labelledby="oc-call-h" id="oc-call">
 <h1 id="oc-call-h">${esc(title)} <span class="oc-muted oc-call-count" id="oc-call-count">${ch.participantCount ? `· ${ch.participantCount} in` : ''}</span></h1>
 <p class="oc-muted" id="oc-call-how">A voice call, peer to peer: your microphone goes only to the people in it.</p>
@@ -1511,7 +1512,7 @@ ${entries.length ? `<ul class="oc-list">${entries.map(entryView).join('')}</ul>`
         res.set('Cache-Control', 'no-store');
         await page(req, res, 200, {
             actor, title: `${room.name}: new hook`, path: req.path, active: 'rooms', robots: 'noindex, nofollow',
-            body: `<p><a href="/r/${esc(room.slug)}/settings#oc-hooks">← Room settings</a></p><h1>Hook "${esc(made.hook.label)}" is ready</h1>
+            body: `<p><a href="/r/${esc(room.slug)}/settings#oc-hooks">${ICONS.back} Room settings</a></p><h1>Hook "${esc(made.hook.label)}" is ready</h1>
 ${notice('ok', 'Copy the secret now: it is not shown again. Anyone with the address and the secret can post in the room.')}
 <label class="oc-form">Address <input readonly value="${esc(address)}"></label>
 <label class="oc-form">Secret <input readonly value="${esc(made.secret)}"></label>
