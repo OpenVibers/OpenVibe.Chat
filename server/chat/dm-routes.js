@@ -130,7 +130,19 @@ router.get('/conversations', async (req, res) => {
 // Create or get a conversation
 router.post('/conversations', startLimit, async (req, res) => {
     try {
-        const { user_ids, name } = req.body;
+        const { name } = req.body;
+        let user_ids = req.body.user_ids;
+        // 11-14: a site that knows a person by their OpenVibe username (Network's friends, the menu's Chat) may name them
+        // instead of Chat's own ids: { usernames: ['maya'] }, resolved as the friends route resolves them.
+        if ((!Array.isArray(user_ids) || !user_ids.length) && Array.isArray(req.body.usernames)) {
+            user_ids = [];
+            for (const u of req.body.usernames.slice(0, 10)) {
+                const name0 = String(u || '').trim().replace(/^@/, '');
+                if (!/^[A-Za-z0-9_]{2,32}$/.test(name0)) continue;
+                const t = await ctx.getUserByUsername(name0) || await ctx.ensureUserByUsername(name0).catch(() => null);
+                if (t) user_ids.push(t.id);
+            }
+        }
         if (!user_ids || !Array.isArray(user_ids) || user_ids.length === 0) {
             return res.status(400).json({ error: 'user_ids array required' });
         }
