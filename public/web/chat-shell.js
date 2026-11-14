@@ -161,7 +161,15 @@
         if (at && !sameDay) { var d = document.createElement('li'); d.className = 'oc-day'; d.setAttribute('role', 'separator'); d.textContent = dayName(at); feed.insertBefore(d, li); }
         var cont = !!(prev && sameDay && prev.who === who && name && at - prev.at < 5 * 60000);
         li.classList.toggle('is-cont', cont); li.classList.toggle('is-first', !cont);
-        if (!cont && name) { li.setAttribute('data-initial', (name.textContent.trim().charAt(0) || '?').toUpperCase()); var nc = name.style.getPropertyValue('--nc'); if (nc) li.style.setProperty('--nc', nc); }
+        if (!cont && name) {
+          // The first letter or digit of the name (a decoration in front of it drew "?"), and the person's picture over it
+          // (Network's /avatar/<username> answers for everyone; 11-14, the owner: "the user avatars … don't work").
+          var letter = (name.textContent.match(/[\p{L}\p{N}]/u) || ['?'])[0].toUpperCase();
+          li.setAttribute('data-initial', letter);
+          var handle = (String(name.getAttribute('href') || '').match(/\/@([A-Za-z0-9_]{2,32})(?:$|[/?#])/) || [])[1];
+          if (handle && !li.style.getPropertyValue('--av-img')) li.style.setProperty('--av-img', 'url("https://openvibe.network/avatar/' + encodeURIComponent(handle) + '?s=80")');
+          var nc = name.style.getPropertyValue('--nc'); if (nc) li.style.setProperty('--nc', nc);
+        }
         if (time && at) time.title = at.toLocaleString();
         prev = { who: who, at: at };
       });
@@ -285,19 +293,23 @@
   }
   var people = Array.prototype.slice.call(document.querySelectorAll('[data-oc-user]'));
   // A message's author opens the card too: the message carries data-user, live messages included (one listener).
-  var hasMessages = !!document.querySelector('.oc-msg[data-user]');
+  // 11-14 (the owner: "the user context menu cross-site shared system doesn't work"): Global chat's messages arrive over
+  // the socket after this runs, so the listener never waits for them; the card asks Network by username (Chat's own ids
+  // are not Network's) and a public card needs no sign-in.
+  var hasMessages = !!document.querySelector('.oc-feed, .oc-msg');
   if (!people.length && !hasMessages) return;
   var tok = token();
-  if (!tok) return;   // signed out: no card to open
+  if (window.OpenVibeUserCard && window.OpenVibeUserCard.init) window.OpenVibeUserCard.init({ apiBase: 'https://openvibe.network', token: tok || null });
   document.addEventListener('click', function (e) {
-    var name = e.target && e.target.closest && e.target.closest('.oc-msg[data-user] .oc-name');
+    var name = e.target && e.target.closest && e.target.closest('.oc-msg .oc-name');
     if (!name || !window.OpenVibeUserCard || e.ctrlKey || e.metaKey || e.shiftKey) return;   // a modifier opens the profile page
-    var id = name.closest('.oc-msg').getAttribute('data-user');
-    if (!id || id === '0') return;
+    var handle = (String(name.getAttribute('href') || '').match(/\/@([A-Za-z0-9_]{2,32})(?:$|[/?#])/) || [])[1];
+    if (!handle) return;
     e.preventDefault();
     var box = name.getBoundingClientRect();
-    window.OpenVibeUserCard.show(id, box.left + 8, box.bottom + 8);
+    window.OpenVibeUserCard.show(handle, box.left + 8, box.bottom + 8);
   });
+  if (!tok) return;   // signed out: the members' cards by id need a session
 
   function openCard(el) {
     if (window.OpenVibeUserCard && window.OpenVibeUserCard.show) {
