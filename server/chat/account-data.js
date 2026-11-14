@@ -108,6 +108,8 @@ const EXPORTS = [
     ['room_reactions.json', `SELECT message_id, reaction, created_at FROM room_message_reactions WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     // What happened to them in Chat, and what their own actions caused (server/chat/activity.js).
     ['activity.json', `SELECT id, kind, actor_user_id, actor_username, room_id, server_id, conversation_id, message_id, parent_id, scope, excerpt, reaction, role, created_at, read_at FROM chat_activity WHERE user_id = ANY(@ids) OR actor_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    // Which of that activity the Network was told about (server/chat/activity-notify.js).
+    ['activity_notifications.json', `SELECT activity_id, kind, type, url, status, created_at FROM chat_activity_notifications WHERE user_id = ANY(@ids) ORDER BY activity_id DESC LIMIT ${LIMIT}`],
 ];
 
 async function exportPart(d, subject) {
@@ -164,6 +166,7 @@ const ERASE_AFTER_ROOMS = [
     ['agent_room_votes', 'DELETE FROM agent_room_poll_votes WHERE user_id = ANY(@ids)'],
     ['room_reactions', 'DELETE FROM room_message_reactions WHERE user_id = ANY(@ids)'],
     ['activity', 'DELETE FROM chat_activity WHERE user_id = ANY(@ids) OR actor_user_id = ANY(@ids)'],
+    ['activity_notifications', 'DELETE FROM chat_activity_notifications WHERE user_id = ANY(@ids)'],
     ['room_memory', "DELETE FROM room_memory WHERE learned_by = ANY(@s) OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(room_memory.source_subjects) x WHERE x = ANY(@s))"],
     ['vibe_deliveries', 'DELETE FROM vibe_deliveries WHERE user_id = ANY(@ids)'],
     // Friends and conversation view preferences from the Chat app shell.

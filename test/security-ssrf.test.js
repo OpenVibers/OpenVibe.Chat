@@ -119,6 +119,7 @@ t('ratchet: every file that makes an outbound request itself is reviewed', () =>
         'server/rooms/vibe-compare.js': 'Bench (configured), fixed paths: the compare round and its vote',
         'server/rooms/community-forum.js': 'Community API (configured internal URL), fixed space/thread endpoints; slugs and ids are validated and request paths are not user URLs',
         'server/net/service-auth.js': 'Network JWKS (configured)',
+        'server/chat/activity-notify.js': 'Network internal API (configured), a fixed path: the person\'s own unread count (/api/notifications/unread-count) with their own Bearer',
         'server/chat/account-data.js': 'Network internal API (configured), fixed paths: export parts and deletion confirmations',
         'server/chat/agent-room-view.js': 'Live internal API (configured), fixed chat-access path with an encoded stream id and optional link key; configured timeout (4 s default), fail-closed',
         'server/prefs/network-modules.js': 'Network user modules (configured)',
