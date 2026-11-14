@@ -297,6 +297,11 @@ ${MARK}
         })}</div>`;
         await page(req, res, status, {
             actor, app: true, kit: true, upload: true, canvas: !!room, active: 'vibe', path: room ? `/vibe/${room.slug}` : '/vibe',
+            // Signed in, /vibe is the network's messenger full-page (openvibe-shared ov-run.js OpenVibeRun.page, 4.250.0;
+            // plan §AB.47): your agents and conversations beside the open one, the same as the menu's Vibe on every site.
+            // public/web/vibe-messenger.js swaps it in once it loads with the person's token; until then, and without
+            // JavaScript, this page works as it is. /vibe/:slug keeps its tools (models side by side, the canvas).
+            scripts: !room && user ? ['vibe-messenger.js'] : [],
             title: room ? `${room.name} · Vibe` : 'Vibe, OpenVibe\'s assistant',
             fullTitle: room ? undefined : 'Vibe: chat with OpenVibe\'s assistant · OpenVibe.Chat',
             description: 'Chat with Vibe, OpenVibe\'s free assistant: it searches news, deals, jobs, rentals and videos across OpenVibe, reads pages you link and helps you think.',
