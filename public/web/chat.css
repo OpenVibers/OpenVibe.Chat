@@ -31,7 +31,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .oc-tabs a { color: var(--oc-muted); text-decoration: none; padding: 4px 10px; border-radius: 999px; }
 .oc-tabs a[aria-current="page"], .oc-tabs a:hover { color: var(--oc-text); background: var(--oc-panel); }
 .oc-account { font-size: 14px; color: var(--oc-muted); margin-left: auto; }
-.oc-main { max-width: 960px; margin: 0 auto; padding: 16px 16px 0; overflow-wrap: anywhere; }
+.oc-main { max-width: 960px; margin: 0 auto; padding: 12px 16px 0; overflow-wrap: anywhere; }
 /* The front page's showcase section under the room: the page column already has the gutter. */
 .oc-main .sc-sec { padding-left: 0; padding-right: 0; margin-top: 40px; }
 h1 { font-size: 1.6rem; line-height: 1.25; margin: .3em 0 .2em; }
@@ -877,3 +877,7 @@ div.oc-set-row { cursor: default; }
 .oc-card-hide-btn:hover, .oc-card-hide-btn:focus-visible { color: var(--oc-text); border-color: var(--oc-accent); }
 .oc-card-hidden-note { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 0; color: var(--oc-muted); font-size: .86em; }
 .oc-card-show { margin: 0; display: inline-flex; }
+/* Design rule 201: the intro is one line on a computer, at most two on a phone. */
+@media (max-width: 640px) { .oc-lede, .oc-lead { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; } }
+/* Design rule 201 (the owner, 11-14): a page starts within 12 px of the bar, 8 px on a phone. */
+@media (max-width: 640px) { .oc-main { padding-top: 8px; } }
