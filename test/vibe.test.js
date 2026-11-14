@@ -150,6 +150,10 @@ t('the app page: signed out it invites a sign-in, signed in it lists the chats a
     assert.ok(!out.text.includes('id="ov-footer"'), 'the app has no footer');
     const signed = await web('GET', '/vibe', ann);
     assert.ok(signed.text.includes('One model, or up to three side by side'));
+    // Signed in, /vibe brings the network's messenger (4.250.0 OpenVibeRun.page), which swaps in over this page once it
+    // has the person's token; signed out and on one chat's own page it does not come.
+    assert.ok(/<script src="\/[^"]*vibe-messenger\.js[^"]*" defer><\/script>/.test(signed.text), 'the messenger comes on /vibe signed in');
+    assert.ok(!out.text.includes('vibe-messenger.js'), 'not signed out');
     assert.strictEqual((signed.text.match(/<h1[\s>]/g) || []).length, 1, 'one h1 on a new chat: the greeting (the header names it in a <p>)');
     assert.ok(signed.text.includes('class="ovk-sidebar-item" href="/vibe/v-'), 'the rail lists their chats (the network\'s one sidebar, kit.sidebar)');
     // The rail leads to the rest of the person's agent: their tasks, their computers and robots, team workspaces.
