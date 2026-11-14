@@ -12,6 +12,8 @@
  *   GET    /:slug/messages          ?before=<id> | ?after=<id>, &limit
  *   POST   /:slug/messages          { message }
  *   DELETE /:slug/messages/:id      the author, a room moderator or chat staff
+ *   POST   /:slug/messages/:id/embeds/hidden   the author, a moderator: the message's cards are taken back (or put back)
+ *   PATCH  /:slug/link-previews      the owner and the moderators: the room's link previews on or off
  *   POST   /:slug/join | /leave | /read { last_id? }
  *   GET    /:slug/members           (moderators also get last_seen_at)
  *   POST   /:slug/members           owner/mods: { username, role } — one of the kind's roles (rooms.KIND_ROLES) or none
@@ -303,6 +305,41 @@ router.get('/:slug/messages/:id/edits', requireAuth, async (req, res) => {
     const row = await db.get('SELECT edit_history FROM room_messages WHERE id = ? AND room_id = ?', [Number(req.params.id), room.id]);
     if (!row) return res.status(404).json({ error: 'No such message' });
     return res.set('Cache-Control', 'private, no-store').json({ versions: row.edit_history || [] });
+});
+
+/**
+ * The cards of a room message, taken back (server/chat/link-previews.js): the message's author, the room's owner
+ * or its moderators decide. The message keeps the flag, so the cards can be put back; while it is set, a read
+ * sends no cards for that message. The room hears it at once (room_message_embeds with hidden: true).
+ */
+router.post('/:slug/messages/:id/embeds/hidden', requireAuth, deleteLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try {
+        const id = parseInt(req.params.id, 10);
+        const message = await db.get('SELECT id, user_id FROM room_messages WHERE id = ? AND room_id = ?', [id, room.id]);
+        if (!message) throw new rooms.RoomError(404, 'rooms.no_message', 'No such message');
+        const a = await rooms.access(room, req.user);
+        if (Number(message.user_id) !== Number(req.user.id) && !a.moderate) throw new rooms.RoomError(403, 'rooms.embeds', 'Only the author or a room moderator hides a preview');
+        const b = req.body || {};
+        const hidden = b.hidden === undefined ? true
+            : !(b.hidden === false || b.hidden === 0 || b.hidden === '0' || b.hidden === 'false' || b.hidden === 'off' || b.hidden === 'no');
+        const out = await linkPreviews.hide('room', id, hidden);
+        chatServer().broadcastToRoom(room.id, { type: 'room_message_embeds', room: room.slug, id, embeds: out.embeds, hidden: out.hidden });
+        res.json({ ok: true, id, hidden: out.hidden, embeds: out.embeds });
+    } catch (err) { send(res, err); }
+});
+
+/**
+ * The room's link previews switch (server/rooms/rooms.js): its owner and its moderators set it. Off: no new
+ * address in the room is fetched, and the reads show no previews.
+ */
+router.patch('/:slug/link-previews', requireAuth, manageLimit, async (req, res) => {
+    const room = await readable(req, res); if (!room) return;
+    try {
+        const b = req.body || {};
+        const on = b.link_previews === undefined ? true : (b.link_previews === true || b.link_previews === 1 || b.link_previews === '1' || b.link_previews === 'on');
+        res.json({ room: await rooms.setLinkPreviews(room, req.user, on) });
+    } catch (err) { send(res, err); }
 });
 
 /**

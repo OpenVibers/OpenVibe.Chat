@@ -937,8 +937,14 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
             ? `<span class="oc-name oc-ai-name">${esc(m.display_name || 'AI')}</span> <span class="oc-badge oc-ai" title="An AI member of this room">AI</span>`
             : `<a class="oc-name" href="${LIVE}/@${encodeURIComponent(m.username || '')}"${/^#[0-9a-f]{3,8}$/i.test(m.profile_color || '') ? ` style="--nc:${esc(m.profile_color)}"` : ''}>${esc(m.display_name || m.username || 'someone')}</a>${roleBadge(m.user_role)}`;
         // An AI member writes Markdown (lists, bold, links): vibe-md.js escapes every character first, then marks it up.
+        // The cards of this message: the author and the room's moderators may take them back, and put them back.
+        const mayHide = !!(can.moderate || (me && !ai && !agent && Number(m.user_id) === Number(me.id)));
+        const hideAction = mayHide ? `/r/${esc(slug)}/embeds/${Number(m.id) || 0}/hidden` : null;
+        const cards = m.embeds_hidden
+            ? `<span class="oc-card-hidden-note">Previews hidden</span>${mayHide ? ui.showForm(hideAction) : ''}`
+            : ui.messageCards(m, { hide: hideAction });
         const text = ai ? `<div class="oc-text vb-md">${md.render(m.message)}</div>` : `<span class="oc-text">${emojis ? require('../chat/emoji-text').render(m.message, emojis, linkify, esc) : linkify(m.message)}</span>`;
-        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${m.edited_at ? ` <span class="oc-muted oc-edited" data-edited-at="${esc(m.edited_at)}">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ai ? '' : pictures.pageHtml(m.message)}${ui.messageCards(m)}${can.moderate && m.edited_at ? '<button type="button" class="ovk-btn ovk-btn--quiet oc-edits">Earlier versions</button>' : ''}${del}</li>`;
+        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${m.edited_at ? ` <span class="oc-muted oc-edited" data-edited-at="${esc(m.edited_at)}">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ai ? '' : pictures.pageHtml(m.message)}${cards}${can.moderate && m.edited_at ? '<button type="button" class="ovk-btn ovk-btn--quiet oc-edits">Earlier versions</button>' : ''}${del}</li>`;
     };
     const applyRoomChange = async (room) => await roomRoutes.applyRoomChange(room);
 
@@ -1211,6 +1217,35 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         res.redirect(303, `/r/${room.slug}`);
     }));
 
+    // The cards of a message, taken back or put back: the same checks, the same answer and the same event as the
+    // API route (server/rooms/routes.js), so a form and the JavaScript client behave the same way.
+    router.post('/r/:slug/embeds/:id/hidden', formLimit, sameSite, roomsOrError(async (req, res, next) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}`;
+        const id = parseInt(req.params.id, 10);
+        const raw = String((req.body && req.body.hidden) === undefined ? '1' : (req.body && req.body.hidden));
+        const hidden = !(raw === '0' || raw === 'off' || raw === 'false' || raw === 'no');
+        return apiBridge(roomRoutes, `/${encodeURIComponent(room.slug)}/messages/${Number(id) || 0}/embeds/hidden`, {
+            body: () => ({ hidden }),
+            ok: (r, s) => s.redirect(303, `/r/${room.slug}`),
+            fail: (r, s, status, error) => s.redirect(303, `/r/${room.slug}?error=${encodeURIComponent(error || 'That did not work')}`),
+        })(req, res, next);
+    }));
+
+    // The room's link previews switch: its owner and its moderators set it (server/rooms/rooms.js).
+    router.post('/r/:slug/link-previews', formLimit, sameSite, roomsOrError(async (req, res) => {
+        const actor = await needUser(req, res); if (!actor) return;
+        const room = await rooms.bySlug(req.params.slug);
+        if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
+        req.roomBack = `/r/${room.slug}/settings`;
+        const b = req.body || {};
+        const on = b.has_link_previews ? (b.link_previews === '1' || b.link_previews === 'on' || b.link_previews === 'true') : true;
+        await rooms.setLinkPreviews(room, actor.user, on);
+        res.redirect(303, `/r/${room.slug}/settings?saved=1`);
+    }));
+
     router.get('/r/:slug/settings', async (req, res) => {
         const x = await loadRoom(req, res); if (!x) return;
         const { actor, room, can } = x;
@@ -1310,6 +1345,9 @@ ${room.slug !== 'staff' && (room.kind || 'community') === 'community' && Number(
 ${rooms.isWorkspace(room) ? `<label>Shared screen <input name="screen_url" type="url" value="${esc(room.screen_url || '')}" placeholder="https://openvibe.bot/screen/…"> <span class="oc-muted oc-small">A screen share link from OpenVibe.Bot (a computer's owner makes it on its screen page). Members see the screen beside the conversation; with a "use" link they can click and type on it. Empty: no screen.</span></label>` : ''}
 <p><button type="submit">Save</button></p></form>
 <p><a href="/r/${esc(room.slug)}/memory">What this room remembers</a> <span class="oc-muted oc-small">— the notes the AI keeps between summaries; you can correct or remove them.</span></p></section>` : ''}
+${can.moderate ? `<section class="oc-set"><h2>Link previews</h2><form class="oc-form oc-set-form" method="post" action="/r/${esc(room.slug)}/link-previews">
+<input type="hidden" name="has_link_previews" value="1"><label class="oc-set-row oc-set-inline"><span class="oc-set-text">Cards under a message<small>When a message carries a web address, a card under it shows the page. Off: nothing is fetched for this room, and no cards are shown.</small></span><input type="checkbox" class="oc-switch" name="link_previews" value="1"${room.link_previews !== false ? ' checked' : ''}></label>
+<p><button type="submit">Save</button></p></form></section>` : ''}
 <section class="oc-set" aria-labelledby="oc-members-h"><h2 id="oc-members-h">Members <span class="oc-count">${members.length}</span></h2>
 <p class="oc-muted oc-set-note">${esc(roleHelp(room.kind))}</p>
 <form class="oc-find oc-find-inset" method="post" action="/r/${esc(room.slug)}/members">${IC.plus}<label for="oc-invite" class="oc-sr">Add someone by their username</label><input id="oc-invite" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="Add by username" autocomplete="off"><select name="role" aria-label="Their role">${choices.filter((r) => r !== 'none' && r !== 'blocked').map((r) => roleOption(r, addRole)).join('')}</select><button type="submit" class="oc-send" aria-label="Add" title="Add">${IC.send}</button></form>

@@ -853,3 +853,12 @@ div.oc-set-row { cursor: default; }
 .oc-edits-sheet li { padding: 10px 12px; border-radius: 12px; background: var(--oc-panel-2); }
 .oc-edits-sheet time { display: block; font-size: 12px; color: var(--oc-muted); }
 .oc-edits-sheet p { margin: 4px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The small × that takes a message's cards back, and the note under a message whose cards are gone
+   (server/rooms/routes.js): the message's author and the room's moderators only. */
+.oc-card { position: relative; }
+.oc-card > .oc-card-hide, .oc-card > .oc-card-hide-btn { position: absolute; top: 4px; right: 4px; margin: 0; }
+.oc-card-hide-btn { width: 24px; height: 24px; padding: 0; border-radius: 999px; border: 1px solid var(--oc-line); background: var(--oc-panel); color: var(--oc-muted); font-size: 15px; line-height: 1; cursor: pointer; }
+.oc-card-hide-btn:hover, .oc-card-hide-btn:focus-visible { color: var(--oc-text); border-color: var(--oc-accent); }
+.oc-card-hidden-note { display: inline-flex; align-items: center; gap: 6px; margin: 4px 0 0; color: var(--oc-muted); font-size: .86em; }
+.oc-card-show { margin: 0; display: inline-flex; }
