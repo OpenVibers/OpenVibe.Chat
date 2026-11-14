@@ -64,7 +64,13 @@ async function record({ userId, kind, actor, roomId = null, serverId = null, con
             serverId ? Number(serverId) : null, conversationId ? Number(conversationId) : null,
             messageId ? Number(messageId) : null, parentId ? Number(parentId) : null, scope,
             excerptOf(excerpt), reaction, role, inviteCode, placeLabel, placeHref]);
-        return Number(r.lastInsertRowid) || null;
+        const id = Number(r.lastInsertRowid) || null;
+        // The Network hears about it too (server/chat/activity-notify.js): one OpenVibe notification per row, in
+        // the background, so the menu shows the same list as /activity. Never in the way of the thing that caused it.
+        if (id) {
+            try { require('./activity-notify').later(id); } catch (err) { console.warn(`[Activity] notify: ${err && err.message}`); }
+        }
+        return id;
     } catch (err) {
         console.warn(`[Activity] ${kind} not recorded: ${err && err.message}`);
         return null;
@@ -267,6 +273,42 @@ async function dmLabels(userId, ids) {
     return out;
 }
 
+/**
+ * Where a row happened: the place's label and the link that opens it. The feed and the Network's notification
+ * (server/chat/activity-notify.js) both name the place this way, so they never disagree.
+ */
+function placeOf(r, dmNames) {
+    if (r.room_id) {
+        const inServer = r.room_server_slug && r.channel_slug;
+        return {
+            kind: 'room',
+            label: r.room_name ? `#${r.room_name}${r.room_server_name ? ` in ${r.room_server_name}` : ''}` : (r.place_label || 'A room'),
+            href: inServer ? `/s/${r.room_server_slug}/${r.channel_slug}` : (r.room_slug ? `/r/${r.room_slug}` : '/rooms'),
+            room: r.room_slug || null,
+            server: r.room_server_slug || null,
+        };
+    }
+    if (r.conversation_id) {
+        const names = dmNames.get(Number(r.conversation_id)) || [];
+        return {
+            kind: 'dm',
+            label: r.conversation_name || names.join(', ') || 'A direct message',
+            href: `/messages/${Number(r.conversation_id)}`,
+            conversation: Number(r.conversation_id),
+        };
+    }
+    if (r.server_id && r.scope === 'server') {
+        return {
+            kind: 'server',
+            label: r.server_name || r.place_label || 'A server',
+            href: r.invite_code ? `/join/${encodeURIComponent(r.invite_code)}` : (r.server_slug ? `/s/${r.server_slug}` : '/servers'),
+            server: r.server_slug || null,
+        };
+    }
+    if (r.scope === 'friends') return { kind: 'friends', label: 'Friends', href: '/messages' };
+    return { kind: 'global', label: r.place_label || 'Global chat', href: r.place_href || '/' };
+}
+
 /** One row from the database as the API and the page want it: who, what, where, when. */
 function shape(r, dmNames) {
     const actor = {
@@ -275,36 +317,7 @@ function shape(r, dmNames) {
         display_name: r.actor_display_name || r.actor_username || null,
         avatar_url: r.actor_avatar_url || null,
     };
-    let where;
-    if (r.room_id) {
-        const inServer = r.room_server_slug && r.channel_slug;
-        where = {
-            kind: 'room',
-            label: r.room_name ? `#${r.room_name}${r.room_server_name ? ` in ${r.room_server_name}` : ''}` : (r.place_label || 'A room'),
-            href: inServer ? `/s/${r.room_server_slug}/${r.channel_slug}` : (r.room_slug ? `/r/${r.room_slug}` : '/rooms'),
-            room: r.room_slug || null,
-            server: r.room_server_slug || null,
-        };
-    } else if (r.conversation_id) {
-        const names = dmNames.get(Number(r.conversation_id)) || [];
-        where = {
-            kind: 'dm',
-            label: r.conversation_name || names.join(', ') || 'A direct message',
-            href: `/messages/${Number(r.conversation_id)}`,
-            conversation: Number(r.conversation_id),
-        };
-    } else if (r.server_id && r.scope === 'server') {
-        where = {
-            kind: 'server',
-            label: r.server_name || r.place_label || 'A server',
-            href: r.invite_code ? `/join/${encodeURIComponent(r.invite_code)}` : (r.server_slug ? `/s/${r.server_slug}` : '/servers'),
-            server: r.server_slug || null,
-        };
-    } else if (r.scope === 'friends') {
-        where = { kind: 'friends', label: 'Friends', href: '/messages' };
-    } else {
-        where = { kind: 'global', label: r.place_label || 'Global chat', href: r.place_href || '/' };
-    }
+    const where = placeOf(r, dmNames);
     return {
         id: Number(r.id),
         kind: r.kind,
@@ -372,13 +385,17 @@ async function unreadCount(user) {
 async function markRead(user, { id = null, ids = null, all = false } = {}) {
     const me = Number(user && user.id) || 0;
     if (!me) return 0;
-    if (all) {
-        const r = await db.run('UPDATE chat_activity SET read_at = ov_now() WHERE user_id = ? AND read_at IS NULL', [me]);
-        return r.changes || 0;
-    }
-    const list = [...new Set([].concat(id == null ? [] : [id], Array.isArray(ids) ? ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 500);
-    if (!list.length) return 0;
-    const r = await db.run(`UPDATE chat_activity SET read_at = ov_now() WHERE user_id = ? AND read_at IS NULL AND id IN (${list.map(() => '?').join(',')})`, [me, ...list]);
+    const list = all ? [] : [...new Set([].concat(id == null ? [] : [id], Array.isArray(ids) ? ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))].slice(0, 500);
+    if (!all && !list.length) return 0;
+    // Which rows this read covers (the ones that were still unread): their notifications on the Network are cleared
+    // with them, the way a read direct message clears its own.
+    const covered = all
+        ? (await db.all('SELECT id FROM chat_activity WHERE user_id = ? AND read_at IS NULL', [me])).map((r) => Number(r.id))
+        : list;
+    const r = all
+        ? await db.run('UPDATE chat_activity SET read_at = ov_now() WHERE user_id = ? AND read_at IS NULL', [me])
+        : await db.run(`UPDATE chat_activity SET read_at = ov_now() WHERE user_id = ? AND read_at IS NULL AND id IN (${list.map(() => '?').join(',')})`, [me, ...list]);
+    if ((r.changes || 0) && covered.length) require('./activity-notify').clear(user, covered).catch(() => {});
     return r.changes || 0;
 }
 
@@ -388,5 +405,6 @@ module.exports = {
     mentionsInRoom, replyInRoom, mentionsInDm, replyInDm, mentionsInChat, replyInChat,
     reaction, removeReaction, serverInvite, friendAccept, roleGiven,
     list, unreadCount, markRead,
+    placeOf, dmLabels,
     _handleSet: handleSet, _visibleTo: visibleTo,
 };

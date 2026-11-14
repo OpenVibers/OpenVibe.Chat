@@ -183,11 +183,19 @@ function createWebRoutes({ config }) {
         if (actor.kind !== 'user') return {};
         const n = async (fn) => { try { return Number(await fn()) || 0; } catch { return 0; } };
         const rooms = require('../rooms/rooms');
+        // The Activity place carries the same dot as the menu (the plan, AB.52): the Network's unread count, the
+        // number the menu's bell shows, when the Network answers. Chat's own count is the fallback, so the dot is
+        // never wrong for a person the Network does not know.
+        let network = null;
+        try {
+            const v = await require('../chat/activity-notify').networkUnread(actor);
+            network = v == null ? null : Number(v) || 0;
+        } catch { network = null; }
         return {
             messages: await n(async () => await dm.getTotalUnread(actor.user.id)),
             rooms: await n(async () => await rooms.unreadTotal(actor.user)),
             servers: await n(async () => await rooms.unreadTotal(actor.user, { servers: true })),
-            activity: await n(async () => await require('../chat/activity').unreadCount(actor.user)),
+            activity: network == null ? await n(async () => await require('../chat/activity').unreadCount(actor.user)) : network,
         };
     };
     // Under the global room on the front page: what openvibe.chat is for (openvibe-shared/showcase), each card a real
@@ -439,7 +447,9 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
         const waiting = requests.length + convRows.length + busy.length + roomRows.length;
         // What happened to this person, above what is waiting for them (server/web/activity.js). Opening the page
         // reads it: the rows below still show what was new on this visit.
-        const happened = await require('./activity').whatHappened(me);
+        // "What happened" is the Network's own list for someone signed in (the shared notification UI mounts it in
+        // the page); Chat's own rows stay in the page until that list is there (public/web/activity-notifications.js).
+        const happened = await require('./activity').whatHappened(me, { network: true });
         const body = waiting
             ? [
                 section('oc-act-requests', 'Friend requests', requests.length, `<ul class="oc-list">${requestRows.join('')}</ul>`),
@@ -450,6 +460,7 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
             : `<section class="oc-act-clear"><span class="oc-act-clear-mark" aria-hidden="true">${IC.check}</span><h2>You are all caught up</h2><p class="oc-muted">New messages, friend requests and unread channels show up here.</p><p class="oc-act-clear-go"><a class="oc-button" href="/messages">Open your messages</a><a class="oc-button oc-button--quiet" href="/servers">Find a server</a></p></section>`;
         await page(req, res, 200, {
             actor, shell: true, title: 'Activity', path: '/activity', active: 'activity', robots: 'noindex, nofollow', footer: 'none',
+            scripts: ['activity-notifications.js'],
             body: shell.shell({
                 rail: shell.rail({ dmUnread: unread, servers: shell.railServers(mineServers), list: 'Chats' }),
                 side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
