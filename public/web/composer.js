@@ -13,10 +13,15 @@
     var ta = form.querySelector('textarea');
     if (!ta) return;
     var add = form.querySelector('[data-oc-attach]');
+    // 4.247.0 (plan §Z.9): a room's box sends the files it takes to Media's composer attachments as they are
+    // picked (any video, picture, sound, PDF or text, at Media's limits) and puts their ids on the form. The
+    // room's own server checks them with Media and keeps them with the message. A box that says nothing keeps
+    // the plain upload.
+    var media = form.hasAttribute('data-ovc-media');
     var c = window.OpenVibeComposer.mount(document.createElement('div'), {
       preset: 'chat', name: ta.name || 'message', maxLength: Number(ta.getAttribute('maxlength')) || 4000,
       placeholder: ta.placeholder || 'Write a message', label: ta.getAttribute('aria-label') || form.getAttribute('aria-label') || 'Message',
-      tools: ['emoji'],
+      tools: ['emoji'], media: !!media, maxFiles: media ? 4 : undefined,
     });
     if (!c) return;
     c.text.id = ta.id || 'oc-input';

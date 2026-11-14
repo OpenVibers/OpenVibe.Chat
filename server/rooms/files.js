@@ -50,7 +50,15 @@ function cleanFiles(files, reader = null) {
 /** The message API calls these attachments; the AI pipeline keeps its historical `files` name. */
 function attachmentsFromBody(body) {
     if (!body || typeof body !== 'object') return [];
-    return Array.isArray(body.attachments) ? body.attachments : (Array.isArray(body.files) ? body.files : []);
+    const list = Array.isArray(body.attachments) ? body.attachments : (Array.isArray(body.files) ? body.files : []);
+    // A body may carry two kinds of file: the ones the AI reads (Media objects) and the ones Media stored for
+    // the sender (composer attachments, att_…). Only the first kind belongs here; the other is read by
+    // server/rooms/attachments.js.
+    return list.filter((f) => {
+        if (f && typeof f === 'object' && f.media_attachment_id) return false;
+        if (typeof f === 'string' && /^att_[0-9A-HJKMNP-TV-Z]{26}$/.test(f.trim())) return false;
+        return true;
+    });
 }
 
 /** The files stored on a message row (jsonb comes back as an array; a text column is tolerated too). */

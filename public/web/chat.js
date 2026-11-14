@@ -761,6 +761,85 @@
   }
 
   // ── A room ──
+  // The files a message carries (Media's composer attachments): a video plays in the network's player (Media's
+  // web copy, its poster, its size), a video whose copy is still being made shows its first frame and a link to
+  // the file, a picture shows, a sound gets a bar, a file is a link. Only https on openvibe.media is ever shown.
+  function mediaUrl(v) {
+    try {
+      var u = new URL(String(v || ''));
+      if (u.protocol !== 'https:' || u.port || u.username || u.password) return null;
+      if (u.hostname.toLowerCase() !== 'openvibe.media') return null;
+      if (u.pathname.indexOf('/a/') !== 0) return null;
+      return u.href;
+    } catch (e) { return null; }
+  }
+  function mediaAttachments(list) {
+    var items = Array.isArray(list) ? list : [];
+    if (!items.length) return null;
+    var box = el('div', 'oc-attach');
+    items.forEach(function (a) {
+      var url = mediaUrl(a && a.url);
+      if (!url) return;
+      var poster = mediaUrl(a.poster);
+      var type = String(a.media_type || '');
+      var kind = a.kind || (type.indexOf('video/') === 0 ? 'video' : type.indexOf('image/') === 0 ? 'image' : type.indexOf('audio/') === 0 ? 'audio' : 'file');
+      var title = a.name || (kind === 'video' ? 'Video' : kind === 'image' ? 'Picture' : kind === 'audio' ? 'Sound' : 'Attached file');
+      if (kind === 'video') {
+        var pb = a.playback && a.playback.ready ? mediaUrl(a.playback.url) : null;
+        if (!pb) {
+          var prep = el('a', 'oc-attach-item oc-attach-video is-preparing');
+          prep.href = url; prep.target = '_blank'; prep.rel = 'noopener noreferrer';
+          if (poster) { var first = document.createElement('img'); first.src = poster; first.alt = ''; first.loading = 'lazy'; prep.appendChild(first); }
+          prep.appendChild(el('span', null, 'Getting the video ready to play here. Open the file'));
+          box.appendChild(prep);
+          return;
+        }
+        var fig = el('figure', 'oc-attach-item oc-attach-video');
+        var video = document.createElement('video');
+        video.setAttribute('data-ov-player', ''); video.controls = true; video.preload = 'none'; video.playsInline = true;
+        video.src = pb; if (poster) video.poster = poster;
+        var w = Number(a.width) || 0, h = Number(a.height) || 0;
+        if (w > 0 && h > 0 && w <= 10000 && h <= 10000) { video.width = Math.round(w); video.height = Math.round(h); }
+        video.setAttribute('aria-label', title);
+        fig.appendChild(video);
+        var secs = Number(a.duration_s);
+        if (isFinite(secs) && secs > 0) fig.appendChild(el('figcaption', null, title + ' · ' + Math.floor(secs / 60) + ':' + String(Math.round(secs % 60)).padStart(2, '0')));
+        box.appendChild(fig);
+        // The network's player wraps a video that arrives later (Shared's player.js).
+        if (window.OpenVibePlayer && window.OpenVibePlayer.enhance) { try { window.OpenVibePlayer.enhance(video); } catch (e) { /* the browser's own controls stay */ } }
+        return;
+      }
+      if (kind === 'image') {
+        var link = el('a', 'oc-attach-item oc-attach-image'); link.href = url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+        var img = document.createElement('img'); img.src = poster || url; img.alt = title; img.loading = 'lazy'; img.width = 160;
+        link.appendChild(img); box.appendChild(link); return;
+      }
+      if (kind === 'audio') {
+        var afig = el('figure', 'oc-attach-item oc-attach-audio');
+        var audio = document.createElement('audio'); audio.controls = true; audio.preload = 'none'; audio.src = url; audio.setAttribute('aria-label', title);
+        afig.appendChild(audio); afig.appendChild(el('figcaption', null, title)); box.appendChild(afig); return;
+      }
+      var flink = el('a', 'oc-attach-item oc-attach-file', title); flink.href = url; flink.target = '_blank'; flink.rel = 'noopener noreferrer';
+      box.appendChild(flink);
+    });
+    return box.childNodes.length ? box : null;
+  }
+  // The files the box picked: Media stored them and the form carries their ids (one hidden field per file).
+  function pickedFiles(form) {
+    var ids = [];
+    if (!form) return ids;
+    Array.prototype.forEach.call(form.querySelectorAll('input[name="attachments"]'), function (input) {
+      var v = String(input.value || '').trim();
+      if (/^att_[0-9A-HJKMNP-TV-Z]{26}$/.test(v) && ids.indexOf(v) < 0) ids.push(v);
+    });
+    return ids;
+  }
+  // The files the box picked, put back on the tray (they travel with the message).
+  function clearPickedFiles(form) {
+    var c = form && form.__ovcComposer;
+    if (c && typeof c.clearFiles === 'function') { try { c.clearFiles(); } catch (e) { /* the tray stays */ } }
+    Array.prototype.forEach.call((form || document).querySelectorAll('input[name="attachments"]'), function (input) { input.remove(); });
+  }
   function roomItem(m) {
     var ai = m.ai_member_id != null;
     var li = el('li', 'oc-msg' + (ai ? ' oc-msg-ai' : '')); li.dataset.id = m.id || ''; li.dataset.user = m.user_id || '';
@@ -787,6 +866,8 @@
     if (m.edited_at && window.OVMessages) window.OVMessages.edited(t, m.edited_at);
     if (cfg.moderate && m.edited_at) { var versions = el('button', 'ovk-btn ovk-btn--quiet oc-edits', 'Earlier versions'); versions.type = 'button'; li.appendChild(versions); }
     if (!ai && cfg.pics) { var pw = pictureThumbs(m.message); if (pw) li.appendChild(pw); }
+    // The files the message carries: a video plays, a picture shows, a sound gets a bar, a file is a link.
+    var files = mediaAttachments(m.media_attachments); if (files) li.appendChild(files);
     // Cards that were taken back are not sent with the message: the line says so instead.
     if (m.embeds_hidden) li.appendChild(hiddenNote(li, Number(m.id) || 0));
     else addCard(li, m);
@@ -896,11 +977,14 @@
     if (form && input) {
       form.addEventListener('submit', function (e) {
         var text = input.value.trim();
-        if (!text) { e.preventDefault(); return; }
+        // The files the box picked travel with the message (the room's server checks them with Media).
+        var files = pickedFiles(form);
+        if (!text && !files.length) { e.preventDefault(); return; }
         if (!ws || ws.readyState !== 1) return;
         e.preventDefault();
-        ws.send(JSON.stringify({ type: 'room_message', message: text }));
+        ws.send(JSON.stringify({ type: 'room_message', message: text, attachments: files }));
         input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus();
+        clearPickedFiles(form);
       });
     }
     if (feed) feed.addEventListener('submit', function (e) {

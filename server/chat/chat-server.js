@@ -761,7 +761,10 @@ class ChatServer {
                 try {
                     const command = await require('./room-slash').parse(room, client.user, msg.message);
                     if (command.handled && !command.text) { this.sendTo(ws, { type: 'system', message: command.reply }); break; }
-                    const message = await rooms.post(room, client.user, command.handled ? command.text : msg.message);
+                    const message = await rooms.post(room, client.user, command.handled ? command.text : msg.message, {
+                        // The files Media stored for the sender (the room's box): at most four, each one theirs.
+                        attachments: require('../rooms/attachments').namedAttachments(msg.attachments),
+                    });
                     this.broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
                 } catch (err) {
                     this.sendTo(ws, { type: 'room_error', room: room.slug, code: err.code || 'rooms.error', message: err.code ? err.message : 'Your message could not be sent' });

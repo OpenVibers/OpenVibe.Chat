@@ -944,7 +944,10 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
             ? `<span class="oc-card-hidden-note">Previews hidden</span>${mayHide ? ui.showForm(hideAction) : ''}`
             : ui.messageCards(m, { hide: hideAction });
         const text = ai ? `<div class="oc-text vb-md">${md.render(m.message)}</div>` : `<span class="oc-text">${emojis ? require('../chat/emoji-text').render(m.message, emojis, linkify, esc) : linkify(m.message)}</span>`;
-        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${m.edited_at ? ` <span class="oc-muted oc-edited" data-edited-at="${esc(m.edited_at)}">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ai ? '' : pictures.pageHtml(m.message)}${cards}${can.moderate && m.edited_at ? '<button type="button" class="ovk-btn ovk-btn--quiet oc-edits">Earlier versions</button>' : ''}${del}</li>`;
+        // The files the message carries (Media's composer attachments): a video plays, a picture shows, a sound
+        // gets a bar, a file is a link.
+        const files = ui.messageAttachments(m);
+        return `<li class="oc-msg${ai ? ' oc-msg-ai' : ''}${agent ? ' oc-msg-agent' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.user_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> ${who} ${text}${m.edited_at ? ` <span class="oc-muted oc-edited" data-edited-at="${esc(m.edited_at)}">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ai ? '' : pictures.pageHtml(m.message)}${files}${cards}${can.moderate && m.edited_at ? '<button type="button" class="ovk-btn ovk-btn--quiet oc-edits">Earlier versions</button>' : ''}${del}</li>`;
     };
     const applyRoomChange = async (room) => await roomRoutes.applyRoomChange(room);
 
@@ -1072,7 +1075,9 @@ ${people}
         const joinLabel = room.kind === 'system' ? 'Follow these announcements' : 'Join this room';
         let composer;
         if (!me) composer = `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${encodeURIComponent(`/r/${room.slug}`)}">Sign in with OpenVibe</a> to join the conversation.</p>`;
-        else if (can.post) composer = shell.composer({ action: `/r/${room.slug}`, label: `Message to ${room.name}`, placeholder: room.kind === 'system' ? 'Post an announcement' : 'Write a message', add: room.kind === 'system' ? '' : pictureComposer(room, `/r/${room.slug}`) });
+        // A room's box takes files: they go to Media's composer attachments as they are picked (any video,
+        // picture, sound, PDF or text, at Media's limits) and the room's server keeps them with the message.
+        else if (can.post) composer = shell.composer({ action: `/r/${room.slug}`, label: `Message to ${room.name}`, placeholder: room.kind === 'system' ? 'Post an announcement' : 'Write a message', add: room.kind === 'system' ? '' : pictureComposer(room, `/r/${room.slug}`), media: true });
         else if (!can.role) composer = `<form method="post" action="/r/${esc(room.slug)}/join"><button type="submit">${joinLabel}</button></form>`;
         else if (room.kind === 'system') composer = `<p class="oc-muted">Announcements from OpenVibe staff. You will see new ones counted in Rooms.</p>`;
         else if (can.role === 'viewer') composer = `<p class="oc-muted">You can read this room but not write in it (viewer).</p>`;
@@ -1106,7 +1111,7 @@ ${people}
         const dmUnread = me ? await require('../chat/dm').getTotalUnread(me.id) : 0;
         await page(req, res, 200, {
             actor, title: room.name, path: `/r/${room.slug}`, active: 'rooms', robots: room.visibility === 'public' ? 'index, follow' : 'noindex, nofollow', script: true, callScript: callReady, feedView: !!feed,
-            footer: 'none', shell: true, upload: pictures.enabled(), scripts: [...(ais.length ? ['vibe-md.js'] : []), ...(pictures.enabled() ? ['picture-upload.js'] : [])],
+            footer: 'none', shell: true, upload: pictures.enabled(), player: true, scripts: [...(ais.length ? ['vibe-md.js'] : []), ...(pictures.enabled() ? ['picture-upload.js'] : [])],
             description,
             page: { view: 'room', room: room.slug, kind: room.kind, pics: pictures.enabled() ? pictures.publicUrl() : null, ai: ais.map((a) => a.handle), latest: msgs.length ? msgs[msgs.length - 1].id : 0, historyMore: roomPage.more, me: me ? me.id : null, moderate: can.moderate, post: can.post, role: can.role,
                 ...(callReady ? { call: { channel: `room-${room.slug}`, join: can.join, talk: can.talk } } : {}) },
@@ -1142,7 +1147,10 @@ ${composer}${work ? `</div>${queuePanel(room, can, me, work)}</div>` : ''}`,
         const room = await rooms.bySlug(req.params.slug);
         if (!room || !(await rooms.access(room, actor.user)).read) return res.redirect(303, '/rooms');
         req.roomBack = `/r/${room.slug}`;
-        const message = await rooms.post(room, actor.user, req.body && req.body.message);
+        // The form may name the files Media stored for the sender (the room's box), one plain att_ id per file.
+        const message = await rooms.post(room, actor.user, req.body && req.body.message, {
+            attachments: require('../rooms/attachments').namedAttachments(req.body && req.body.attachments),
+        });
         require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message });
         res.redirect(303, `/r/${room.slug}#oc-compose`);
     }));
