@@ -16,7 +16,9 @@
  *   POST /api/vibe/undo { message_id, index }
  *                                     undo one of those results: the reminder is stopped, the timer too, and the
  *                                     result is marked undone. The person themself, in their own chat, within a day.
- *   POST /api/vibe/ask { message, slug?, timezone?, fresh? }
+ *   POST /api/vibe/ask { message, slug?, timezone?, fresh?, files? }
+ *                                     files: ai.file@1 references from POST /api/chat/vibe/files (at most 10); with
+ *                                     files the words may be empty (the messenger's picture alone, 4.250.0).
  *                                     post into that chat, else the latest one if it moved in the last 6 hours, else
  *                                     a new chat (fresh: always new). Vibe answers in the background, as on Chat.
  *                                     → { chat, message }
@@ -192,7 +194,10 @@ router.post('/listen', personOnly, listened, audioBody, async (req, res) => {
 router.post('/ask', personOnly, (req, res, next) => (req.body && req.body.models !== undefined && !compare.modelIds(req.body.models)
     ? res.status(422).json({ error: 'Choose one to three distinct models' }) : next()), answerLimit, async (req, res) => {
     const b = req.body && typeof req.body === 'object' ? req.body : {};
-    const message = String(b.message || '').replace(/\r\n/g, '\n').trim();
+    const files = Array.isArray(b.files) ? b.files.slice(0, 11) : [];
+    // A file alone says what it is, so the chat and its title have words (the messenger sends a picture by itself).
+    const typed = String(b.message || '').replace(/\r\n/g, '\n').trim();
+    const message = typed || (files.length === 1 ? `(${String((files[0] && files[0].name) || 'a file').slice(0, 120)})` : files.length ? `(${files.length} files)` : '');
     if (!message) return res.status(422).json({ error: 'Write something first' });
     if (message.length > 8000) return res.status(422).json({ error: 'That is longer than Vibe reads in one message' });
     if (b.models !== undefined && !compare.modelIds(b.models)) return res.status(422).json({ error: 'Choose one to three distinct models' });
@@ -204,7 +209,7 @@ router.post('/ask', personOnly, (req, res, next) => (req.body && req.body.models
             const moved = last ? Date.parse(at(last.updated_at || last.last_message_at || last.created_at) || 0) : 0;
             if (last && Date.now() - moved < SIX_HOURS) room = last;
         }
-        if (!room && b.models) {
+        if (!room && b.models && !files.length) {
             room = await vibe.createRoom(req.user, message, { site: siteOf(req) });
             try {
                 const posted = await compare.ask(room, req.user, message, b.models, { system_prompt: b.system_prompt, temperature: b.temperature });
@@ -212,14 +217,14 @@ router.post('/ask', personOnly, (req, res, next) => (req.body && req.body.models
             } catch (err) { await vibe.erase(room.id); throw err; }
         }
         if (!room) {
-            const out = await vibe.start(req.user, message, { timezone, site: siteOf(req) });
+            const out = await vibe.start(req.user, message, { timezone, site: siteOf(req), files });
             const full = await vibe.ownChat(out.room.slug, req.user);
             return res.status(201).json({ chat: chatOf(full || out.room), message: wire(out.message) });
         }
-        const selected = b.models || (await compare.settings(room)).models;
+        const selected = files.length ? [] : b.models || (await compare.settings(room)).models;
         const posted = selected.length ? await compare.ask(room, req.user, message, selected,
             { ...(b.system_prompt === undefined ? {} : { system_prompt: b.system_prompt }), ...(b.temperature === undefined ? {} : { temperature: b.temperature }) })
-            : await rooms.post(room, req.user, message, { timezone });
+            : await rooms.post(room, req.user, message, { timezone, files });
         try { require('../chat/chat-server').broadcastToRoom(room.id, { type: 'room_message', room: room.slug, message: posted }); } catch { /* the socket is optional */ }
         return res.status(201).json({ chat: chatOf(room), message: wire(posted) });
     } catch (err) {

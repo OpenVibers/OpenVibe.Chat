@@ -47,6 +47,21 @@ t('POST /api/chat/vibe/files stores an unlisted Media file as the person and ret
     assert.equal(uploads[0].opts.subject, ann.subject_id);
 });
 
+t('POST /api/vibe/ask carries files too (the messenger on every site, through the Frame), words or not', async () => {
+    const file = (await rawPost('/api/chat/vibe/files', 'x,y\n1,2\n', { 'Content-Type': 'text/csv', 'X-Filename': 'pair.csv' })).body.file;
+    const ask = (body) => fetch(`${h.base}/api/vibe/ask`, { method: 'POST', headers: { authorization: `Bearer ${ann.token}`, 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(async (r) => ({ status: r.status, body: await r.json() }));
+    const started = await ask({ message: 'What is in it?', files: [file], fresh: true });
+    assert.equal(started.status, 201, JSON.stringify(started.body));
+    const history = await h.http('GET', `/api/chat/rooms/${started.body.chat.slug}/messages`, { token: ann.token });
+    assert.ok(history.body.messages.some((m) => (m.files || []).some((f) => f.id === file.id)), 'the reference is on the message');
+    const alone = await ask({ message: '', files: [file], slug: started.body.chat.slug });
+    assert.equal(alone.status, 201, 'a file alone is a message');
+    assert.match(alone.body.message.text, /pair\.csv/, 'it says which file');
+    const bad = await ask({ message: 'x', files: [{ id: 'not-media' }], slug: started.body.chat.slug });
+    assert.equal(bad.status, 422, 'only stored Media objects');
+});
+
 t('a message with a file stores the reference and Vibe\'s turn carries it to AI', async () => {
     const file = (await rawPost('/api/chat/vibe/files', 'a,b\n1,2\n', { 'Content-Type': 'text/csv', 'X-Filename': 'rows.csv' })).body.file;
     const started = await fetch(`${h.base}/api/chat/vibe`, {
