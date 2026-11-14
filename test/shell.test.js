@@ -60,7 +60,7 @@ t('the shell: the rail, the side column, the members column and the bottom bar',
     assert.match(r.text, /"label":"Vibe","href":"\/vibe"/);
     assert.match(r.text, /"label":"Activity","href":"\/activity"/, 'Activity is a page that exists');
     assert.match(r.text, /"label":"You","href":"\/settings"/);
-    assert.match(r.text, /"label":"Servers","href":"\/servers","icon":"fa-people-group"/, 'Servers is not the globe: that is Global chat');
+    assert.match(r.text, /"label":"Servers","href":"\/servers","icon":"members"/, 'Servers is not the globe: that is Global chat');
     // Every place on the rail carries its name; a server carries what its sheet says (hold it, or right-click it).
     assert.match(r.text, /class="oc-rail-icon oc-rail-server is-active" href="\/s\/saturday-raiders"[^>]* data-oc-server="saturday-raiders" data-oc-name="Saturday Raiders" data-oc-role="owner" data-oc-members="2"/, 'the open server, with your rank in it');
     assert.match(r.text, /<span class="oc-rail-label">Saturday Raiders<\/span>/, 'its name, not its initials alone');

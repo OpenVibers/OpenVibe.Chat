@@ -28,11 +28,11 @@ const kit = require('openvibe-shared/kit');
 
 /** The five places of the phone's bottom bar: Shared's app bar draws them (appbar.js). */
 const APP_BAR = [
-    { label: 'Home', href: '/messages', icon: 'fa-comment-dots', page: 'messages' },
-    { label: 'Servers', href: '/servers', icon: 'fa-people-group', page: 'servers' },   // not the globe: that is Global chat
-    { label: 'Vibe', href: '/vibe', icon: 'fa-wand-magic-sparkles', page: 'vibe' },
-    { label: 'Activity', href: '/activity', icon: 'fa-bell', page: 'activity', dot: true },
-    { label: 'You', href: '/settings', icon: 'fa-user', page: 'settings' },
+    { label: 'Home', href: '/messages', icon: 'chat', page: 'messages' },
+    { label: 'Servers', href: '/servers', icon: 'members', page: 'servers' },   // not the globe: that is Global chat
+    { label: 'Vibe', href: '/vibe', icon: 'wand', page: 'vibe' },
+    { label: 'Activity', href: '/activity', icon: 'bell', page: 'activity', dot: true },
+    { label: 'You', href: '/settings', icon: 'user', page: 'settings' },
 ];
 
 /** One icon button: 40 px on a computer, 44 px on a phone (chat-shell.css), never a bare glyph at a random size. */
