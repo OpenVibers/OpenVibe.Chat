@@ -381,7 +381,9 @@ fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
    and the time once; the next lines are just the words (their time shows on a press). A line says when the day changes. */
 .oc-feed.is-grouped { padding: 4px 0 10px; }
 .oc-feed.is-grouped > .oc-msg { position: relative; display: block; margin: 0; padding: 1px 14px 1px 62px; line-height: 1.42; border: 0; }
-.oc-feed.is-grouped > .oc-msg.is-first { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; margin-top: 14px; }
+.oc-feed.is-grouped > .oc-msg.is-first { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 8px; margin-top: 10px; }
+/* The person's picture over their letter (11-14); a picture that does not load leaves the letter. */
+.oc-feed.is-grouped > .oc-msg.is-first[style*="--av-img"]::before { background-image: var(--av-img); background-size: cover; background-position: center; color: transparent; }
 .oc-feed.is-grouped > .oc-msg.is-first::before { content: attr(data-initial); position: absolute; left: 14px; top: 1px; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; font-size: .92rem; font-weight: 800; color: var(--oc-text); background: color-mix(in srgb, var(--nc, var(--oc-accent)) 34%, var(--oc-panel-2)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nc, var(--oc-accent)) 50%, transparent); }
 .oc-feed.is-grouped > .oc-msg.is-first > .oc-name { order: 1; font-weight: 750; }
 .oc-feed.is-grouped > .oc-msg.is-first > .oc-where { order: 2; font-size: .74rem; padding: 1px 7px; border-radius: 999px; color: var(--oc-muted); background: color-mix(in srgb, var(--oc-text) 7%, transparent); text-decoration: none; }

@@ -161,7 +161,15 @@
         if (at && !sameDay) { var d = document.createElement('li'); d.className = 'oc-day'; d.setAttribute('role', 'separator'); d.textContent = dayName(at); feed.insertBefore(d, li); }
         var cont = !!(prev && sameDay && prev.who === who && name && at - prev.at < 5 * 60000);
         li.classList.toggle('is-cont', cont); li.classList.toggle('is-first', !cont);
-        if (!cont && name) { li.setAttribute('data-initial', (name.textContent.trim().charAt(0) || '?').toUpperCase()); var nc = name.style.getPropertyValue('--nc'); if (nc) li.style.setProperty('--nc', nc); }
+        if (!cont && name) {
+          // The first letter or digit of the name (a decoration in front of it drew "?"), and the person's picture over it
+          // (Network's /avatar/<username> answers for everyone; 11-14, the owner: "the user avatars … don't work").
+          var letter = (name.textContent.match(/[\p{L}\p{N}]/u) || ['?'])[0].toUpperCase();
+          li.setAttribute('data-initial', letter);
+          var handle = (String(name.getAttribute('href') || '').match(/\/@([A-Za-z0-9_]{2,32})(?:$|[/?#])/) || [])[1];
+          if (handle && !li.style.getPropertyValue('--av-img')) li.style.setProperty('--av-img', 'url("https://openvibe.network/avatar/' + encodeURIComponent(handle) + '?s=80")');
+          var nc = name.style.getPropertyValue('--nc'); if (nc) li.style.setProperty('--nc', nc);
+        }
         if (time && at) time.title = at.toLocaleString();
         prev = { who: who, at: at };
       });
