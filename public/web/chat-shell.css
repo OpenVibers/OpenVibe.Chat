@@ -154,6 +154,9 @@
   /* A conversation (the middle column has a composer) takes the whole width and the bottom bar's place. */
   .oc-app:has(> .oc-col-main > :is(.oc-dock, .oc-compose)):not([data-oc-panel="side"]) { grid-template-columns: minmax(0, 1fr); }
   .oc-app:has(> .oc-col-main > :is(.oc-dock, .oc-compose)):not([data-oc-panel="side"]) > .oc-rail { display: none; }
+  /* A page that keeps the whole width on a phone (Activity): no server rail; the bottom bar is the way around. */
+  .oc-app[data-oc-norail]:not([data-oc-panel="side"]) { grid-template-columns: minmax(0, 1fr); }
+  .oc-app[data-oc-norail]:not([data-oc-panel="side"]) > .oc-rail { display: none; }
   html:has(.oc-app:not([data-oc-panel="side"]) > .oc-col-main > :is(.oc-dock, .oc-compose)) { --ovnav-appbar-h: 0px !important; }
   html:has(.oc-app:not([data-oc-panel="side"]) > .oc-col-main > :is(.oc-dock, .oc-compose)) .ovnav-appbar { display: none !important; }
   /* The messages take all the room between the head and the composer (chat.css capped them at 62% of the screen, for
@@ -352,6 +355,18 @@ fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
 .oc-card-go > .oc-card-more { flex: none; border: 1px solid var(--oc-line); border-radius: 10px; color: var(--oc-text); }
 
 /* ── Activity: what is waiting for you, by kind; nothing waiting is said as that ── */
+/* Activity (2026-11-15 redo): one column, what needs you first, then everything that happened. */
+.oc-act { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 6px; }
+.oc-act > .oc-page-head { margin-bottom: 4px; }
+.oc-act-waiting { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 4px; border: 1px solid var(--oc-line); border-radius: 18px; background: var(--oc-panel); }
+.oc-act-waiting .oc-act-sec { margin: 0 0 6px; }
+.oc-act-waiting .oc-list-head { margin: 6px 4px; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted, var(--oc-text)); }
+.oc-act-answer { display: inline-flex; gap: 6px; flex: none; }
+.oc-act-answer button { min-height: 40px; padding: 0 14px; border-radius: 999px; }
+.oc-act-what > .oc-list-head { margin: 10px 0 8px; }
+.oc-act-what .oc-notif-list { margin: 0 -4px; }
+.oc-act-none { display: flex; align-items: center; gap: 10px; margin: 6px 0; padding: 14px 16px; border-radius: 16px; background: var(--oc-panel); color: var(--oc-muted, var(--oc-text)); }
+.oc-act-none > span { display: grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 50%; background: color-mix(in srgb, var(--oc-ok, #22c55e) 22%, transparent); color: var(--oc-ok, #22c55e); font-weight: 800; }
 .oc-act-sec { margin: 0 0 18px; }
 .oc-act-row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; }
 .oc-act-who { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }

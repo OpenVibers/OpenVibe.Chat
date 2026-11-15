@@ -47,7 +47,7 @@ function what(row, place) {
  * in the page until that list is really there (without JavaScript, or without a token, they are what is read).
  * → HTML for one <section> in the page's plain list markup.
  */
-async function whatHappened(user, { network = false } = {}) {
+async function whatHappened(user, { network = false, nothingWaiting = false } = {}) {
     if (!user || !user.id) return '';
     const { items } = await activity.list(user, { limit: LIMIT });
     // With the Network's list in this section, the section is there even when Chat has no rows of its own: the
@@ -68,8 +68,12 @@ ${ui.initials(who, null, { avatarUrl: row.actor.avatar_url })}
     const mount = network
         ? '<div id="oc-notif-list" class="oc-notif-list" data-oc-network-list hidden></div>'
         : '';
-    const empty = items.length ? '' : '<p class="oc-muted">Nothing has happened yet.</p>';
-    return `<section class="oc-act-sec" aria-labelledby="oc-act-what">
+    // Nothing of Chat's own and nothing waiting: the page says so once (the Network's list, when it mounts, takes
+    // this place and says it in its own words).
+    const empty = items.length ? ''
+        : nothingWaiting ? '<p class="oc-act-none"><span aria-hidden="true">✓</span> You are all caught up. New messages, friend requests and mentions show up here.</p>'
+            : '<p class="oc-muted">Nothing has happened yet.</p>';
+    return `<section class="oc-act-sec oc-act-what" aria-labelledby="oc-act-what">
 <h2 class="oc-list-head" id="oc-act-what">What happened</h2>
 <div id="oc-act-what-rows">${items.length ? `<ul class="oc-list">${rows}</ul>` : empty}</div>
 ${mount}
