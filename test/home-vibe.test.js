@@ -15,7 +15,7 @@ t('boot', async () => { h = await boot({ env: { CHAT_WEB_URL: 'https://openvibe.
 t('the front page leads to Vibe: the first action, an Ask Vibe box, the question in the FAQ', async () => {
     const page = await fetch(`${h.base}/`).then((r) => r.text());
     assert.match(page, /<p class="oc-hero-actions"><a class="oc-button" href="\/vibe">Chat with Vibe<\/a> /, 'the first action');
-    assert.match(page, /<form class="oc-vibe-ask" action="\/vibe" method="get" role="search"><label for="oc-vibe-q" class="oc-sr">Ask Vibe<\/label><input id="oc-vibe-q" name="ask" /);
+    assert.match(page, /<form class="oc-vibe-ask" action="\/vibe" method="get" role="search"><label for="oc-vibe-q" class="oc-sr">Ask Actor<\/label><input id="oc-vibe-q" name="ask" /);
     assert.ok(page.indexOf('oc-vibe-card') < page.indexOf('id="oc-h">Global chat'), 'before global chat');
     assert.match(page, /<summary>What is Vibe\?<\/summary>/);
     assert.match(page, /"name":"What is Vibe\?"/, 'in the FAQ JSON-LD');

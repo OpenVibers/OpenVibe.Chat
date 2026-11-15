@@ -160,12 +160,12 @@ function roomsSection(a, app) {
 /** Ask Vibe from the front page: the question opens a new Vibe chat with it in the box (never sent for you). */
 function vibeSection(app) {
     if (app) {
-        return `<section class="oc-home-sec oc-vibe-mini" aria-labelledby="oc-h-vibe"><h2 id="oc-h-vibe" class="oc-sr">Ask Vibe</h2>
-<form class="oc-find oc-vibe-ask" action="/vibe" method="get" role="search">${ICONS.spark}<label for="oc-vibe-q" class="oc-sr">Ask Vibe</label><input id="oc-vibe-q" name="ask" type="text" maxlength="1200" placeholder="Ask Vibe anything" autocomplete="off" enterkeyhint="go" required><button type="submit" class="oc-send" aria-label="Ask Vibe" title="Ask Vibe">${ICONS.send}</button></form></section>`;
+        return `<section class="oc-home-sec oc-vibe-mini" aria-labelledby="oc-h-vibe"><h2 id="oc-h-vibe" class="oc-sr">Ask Actor</h2>
+<form class="oc-find oc-vibe-ask" action="/vibe" method="get" role="search">${ICONS.spark}<label for="oc-vibe-q" class="oc-sr">Ask Actor</label><input id="oc-vibe-q" name="ask" type="text" maxlength="1200" placeholder="Ask Actor anything" autocomplete="off" enterkeyhint="go" required><button type="submit" class="oc-send" aria-label="Ask Vibe" title="Ask Vibe">${ICONS.send}</button></form></section>`;
     }
-    return `<section class="oc-home-sec oc-vibe-card" aria-labelledby="oc-h-vibe"><h2 id="oc-h-vibe">Ask Vibe, OpenVibe's assistant</h2>
+    return `<section class="oc-home-sec oc-vibe-card" aria-labelledby="oc-h-vibe"><h2 id="oc-h-vibe">Ask Actor, your agent</h2>
 <p class="oc-muted">Free with your account. It searches the web and all of OpenVibe, reads the pages and pictures you share, remembers what you ask it to, and sets up work that runs every day for you. Your chats with it are private.</p>
-<form class="oc-vibe-ask" action="/vibe" method="get" role="search"><label for="oc-vibe-q" class="oc-sr">Ask Vibe</label><input id="oc-vibe-q" name="ask" type="text" maxlength="1200" placeholder="Ask Vibe anything" autocomplete="off" enterkeyhint="go" required><button type="submit" class="oc-button">Ask</button></form></section>`;
+<form class="oc-vibe-ask" action="/vibe" method="get" role="search"><label for="oc-vibe-q" class="oc-sr">Ask Actor</label><input id="oc-vibe-q" name="ask" type="text" maxlength="1200" placeholder="Ask Actor anything" autocomplete="off" enterkeyhint="go" required><button type="submit" class="oc-button">Ask</button></form></section>`;
 }
 
 function stepsSection() {
