@@ -37,7 +37,7 @@ async function publicPages() {
     const pages = (await rooms.list(null, { limit: 100 })).public;
     const out = [
         { path: '/', title: 'Global chat', text: 'The whole-network public chat: read the newest messages without an account and without JavaScript; signed-in people post here.', changefreq: 'hourly', priority: 1.0, lastmod: async () => await newestGlobalMessage() },
-        { path: '/vibe', title: 'Vibe, OpenVibe\'s assistant', text: 'Chat with Vibe: it searches the web and OpenVibe, reads pages and pictures, remembers what it is asked to and sets up recurring work; each conversation is private to its person.', changefreq: 'weekly', priority: 0.9 },
+        { path: '/vibe', title: 'Actor, your agent', text: 'Chat with your Actor: it searches the web and OpenVibe, reads pages and pictures, remembers what it is asked to and sets up recurring work; each conversation is private to its person.', changefreq: 'weekly', priority: 0.9 },
         { path: '/rooms', title: 'Public rooms', text: 'Every public room without a server, with its topic and activity; anyone can read a public room.', changefreq: 'daily', priority: 0.8, lastmod: () => newestRoomActivity(pages) },
         { path: '/servers', title: 'Public servers', text: 'Public servers: groups with text and voice channels, roles and invites; anyone can read, signed-in people join.', changefreq: 'daily', priority: 0.8 },
         { path: '/updates', title: 'What shipped on OpenVibe.Chat', text: 'The shared changelog for OpenVibe.Chat, newest first.', changefreq: 'daily', priority: 0.5 },
@@ -128,7 +128,7 @@ function createDiscoveryRoutes({ config }) {
             details: 'One OpenVibe account works here and on every other OpenVibe site. Anyone can read the global chat and the public rooms without an account; posting needs a signed-in person. The global chat and the public room pages are readable as plain HTML without JavaScript and update live over the site\'s own WebSocket. Direct messages, room settings and the API are per-person and are never listed here.',
             sections: [
                 { title: 'Start here', links: [
-                    { title: 'Vibe', url: abs('/vibe'), note: 'OpenVibe\'s assistant: searches the web and OpenVibe, reads pages and pictures, remembers what it is asked to, sets up recurring work; chats are private to the signed-in person' },
+                    { title: 'Actor', url: abs('/vibe'), note: 'Your agent: searches the web and OpenVibe, reads pages and pictures, remembers what it is asked to, sets up recurring work; chats are private to the signed-in person' },
                     { title: 'Global chat', url: abs('/'), note: 'one room for everyone on OpenVibe, newest messages at the end' },
                     { title: 'Rooms', url: abs('/rooms'), note: 'every public room, with its topic and activity' },
                     { title: 'Servers', url: abs('/servers'), note: 'public servers: groups with text and voice channels, roles and invites' },
