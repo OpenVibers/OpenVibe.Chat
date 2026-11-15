@@ -158,7 +158,7 @@
         var who = (name ? name.textContent.trim() : '') + '|' + (where ? where.textContent.trim() : '');
         var at = time && time.dateTime ? new Date(time.dateTime) : null;
         var sameDay = !!(prev && at && prev.at && dayOf(prev.at) === dayOf(at));
-        if (at && !sameDay) { var d = document.createElement('li'); d.className = 'oc-day'; d.setAttribute('role', 'separator'); d.textContent = dayName(at); feed.insertBefore(d, li); }
+        if (at && !sameDay) { var d = document.createElement('li'); d.className = 'oc-day'; d.textContent = dayName(at); /* a list item: a role on an li breaks the list (axe list, the browser check 11-15) */ feed.insertBefore(d, li); }
         var cont = !!(prev && sameDay && prev.who === who && name && at - prev.at < 5 * 60000);
         li.classList.toggle('is-cont', cont); li.classList.toggle('is-first', !cont);
         if (!cont && name) {
