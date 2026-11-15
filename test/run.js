@@ -21,6 +21,6 @@
 const path = require('path');
 const { pathToFileURL } = require('url');
 require('openvibe-shared/test-runner').main({
-    dir: __dirname, timeoutMs: 60000, pad: 32, parallel: 1,
+    dir: __dirname, timeoutMs: 60000, pad: 32,
     nodeArgs: ['--import', pathToFileURL(path.join(__dirname, 'helpers', 'pg-preload.mjs')).href],
 });
