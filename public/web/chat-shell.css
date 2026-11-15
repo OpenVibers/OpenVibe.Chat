@@ -201,7 +201,7 @@
 .oc-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 14px; }
 .oc-chip { display: inline-flex; align-items: center; min-height: 36px; padding: 6px 14px; border-radius: 999px; border: 1px solid var(--oc-line); color: var(--oc-muted); text-decoration: none; font-size: .9rem; }
 .oc-chip:hover { border-color: var(--oc-accent); color: var(--oc-text); }
-.oc-chip.is-active { background: var(--oc-accent); border-color: var(--oc-accent); color: var(--oc-on-accent); font-weight: 700; }
+.oc-chip.is-active { background: color-mix(in srgb, var(--oc-accent) 85%, #000); border-color: color-mix(in srgb, var(--oc-accent) 85%, #000); color: var(--oc-on-accent); font-weight: 700; }
 .oc-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
 .oc-card { display: flex; flex-direction: column; gap: 6px; padding: 0 0 14px; border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel); overflow: hidden; }
 .oc-card-banner { height: 64px; background: linear-gradient(120deg, hsl(var(--oc-hue, 215) 52% 34%), hsl(var(--oc-hue, 215) 52% 22%)); }
