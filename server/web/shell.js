@@ -289,7 +289,7 @@ ${o.back ? iconBtn(o.back.href, o.back.label, IC.back) : ''}
  * o: { rail, side, sideLabel, main, members, membersLabel }
  */
 function shell(o = {}) {
-    return `<div class="oc-app" data-oc-app data-oc-panel="main">
+    return `<div class="oc-app" data-oc-app data-oc-panel="main"${o.phoneRail === false ? ' data-oc-norail' : ''}>
 ${o.rail || ''}
 ${o.side ? `<aside class="oc-side" aria-label="${esc(o.sideLabel || 'Chat')}">${o.side}</aside>` : ''}
 <section class="oc-col oc-col-main" aria-label="${esc(o.mainLabel || 'Conversation')}">${o.page ? `<div class="oc-page">${o.main || ''}</div>` : (o.main || '')}</section>

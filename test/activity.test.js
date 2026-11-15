@@ -206,7 +206,10 @@ t('a deleted message leaves the feed, and the page section renders who, what, wh
     assert.match(page.text, /<h1[^>]*>Activity<\/h1>/);
     assert.match(page.text, /What happened/);
     assert.match(page.text, /page me @ann|page me/);
-    assert.ok(page.text.indexOf('What happened') < page.text.indexOf('Friend requests') || !page.text.includes('Friend requests'), 'the feed is above the waiting sections');
+    // 2026-11-15 redo (the owner: "redo it completely"): what needs you comes first, then everything that happened.
+    assert.ok(!page.text.includes('Friend requests') || page.text.indexOf('Friend requests') < page.text.indexOf('What happened'), 'what is waiting is above the feed');
+    assert.ok(!/You are all caught up/.test(page.text), 'never "all caught up" over a list that has rows');
+    assert.match(page.text, /data-oc-norail/, 'a phone gives Activity the whole width');
     assert.strictEqual((await activity('GET', '/unread', ann)).body.unread, 0, 'opening /activity reads it');
     const out = await web('/activity', null);
     assert.strictEqual(out.status, 200, 'the page answers 200 signed out, with the way to sign in');

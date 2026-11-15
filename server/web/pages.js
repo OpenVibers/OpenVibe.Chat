@@ -438,34 +438,39 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
         }));
         const myRooms = (await require('../rooms/rooms').list(me)).mine.filter((r) => r.unread);
         const requests = contacts.requests || [];
-        const requestRows = requests.map((r) => `<li class="oc-row oc-act-row"><span class="oc-act-who">${ui.initials(r.display_name || r.username || '?', null, { avatarUrl: r.avatar_url })}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(r.display_name || r.username || '?')}</strong></span><span class="oc-row-sub">@${esc(r.username || '')} asked to be your friend</span></span></span><form class="oc-inline" method="post" action="/messages/contacts/${Number(r.id)}/accept"><button type="submit">Accept</button></form></li>`);
+        // A friend request is answered in place (2026-11-15 redo): Accept or Decline, and the page comes back here.
+        const answerForm = (r, act, label, quiet) => `<form class="oc-inline" method="post" action="/messages/contacts/${Number(r.id)}/${act}"><input type="hidden" name="next" value="/activity"><button type="submit"${quiet ? ' class="oc-button--quiet"' : ''}>${label}</button></form>`;
+        const requestRows = requests.map((r) => `<li class="oc-row oc-act-row"><span class="oc-act-who">${ui.initials(r.display_name || r.username || '?', null, { avatarUrl: r.avatar_url })}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(r.display_name || r.username || '?')}</strong></span><span class="oc-row-sub">@${esc(r.username || '')} asked to be your friend</span></span></span><span class="oc-act-answer">${answerForm(r, 'accept', 'Accept', false)}${answerForm(r, 'remove', 'Decline', true)}</span></li>`);
         const convRows = dms.filter((d) => d.unread).map((d) => convRow({ href: `/messages/${d.id}`, title: d.title, preview: d.preview, at: d.at, unread: d.unread, personPresence: d.presence, avatarUrl: d.avatarUrl }));
         const serverBlocks = busy.map((sv, i) => `<li class="oc-act-server"><a class="oc-act-server-head" href="/s/${esc(sv.slug)}">${ui.serverMark(sv)}<strong>${esc(sv.name)}</strong></a>
 <ul class="oc-act-chans">${busyChannels[i].map((ch) => `<li><a class="oc-chan is-unread" href="/s/${esc(sv.slug)}/${esc(ch.slug)}">${ch.kind === 'voice' ? IC.voice : '<span class="oc-chan-hash" aria-hidden="true">#</span>'}<span class="oc-chan-name">${esc(ch.name)}</span><span class="oc-chan-dot" aria-label="${ch.unread} unread">${ch.unread > 99 ? '99+' : ch.unread}</span></a></li>`).join('')}</ul></li>`);
         const roomRows = myRooms.map((r) => `<li><a class="oc-chan is-unread" href="/r/${esc(r.slug)}"><span class="oc-chan-hash" aria-hidden="true">#</span><span class="oc-chan-name">${esc(r.name)}</span><span class="oc-chan-dot" aria-label="${r.unread} unread">${r.unread > 99 ? '99+' : r.unread}</span></a></li>`);
         const section = (id, title, n, inner) => (n ? `<section class="oc-act-sec" aria-labelledby="${id}"><h2 class="oc-list-head" id="${id}">${title} <span class="oc-muted">${n}</span></h2>${inner}</section>` : '');
         const waiting = requests.length + convRows.length + busy.length + roomRows.length;
-        // What happened to this person, above what is waiting for them (server/web/activity.js). Opening the page
-        // reads it: the rows below still show what was new on this visit.
-        // "What happened" is the Network's own list for someone signed in (the shared notification UI mounts it in
-        // the page); Chat's own rows stay in the page until that list is there (public/web/activity-notifications.js).
-        const happened = await require('./activity').whatHappened(me, { network: true });
+        // 2026-11-15 redo (the owner: "extremely buggy and broken … redo it completely"): one column. What needs you
+        // comes first (friend requests answered in place, new messages, unread channels), then every notification
+        // from across OpenVibe: the Network's whole list with its filters, loading more as you scroll (it was the
+        // menu's three-card preview, so most of it was "just not there"). "All caught up" is said once, by the list
+        // itself, never under things still listed.
+        const happened = await require('./activity').whatHappened(me, { network: true, nothingWaiting: !waiting });
         const body = waiting
-            ? [
+            ? `<div class="oc-act-waiting">${[
                 section('oc-act-requests', 'Friend requests', requests.length, `<ul class="oc-list">${requestRows.join('')}</ul>`),
                 section('oc-act-convs', 'New messages', convRows.length, `<ul class="oc-list">${convRows.join('\n')}</ul>`),
                 section('oc-act-servers', 'In your servers', busy.length, `<ul class="oc-act-servers">${serverBlocks.join('')}</ul>`),
                 section('oc-act-rooms', 'In your rooms', roomRows.length, `<ul class="oc-act-chans oc-act-rooms">${roomRows.join('')}</ul>`),
-            ].join('\n')
-            : `<section class="oc-act-clear"><span class="oc-act-clear-mark" aria-hidden="true">${IC.check}</span><h2>You are all caught up</h2><p class="oc-muted">New messages, friend requests and unread channels show up here.</p><p class="oc-act-clear-go"><a class="oc-button" href="/messages">Open your messages</a><a class="oc-button oc-button--quiet" href="/servers">Find a server</a></p></section>`;
+            ].join('\n')}</div>`
+            : '';
         await page(req, res, 200, {
             actor, shell: true, title: 'Activity', path: '/activity', active: 'activity', robots: 'noindex, nofollow', footer: 'none',
             scripts: ['activity-notifications.js'],
             body: shell.shell({
+                // A phone gives Activity the whole width: the bottom bar is the way around, not the server rail.
+                phoneRail: false,
                 rail: shell.rail({ dmUnread: unread, servers: shell.railServers(mineServers), list: 'Chats' }),
                 side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
-                main: `${ui.head({ title: 'Activity', sub: waiting ? 'What is waiting for you' : 'Nothing is waiting for you' })}\n${happened}\n${body}`,
+                main: `<div class="oc-act">${ui.head({ title: 'Activity', sub: waiting ? `${waiting} waiting for you` : '' })}\n${body}\n${happened}</div>`,
                 mainLabel: 'Activity',
                 page: true,
             }),
@@ -547,16 +552,18 @@ ${blockedList}`,
         res.redirect(303, status === 'friend' ? `${back}?added=1` : `${back}?asked=1`);
     });
 
+    // Answered from Activity, the page comes back to Activity; anywhere else, to the messages.
+    const contactsBack = (req) => (req.body && req.body.next === '/activity' ? '/activity' : '/messages');
     router.post('/messages/contacts/:userId/accept', formLimit, sameSite, async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         await require('../chat/contacts').accept(actor.user.id, Number(req.params.userId));
-        res.redirect(303, '/messages');
+        res.redirect(303, contactsBack(req));
     });
 
     router.post('/messages/contacts/:userId/remove', formLimit, sameSite, async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         await require('../chat/contacts').remove(actor.user.id, Number(req.params.userId));
-        res.redirect(303, '/messages');
+        res.redirect(303, contactsBack(req));
     });
 
     router.post('/messages/new', formLimit, sameSite, async (req, res, next) => {

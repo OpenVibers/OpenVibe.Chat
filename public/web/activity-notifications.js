@@ -1,7 +1,7 @@
 /* global window, document */
 /**
- * The "What happened" section on openvibe.chat/activity is the Network's own notification list: the same list the
- * menu's Alerts show, drawn by the shared notification UI (openvibe-shared/notification-ui.js). Chat's own rows stay
+ * The "What happened" section on openvibe.chat/activity is the Network's own notification list, whole: the same list
+ * the menu's Alerts show, drawn by the shared notification UI (openvibe-shared/notification-ui.js, renderInbox). Chat's own rows stay
  * in the page until this list is really there: without JavaScript, or without a token (a person who is not signed in
  * to the Network), the page keeps what it had.
  */
@@ -47,7 +47,9 @@
         if (!N || !token) return false;      // no JavaScript or no token: Chat's own rows stay
         try {
             N.init({ token: token, apiBase: API_BASE });
-            N.renderMenuNotifications(host);
+            // The whole list (2026-11-15 redo): its filters, its search and the next page as you scroll. It was the
+            // menu's three-card preview, so most of what happened was not there.
+            N.renderInbox(host);
             host.hidden = false;
             if (rows) rows.hidden = true;
             return true;
