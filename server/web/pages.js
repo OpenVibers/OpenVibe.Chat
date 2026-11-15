@@ -983,18 +983,25 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
         // ?new=workspace (other OpenVibe sites link "Work on it together" here) picks the workspace kind and fills the name.
         const wantWork = req.query.new === 'workspace';
         const preName = wantWork && typeof req.query.name === 'string' ? req.query.name.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 40) : '';
-        const create = me ? `<form class="oc-form oc-grid-form oc-create" id="oc-new-room" method="post" action="/rooms/new">
-<h2>Start a room</h2>
+        // 2026-11-15 (the owner's phone shot of /rooms): starting a room is a sheet behind the + (open by itself when
+        // there is no room yet, from "Work on it together", or after an error); its kinds are cards, the call's own
+        // choice shows only for a call, and Private is a switch. No script: :target and :has().
+        const openNow = wantWork || !!req.query.error || (!mine.length && !pub.length);
+        const create = me ? `<a class="oc-create-dim" href="#" aria-label="Close" tabindex="-1"></a><form class="oc-form oc-grid-form oc-create${openNow ? ' oc-create--open' : ''}" id="oc-new-room" method="post" action="/rooms/new">
+<div class="oc-create-h"><h2>Start a room</h2><a class="oc-icon-btn oc-create-x" href="#" aria-label="Close">${IC.close}</a></div>
 <label>Name <input name="name" required minlength="3" maxlength="40" placeholder="Night Owls" value="${esc(preName)}"${wantWork ? ' autofocus' : ''}></label>
 <label>Topic <input name="topic" maxlength="200" placeholder="What it is about (optional)"></label>
-<fieldset class="oc-fieldset"><legend>Kind</legend>
-<label class="oc-check"><input type="radio" name="kind" value="community"${wantWork ? '' : ' checked'}> Chat room: people write to each other</label>
-<label class="oc-check"><input type="radio" name="kind" value="workspace"${wantWork ? ' checked' : ''}> Workspace: a team and Vibe work together, with a work queue, alerts from other systems and a shared screen</label>
-<label class="oc-check"><input type="radio" name="kind" value="call"> Call room: a voice call with a text chat beside it</label>
-${staff ? '<label class="oc-check"><input type="radio" name="kind" value="system"> Announcements: only OpenVibe staff post (staff)</label>' : ''}
+<fieldset class="oc-fieldset oc-kinds"><legend>Kind</legend>
+<label class="oc-kind"><input type="radio" name="kind" value="community"${wantWork ? '' : ' checked'}><span><b>Chat room</b><small>People write to each other</small></span></label>
+<label class="oc-kind"><input type="radio" name="kind" value="workspace"${wantWork ? ' checked' : ''}><span><b>Workspace</b><small>A team and your agent work together: a work queue, alerts from other systems, a shared screen</small></span></label>
+<label class="oc-kind"><input type="radio" name="kind" value="call"><span><b>Call room</b><small>A voice call with a text chat beside it</small></span></label>
+${staff ? '<label class="oc-kind"><input type="radio" name="kind" value="system"><span><b>Announcements</b><small>Only OpenVibe staff post (staff)</small></span></label>' : ''}
 </fieldset>
-<label>In a call room, people who join <select name="join_role"><option value="participant">listen and write (participants)</option><option value="speaker">can talk (speakers)</option><option value="viewer">listen and read (viewers)</option></select></label>
-<label class="oc-check"><input type="checkbox" name="private" value="1"> Private: only people you invite can read and post</label>
+<fieldset class="oc-fieldset oc-join"><legend>People who join the call</legend><div class="oc-seg">
+<label><input type="radio" name="join_role" value="participant" checked><span>Listen and write</span></label>
+<label><input type="radio" name="join_role" value="speaker"><span>Can talk</span></label>
+<label><input type="radio" name="join_role" value="viewer"><span>Listen and read</span></label></div></fieldset>
+<label class="oc-switch-row"><span><b>Private</b><small>Only people you invite can read and post</small></span><input type="checkbox" role="switch" name="private" value="1"><i class="oc-switch" aria-hidden="true"></i></label>
 <p><button type="submit">Create room</button></p>
 </form>` : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${wantWork ? '%2Frooms%3Fnew%3Dworkspace' : '%2Frooms'}">Sign in with OpenVibe</a> to start or join a room.</p>`;
         const mineServers = me ? (await require('../rooms/servers').list(me)).mine : [];
