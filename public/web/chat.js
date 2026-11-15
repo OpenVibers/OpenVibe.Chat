@@ -693,6 +693,8 @@
     li.appendChild(document.createTextNode(' '));
     var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
     if (m.edited_at && window.OVMessages) window.OVMessages.edited(t, m.edited_at);
+    // The files it carries (11-15): drawn as a room's are.
+    var files = mediaAttachments(m.attachments); if (files) li.appendChild(files);
     addCard(li, m);
     offerActions(li, { id: m.id, user_id: m.sender_id, message: m.message, edited_at: m.edited_at }, Number(m.sender_id) === Number(cfg.me));
     return li;
@@ -744,15 +746,19 @@
     if (form && input) {
       form.addEventListener('submit', function (e) {
         var text = input.value.trim();
-        if (!text) { e.preventDefault(); return; }
+        // The files the composer put in Media (their att_ ids on the form): a file alone is a message.
+        var ids = Array.prototype.map.call(form.querySelectorAll('input[type="hidden"][name="' + (form.getAttribute('data-ovc-ids') || 'attachments') + '"]'), function (h) { return h.value; }).filter(Boolean);
+        if (!text && !ids.length) { e.preventDefault(); return; }
         e.preventDefault();
         var btn = form.querySelector('[data-ovt-send]') || form.querySelector('.oc-send') || form.querySelector('button'); if (btn) btn.disabled = true;
-        fetch(base + '/messages', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) })
+        fetch(base + '/messages', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, attachments: ids }) })
           .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
           .then(function (x) {
             if (!x.ok) { showError((x.d && x.d.error) || 'Could not send'); return; }
             if (x.d && x.d.message) { latest = Math.max(latest, Number(x.d.message.id) || 0); append(dmItem(x.d.message), x.d.message.id); }
             input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus();
+            var c = form.__ovcComposer; if (c && typeof c.clearFiles === 'function') c.clearFiles();
+            Array.prototype.forEach.call(form.querySelectorAll('input[type="hidden"][name="' + (form.getAttribute('data-ovc-ids') || 'attachments') + '"]'), function (h) { h.remove(); });
           })
           .catch(function () { form.submit(); })
           .then(function () { if (btn) btn.disabled = false; });

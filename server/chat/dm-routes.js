@@ -273,11 +273,19 @@ router.post('/conversations/:id/messages', sendLimit, async (req, res) => {
         }
 
         const { message } = req.body;
-        if (!message || typeof message !== 'string' || !message.trim()) {
+        // The files the shared composer put in Media (att_ ids, 11-15): a file alone is a message.
+        let attachments = [];
+        try { attachments = require('../rooms/attachments').namedAttachments(req.body && req.body.attachments); }
+        catch (err) { return res.status(err.status || 400).json({ error: err.message, code: err.code || 'dm.attachment_invalid' }); }
+        const words = typeof message === 'string' ? message : '';
+        if (!words.trim() && !attachments.length) {
             return res.status(400).json({ error: 'Message required' });
         }
 
-        const msg = publicMessage(await dm.sendMessage(convId, req.user.id, message, { reply_to_id: req.body && req.body.reply_to_id }));
+        let sent;
+        try { sent = await dm.sendMessage(convId, req.user.id, words, { reply_to_id: req.body && req.body.reply_to_id, attachments }); }
+        catch (err) { if (err && err.status) return res.status(err.status).json({ error: err.message, code: err.code }); throw err; }
+        const msg = publicMessage(sent);
         if (!msg) return res.status(400).json({ error: 'Failed to send' });
 
         // Attach sender info

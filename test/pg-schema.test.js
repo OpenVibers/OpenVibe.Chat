@@ -44,6 +44,7 @@ const TABLES = [
     'chat_server_timeouts', 'chat_command_polls', 'chat_command_poll_votes', 'chat_command_reminders', 'chat_registered_commands',
     'room_memory',                           // 0071: what a room keeps between summaries
     'room_message_attachments',              // 0081: the files a room message carries (Media's composer attachments)
+    'dm_message_attachments',                // 0083: the files a direct message carries (any kind Media keeps)
     'chat_activity_notifications',            // 0082: the activity rows Chat told the Network about
 ];
 const INDEXES = [

@@ -145,6 +145,45 @@ function rowFor(messageId, item, position) {
     };
 }
 
+/** The kind a direct message may carry (11-15, the owner: "all file types"): anything Media accepts, which refuses
+ *  programs; Media's "code" is a file here. */
+function anyKind(kind) {
+    const k = String(kind || '').trim();
+    if (k === 'code') return 'file';
+    return KINDS.has(k) ? k : null;
+}
+
+/** The row helpers over one table: room_message_attachments (rooms) or dm_message_attachments (direct messages). */
+function tableHelpers(table) {
+    if (!/^(room|dm)_message_attachments$/.test(table)) throw new Error('no such attachments table');
+    return {
+        async createRows(messageId, items) {
+            const out = [];
+            for (let i = 0; i < items.length; i++) {
+                const row = rowFor(messageId, items[i], i);
+                if (!row.attachment_id || !row.url) continue;
+                await db.run(
+                    `INSERT INTO ${table} (message_id, attachment_id, position, owner_subject, name, mime, size_bytes, kind, url, poster, playback_url, playback_mime, playback_ready, duration_s, width, height)`
+                    + ' VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                    [row.message_id, row.attachment_id, row.position, row.owner_subject, row.name, row.mime, row.size_bytes, row.kind,
+                        row.url, row.poster, row.playback_url, row.playback_mime, row.playback_ready, row.duration_s, row.width, row.height]);
+                out.push(row);
+            }
+            return out;
+        },
+        async rowsFor(messageIds) {
+            const ids = (Array.isArray(messageIds) ? messageIds : [messageIds]).map((n) => Number(n) || 0).filter(Boolean);
+            if (!ids.length) return new Map();
+            const rows = await db.all(`SELECT * FROM ${table} WHERE message_id IN (${ids.map(() => '?').join(',')}) ORDER BY message_id, position, attachment_id`, ids);
+            const out = new Map();
+            for (const row of rows) { const list = out.get(Number(row.message_id)) || []; list.push(row); out.set(Number(row.message_id), list); }
+            return out;
+        },
+        async rowsOf(messageId) { return await db.all(`SELECT * FROM ${table} WHERE message_id = ? ORDER BY position, attachment_id`, [Number(messageId) || 0]); },
+        async dropRows(messageId) { await db.run(`DELETE FROM ${table} WHERE message_id = ?`, [Number(messageId) || 0]); },
+    };
+}
+
 /** Store the attachments of one message (the rows a reader draws them from). */
 async function createRows(messageId, items) {
     const out = [];
@@ -187,4 +226,4 @@ async function dropRows(messageId) {
     await db.run('DELETE FROM room_message_attachments WHERE message_id = ?', [Number(messageId) || 0]);
 }
 
-module.exports = { ATTACHMENT_ID, KINDS, MAX_ATTACHMENTS, allowedKind, composerReference, namedAttachments, mediaUrl, publicReference, createRows, rowsFor, rowsOf, dropRows };
+module.exports = { ATTACHMENT_ID, KINDS, MAX_ATTACHMENTS, allowedKind, anyKind, composerReference, namedAttachments, mediaUrl, publicReference, createRows, rowsFor, rowsOf, dropRows, tableHelpers };

@@ -132,8 +132,8 @@ function globalMessage(m) {
 function dmMessage(m, me, view = 'room') {
     const t = hhmm(m.created_at);
     const mine = me && m.sender_id === me.id;
-    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.sender_id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div>${ui.messageCards(m)}<time class="oc-bubble-time" datetime="${t.iso}">${t.text}${m.edited_at ? ` <span class="oc-edited" data-edited-at="${esc(m.edited_at)}">· edited ${esc(hhmm(m.edited_at).text)}</span>` : ''}</time></li>`;
-    return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.sender_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${m.edited_at ? ` <span class="oc-muted oc-edited" data-edited-at="${esc(m.edited_at)}">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ui.messageCards(m)}</li>`;
+    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.sender_id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div>${ui.messageAttachments({ media_attachments: m.attachments })}${ui.messageCards(m)}<time class="oc-bubble-time" datetime="${t.iso}">${t.text}${m.edited_at ? ` <span class="oc-edited" data-edited-at="${esc(m.edited_at)}">· edited ${esc(hhmm(m.edited_at).text)}</span>` : ''}</time></li>`;
+    return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.sender_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${m.edited_at ? ` <span class="oc-muted oc-edited" data-edited-at="${esc(m.edited_at)}">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ui.messageAttachments({ media_attachments: m.attachments })}${ui.messageCards(m)}</li>`;
 }
 // Vibe, OpenVibe's assistant, as a room's AI member (one click on the room's settings; a person's own chats with it are
 // server/rooms/vibe.js): how it should be in a group.
@@ -608,7 +608,9 @@ ${blockedList}`,
         const liveHref = otherPresence && (otherPresence.channel_url || otherPresence.url);
         const subLine = other ? (ui.presenceLine(otherPresence, { liveHref }) || `@${esc(other.username || '')}`) : `${others.length + 1} people`;
         const avatar = other ? ui.initials(other.display_name || other.username || '?', otherPresence, { large: true, id: 'oc-dm-avatar', avatarUrl: other.avatar_url }) : '';
-        let composer = shell.composer({ action: `/messages/${id}`, label: 'Reply', placeholder: 'Write a message' });
+        // 11-15 (the owner: DMs on the shared composer, "file support and images … all file types"): the box sends the
+        // files it takes to Media as they are picked and puts their ids on the form, like a room's.
+        let composer = shell.composer({ action: `/messages/${id}`, label: 'Reply', placeholder: 'Write a message', media: true });
         if (iBlocked) composer = `${notice('error', `You blocked ${other.display_name || other.username}. Neither of you can message the other.`)}<form class="oc-inline" method="post" action="/messages/unblock/${Number(other.id)}"><input type="hidden" name="back" value="/messages/${id}"><button type="submit">Unblock ${otherName}</button></form>`;
         else if (closed) composer = notice('error', 'You cannot message this person.');
         // Blocking is in the conversation's "more" menu: one tap on an icon in the header should never block someone.
@@ -720,7 +722,7 @@ ${composer}`,
         if (!Number.isInteger(id)) return res.redirect(303, '/messages');
         req.headers.authorization = `Bearer ${req.cookies.ov_token}`;
         return apiBridge(dmApi, `/conversations/${id}/messages`, {
-            body: (r) => ({ message: String((r.body && r.body.message) || '').slice(0, 2000) }),
+            body: (r) => ({ message: String((r.body && r.body.message) || '').slice(0, 2000), attachments: require('../rooms/attachments').namedAttachments(r.body && r.body.attachments) }),
             ok: (r, s) => s.redirect(303, `/messages/${id}#oc-compose`),
             fail: (r, s, status, error) => s.redirect(303, `/messages/${id}?error=${encodeURIComponent(error)}#oc-compose`),
         })(req, res, next);
