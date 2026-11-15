@@ -104,31 +104,37 @@ function personRow(person, { href = '', extra = '', title = '', sub = '' } = {})
 }
 
 /**
- * The side column on Home: find or start a conversation, then Friends, Requests and Vibe, then the DMs.
- * o: { dms: [{ id, title, preview, at, unread, presence, avatarUrl }], friends, requests, current }
+ * The side column on Home (2026-11-15 redo; the owner, twice: "All my chat messages disappeared": the conversations
+ * sat at the very bottom, under two empty boxes and the add field): find or start a conversation, your agent, then
+ * your conversations first; friend requests only when there are some; your friends after, the add field with them.
+ * An empty section is one quiet line, never a box.
+ * o: { dms: [{ id, title, preview, at, unread, presence, avatarUrl }], friends, requests, current, agentName? }
  */
 function sideHome(o = {}) {
     const dms = o.dms || [];
     const dmRow = (d) => `<li class="oc-row${d.unread ? ' oc-unread' : ''}"><a href="/messages/${d.id}"${d.current ? ' aria-current="page"' : ''}>${ui.initials(d.title, d.presence, { avatarUrl: d.avatarUrl })}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(d.title)}</strong>${d.unread ? `<span class="oc-dot" aria-label="${d.unread} new">${d.unread > 9 ? '9+' : d.unread}</span>` : ''}</span><span class="oc-row-sub">${esc(d.preview || '')}</span></span></a></li>`;
     const friends = o.friends || [];
     const requests = o.requests || [];
+    const agent = String(o.agentName || 'Actor').slice(0, 40);
+    const friendList = friends.length ? `<ul class="oc-side-list">${friends.map((f) => `<li class="oc-row"><form method="post" action="/messages/new"><input type="hidden" name="username" value="${esc(f.username || '')}"><button type="submit" class="oc-side-person">${ui.initials(f.display_name || f.username || '?', f.presence, { avatarUrl: f.avatar_url })}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(f.display_name || f.username || '?')}</strong></span><span class="oc-row-sub">@${esc(f.username || '')}</span></span></button></form></li>`).join('')}</ul>`
+        : dms.length ? '<p class="oc-side-none">No friends yet: add someone by their username.</p>'
+            // Nothing at all yet (owner ask 81): the kit's empty state, not a bare line.
+            : `<div class="oc-side-empty">${kit.empty({ icon: 'user', title: 'No friends yet', text: 'Start a conversation and add the people you talk to.' })}</div>`;
+    const showRequests = requests.length || !dms.length;
     return `<div class="oc-side-top">
 <a class="oc-side-find" href="/messages#oc-new">${IC.pencil}<span>Find or start a conversation</span></a>
 </div>
-<section class="oc-side-sec" aria-labelledby="oc-side-friends"><h2 class="oc-side-group" id="oc-side-friends">Friends <span class="oc-muted">${friends.length}</span></h2>
-${friends.length ? `<ul class="oc-side-list">${friends.map((f) => `<li class="oc-row"><form method="post" action="/messages/new"><input type="hidden" name="username" value="${esc(f.username || '')}"><button type="submit" class="oc-side-person">${ui.initials(f.display_name || f.username || '?', f.presence, { avatarUrl: f.avatar_url })}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(f.display_name || f.username || '?')}</strong></span><span class="oc-row-sub">@${esc(f.username || '')}</span></span></button></form></li>`).join('')}</ul>`
-        : `<div class="oc-side-empty">${kit.empty({ icon: 'user', title: 'No friends yet', text: 'Start a conversation and add the people you talk to.' })}</div>`}
-<form class="oc-side-add" method="post" action="/messages/contacts"><label class="oc-sr" for="oc-add-friend">Add a friend by username</label><input id="oc-add-friend" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="Add a friend by username" autocomplete="off"><button type="submit">Add</button></form>
+<ul class="oc-side-list oc-side-agent"><li class="oc-row"><a href="/vibe">${IC.spark}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(agent)}</strong></span><span class="oc-row-sub">Your agent: ask anything</span></span></a></li></ul>
+<section class="oc-side-sec" aria-labelledby="oc-side-dms"><h2 class="oc-side-group" id="oc-side-dms">Direct messages <span class="oc-muted">${dms.length || ''}</span></h2>
+${dms.length ? `<ul class="oc-side-list">${dms.map(dmRow).join('')}</ul>` : `<div class="oc-side-empty">${kit.empty({ icon: 'chat', title: 'No conversations yet', text: 'Find someone above to start one.' })}</div>`}
 </section>
-<section class="oc-side-sec" aria-labelledby="oc-side-requests"><h2 class="oc-side-group" id="oc-side-requests">Requests <span class="oc-muted">${requests.length}</span></h2>
+${showRequests ? `<section class="oc-side-sec" aria-labelledby="oc-side-requests"><h2 class="oc-side-group" id="oc-side-requests">Requests <span class="oc-muted">${requests.length || ''}</span></h2>
 ${requests.length ? `<ul class="oc-side-list">${requests.map((r) => personRow(r, { extra: `<form class="oc-inline" method="post" action="/messages/contacts/${Number(r.id)}/accept"><button type="submit" class="oc-link">Accept</button></form>` })).join('')}</ul>`
         : `<div class="oc-side-empty">${kit.empty({ icon: 'user', title: 'No requests', text: 'Friend requests appear here.' })}</div>`}
-</section>
-<section class="oc-side-sec" aria-labelledby="oc-side-vibe"><h2 class="oc-side-group" id="oc-side-vibe">Vibe</h2>
-<ul class="oc-side-list"><li class="oc-row"><a href="/vibe">${IC.spark}<span class="oc-row-main"><span class="oc-row-top"><strong>Vibe</strong></span><span class="oc-row-sub">OpenVibe's assistant</span></span></a></li></ul>
-</section>
-<section class="oc-side-sec" aria-labelledby="oc-side-dms"><h2 class="oc-side-group" id="oc-side-dms">Direct messages</h2>
-${dms.length ? `<ul class="oc-side-list">${dms.map(dmRow).join('')}</ul>` : `<div class="oc-side-empty">${kit.empty({ icon: 'chat', title: 'No conversations yet', text: 'Find someone above to start one.' })}</div>`}
+</section>` : ''}
+<section class="oc-side-sec" aria-labelledby="oc-side-friends"><h2 class="oc-side-group" id="oc-side-friends">Friends <span class="oc-muted">${friends.length || ''}</span></h2>
+${friendList}
+<form class="oc-side-add" method="post" action="/messages/contacts"><label class="oc-sr" for="oc-add-friend">Add a friend by username</label><input id="oc-add-friend" name="username" required pattern="[A-Za-z0-9_]{3,24}" placeholder="Add a friend by username" autocomplete="off"><button type="submit">Add</button></form>
 </section>
 ${youBar(o.you || {})}`;
 }

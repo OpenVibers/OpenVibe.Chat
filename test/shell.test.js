@@ -118,7 +118,10 @@ t('Home: the DMs and the people you talk to down the side', async () => {
     assert.strictEqual(r.status, 200);
     assert.match(r.text, /id="oc-side-dms"/, 'the DMs in the side column');
     assert.match(r.text, /id="oc-side-friends"/, 'Friends');
-    assert.match(r.text, /id="oc-side-requests"/, 'Requests');
+    // 2026-11-15 (the owner: "All my chat messages disappeared": they sat under two empty boxes): the conversations come
+    // first, before friends; Requests shows only when there are some (or when the column is empty).
+    assert.ok(r.text.indexOf('id="oc-side-dms"') < r.text.indexOf('id="oc-side-friends"'), 'the conversations before the friends');
+    assert.ok(!/id="oc-side-requests"/.test(r.text), 'no empty Requests box above or below them');
     assert.match(r.text, /Find or start a conversation/);
     assert.match(r.text, /Saturday\\?/, 'the last line of the conversation');
 });

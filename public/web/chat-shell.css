@@ -400,3 +400,8 @@ fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
 .oc-feed.is-grouped > .oc-day::before, .oc-feed.is-grouped > .oc-day::after { content: ""; flex: 1; height: 1px; background: var(--oc-line); }
 .oc-feed.is-grouped > .oc-msg.is-first > .oc-time { display: inline; margin: 0; }
 .oc-feed.is-grouped > .oc-msg.is-cont > .oc-time { display: block; margin: 0; }
+/* Home's side column (2026-11-15): conversations first; an empty section is one quiet line, never a box. */
+.oc-side-none { margin: 2px 12px 8px; font-size: .85rem; color: var(--oc-muted, var(--oc-text)); }
+.oc-side-agent { margin: 6px 0 2px; }
+.oc-side-agent .oc-row a { border-radius: 14px; background: color-mix(in srgb, var(--oc-accent) 10%, transparent); }
+.oc-side-agent .oc-row a:hover { background: color-mix(in srgb, var(--oc-accent) 16%, transparent); }
