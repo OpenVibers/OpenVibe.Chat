@@ -931,3 +931,17 @@ html[data-ov-motion=off] .oc-insight-pop, html[data-ov-motion=off] .oc-chan-tool
 .oc-switch-row input:checked ~ .oc-switch::after { transform: translateX(20px); }
 .oc-switch-row input:focus-visible ~ .oc-switch { outline: 2px solid var(--oc-accent); outline-offset: 2px; }
 html[data-ov-motion=off] .oc-create:target, html[data-ov-motion=off] .oc-create-dim { animation: none; }
+
+/* Where you stopped reading Global (11-17): the New messages line, and the lines after it lit until they are seen. */
+.oc-new-line { display: flex; align-items: center; gap: 10px; margin: 10px 4px 6px; list-style: none; color: var(--accent-light, var(--accent, #3b82f6));
+  font-size: 11.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.oc-new-line::before, .oc-new-line::after { content: ""; flex: 1; height: 2px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--accent, #3b82f6));
+  animation: oc-new-line .55s cubic-bezier(.2, .8, .2, 1) both; }
+.oc-new-line::after { background: linear-gradient(90deg, var(--accent, #3b82f6), transparent); }
+.oc-new-line span { padding: 3px 10px; border-radius: 999px; background: color-mix(in srgb, var(--accent, #3b82f6) 16%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #3b82f6) 38%, transparent); }
+.oc-msg.oc-new { box-shadow: inset 3px 0 0 var(--accent, #3b82f6); background: color-mix(in srgb, var(--accent, #3b82f6) 9%, transparent); }
+.oc-msg.oc-was-new { transition: background-color 1.1s ease, box-shadow 1.1s ease; }
+@keyframes oc-new-line { from { transform: scaleX(0); opacity: 0; } }
+html[data-ov-motion="off"] .oc-new-line::before, html[data-ov-motion="off"] .oc-new-line::after { animation: none; }
+html[data-ov-motion="off"] .oc-msg.oc-was-new { transition: none; }
