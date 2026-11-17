@@ -138,7 +138,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     // The menu's Chat tab on every site (Shared 4.275.0; the owner's phone, 11-15: on openvibe.actor Global "did not load"
     // and Servers said "No servers yet": both were refused for the origin): Global's history and a message to it, the
     // servers list, starting one and joining one, and the older contacts list.
-    const bearerDockChatPath = (p) => p === '/api/chat/global/history' || p === '/api/chat/send' || p === '/api/chat/servers' || /^\/api\/chat\/servers\/[a-z0-9][a-z0-9-]{0,63}\/join$/i.test(p) || p === '/api/dm/contacts';
+    const bearerDockChatPath = (p) => p === '/api/chat/global/history' || p === '/api/chat/global/read' || p === '/api/chat/send' || p === '/api/chat/servers' || /^\/api\/chat\/servers\/[a-z0-9][a-z0-9-]{0,63}\/join$/i.test(p) || p === '/api/dm/contacts';
     const bearerDockVibePath = (p) => p.startsWith('/api/vibe/') || p.startsWith('/api/chat/vibe/') || p === '/api/chat/vibe/picture' || /^\/api\/chat\/rooms\/[^/]+\/pictures$/.test(p);
 
     // ── Internal (loopback; never routed by nginx) ─────────────
