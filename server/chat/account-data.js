@@ -137,6 +137,7 @@ const ERASE_FIRST = [
     ['conversations_left', 'DELETE FROM dm_participants WHERE subject_id = ANY(@s) OR user_id = ANY(@ids)'],
     ['conversations', 'DELETE FROM dm_conversations WHERE id NOT IN (SELECT conversation_id FROM dm_participants)'],
     ['room_memberships', 'DELETE FROM room_members WHERE user_id = ANY(@ids)'],
+    ['global_read', 'DELETE FROM global_reads WHERE user_id = ANY(@ids)'],
     ['room_attachments', 'DELETE FROM room_attachments WHERE attached_by_subject = ANY(@s)'],
     ['command_poll_votes', 'DELETE FROM chat_command_poll_votes WHERE user_id = ANY(@ids)'],
     ['command_reminders', 'DELETE FROM chat_command_reminders WHERE user_id = ANY(@ids)'],
