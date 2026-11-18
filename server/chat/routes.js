@@ -540,6 +540,47 @@ router.get('/filters/friendly', (req, res) => {
     res.json({ version: 1, categories: FRIENDLY_FILTER_CATEGORIES.map(({ key, label, patterns }) => ({ key, label, patterns })) });
 });
 
+// ── Where the person stopped reading Global (the owner, 11-17: "remember where you were in the chat last … locally
+// and on the server … new messages … wherever you last read") ──
+// GET: the last Global message they read, and how many came after it that they would see (up to 100; their own lines
+// and blocked people's are not news). POST { id }: they read up to there; it only moves forward, never past the newest
+// message, so a stale tab on another device cannot move it back.
+const GLOBAL_UNREAD_MAX = 100;
+const globalReadLimit = limits('chat.global.read', { minute: 120, hour: 2000 });
+async function globalReadOf(userId) {
+    const row = await db.get('SELECT last_read_id FROM global_reads WHERE user_id = ?', [userId]);
+    return row ? Number(row.last_read_id) || 0 : 0;
+}
+router.get('/global/read', requireAuth, async (req, res) => {
+    try {
+        const last = await globalReadOf(req.user.id);
+        let unread = 0;
+        if (last) {
+            const out = await historyStore.delta('global', { afterId: last, limit: GLOBAL_UNREAD_MAX });
+            const rows = await withoutBlocked(req, res, require('./global-standard').filterFeed(out.messages));
+            unread = rows.filter((m) => m && !m.is_deleted && m.message && Number(m.user_id) !== Number(req.user.id)).length;
+        }
+        res.set('Cache-Control', 'private, no-store');
+        res.json({ last_read_id: last, unread, more: unread >= GLOBAL_UNREAD_MAX });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to read where you stopped in Global' });
+    }
+});
+router.post('/global/read', requireAuth, globalReadLimit, async (req, res) => {
+    const asked = Number(req.body && req.body.id);
+    if (!Number.isSafeInteger(asked) || asked < 0) return res.status(400).json({ error: 'id is a message id' });
+    try {
+        const tip = await db.get('SELECT MAX(id) AS id FROM chat_messages');
+        const id = Math.min(asked, Number(tip && tip.id) || 0);
+        await db.run(`INSERT INTO global_reads (user_id, last_read_id, updated_at) VALUES (?, ?, now())
+            ON CONFLICT (user_id) DO UPDATE SET last_read_id = GREATEST(global_reads.last_read_id, EXCLUDED.last_read_id),
+                updated_at = CASE WHEN EXCLUDED.last_read_id > global_reads.last_read_id THEN now() ELSE global_reads.updated_at END`, [req.user.id, id]);
+        res.json({ last_read_id: await globalReadOf(req.user.id) });
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to save where you stopped in Global' });
+    }
+});
+
 router.get('/global/history', optionalAuth, async (req, res) => {
     try {
         const askedLimit = parseInt(req.query.limit, 10);

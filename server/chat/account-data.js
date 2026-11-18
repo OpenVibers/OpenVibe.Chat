@@ -51,6 +51,7 @@ const EXPORTS = [
     ['vibe_canvases.json', `SELECT c.* FROM vibe_canvases c JOIN rooms r ON r.id = c.room_id WHERE r.owner_subject = ANY(@s) OR r.owner_id = ANY(@ids) ORDER BY c.updated_at DESC LIMIT ${LIMIT}`],
     ['vibe_canvas_versions.json', `SELECT v.* FROM vibe_canvas_versions v JOIN vibe_canvases c ON c.id = v.canvas_id JOIN rooms r ON r.id = c.room_id WHERE r.owner_subject = ANY(@s) OR r.owner_id = ANY(@ids) ORDER BY v.created_at DESC LIMIT ${LIMIT}`],
     ['direct_messages.json', `SELECT * FROM dm_messages WHERE sender_subject_id = ANY(@s) OR sender_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    ['direct_message_files.json', `SELECT message_id, attachment_id, name, mime, size_bytes, kind, url, created_at FROM dm_message_attachments WHERE owner_subject = ANY(@s) ORDER BY message_id DESC LIMIT ${LIMIT}`],
     ['conversations.json', `SELECT * FROM dm_participants WHERE subject_id = ANY(@s) OR user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
     ['rooms_owned.json', `SELECT * FROM rooms WHERE (owner_subject = ANY(@s) OR owner_id = ANY(@ids)) AND server_id IS NULL ORDER BY id DESC LIMIT ${LIMIT}`],
     ['servers_owned.json', `SELECT * FROM chat_servers WHERE owner_subject = ANY(@s) OR owner_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
@@ -108,6 +109,8 @@ const EXPORTS = [
     ['room_reactions.json', `SELECT message_id, reaction, created_at FROM room_message_reactions WHERE user_id = ANY(@ids) LIMIT ${LIMIT}`],
     // What happened to them in Chat, and what their own actions caused (server/chat/activity.js).
     ['activity.json', `SELECT id, kind, actor_user_id, actor_username, room_id, server_id, conversation_id, message_id, parent_id, scope, excerpt, reaction, role, created_at, read_at FROM chat_activity WHERE user_id = ANY(@ids) OR actor_user_id = ANY(@ids) ORDER BY id DESC LIMIT ${LIMIT}`],
+    // Which of that activity the Network was told about (server/chat/activity-notify.js).
+    ['activity_notifications.json', `SELECT activity_id, kind, type, url, status, created_at FROM chat_activity_notifications WHERE user_id = ANY(@ids) ORDER BY activity_id DESC LIMIT ${LIMIT}`],
 ];
 
 async function exportPart(d, subject) {
@@ -134,6 +137,7 @@ const ERASE_FIRST = [
     ['conversations_left', 'DELETE FROM dm_participants WHERE subject_id = ANY(@s) OR user_id = ANY(@ids)'],
     ['conversations', 'DELETE FROM dm_conversations WHERE id NOT IN (SELECT conversation_id FROM dm_participants)'],
     ['room_memberships', 'DELETE FROM room_members WHERE user_id = ANY(@ids)'],
+    ['global_read', 'DELETE FROM global_reads WHERE user_id = ANY(@ids)'],
     ['room_attachments', 'DELETE FROM room_attachments WHERE attached_by_subject = ANY(@s)'],
     ['command_poll_votes', 'DELETE FROM chat_command_poll_votes WHERE user_id = ANY(@ids)'],
     ['command_reminders', 'DELETE FROM chat_command_reminders WHERE user_id = ANY(@ids)'],
@@ -164,6 +168,7 @@ const ERASE_AFTER_ROOMS = [
     ['agent_room_votes', 'DELETE FROM agent_room_poll_votes WHERE user_id = ANY(@ids)'],
     ['room_reactions', 'DELETE FROM room_message_reactions WHERE user_id = ANY(@ids)'],
     ['activity', 'DELETE FROM chat_activity WHERE user_id = ANY(@ids) OR actor_user_id = ANY(@ids)'],
+    ['activity_notifications', 'DELETE FROM chat_activity_notifications WHERE user_id = ANY(@ids)'],
     ['room_memory', "DELETE FROM room_memory WHERE learned_by = ANY(@s) OR EXISTS (SELECT 1 FROM jsonb_array_elements_text(room_memory.source_subjects) x WHERE x = ANY(@s))"],
     ['vibe_deliveries', 'DELETE FROM vibe_deliveries WHERE user_id = ANY(@ids)'],
     // Friends and conversation view preferences from the Chat app shell.

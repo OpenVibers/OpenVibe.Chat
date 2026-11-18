@@ -619,7 +619,67 @@
         if (d.latest_id) latest = Math.max(latest, d.latest_id);
       }).catch(function () {});
   }
+  // ── Where you stopped reading Global (the owner, 11-17: "remember where you were in the chat last … save it
+  // locally and on the server … new messages … wherever you last read"): the same mark as the menu's Global on every
+  // OpenVibe site (GET/POST /api/chat/global/read). The room opens at a New messages line when lines came after it; a
+  // line counts as read once it has been on screen a moment (or comes while you are at the end), so the menu's count
+  // follows what you read here.
+  function globalReads() {
+    if (!cfg.me || !feed) return { seen: function () {} };
+    var sent = 0, want = 0, timer = null, dwell = null;
+    var idOf = function (x) { return Number(x && x.dataset && x.dataset.id) || 0; };
+    function flush(leaving) {
+      clearTimeout(timer);
+      if (want <= sent) return;
+      var id = want; var prev = sent; sent = id;
+      fetch('/api/chat/global/read', { method: 'POST', credentials: 'same-origin', keepalive: !!leaving, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: id }) })
+        .then(function (r) { if (!r.ok && sent === id) sent = prev; }, function () { if (sent === id) sent = prev; });
+    }
+    function mark(id) { if (id <= want) return; want = id; clearTimeout(timer); timer = setTimeout(function () { flush(false); }, 1200); }
+    /** The newest line whose middle is on screen. */
+    function lastOnScreen() {
+      var box = feed.getBoundingClientRect(), items = feed.querySelectorAll('[data-id]');
+      for (var i = items.length - 1; i >= 0; i--) {
+        var r = items[i].getBoundingClientRect(), mid = (r.top + r.bottom) / 2;
+        if (mid < box.bottom && mid > box.top) return idOf(items[i]);
+      }
+      return 0;
+    }
+    function settle() {
+      clearTimeout(dwell);
+      dwell = setTimeout(function () {
+        if (document.hidden) return;
+        var id = lastOnScreen(); if (!id) return;
+        mark(id);
+        Array.prototype.forEach.call(feed.querySelectorAll('.oc-new'), function (x) { if (idOf(x) <= id) { x.classList.remove('oc-new'); x.classList.add('oc-was-new'); } });
+      }, 450);
+    }
+    feed.addEventListener('scroll', settle, { passive: true });
+    document.addEventListener('visibilitychange', function () { if (document.hidden) flush(true); else settle(); });
+    window.addEventListener('pagehide', function () { flush(true); });
+    fetch('/api/chat/global/read', { credentials: 'same-origin', cache: 'no-store' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) {
+        var last = d ? Number(d.last_read_id) || 0 : 0;
+        if (last > sent) sent = last;
+        var first = null;
+        if (last) Array.prototype.forEach.call(feed.querySelectorAll('[data-id]'), function (x) {
+          if (idOf(x) > last && String(x.dataset.user || '') !== String(cfg.me)) { x.classList.add('oc-new'); if (!first) first = x; }
+        });
+        if (first && first.previousElementSibling) {
+          var line = el('li', 'oc-new-line'); line.setAttribute('role', 'separator'); line.setAttribute('aria-label', 'New messages below');
+          line.appendChild(el('span', '', 'New messages'));
+          feed.insertBefore(line, first);
+          feed.scrollTop = Math.max(0, feed.scrollTop + line.getBoundingClientRect().top - feed.getBoundingClientRect().top - Math.min(feed.clientHeight * 0.22, 140));
+        }
+        settle();
+      }).catch(function () { settle(); });
+    return { seen: function () { if (nearBottom()) settle(); } };
+  }
+  var reads = { seen: function () {} };
+
   function startGlobal() {
+    reads = globalReads();
     var live = document.getElementById('oc-live');
     var ws = null, delay = 1000, opened = false;
     var historyState = document.getElementById('oc-history-state');
@@ -654,6 +714,7 @@
         if (m.type === 'chat' && m.is_global) {
           if (m.id) latest = Math.max(latest, Number(m.id));
           append(globalItem(m), m.id);
+          reads.seen();
         } else if (m.type === 'chat_embeds' && m.id) {
           updateEmbeds(m.id, m.embeds);
         } else if (m.type === 'chat_edited' && m.message) {
@@ -693,6 +754,8 @@
     li.appendChild(document.createTextNode(' '));
     var t = el('span', 'oc-text'); textWithLinks(t, m.message); li.appendChild(t);
     if (m.edited_at && window.OVMessages) window.OVMessages.edited(t, m.edited_at);
+    // The files it carries (11-15): drawn as a room's are.
+    var files = mediaAttachments(m.attachments); if (files) li.appendChild(files);
     addCard(li, m);
     offerActions(li, { id: m.id, user_id: m.sender_id, message: m.message, edited_at: m.edited_at }, Number(m.sender_id) === Number(cfg.me));
     return li;
@@ -744,15 +807,19 @@
     if (form && input) {
       form.addEventListener('submit', function (e) {
         var text = input.value.trim();
-        if (!text) { e.preventDefault(); return; }
+        // The files the composer put in Media (their att_ ids on the form): a file alone is a message.
+        var ids = Array.prototype.map.call(form.querySelectorAll('input[type="hidden"][name="' + (form.getAttribute('data-ovc-ids') || 'attachments') + '"]'), function (h) { return h.value; }).filter(Boolean);
+        if (!text && !ids.length) { e.preventDefault(); return; }
         e.preventDefault();
         var btn = form.querySelector('[data-ovt-send]') || form.querySelector('.oc-send') || form.querySelector('button'); if (btn) btn.disabled = true;
-        fetch(base + '/messages', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text }) })
+        fetch(base + '/messages', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, attachments: ids }) })
           .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
           .then(function (x) {
             if (!x.ok) { showError((x.d && x.d.error) || 'Could not send'); return; }
             if (x.d && x.d.message) { latest = Math.max(latest, Number(x.d.message.id) || 0); append(dmItem(x.d.message), x.d.message.id); }
             input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus();
+            var c = form.__ovcComposer; if (c && typeof c.clearFiles === 'function') c.clearFiles();
+            Array.prototype.forEach.call(form.querySelectorAll('input[type="hidden"][name="' + (form.getAttribute('data-ovc-ids') || 'attachments') + '"]'), function (h) { h.remove(); });
           })
           .catch(function () { form.submit(); })
           .then(function () { if (btn) btn.disabled = false; });

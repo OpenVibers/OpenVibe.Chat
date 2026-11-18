@@ -135,6 +135,10 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
     /** The Bearer-only DM reads and writes the shared navbar and Dock make from any OpenVibe site. */
     // /api/dm/users/search: the share sheet's "OpenVibe Chat" (Shared 4.144.0) starts a conversation by a person's name.
     const bearerDmPath = (p) => p === '/api/dm/unread' || p === '/api/dm/conversations' || p.startsWith('/api/dm/conversations/') || p === '/api/dm/users/search';
+    // The menu's Chat tab on every site (Shared 4.275.0; the owner's phone, 11-15: on openvibe.actor Global "did not load"
+    // and Servers said "No servers yet": both were refused for the origin): Global's history and a message to it, the
+    // servers list, starting one and joining one, and the older contacts list.
+    const bearerDockChatPath = (p) => p === '/api/chat/global/history' || p === '/api/chat/global/read' || p === '/api/chat/send' || p === '/api/chat/servers' || /^\/api\/chat\/servers\/[a-z0-9][a-z0-9-]{0,63}\/join$/i.test(p) || p === '/api/dm/contacts';
     const bearerDockVibePath = (p) => p.startsWith('/api/vibe/') || p.startsWith('/api/chat/vibe/') || p === '/api/chat/vibe/picture' || /^\/api\/chat\/rooms\/[^/]+\/pictures$/.test(p);
 
     // ── Internal (loopback; never routed by nginx) ─────────────
@@ -286,7 +290,7 @@ function createApp({ chatServer, relay, events = null, callServer = null, settin
         // echoed with no Allow-Credentials, so the Bearer is the whole key, a browser refuses a credentialed read or
         // preflight, and a foreign web origin is still refused.
         const origin = req.headers.origin;
-        if (origin && (bearerDmPath(req.path) || bearerDockVibePath(req.path)) && !isAllowedOrigin(origin) && FIRST_PARTY.has(origin)) return openCors(req, res, next);
+        if (origin && (bearerDmPath(req.path) || bearerDockVibePath(req.path) || bearerDockChatPath(req.path)) && !isAllowedOrigin(origin) && FIRST_PARTY.has(origin)) return openCors(req, res, next);
         return allowlistedCors(req, res, next);
     });
     // A workspace room's incoming hooks check a signature over the raw body, so they read it before the JSON parser does.

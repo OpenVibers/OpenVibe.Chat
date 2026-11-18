@@ -85,6 +85,11 @@ module.exports = {
         // inbox's own daily cap (aiRepliesPerDay), which stays the outer limit: one visitor cannot spend the day.
         visitorTurnsPerHour: Math.max(1, int(process.env.CHAT_INBOX_VISITOR_TURNS_PER_HOUR, 10)),
         visitorTurnsPerDay: Math.max(1, int(process.env.CHAT_INBOX_VISITOR_TURNS_PER_DAY, 40)) },
+    // Chat's activity on the Network's notifications (server/chat/activity-notify.js): a mention, a reply, a
+    // reaction, a role, an invite and the rest are one OpenVibe notification each, so the menu's Alerts and
+    // openvibe.chat/activity show one list. The person's Chat switch governs them, as it governs a direct message.
+    // 0 turns it off.
+    activity: { notify: process.env.CHAT_ACTIVITY_NOTIFY !== '0' },
     // OpenVibe.Actor, the fallback for Vibe's web search when the Search Fabric is down (server/rooms/web-search.js):
     // tasks for the person, with Chat's own token.
     actor: { internalUrl: strip(process.env.CHAT_ACTOR_INTERNAL_URL || 'http://127.0.0.1:4950'), members: bool(process.env.CHAT_ACTOR_MEMBERS) },

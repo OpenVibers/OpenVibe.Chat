@@ -7,20 +7,34 @@
  * notifications off there), to whoever took the conversation, else everyone in the inbox. A visitor writing five lines
  * is one notification: at most one per conversation every 10 minutes, except that starting to wait always tells.
  * CHAT_INBOX_NOTIFY=0 turns it off.
+ *
+ * This module is also Chat's one way to the Network's notifications: one service token, one client. It pushes a
+ * notification (pushOne, used by the inbox and by Chat's activity, server/chat/activity-notify.js), it resolves a
+ * person's subject to their Network user id, and it marks a person's notifications of one type read (markRead, how a
+ * direct message is cleared when it is read: server/chat/dm-routes.js).
  */
 const db = require('../db/database');
 const config = require('../config');
 
 const QUIET_MS = 10 * 60 * 1000;
 const lastSent = new Map();   // conversation id → when its people were last told
-let _push = null;
+let _net = null;
 let _testPush = null;
+let _testMarkRead = null;
 
-function push(notification) {
-    if (!_push) {
+/**
+ * Chat's client for the Network's notifications: one service token (network.notifications.push and
+ * identity.subject.resolve, audience openvibe.network) on the Network's host-internal address.
+ *   push(notification)               → { sent, skipped }
+ *   networkUserId(subjectId)         → the person's Network user id, or null
+ *   markRead(userId, type, url)      → { ok, marked }
+ */
+function net() {
+    if (!_net) {
         const { createClient } = require('openvibe-sdk');
         const { createServiceTokenClient } = require('openvibe-sdk/auth');
         const { createNotificationsClient } = require('openvibe-sdk/notifications');
+        const { createIdentityClient } = require('openvibe-sdk/identity');
         const tokens = createServiceTokenClient({
             tokenUrl: `${config.networkInternalUrl}/oauth/token`,
             clientId: config.oauth.clientId,
@@ -28,10 +42,27 @@ function push(notification) {
             audience: 'openvibe.network',
             scope: 'network.notifications.push identity.subject.resolve',
         });
-        const client = createNotificationsClient(createClient({ tokenProvider: tokens, timeoutMs: 8000 }), { baseUrl: config.networkInternalUrl });
-        _push = (n) => client.push(n);
+        const client = createClient({ tokenProvider: tokens, timeoutMs: 8000 });
+        const notifications = createNotificationsClient(client, { baseUrl: config.networkInternalUrl });
+        const identity = createIdentityClient(client, { baseUrl: config.networkInternalUrl });
+        _net = {
+            push: (n) => notifications.push(n),
+            networkUserId: async (subjectId) => {
+                const who = await identity.resolve({ subjectId });
+                return who && who.network_user_id != null ? Number(who.network_user_id) : null;
+            },
+            markRead: async (userId, type, urlPattern) => await client.json({
+                service: 'network', baseUrl: config.networkInternalUrl, audience: 'openvibe.network',
+                method: 'POST', path: '/internal/notifications/mark-read',
+                json: { user_id: Number(userId), type, url_pattern: urlPattern || null },
+            }),
+        };
     }
-    return _push(notification);
+    return _net;
+}
+
+function push(notification) {
+    return net().push(notification);
 }
 
 const watchedLive = (inboxId) => { try { return require('../chat/chat-server').inboxWatchers(inboxId) > 0; } catch { return false; } };
@@ -82,4 +113,25 @@ function _setPush(fn) { _testPush = fn; lastSent.clear(); }
 const pushOne = (notification) => (_testPush || push)(notification);
 const _hasTestPush = () => !!_testPush;
 
-module.exports = { people, later, pushOne, QUIET_MS, _setPush, _hasTestPush };
+/**
+ * The person's Network user id (their account on openvibe.network), or null when the Network does not know them.
+ * Their notifications are filed under that id.
+ */
+const networkUserId = async (subjectId) => await net().networkUserId(subjectId);
+
+/**
+ * Mark a person's notifications of one type read on the Network, the way a read direct message clears its own
+ * (type, and the url of that conversation). → how many notifications changed.
+ */
+async function markRead({ subjectId, type, urlPattern = null } = {}) {
+    if (!subjectId || !type) return 0;
+    const userId = await networkUserId(subjectId);
+    if (!userId) return 0;
+    const out = await (_testMarkRead || net().markRead)(userId, type, urlPattern);
+    return Number(out && out.marked) || 0;
+}
+
+/** Tests: capture the mark-read calls instead of calling the Network (null restores it). */
+function _setMarkRead(fn) { _testMarkRead = fn; }
+
+module.exports = { people, later, pushOne, networkUserId, markRead, QUIET_MS, _setPush, _setMarkRead, _hasTestPush };

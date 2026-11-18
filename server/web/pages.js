@@ -132,8 +132,8 @@ function globalMessage(m) {
 function dmMessage(m, me, view = 'room') {
     const t = hhmm(m.created_at);
     const mine = me && m.sender_id === me.id;
-    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.sender_id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div>${ui.messageCards(m)}<time class="oc-bubble-time" datetime="${t.iso}">${t.text}${m.edited_at ? ` <span class="oc-edited" data-edited-at="${esc(m.edited_at)}">· edited ${esc(hhmm(m.edited_at).text)}</span>` : ''}</time></li>`;
-    return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.sender_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${m.edited_at ? ` <span class="oc-muted oc-edited" data-edited-at="${esc(m.edited_at)}">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ui.messageCards(m)}</li>`;
+    if (view === 'bubbles') return `<li class="oc-bubble-row${mine ? ' oc-bubble-mine' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.sender_id) || 0}">${!mine ? `<span class="oc-bubble-author">${esc(m.display_name || m.username)}</span>` : ''}<div class="oc-bubble">${linkify(m.message)}</div>${ui.messageAttachments({ media_attachments: m.attachments })}${ui.messageCards(m)}<time class="oc-bubble-time" datetime="${t.iso}">${t.text}${m.edited_at ? ` <span class="oc-edited" data-edited-at="${esc(m.edited_at)}">· edited ${esc(hhmm(m.edited_at).text)}</span>` : ''}</time></li>`;
+    return `<li class="oc-msg${mine ? ' oc-mine' : ''}" data-id="${Number(m.id) || 0}" data-user="${Number(m.sender_id) || 0}"><time class="oc-time" datetime="${t.iso}">${t.text}</time> <span class="oc-name">${esc(m.display_name || m.username)}</span> <span class="oc-text">${linkify(m.message)}</span>${m.edited_at ? ` <span class="oc-muted oc-edited" data-edited-at="${esc(m.edited_at)}">edited · ${esc(hhmm(m.edited_at).text)}</span>` : ''}${ui.messageAttachments({ media_attachments: m.attachments })}${ui.messageCards(m)}</li>`;
 }
 // Vibe, OpenVibe's assistant, as a room's AI member (one click on the room's settings; a person's own chats with it are
 // server/rooms/vibe.js): how it should be in a group.
@@ -183,11 +183,19 @@ function createWebRoutes({ config }) {
         if (actor.kind !== 'user') return {};
         const n = async (fn) => { try { return Number(await fn()) || 0; } catch { return 0; } };
         const rooms = require('../rooms/rooms');
+        // The Activity place carries the same dot as the menu (the plan, AB.52): the Network's unread count, the
+        // number the menu's bell shows, when the Network answers. Chat's own count is the fallback, so the dot is
+        // never wrong for a person the Network does not know.
+        let network = null;
+        try {
+            const v = await require('../chat/activity-notify').networkUnread(actor);
+            network = v == null ? null : Number(v) || 0;
+        } catch { network = null; }
         return {
             messages: await n(async () => await dm.getTotalUnread(actor.user.id)),
             rooms: await n(async () => await rooms.unreadTotal(actor.user)),
             servers: await n(async () => await rooms.unreadTotal(actor.user, { servers: true })),
-            activity: await n(async () => await require('../chat/activity').unreadCount(actor.user)),
+            activity: network == null ? await n(async () => await require('../chat/activity').unreadCount(actor.user)) : network,
         };
     };
     // Under the global room on the front page: what openvibe.chat is for (openvibe-shared/showcase), each card a real
@@ -430,31 +438,39 @@ ${foldBlock({ id: 'more', head: '<h2 id="oc-h-more">More on OpenVibe</h2>', html
         }));
         const myRooms = (await require('../rooms/rooms').list(me)).mine.filter((r) => r.unread);
         const requests = contacts.requests || [];
-        const requestRows = requests.map((r) => `<li class="oc-row oc-act-row"><span class="oc-act-who">${ui.initials(r.display_name || r.username || '?', null, { avatarUrl: r.avatar_url })}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(r.display_name || r.username || '?')}</strong></span><span class="oc-row-sub">@${esc(r.username || '')} asked to be your friend</span></span></span><form class="oc-inline" method="post" action="/messages/contacts/${Number(r.id)}/accept"><button type="submit">Accept</button></form></li>`);
+        // A friend request is answered in place (2026-11-15 redo): Accept or Decline, and the page comes back here.
+        const answerForm = (r, act, label, quiet) => `<form class="oc-inline" method="post" action="/messages/contacts/${Number(r.id)}/${act}"><input type="hidden" name="next" value="/activity"><button type="submit"${quiet ? ' class="oc-button--quiet"' : ''}>${label}</button></form>`;
+        const requestRows = requests.map((r) => `<li class="oc-row oc-act-row"><span class="oc-act-who">${ui.initials(r.display_name || r.username || '?', null, { avatarUrl: r.avatar_url })}<span class="oc-row-main"><span class="oc-row-top"><strong>${esc(r.display_name || r.username || '?')}</strong></span><span class="oc-row-sub">@${esc(r.username || '')} asked to be your friend</span></span></span><span class="oc-act-answer">${answerForm(r, 'accept', 'Accept', false)}${answerForm(r, 'remove', 'Decline', true)}</span></li>`);
         const convRows = dms.filter((d) => d.unread).map((d) => convRow({ href: `/messages/${d.id}`, title: d.title, preview: d.preview, at: d.at, unread: d.unread, personPresence: d.presence, avatarUrl: d.avatarUrl }));
         const serverBlocks = busy.map((sv, i) => `<li class="oc-act-server"><a class="oc-act-server-head" href="/s/${esc(sv.slug)}">${ui.serverMark(sv)}<strong>${esc(sv.name)}</strong></a>
 <ul class="oc-act-chans">${busyChannels[i].map((ch) => `<li><a class="oc-chan is-unread" href="/s/${esc(sv.slug)}/${esc(ch.slug)}">${ch.kind === 'voice' ? IC.voice : '<span class="oc-chan-hash" aria-hidden="true">#</span>'}<span class="oc-chan-name">${esc(ch.name)}</span><span class="oc-chan-dot" aria-label="${ch.unread} unread">${ch.unread > 99 ? '99+' : ch.unread}</span></a></li>`).join('')}</ul></li>`);
         const roomRows = myRooms.map((r) => `<li><a class="oc-chan is-unread" href="/r/${esc(r.slug)}"><span class="oc-chan-hash" aria-hidden="true">#</span><span class="oc-chan-name">${esc(r.name)}</span><span class="oc-chan-dot" aria-label="${r.unread} unread">${r.unread > 99 ? '99+' : r.unread}</span></a></li>`);
         const section = (id, title, n, inner) => (n ? `<section class="oc-act-sec" aria-labelledby="${id}"><h2 class="oc-list-head" id="${id}">${title} <span class="oc-muted">${n}</span></h2>${inner}</section>` : '');
         const waiting = requests.length + convRows.length + busy.length + roomRows.length;
-        // What happened to this person, above what is waiting for them (server/web/activity.js). Opening the page
-        // reads it: the rows below still show what was new on this visit.
-        const happened = await require('./activity').whatHappened(me);
+        // 2026-11-15 redo (the owner: "extremely buggy and broken … redo it completely"): one column. What needs you
+        // comes first (friend requests answered in place, new messages, unread channels), then every notification
+        // from across OpenVibe: the Network's whole list with its filters, loading more as you scroll (it was the
+        // menu's three-card preview, so most of it was "just not there"). "All caught up" is said once, by the list
+        // itself, never under things still listed.
+        const happened = await require('./activity').whatHappened(me, { network: true, nothingWaiting: !waiting });
         const body = waiting
-            ? [
+            ? `<div class="oc-act-waiting">${[
                 section('oc-act-requests', 'Friend requests', requests.length, `<ul class="oc-list">${requestRows.join('')}</ul>`),
                 section('oc-act-convs', 'New messages', convRows.length, `<ul class="oc-list">${convRows.join('\n')}</ul>`),
                 section('oc-act-servers', 'In your servers', busy.length, `<ul class="oc-act-servers">${serverBlocks.join('')}</ul>`),
                 section('oc-act-rooms', 'In your rooms', roomRows.length, `<ul class="oc-act-chans oc-act-rooms">${roomRows.join('')}</ul>`),
-            ].join('\n')
-            : `<section class="oc-act-clear"><span class="oc-act-clear-mark" aria-hidden="true">${IC.check}</span><h2>You are all caught up</h2><p class="oc-muted">New messages, friend requests and unread channels show up here.</p><p class="oc-act-clear-go"><a class="oc-button" href="/messages">Open your messages</a><a class="oc-button oc-button--quiet" href="/servers">Find a server</a></p></section>`;
+            ].join('\n')}</div>`
+            : '';
         await page(req, res, 200, {
             actor, shell: true, title: 'Activity', path: '/activity', active: 'activity', robots: 'noindex, nofollow', footer: 'none',
+            scripts: ['activity-notifications.js'],
             body: shell.shell({
+                // A phone gives Activity the whole width: the bottom bar is the way around, not the server rail.
+                phoneRail: false,
                 rail: shell.rail({ dmUnread: unread, servers: shell.railServers(mineServers), list: 'Chats' }),
                 side: shell.sideHome({ dms, friends: contacts.friends, requests: contacts.requests, you: { name: me.display_name || me.username, status: 'Online', avatarUrl: me.avatar_url || '' } }),
                 sideLabel: 'Home',
-                main: `${ui.head({ title: 'Activity', sub: waiting ? 'What is waiting for you' : 'Nothing is waiting for you' })}\n${happened}\n${body}`,
+                main: `<div class="oc-act">${ui.head({ title: 'Activity', sub: waiting ? `${waiting} waiting for you` : '' })}\n${body}\n${happened}</div>`,
                 mainLabel: 'Activity',
                 page: true,
             }),
@@ -536,16 +552,18 @@ ${blockedList}`,
         res.redirect(303, status === 'friend' ? `${back}?added=1` : `${back}?asked=1`);
     });
 
+    // Answered from Activity, the page comes back to Activity; anywhere else, to the messages.
+    const contactsBack = (req) => (req.body && req.body.next === '/activity' ? '/activity' : '/messages');
     router.post('/messages/contacts/:userId/accept', formLimit, sameSite, async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         await require('../chat/contacts').accept(actor.user.id, Number(req.params.userId));
-        res.redirect(303, '/messages');
+        res.redirect(303, contactsBack(req));
     });
 
     router.post('/messages/contacts/:userId/remove', formLimit, sameSite, async (req, res) => {
         const actor = await needUser(req, res); if (!actor) return;
         await require('../chat/contacts').remove(actor.user.id, Number(req.params.userId));
-        res.redirect(303, '/messages');
+        res.redirect(303, contactsBack(req));
     });
 
     router.post('/messages/new', formLimit, sameSite, async (req, res, next) => {
@@ -553,6 +571,12 @@ ${blockedList}`,
         const name = String((req.body && req.body.username) || '').trim();
         let target = /^[A-Za-z0-9_]{3,24}$/.test(name) ? await ctx.getUserByUsername(name) : null;
         if (!target && /^[A-Za-z0-9_]{3,24}$/.test(name)) target = await ctx.ensureUserByUsername(name).catch(() => null);
+        // A Network friend (plan §AB.51): the person is in the friend's circle even when Chat has never talked
+        // to them, and their row is found by subject, so a renamed account still matches.
+        if (!target && /^[A-Za-z0-9_]{3,24}$/.test(name)) {
+            const friend = await require('../chat/network-friends').friendByName(actor.user.subject_id, name).catch(() => null);
+            if (friend && friend.id) target = friend;
+        }
         if (!target) return res.redirect(303, `/messages?error=${encodeURIComponent(`Nobody called ${name.slice(0, 24)} on OpenVibe`)}`);
         req.headers.authorization = `Bearer ${req.cookies.ov_token}`;
         return apiBridge(dmApi, '/conversations', {
@@ -591,7 +615,9 @@ ${blockedList}`,
         const liveHref = otherPresence && (otherPresence.channel_url || otherPresence.url);
         const subLine = other ? (ui.presenceLine(otherPresence, { liveHref }) || `@${esc(other.username || '')}`) : `${others.length + 1} people`;
         const avatar = other ? ui.initials(other.display_name || other.username || '?', otherPresence, { large: true, id: 'oc-dm-avatar', avatarUrl: other.avatar_url }) : '';
-        let composer = shell.composer({ action: `/messages/${id}`, label: 'Reply', placeholder: 'Write a message' });
+        // 11-15 (the owner: DMs on the shared composer, "file support and images … all file types"): the box sends the
+        // files it takes to Media as they are picked and puts their ids on the form, like a room's.
+        let composer = shell.composer({ action: `/messages/${id}`, label: 'Reply', placeholder: 'Write a message', media: true });
         if (iBlocked) composer = `${notice('error', `You blocked ${other.display_name || other.username}. Neither of you can message the other.`)}<form class="oc-inline" method="post" action="/messages/unblock/${Number(other.id)}"><input type="hidden" name="back" value="/messages/${id}"><button type="submit">Unblock ${otherName}</button></form>`;
         else if (closed) composer = notice('error', 'You cannot message this person.');
         // Blocking is in the conversation's "more" menu: one tap on an icon in the header should never block someone.
@@ -703,7 +729,7 @@ ${composer}`,
         if (!Number.isInteger(id)) return res.redirect(303, '/messages');
         req.headers.authorization = `Bearer ${req.cookies.ov_token}`;
         return apiBridge(dmApi, `/conversations/${id}/messages`, {
-            body: (r) => ({ message: String((r.body && r.body.message) || '').slice(0, 2000) }),
+            body: (r) => ({ message: String((r.body && r.body.message) || '').slice(0, 2000), attachments: require('../rooms/attachments').namedAttachments(r.body && r.body.attachments) }),
             ok: (r, s) => s.redirect(303, `/messages/${id}#oc-compose`),
             fail: (r, s, status, error) => s.redirect(303, `/messages/${id}?error=${encodeURIComponent(error)}#oc-compose`),
         })(req, res, next);
@@ -964,18 +990,25 @@ ${key ? `<form class="oc-inline oc-danger-row" method="post" action="/settings/a
         // ?new=workspace (other OpenVibe sites link "Work on it together" here) picks the workspace kind and fills the name.
         const wantWork = req.query.new === 'workspace';
         const preName = wantWork && typeof req.query.name === 'string' ? req.query.name.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 40) : '';
-        const create = me ? `<form class="oc-form oc-grid-form oc-create" id="oc-new-room" method="post" action="/rooms/new">
-<h2>Start a room</h2>
+        // 2026-11-15 (the owner's phone shot of /rooms): starting a room is a sheet behind the + (open by itself when
+        // there is no room yet, from "Work on it together", or after an error); its kinds are cards, the call's own
+        // choice shows only for a call, and Private is a switch. No script: :target and :has().
+        const openNow = wantWork || !!req.query.error || (!mine.length && !pub.length);
+        const create = me ? `<a class="oc-create-dim" href="#" aria-label="Close" tabindex="-1"></a><form class="oc-form oc-grid-form oc-create${openNow ? ' oc-create--open' : ''}" id="oc-new-room" method="post" action="/rooms/new">
+<div class="oc-create-h"><h2>Start a room</h2><a class="oc-icon-btn oc-create-x" href="#" aria-label="Close">${IC.close}</a></div>
 <label>Name <input name="name" required minlength="3" maxlength="40" placeholder="Night Owls" value="${esc(preName)}"${wantWork ? ' autofocus' : ''}></label>
 <label>Topic <input name="topic" maxlength="200" placeholder="What it is about (optional)"></label>
-<fieldset class="oc-fieldset"><legend>Kind</legend>
-<label class="oc-check"><input type="radio" name="kind" value="community"${wantWork ? '' : ' checked'}> Chat room: people write to each other</label>
-<label class="oc-check"><input type="radio" name="kind" value="workspace"${wantWork ? ' checked' : ''}> Workspace: a team and Vibe work together, with a work queue, alerts from other systems and a shared screen</label>
-<label class="oc-check"><input type="radio" name="kind" value="call"> Call room: a voice call with a text chat beside it</label>
-${staff ? '<label class="oc-check"><input type="radio" name="kind" value="system"> Announcements: only OpenVibe staff post (staff)</label>' : ''}
+<fieldset class="oc-fieldset oc-kinds"><legend>Kind</legend>
+<label class="oc-kind"><input type="radio" name="kind" value="community"${wantWork ? '' : ' checked'}><span><b>Chat room</b><small>People write to each other</small></span></label>
+<label class="oc-kind"><input type="radio" name="kind" value="workspace"${wantWork ? ' checked' : ''}><span><b>Workspace</b><small>A team and your agent work together: a work queue, alerts from other systems, a shared screen</small></span></label>
+<label class="oc-kind"><input type="radio" name="kind" value="call"><span><b>Call room</b><small>A voice call with a text chat beside it</small></span></label>
+${staff ? '<label class="oc-kind"><input type="radio" name="kind" value="system"><span><b>Announcements</b><small>Only OpenVibe staff post (staff)</small></span></label>' : ''}
 </fieldset>
-<label>In a call room, people who join <select name="join_role"><option value="participant">listen and write (participants)</option><option value="speaker">can talk (speakers)</option><option value="viewer">listen and read (viewers)</option></select></label>
-<label class="oc-check"><input type="checkbox" name="private" value="1"> Private: only people you invite can read and post</label>
+<fieldset class="oc-fieldset oc-join"><legend>People who join the call</legend><div class="oc-seg">
+<label><input type="radio" name="join_role" value="participant" checked><span>Listen and write</span></label>
+<label><input type="radio" name="join_role" value="speaker"><span>Can talk</span></label>
+<label><input type="radio" name="join_role" value="viewer"><span>Listen and read</span></label></div></fieldset>
+<label class="oc-switch-row"><span><b>Private</b><small>Only people you invite can read and post</small></span><input type="checkbox" role="switch" name="private" value="1"><i class="oc-switch" aria-hidden="true"></i></label>
 <p><button type="submit">Create room</button></p>
 </form>` : `<p class="oc-signin"><a class="oc-button" href="/auth/login?next=${wantWork ? '%2Frooms%3Fnew%3Dworkspace' : '%2Frooms'}">Sign in with OpenVibe</a> to start or join a room.</p>`;
         const mineServers = me ? (await require('../rooms/servers').list(me)).mine : [];

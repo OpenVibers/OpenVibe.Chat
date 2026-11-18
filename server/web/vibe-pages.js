@@ -302,7 +302,8 @@ ${MARK}
             // public/web/vibe-messenger.js swaps it in once it loads with the person's token; until then, and without
             // JavaScript, this page works as it is. /vibe/:slug keeps its tools (models side by side, the canvas).
             scripts: !room && user ? ['vibe-messenger.js'] : [],
-            title: room ? `${room.name} · Vibe` : 'Vibe, OpenVibe\'s assistant',
+            // 2026-11-15 (the owner: "use the actor … instead of vibe character"): this page talks to your Actor.
+            title: room ? `${room.name} · Actor` : 'Actor, your agent',
             fullTitle: room ? undefined : 'Vibe: chat with OpenVibe\'s assistant · OpenVibe.Chat',
             description: 'Chat with Vibe, OpenVibe\'s free assistant: it searches news, deals, jobs, rentals and videos across OpenVibe, reads pages you link and helps you think.',
             robots: room ? 'noindex, nofollow' : 'index, follow',

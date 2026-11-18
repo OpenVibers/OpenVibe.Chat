@@ -155,6 +155,7 @@ before changing behaviour.** Browser JavaScript does not change; nginx routes th
 Migration 0008 copies pending `events_outbox` rows into `service_outbox`. The old table stays through the N-1 rollback window; a later contract migration removes it.
 | A person's chat preferences | **OpenVibe.Network** user module `chat.preferences` (Chat owns the namespace) | `server/prefs/` → `GET/PUT/DELETE /internal/modules/chat.preferences/:subject` (`network.modules.read` / `.write`), cached per person |
 | Member badges | **OpenVibe.VIP** (Billing holds the entitlement) | `server/vip/badges.js` → `POST /api/v1/entitlements/check` with `product: 'chat'` (`vip.entitlement.check`), behind the shared product cache |
+| The person's friends (one friend system across every site, plan §AB.51) | **OpenVibe.Network** | `server/chat/network-friends.js` → `GET /internal/friends?subject=…` (`network.friends.read`), Chat's service token; the answer is kept for a minute per person. The friends are in `GET /api/dm/contacts` and in the side column, first, and a DM start by username finds a friend Chat has never talked to |
 
 ### Data
 
@@ -1018,7 +1019,7 @@ left OpenVibe.Sites, and this repository's vhost serves it.
 Part of the [OpenVibe network](https://openvibe.network). Built in the open by [OpenVibers](https://github.com/OpenVibers).
 
 <!-- versions:start -->
-- openvibe-contracts: v0.419.0
-- openvibe-sdk: v0.168.0
-- openvibe-shared: v4.248.0
+- openvibe-contracts: v0.443.0
+- openvibe-sdk: v0.177.0
+- openvibe-shared: v4.314.0
 <!-- versions:end -->

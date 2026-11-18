@@ -158,7 +158,7 @@
         var who = (name ? name.textContent.trim() : '') + '|' + (where ? where.textContent.trim() : '');
         var at = time && time.dateTime ? new Date(time.dateTime) : null;
         var sameDay = !!(prev && at && prev.at && dayOf(prev.at) === dayOf(at));
-        if (at && !sameDay) { var d = document.createElement('li'); d.className = 'oc-day'; d.setAttribute('role', 'separator'); d.textContent = dayName(at); feed.insertBefore(d, li); }
+        if (at && !sameDay) { var d = document.createElement('li'); d.className = 'oc-day'; d.textContent = dayName(at); /* a list item: a role on an li breaks the list (axe list, the browser check 11-15) */ feed.insertBefore(d, li); }
         var cont = !!(prev && sameDay && prev.who === who && name && at - prev.at < 5 * 60000);
         li.classList.toggle('is-cont', cont); li.classList.toggle('is-first', !cont);
         if (!cont && name) {
@@ -364,4 +364,19 @@
     s.onerror = function () { /* the card is optional */ };
     document.head.appendChild(s);
   }
+  // A header panel (the room's AI overview, a conversation's more menu) closes on a tap outside it or on Escape;
+  // on a phone the overview is a sheet over a dimmed page, and a tap on the dim closes it (2026-11-15).
+  document.addEventListener('click', function (e) {
+    var open = document.querySelectorAll('details.oc-more[open]');
+    for (var i = 0; i < open.length; i++) {
+      var d = open[i], pop = d.querySelector('.oc-pop'), sum = d.querySelector('summary');
+      if ((pop && pop.contains(e.target)) || (sum && sum.contains(e.target))) continue;
+      d.open = false;
+    }
+  });
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') return;
+    var d = document.querySelector('details.oc-more[open]');
+    if (d) { d.open = false; var s = d.querySelector('summary'); if (s) s.focus(); }
+  });
 })();

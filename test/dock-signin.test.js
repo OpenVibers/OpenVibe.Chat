@@ -92,4 +92,20 @@ t('an OpenVibe site outside the credentialed list reads DMs with its Bearer, and
     assert.strictEqual(live.headers.get('access-control-allow-credentials'), 'true', 'the credentialed list keeps its grant');
 });
 
+t('the menu\'s Global and Servers answer every OpenVibe site with its Bearer, never with credentials', async () => {
+    // The owner's phone, 11-15: on openvibe.actor the menu's Global "did not load" and Servers showed none (403 for the origin).
+    const origin = 'https://openvibe.actor';
+    const tok = normal(alice);
+    for (const [method, path, body] of [['GET', '/api/chat/global/history?limit=5'], ['GET', '/api/chat/servers?limit=12'], ['POST', '/api/chat/send', { message: 'hello from the menu' }]]) {
+        const r = await h.http(method, path, { token: tok, headers: { origin }, ...(body ? { body } : {}) });
+        assert.ok(r.status < 400, `${method} ${path} from ${origin}: ${r.status} ${r.text}`);
+        assert.strictEqual(r.headers.get('access-control-allow-origin'), origin, `${path}: the origin is echoed`);
+        assert.strictEqual(r.headers.get('access-control-allow-credentials'), null, `${path}: never a credentialed grant`);
+    }
+    const pre = await h.http('OPTIONS', '/api/chat/servers/openvibe/join', { headers: { origin, 'access-control-request-method': 'POST', 'access-control-request-headers': 'authorization,content-type' } });
+    assert.strictEqual(pre.headers.get('access-control-allow-origin'), origin, 'joining a server from the menu');
+    assert.strictEqual((await h.http('GET', '/api/chat/global/history?limit=5', { token: tok, headers: { origin: 'https://evil.example' } })).status, 403, 'a foreign web origin is still refused');
+    assert.strictEqual((await h.http('GET', '/api/chat/servers/openvibe/members', { token: tok, headers: { origin } })).status, 403, 'only the menu\'s paths');
+});
+
 t.run(async () => { await h.shutdown(); });

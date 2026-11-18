@@ -30,7 +30,7 @@ const TABLES = [
     'channel_moderators', 'channel_moderation_settings', 'emotes', 'user_tags', 'chat_ai_summaries', 'chat_timeline_events',
     'ctx_users', 'ctx_streams', 'ctx_managed_streams', 'ctx_channels', 'ctx_sync', 'events_outbox', 'service_outbox',
     'chat_ingress_applied', 'audio_requests', 'import_hold', 'import_runs', 'chat_meta', 'deploy_releases',
-    'chat_event_inbox', 'calls', 'rooms', 'room_members', 'room_messages', 'room_attachments', 'room_ai_members', 'room_ai_usage', 'room_tasks', 'room_hooks', 'vibe_usage', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_asks', 'vibe_deliveries', 'vibe_canvases', 'vibe_canvas_versions', 'inboxes', 'inbox_members', 'inbox_conversations', 'inbox_messages', 'inbox_ai_usage', 'inbox_visitor_turns', 'inbox_saved_replies', 'inbox_webhooks', 'inbox_actions', 'inbox_translations', 'feeds', 'feed_sessions', 'feed_events', 'chat_servers', 'chat_server_members', 'chat_server_invites', 'token_revocations', 'chat_control_log',
+    'chat_event_inbox', 'calls', 'rooms', 'room_members', 'global_reads', 'room_messages', 'room_attachments', 'room_ai_members', 'room_ai_usage', 'room_tasks', 'room_hooks', 'vibe_usage', 'vibe_memory', 'vibe_memory_off', 'vibe_own_engine', 'vibe_asks', 'vibe_deliveries', 'vibe_canvases', 'vibe_canvas_versions', 'inboxes', 'inbox_members', 'inbox_conversations', 'inbox_messages', 'inbox_ai_usage', 'inbox_visitor_turns', 'inbox_saved_replies', 'inbox_webhooks', 'inbox_actions', 'inbox_translations', 'feeds', 'feed_sessions', 'feed_events', 'chat_servers', 'chat_server_members', 'chat_server_invites', 'token_revocations', 'chat_control_log',
     'network_blocks', 'account_data_events', 'ticket_conversations', 'ticket_messages', 'telemetry_samples',
     'dm_contacts', 'dm_view_defaults', 'dm_view_preferences',
     'chat_app_link_tokens', 'chat_app_settings', 'chat_app_callbacks', 'chat_app_deliveries', 'chat_app_rates',
@@ -44,6 +44,8 @@ const TABLES = [
     'chat_server_timeouts', 'chat_command_polls', 'chat_command_poll_votes', 'chat_command_reminders', 'chat_registered_commands',
     'room_memory',                           // 0071: what a room keeps between summaries
     'room_message_attachments',              // 0081: the files a room message carries (Media's composer attachments)
+    'dm_message_attachments',                // 0083: the files a direct message carries (any kind Media keeps)
+    'chat_activity_notifications',            // 0082: the activity rows Chat told the Network about
 ];
 const INDEXES = [
     'idx_chat_ts_deleted', 'idx_chat_page_live', 'idx_chat_channel_user_ts', 'idx_chat_stream_ts', 'idx_emotes_channel_code', 'idx_chat_tl_dedup',

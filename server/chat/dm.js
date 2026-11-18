@@ -22,6 +22,9 @@ const networkBlocks = require('./network-blocks');
 const linkCards = require('./link-cards');
 const linkPreviews = require('./link-previews');
 const previewSettings = require('./dm-preview-settings');
+const messageAttachments = require('../rooms/attachments');
+const mediaAttachments = require('../media/attachments');
+const dmFiles = messageAttachments.tableHelpers('dm_message_attachments');
 
 // ── Schema & Migrations ──────────────────────────────────────
 
@@ -164,10 +167,43 @@ async function getConversation(conversationId) {
 /**
  * Send a message in a conversation. Returns the message row.
  */
-async function sendMessage(conversationId, senderId, text, { reply_to_id = null } = {}) {
-    if (!text || !text.trim()) return null;
-    const trimmed = text.trim().slice(0, 2000); // max 2000 chars
+/** The files a direct message names, checked with Media as the sender (11-15): each one there, the sender's, a kind
+ *  Media keeps (anything but a program). Another person's file is a 404, exactly like one that is not there. */
+async function checkedFiles(attachments, subject) {
+    const list = Array.isArray(attachments) ? attachments : [];
+    if (!list.length) return [];
+    const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
+    if (list.length > messageAttachments.MAX_ATTACHMENTS) fail(400, 'dm.attachments_too_many', `At most ${messageAttachments.MAX_ATTACHMENTS} files can go with a message`);
+    if (!subject) fail(400, 'dm.attachment_invalid', 'A file can only be attached by the person who uploaded it');
+    const out = [];
+    for (const raw of list) {
+        let ref;
+        try { ref = messageAttachments.composerReference(raw); } catch (err) { fail(400, 'dm.attachment_invalid', err.message); }
+        let att;
+        try { att = await mediaAttachments.attachment(ref.media_attachment_id, subject); }
+        catch (err) { if (err && err.status === 404) fail(404, 'dm.attachment_not_found', 'One of the attached files is not there'); fail(502, 'dm.attachment_unavailable', 'One of the attached files could not be checked'); }
+        const kind = messageAttachments.anyKind(att && att.kind);
+        if (!kind) fail(415, 'dm.attachment_type', 'That kind of file cannot be sent');
+        out.push({ ...att, id: ref.media_attachment_id, kind, owner_subject: subject });
+    }
+    return out;
+}
+/** Each message's files, as a reader draws them (attachments: [] when it has none). */
+async function withFiles(rows) {
+    const list = (Array.isArray(rows) ? rows : [rows]).filter(Boolean);
+    if (!list.length) return rows;
+    const map = await dmFiles.rowsFor(list.map((r) => r.id));
+    for (const r of list) r.attachments = (map.get(Number(r.id)) || []).map(messageAttachments.publicReference).filter(Boolean);
+    return rows;
+}
+
+async function sendMessage(conversationId, senderId, text, { reply_to_id = null, attachments = [] } = {}) {
+    // A message may be a file with no words (a picture alone is a message, as on any social app).
+    const hasFiles = Array.isArray(attachments) && attachments.length > 0;
+    if ((!text || !text.trim()) && !hasFiles) return null;
+    const trimmed = String(text || '').trim().slice(0, 2000); // max 2000 chars
     const senderSubject = await db.subjectFor(senderId);
+    const files = await checkedFiles(attachments, senderSubject);
     // What this answers: it must be a message of this same conversation.
     const replyToId = Number(reply_to_id) || null;
     const replyTo = replyToId
@@ -181,6 +217,8 @@ async function sendMessage(conversationId, senderId, text, { reply_to_id = null 
             `INSERT INTO dm_messages (conversation_id, sender_id, message, sender_subject_id, card, reply_to_id) VALUES (?, ?, ?, ?, ?, ?)`,
             [conversationId, senderId, trimmed, senderSubject, linkCards.toJson(card), replyToId]
         );
+        // What Media answered about the files, kept beside the message (the bytes live in Media).
+        if (files.length) await dmFiles.createRows(Number(result.lastInsertRowid), files);
         // Touch conversation updated_at
         await db.run(`UPDATE dm_conversations SET updated_at = ov_now() WHERE id = ?`, [conversationId]);
         // Auto-mark read for sender
@@ -202,10 +240,23 @@ async function sendMessage(conversationId, senderId, text, { reply_to_id = null 
         });
         return await db.get(`SELECT * FROM dm_messages WHERE id = ?`, [result.lastInsertRowid]);
     });
+    // The files live as long as the message: Media keeps them with it. One that cannot be kept takes the message with
+    // it, so a conversation never shows a file that is already gone.
+    if (row) {
+        for (const att of files) {
+            let kept = false;
+            try { kept = await mediaAttachments.keepAttachment(att.id, senderSubject, `dm:${row.id}`); }
+            catch (err) { console.warn(`[Chat] could not keep the DM attachment ${att.id}: ${err.message}`); }
+            if (kept) continue;
+            await db.run('DELETE FROM dm_messages WHERE id = ?', [row.id]);
+            throw Object.assign(new Error('One of the attached files could not be kept with the message'), { status: 502, code: 'dm.attachment_keep_failed' });
+        }
+        await withFiles(row);
+    }
     if (row) {
         row.card = card;
         row.embeds = [];                 // the job fills them; the send answer starts empty, as a room's does
-        if (pending) linkCards.fillLater('dm_messages', row.id, pending, trimmed);
+        if (pending && trimmed) linkCards.fillLater('dm_messages', row.id, pending, trimmed);
         // Address previews run after the line is out (server/chat/link-previews.js), and only when every person in
         // the conversation left link previews on (part 4 privacy: one side off fetches nothing).
         if (await previewSettings.allowedIn(conversationId)) {
@@ -295,6 +346,7 @@ async function getMessages(conversationId, limit = 50, before = null, after = nu
     // earlier message already had (server/chat/dm-preview-settings.js).
     await linkPreviews.attach(messages, 'dm', { enabled: await previewSettings.allowedIn(conversationId) });
     for (const message of messages) delete message.edit_history;
+    await withFiles(messages);
     return messages;
 }
 
@@ -312,6 +364,7 @@ async function getMessagesPage(conversationId, { before = null, limit = 50 } = {
     await linkCards.hydrate(rows, 'dm_messages');
     await linkPreviews.attach(rows, 'dm', { enabled: await previewSettings.allowedIn(conversationId) });
     for (const row of rows) delete row.edit_history;
+    await withFiles(rows);
     return { messages: rows, more };
 }
 
