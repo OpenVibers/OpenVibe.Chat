@@ -321,6 +321,10 @@
       var link = el('a', '', e.title); link.href = /^https:\/\/openvibe\.(?:actor\/tasks|codes\/run\/tasks)\/tsk_[0-9A-HJKMNP-TV-Z]{26}$/.test(String(e.url || '')) ? e.url : '#'; link.rel = 'noopener'; host.appendChild(link);
       return host;
     }
+    // An address preview is Shared's card (ov-linkcard.js), as the server draws it; Chat's own when the script is missing.
+    if (window.OVLinkCard && typeof window.OVLinkCard.make === 'function') {
+      return window.OVLinkCard.make(e, mayHide && messageId ? { onHide: function () { setHidden(messageId, true); }, hideLabel: 'Hide the preview' } : {});
+    }
     var url = httpsHref(e.url);
     var box = el('div', 'oc-card'); box.dataset.kind = EMBED_KINDS.indexOf(e.kind) >= 0 ? e.kind : 'link';
     var img = typeof e.image === 'string' && /^https:\/\/openvibe\.media\/[^\s"'<>]+$/.test(e.image) ? httpsHref(e.image) : null;
@@ -361,7 +365,7 @@
     if (!feed || !Array.isArray(embeds)) return;
     var li = feed.querySelector('[data-id="' + Number(id) + '"]');
     if (!li) return;
-    Array.prototype.forEach.call(li.querySelectorAll('.oc-card, .oc-agent-run'), function (c) { c.remove(); });
+    Array.prototype.forEach.call(li.querySelectorAll('.oc-card, .ovlc, .oc-agent-run'), function (c) { c.remove(); });
     var note = li.querySelector('.oc-card-hidden-note');
     if (note) note.remove();
     if (hidden) { li.appendChild(hiddenNote(li, Number(id))); return; }

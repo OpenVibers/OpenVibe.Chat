@@ -158,6 +158,15 @@ function showForm(action) {
     return `<form class="oc-inline oc-card-show" method="post" action="${esc(action)}"><input type="hidden" name="hidden" value="0"><button type="submit" class="oc-link">Show previews</button></form>`;
 }
 
+/** Shared's card as HTML (openvibe-shared/linkcard, 4.321.0+), or null with an older Shared (Chat's own card then). */
+let _linkcard;
+function linkcardHtml() {
+    if (_linkcard === undefined) {
+        try { const L = require('openvibe-shared/linkcard'); _linkcard = L && typeof L.html === 'function' ? L.html : null; } catch { _linkcard = null; }
+    }
+    return _linkcard;
+}
+
 /**
  * An address preview under a message (server/chat/link-previews.js): the picture when there is one, the address's
  * title as the link, its description, and "by" and LIVE for OpenVibe's own kinds. Every field is data: escaped here.
@@ -171,6 +180,10 @@ function embedCard(e, opts) {
         if (!trusted.test(run) || events !== `${run}/events`) return '';
         return `<div class="oc-agent-run" data-ov-run-url="${esc(run)}" data-ov-events-url="${esc(events)}" data-ov-run-title="${esc(e.title)}">${href ? `<a href="${esc(href)}" rel="noopener">${esc(e.title)}</a>` : esc(e.title)}</div>`;
     }
+    // An address preview is Shared's card (openvibe-shared 4.321.0 OVLinkCard.html): the same card Live's stream chat
+    // and the menu's Chat draw, with the same rules (https, OpenVibe.Media pictures, all text) and the × as a form post.
+    const shared = linkcardHtml();
+    if (shared) return shared(e, { hideAction: opts && opts.hide ? String(opts.hide) : '' });
     const href = cardHref(e.url);
     const image = cardImage(e.image);
     const kind = ['link', 'video', 'image', 'live', 'picture', 'design', 'post', 'profile', 'game'].includes(e.kind) ? e.kind : 'link';
