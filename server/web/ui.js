@@ -183,7 +183,7 @@ function embedCard(e, opts) {
     // An address preview is Shared's card (openvibe-shared 4.321.0 OVLinkCard.html): the same card Live's stream chat
     // and the menu's Chat draw, with the same rules (https, OpenVibe.Media pictures, all text) and the × as a form post.
     const shared = linkcardHtml();
-    if (shared) return shared(e, { hideAction: opts && opts.hide ? String(opts.hide) : '' });
+    if (shared) return shared(e, { hideAction: opts && opts.hide ? String(opts.hide) : '', hideLabel: 'Hide the preview' });
     const href = cardHref(e.url);
     const image = cardImage(e.image);
     const kind = ['link', 'video', 'image', 'live', 'picture', 'design', 'post', 'profile', 'game'].includes(e.kind) ? e.kind : 'link';
