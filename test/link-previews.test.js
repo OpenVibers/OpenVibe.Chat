@@ -221,7 +221,7 @@ t('the room page draws a preview with its text escaped, never as markup', async 
     await previews.idle();
     const res = await fetch(`${h.base}/r/${made.body.room.slug}`, { headers: { cookie: `ov_token=${alice.token}` } });
     const html = await res.text();
-    assert.match(html, /<div class="oc-card" data-kind="link">/, 'the card markup is drawn');
+    assert.match(html, /<div class="ovlc[^"]*" data-kind="link">/, "the card markup is drawn (Shared's link card)");
     assert.ok(html.includes('&lt;b&gt;bold title&lt;/b&gt;'), 'the title is escaped as text');
     assert.ok(!html.includes('<b>bold title</b>'), 'never markup');
     assert.ok(html.includes('&lt;img src=x onerror=alert(1)&gt;'), 'the description is escaped too');

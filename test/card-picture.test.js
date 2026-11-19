@@ -116,8 +116,14 @@ function runClient(pictures) {
 {
     const ui = require('../server/web/ui');
     const html = ui.embedCard({ url: 'https://example.com/page', title: 'A card', kind: 'link', image: 'https://openvibe.media/a/att_01J/og.png' });
-    assert.ok(html.includes('data-oc-card-pic'), 'the server marks the picture it draws');
-    assert.ok(html.includes('class="oc-card-pic"'), 'in the card picture');
+    // An address preview is Shared's card (openvibe-shared 4.321.0 OVLinkCard.html): its picture is marked for
+    // OVLinkCard.watch, which drops it when it does not load, and every page with messages loads that script.
+    assert.ok(html.includes('data-ovlc-pic'), 'the server marks the picture it draws');
+    assert.ok(html.includes('class="ovlc-pic"'), 'in the card picture');
+    const layout = fs.readFileSync(path.join(__dirname, '..', 'server/web/layout.js'), 'utf8');
+    assert.match(layout, /ov-linkcard\.js/, 'pages with messages load the card script that drops it');
+    const shared = fs.readFileSync(require.resolve('openvibe-shared/linkcard'), 'utf8');
+    assert.match(shared, /function watch\(/, "Shared's watch drops a server-drawn picture that does not load");
     const known = ui.linkCard({ url: 'https://example.com/page', title: 'A card', image: 'https://openvibe.media/a/att_01J/og.png' });
     assert.ok(known.includes('data-oc-card-pic'), 'the known-link card marks its picture too');
 }
