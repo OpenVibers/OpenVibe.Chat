@@ -34,6 +34,17 @@ const routes = require('../server/chat/emotes-routes');
     assert.deepStrictEqual(await routes._globalSet('ffz'), []);
     assert.ok(Date.now() - t < 100 && asked.filter((u) => /frankerfacez/.test(u)).length === 1, 'failed: not asked again for ten minutes, no wait');
 
+    // Ten minutes on, the failed provider is tried again behind the answer: nobody waits for it.
+    const realNow0 = Date.now;
+    Date.now = () => realNow0() + 11 * 60 * 1000;
+    t = realNow0();
+    assert.deepStrictEqual(await routes._globalSet('ffz'), []);
+    assert.ok(realNow0() - t < 100, 'a retry of a provider that failed makes nobody wait');
+    assert.strictEqual(asked.filter((u) => /frankerfacez/.test(u)).length, 2, 'it is asked again');
+    Date.now = realNow0;
+    ffzFail();
+    await new Promise((r) => setTimeout(r, 10));
+
     const bttv = await routes._globalSet('bttv');
     assert.ok(Array.isArray(bttv) && bttv.length === 1 && bttv[0].code === 'catJAM', JSON.stringify(bttv));
     await routes._globalSet('bttv');
