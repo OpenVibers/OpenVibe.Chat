@@ -67,4 +67,24 @@ assert.strictEqual(guard.check({ id: 203, message: '#'.repeat(300), user_id: 5, 
         assert.strictEqual(containsCoreSlur(`a small ${word} about the stream`), false, word);
 }
 
+// 11-20 (the owner's phone): a finished recording was said twice in Global: the channel's line (mirrored) and Live's own
+// Global line. The channel's recording line stays in its channel; any mirrored service line Global already says is once.
+{
+    const vod = { kind: 'vod_link', url: 'https://openvibe.live/vod/6633', vod_id: 6633 };
+    const text = '📼 iZoR_One saved a broadcast: “iZoR_One’s Stream” (1h 53m) at https://openvibe.live/vod/6633';
+    const channel = row(text, { message_type: 'system', user_id: null, username: 'OpenVibe.Live', stream_id: 3062, channel_user_id: 9, metadata: JSON.stringify(vod) });
+    const global = row(text, { message_type: 'system', user_id: null, username: 'OpenVibe.Live', stream_id: null, channel_user_id: null, is_global: 1, metadata: vod });
+    const chat = row('see you all tomorrow', { stream_id: 3062 });
+    const out = filterFeed([channel, global, chat]);
+    assert.deepStrictEqual(out.map((r) => r.id), [global.id, chat.id], 'the recording once, from Global; the chat line stays');
+    // An 18+ channel's recording Live kept out of Global does not come in through the mirror either.
+    assert.deepStrictEqual(filterFeed([channel]).length, 0);
+    // Another service line Global already says, mirrored from a channel: shown once.
+    const live = row('🔴 Maticus is live', { message_type: 'system', user_id: null, stream_id: 3070 });
+    const liveGlobal = row('🔴  Maticus is live ', { message_type: 'system', user_id: null, stream_id: null, channel_user_id: null, is_global: 1 });
+    assert.deepStrictEqual(filterFeed([live, liveGlobal]).map((r) => r.id), [liveGlobal.id]);
+    // A mirrored service line with no Global twin still shows.
+    assert.deepStrictEqual(filterFeed([live]).map((r) => r.id), [live.id]);
+}
+
 console.log('global-standard: all checks passed');
