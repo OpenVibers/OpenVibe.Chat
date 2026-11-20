@@ -107,6 +107,8 @@ class ChatServer {
         /** @type {Map<string, number>} `${ip}:${streamId}` → last message time (rate limiting) */
         this.rateLimits = new Map();
         this.DEFAULT_RATE_LIMIT_MS = 1000; // 1 message per second
+        // Guests (no account) by the day: 20 messages, 3 links, 5,000 for all guests (guest-caps.js; plan §V.1).
+        this.guestCaps = require('./guest-caps').createGuestCaps();
         /** @type {Map<string, {t: number, k: string}[]>} `${ip}:${streamId}` → recent lines (repeat guard, _repeats) */
         this.recentLines = new Map();
         // Slow mode and sub-only mode are the channel's saved settings (slowModeMs, _chatRulesBlock);
@@ -1082,6 +1084,12 @@ class ChatServer {
 
         // ── Channel moderation settings ──────────────────────
         if (await this._chatRulesBlock(ws, client, text, modStreamId)) return;
+
+        // A guest's message counts toward the day's caps once every other rule let it through (guest-caps.js).
+        if (!client.user) {
+            const refused = this.guestCaps.take(client.ip, text);
+            if (refused) { this.sendTo(ws, { type: 'system', message: refused }); return; }
+        }
 
         const username = client.user ? client.user.display_name : client.anonId;
         const coreUsername = client.user ? client.user.username : null;

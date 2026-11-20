@@ -93,7 +93,7 @@ const LIVE = 'https://openvibe.live';
 
 /** Questions and answers, each true of what runs today (the page shows them; the FAQPage JSON-LD repeats them). */
 const FAQ = [
-    { q: 'Do I need an account to read?', a: 'No. Global chat, public rooms and public servers read without an account. To write, sign in with your free OpenVibe account, the same one every OpenVibe site uses.' },
+    { q: 'Do I need an account to read?', a: 'No. Global chat, public rooms and public servers read without an account. As a guest you can also write in global chat and in stream chats that allow guests, 20 messages a day. Sign in with your free OpenVibe account, the same one every OpenVibe site uses, to post in rooms and servers, send messages and keep chatting.' },
     { q: 'How do I start a server?', a: 'Sign in, open Servers and give it a name. It starts with text and voice channels; add more, give people roles, and share an invite link. A server can be public or private.' },
     { q: 'What is Vibe?', a: 'OpenVibe\'s own assistant, free with your account: it searches the web and all of OpenVibe, reads pages and pictures you share, remembers what you ask it to, and sets up work that runs every day for you. Your chats with it are private.' },
     { q: 'What are AI members?', a: 'An AI you add to a room or channel, with a name, a persona and a memory of that room. It answers when someone writes its @name, with OpenVibe\'s model, one from your own AI key, or a model on your own computer.' },
