@@ -7,6 +7,7 @@
  *   - the alert sound (playAlertSound: "play the alert", Chat resolves the sound)
  * Chat is the only writer of the six tables (C-04 done), so the writes never refuse.
  */
+const MEDIA_ID = 'med_01M7VG159AD2EEPX4NV36V45H9';   // Media's object ids are text (11-20)
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
@@ -37,7 +38,8 @@ t('boot', async () => {
     streamId = h.addStream(streamer.id, channelId);
     await h.ctx.sync();
     // The Media mock: uploads answer a public object, deletes are recorded.
-    assets.upload = async (buf, opts) => ({ id: 777, public_url: `https://openvibe.media/chat/${(opts && opts.filename) || 'emote.png'}` });
+    // Media's object ids are text (11-20: the bigint column refused every upload of one).
+    assets.upload = async (buf, opts) => ({ id: MEDIA_ID, public_url: `https://openvibe.media/chat/${(opts && opts.filename) || 'emote.png'}` });
     assets.delete = async (id) => { deletedAssets.push(id); return true; };
     require('../server/media/client')._setClient({ upload: assets.upload, delete: assets.delete });
 });
@@ -119,7 +121,7 @@ t('emote API: create uploads to Media, lists in Live\'s shapes, clash and cap', 
     assert.strictEqual(up.body.emote.code, 'hype');
     assert.strictEqual(up.body.emote.url, 'https://openvibe.media/chat/emote.png');
     const row = await h.db.get('SELECT * FROM emotes WHERE code = ?', ['hype']);
-    assert.strictEqual(row.media_asset_id, 777);
+    assert.strictEqual(row.media_asset_id, MEDIA_ID, 'Media\'s text id is stored');
     assert.strictEqual(row.media_url, 'https://openvibe.media/chat/emote.png');
     assert.strictEqual(row.size, 150);
 
@@ -163,7 +165,7 @@ t('emote API: rename/resize, delete removes the Media object', async () => {
     r = await h.http('DELETE', `/api/emotes/${row.id}`, { token: streamer.token });
     assert.strictEqual(r.status, 200, r.text);
     assert.strictEqual((await h.db.get('SELECT COUNT(*) AS n FROM emotes WHERE id = ?', [row.id])).n, 0);
-    assert.deepStrictEqual(deletedAssets, [777], 'the Media object is removed');
+    assert.deepStrictEqual(deletedAssets, [MEDIA_ID], 'the Media object is removed');
 });
 
 t('emote API: not-mine is refused, sources round-trip through the Live-context effect', async () => {
