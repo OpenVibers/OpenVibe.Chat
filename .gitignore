@@ -9,3 +9,6 @@ data/
 *.log
 *.pem
 *.key
+# A link named node_modules (the test runner makes one in a worktree) is ignored too, not only the directory: 11-20,
+# one was committed by #667 and ovhost refused the deploy (EISDIR).
+node_modules
