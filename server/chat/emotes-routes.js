@@ -478,9 +478,11 @@ async function globalSet(name) {
     const have = Array.isArray(c.data) && c.data.length > 0;
     if (have && Date.now() - c.ts < (Number(p.ttl()) || 3600) * 1000) return c.data;
     const startedHere = !_setFetching[name];
+    const failedBefore = _setFailedAt[name] !== undefined;
     const pending = refreshGlobalSet(name);
-    // Only the request that started a fetch for an empty set waits (briefly); the others answer at once.
-    if (have || !pending || !startedHere) return have ? c.data : [];
+    // Only the request that started a fetch for an empty set waits (briefly), and only while the provider has not
+    // failed yet: a provider that keeps failing is retried every ten minutes without making anyone wait.
+    if (have || !pending || !startedHere || failedBefore) return have ? c.data : [];
     let timer = null;
     await Promise.race([pending, new Promise((r) => { timer = setTimeout(r, FIRST_WAIT_MS); })]);
     clearTimeout(timer);
