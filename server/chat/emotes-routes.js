@@ -447,53 +447,63 @@ router.get('/file/:filename', (req, res) => {
     res.status(404).json({ error: 'Emote file not found' });
 });
 
+// ── Third-party global sets for /all: never waited on ─────────
+// 2026-11-20: FrankerFaceZ's API stopped answering this host. /all fetched FFZ, then BTTV, then 7TV one after another
+// whenever a cache was empty, a failure cached nothing, and every request waited out FFZ's 8 s timeout again: every
+// chat's history (Live renders it after the emotes) appeared 8 s late. Now a set is served from its cache and fetched
+// again behind the answer when old; a missing one is waited on at most FIRST_WAIT_MS (only after a start); a failed
+// fetch is not tried again for RETRY_AFTER_MS; one fetch per provider at a time; the three in parallel.
+const FIRST_WAIT_MS = 1500;
+const RETRY_AFTER_MS = 10 * 60 * 1000;
+const GLOBAL_SETS = {
+    ffz: { url: 'https://api.frankerfacez.com/v1/set/global', parse: (d) => parseFfzSets(d), get: () => ffzCache, set: (c) => { ffzCache = c; }, ttl: () => config.emotes.ffzCacheTtl },
+    bttv: { url: 'https://api.betterttv.net/3/cached/emotes/global', parse: (d) => parseBttvEmotes(d), get: () => bttvCache, set: (c) => { bttvCache = c; }, ttl: () => config.emotes.bttvCacheTtl },
+    '7tv': { url: 'https://7tv.io/v3/emote-sets/global', parse: (d) => parse7tvEmotes(d), get: () => sevenTvCache, set: (c) => { sevenTvCache = c; }, ttl: () => config.emotes.sevenTvCacheTtl },
+};
+const _setFetching = {};
+const _setFailedAt = {};
+function refreshGlobalSet(name) {
+    if (_setFetching[name]) return _setFetching[name];
+    if (Date.now() - (_setFailedAt[name] || 0) < RETRY_AFTER_MS) return null;
+    const p = GLOBAL_SETS[name];
+    _setFetching[name] = module.exports._fetchJSON(p.url)
+        .then((d) => { p.set({ data: p.parse(d), ts: Date.now() }); delete _setFailedAt[name]; })
+        .catch(() => { _setFailedAt[name] = Date.now(); })
+        .finally(() => { _setFetching[name] = null; });
+    return _setFetching[name];
+}
+async function globalSet(name) {
+    const p = GLOBAL_SETS[name];
+    const c = p.get();
+    const have = Array.isArray(c.data) && c.data.length > 0;
+    if (have && Date.now() - c.ts < (Number(p.ttl()) || 3600) * 1000) return c.data;
+    const startedHere = !_setFetching[name];
+    const pending = refreshGlobalSet(name);
+    // Only the request that started a fetch for an empty set waits (briefly); the others answer at once.
+    if (have || !pending || !startedHere) return have ? c.data : [];
+    let timer = null;
+    await Promise.race([pending, new Promise((r) => { timer = setTimeout(r, FIRST_WAIT_MS); })]);
+    clearTimeout(timer);
+    return p.get().data || [];
+}
+
 // ── FFZ / BTTV / 7TV (cached proxies) ────────────────────────
 router.get('/ffz', async (req, res) => {
-    try {
-        const now = Date.now();
-        if (ffzCache.data && (now - ffzCache.ts) < config.emotes.ffzCacheTtl * 1000) {
-            return res.json({ emotes: ffzCache.data, cached: true });
-        }
-        const data = await fetchJSON('https://api.frankerfacez.com/v1/set/global');
-        const emotes = parseFfzSets(data);
-        ffzCache = { data: emotes, ts: now };
-        res.json({ emotes, cached: false });
-    } catch (err) {
-        if (ffzCache.data) return res.json({ emotes: ffzCache.data, cached: true, stale: true });
-        res.status(502).json({ error: 'Failed to fetch FFZ emotes', emotes: [] });
-    }
+    // The same cached set /all serves: never an 8 s wait on a provider that does not answer (2026-11-20).
+    const emotes = await globalSet('ffz');
+    res.json({ emotes, cached: true });
 });
 
 router.get('/bttv', async (req, res) => {
-    try {
-        const now = Date.now();
-        if (bttvCache.data && (now - bttvCache.ts) < config.emotes.bttvCacheTtl * 1000) {
-            return res.json({ emotes: bttvCache.data, cached: true });
-        }
-        const data = await fetchJSON('https://api.betterttv.net/3/cached/emotes/global');
-        const emotes = parseBttvEmotes(data);
-        bttvCache = { data: emotes, ts: now };
-        res.json({ emotes, cached: false });
-    } catch (err) {
-        if (bttvCache.data) return res.json({ emotes: bttvCache.data, cached: true, stale: true });
-        res.status(502).json({ error: 'Failed to fetch BTTV emotes', emotes: [] });
-    }
+    // The same cached set /all serves: never an 8 s wait on a provider that does not answer (2026-11-20).
+    const emotes = await globalSet('bttv');
+    res.json({ emotes, cached: true });
 });
 
 router.get('/7tv', async (req, res) => {
-    try {
-        const now = Date.now();
-        if (sevenTvCache.data && (now - sevenTvCache.ts) < config.emotes.sevenTvCacheTtl * 1000) {
-            return res.json({ emotes: sevenTvCache.data, cached: true });
-        }
-        const data = await fetchJSON('https://7tv.io/v3/emote-sets/global');
-        const emotes = parse7tvEmotes(data);
-        sevenTvCache = { data: emotes, ts: now };
-        res.json({ emotes, cached: false });
-    } catch (err) {
-        if (sevenTvCache.data) return res.json({ emotes: sevenTvCache.data, cached: true, stale: true });
-        res.status(502).json({ error: 'Failed to fetch 7TV emotes', emotes: [] });
-    }
+    // The same cached set /all serves: never an 8 s wait on a provider that does not answer (2026-11-20).
+    const emotes = await globalSet('7tv');
+    res.json({ emotes, cached: true });
 });
 
 router.get('/defaults', (req, res) => {
@@ -611,41 +621,11 @@ router.get('/all/:streamId', optionalAuth, async (req, res) => {
             }
         }
 
-        let ffzEmotes = [];
-        if (sources.ffz !== false) {
-            ffzEmotes = ffzCache.data || [];
-            if (!ffzEmotes.length) {
-                try {
-                    const data = await fetchJSON('https://api.frankerfacez.com/v1/set/global');
-                    ffzEmotes = parseFfzSets(data);
-                    ffzCache = { data: ffzEmotes, ts: Date.now() };
-                } catch { /* use empty */ }
-            }
-        }
-
-        let bttvEmotes = [];
-        if (sources.bttv !== false) {
-            bttvEmotes = bttvCache.data || [];
-            if (!bttvEmotes.length) {
-                try {
-                    const data = await fetchJSON('https://api.betterttv.net/3/cached/emotes/global');
-                    bttvEmotes = parseBttvEmotes(data);
-                    bttvCache = { data: bttvEmotes, ts: Date.now() };
-                } catch { /* use empty */ }
-            }
-        }
-
-        let sevenTvEmotes = [];
-        if (sources['7tv'] !== false) {
-            sevenTvEmotes = sevenTvCache.data || [];
-            if (!sevenTvEmotes.length) {
-                try {
-                    const data = await fetchJSON('https://7tv.io/v3/emote-sets/global');
-                    sevenTvEmotes = parse7tvEmotes(data);
-                    sevenTvCache = { data: sevenTvEmotes, ts: Date.now() };
-                } catch { /* use empty */ }
-            }
-        }
+        const [ffzEmotes, bttvEmotes, sevenTvEmotes] = await Promise.all([
+            sources.ffz !== false ? globalSet('ffz') : [],
+            sources.bttv !== false ? globalSet('bttv') : [],
+            sources['7tv'] !== false ? globalSet('7tv') : [],
+        ]);
 
         let emoteScale = 100;
         if (channel) {
@@ -669,3 +649,6 @@ router.get('/all/:streamId', optionalAuth, async (req, res) => {
 });
 
 module.exports = router;
+module.exports._fetchJSON = fetchJSON;
+module.exports._globalSet = globalSet;
+module.exports._resetGlobalSets = () => { ffzCache = { data: null, ts: 0 }; bttvCache = { data: null, ts: 0 }; sevenTvCache = { data: null, ts: 0 }; for (const k of Object.keys(_setFailedAt)) delete _setFailedAt[k]; };
