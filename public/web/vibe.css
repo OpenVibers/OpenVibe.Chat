@@ -293,3 +293,8 @@
    screen under the navbar and above a phone's app bar; each side scrolls on its own. */
 .vb-messenger { height: calc(100dvh - var(--ovnav-real-h, 52px) - var(--ovnav-appbar-h, 0px)); min-height: 420px; box-sizing: border-box; }
 html.vb-has-messenger, html.vb-has-messenger body { overflow: hidden; }
+
+/* A guest's answer (vibe.js guestAsk, plan §V.1): how many are left and the sign-in, quiet under the answer. */
+.vb-guest-note { margin: 8px 0 0; font-size: .82rem; color: var(--oc-muted); }
+.vb-guest-note.oc-error { color: inherit; }
+.vb-guest-signin { font-weight: 600; white-space: nowrap; }

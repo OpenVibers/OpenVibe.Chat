@@ -801,14 +801,72 @@
       .catch(function () {}).then(function () { stopBtn.disabled = false; });
   });
 
+  // ── A guest's question (11-20; plan §V.1, the owner's register #801) ──
+  // OpenVibeGuestAsk (openvibe-shared 4.330.0, served at /shared/ov-guest-ask.js) does the quick check and asks
+  // Network; the turn is drawn here like any other (the answer through VibeMarkdown, which escapes first). Where the
+  // script is not there (an older Shared), the visitor signs in as before, the draft kept.
+  var guestBusy = false, guestLoading = null;
+  function guestLib() {
+    if (window.OpenVibeGuestAsk) return Promise.resolve(window.OpenVibeGuestAsk);
+    if (guestLoading) return guestLoading;
+    guestLoading = new Promise(function (resolve, reject) {
+      var sc = document.createElement('script'); sc.src = '/shared/ov-guest-ask.js'; sc.async = true;
+      sc.onload = function () { if (window.OpenVibeGuestAsk) resolve(window.OpenVibeGuestAsk); else reject(new Error('ov-guest-ask.js')); };
+      sc.onerror = function () { guestLoading = null; sc.remove(); reject(new Error('ov-guest-ask.js')); };
+      document.head.appendChild(sc);
+    });
+    return guestLoading;
+  }
+  function signInLink(label) {
+    var a = el('a', 'vb-guest-signin', label); a.href = '/auth/login?next=' + encodeURIComponent(location.pathname);
+    return a;
+  }
+  function guestAsk(text) {
+    if (guestBusy) return;
+    guestLib().then(function (G) {
+      guestBusy = true;
+      var li = meTurn(text, null); threadEl().appendChild(li);
+      var reply = botOf(li);
+      var work = el('details', 'ovt-work'); work.open = true;
+      var sum = el('summary'); sum.appendChild(el('span', 'ovt-w-live', 'Vibe is writing\u2026')); work.appendChild(sum);
+      reply.appendChild(work);
+      input.value = ''; changed(); toBottom();
+      return G.ask(text, { site: 'chat' }).then(function (d) {
+        work.remove();
+        var ans = el('div', 'ovt-answer');
+        if (MD) ans.innerHTML = MD.render(String(d.answer || '')); else ans.textContent = String(d.answer || '');
+        reply.appendChild(ans);
+        var note = el('p', 'vb-guest-note', d.left == null ? 'Answered as a guest. ' : d.left > 0 ? d.left + ' more today as a guest. ' : 'Your last guest question today. ');
+        note.appendChild(signInLink('Sign in (free) for 100 a day'));
+        reply.appendChild(note);
+      }, function (err) {
+        work.remove();
+        if (err && err.code === 'guest.cancelled') return;
+        var p = el('p', 'oc-notice oc-error vb-guest-note', (err && err.message) || 'Vibe could not answer right now. Try again in a moment.');
+        p.setAttribute('role', 'alert');
+        if (G.limited(err)) { p.appendChild(document.createTextNode(' ')); p.appendChild(signInLink('Sign in (free)')); }
+        else if (!input.value) { input.value = text; changed(); }
+        reply.appendChild(p);
+      }).then(function () { guestBusy = false; toBottom(); });
+    }, function () {
+      // No guest core here: sign in as before, the draft kept.
+      store(function (s) { s.setItem(DRAFT, text); });
+      location.href = '/auth/login?next=' + encodeURIComponent(location.pathname);
+    });
+  }
+
   // ── Sending ──
   if (form) form.addEventListener('submit', function (e) {
     if (e.submitter && e.submitter === stopBtn) { e.preventDefault(); return; }
     var text = input.value.trim();
     if (!text && !picture && !attachments.length) { e.preventDefault(); return; }
     if (form.dataset.signin) {
-      // Signed out: the draft waits in this browser while they sign in, and comes back in the composer.
       e.preventDefault();
+      // 11-20 (plan §V.1 guests): a signed-out visitor's question in Chat mode is answered here, three a day
+      // (openvibe-shared ov-guest-ask.js through OpenVibe.Network). A picture, files or another mode sign in first.
+      var guestMode = form.querySelector('input[name="mode"]:checked');
+      if (text && !picture && !attachments.length && (!guestMode || guestMode.value === 'chat')) { guestAsk(text); return; }
+      // Signed out: the draft waits in this browser while they sign in, and comes back in the composer.
       store(function (s) { s.setItem(DRAFT, text); });
       location.href = '/auth/login?next=' + encodeURIComponent(location.pathname);
       return;
