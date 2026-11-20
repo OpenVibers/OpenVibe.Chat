@@ -140,7 +140,7 @@ t('removal: only a server moderator, and its Media object goes too', async () =>
     const del = await api('DELETE', `/${slug}/emojis/${first.id}`, mod);
     assert.deepStrictEqual([del.status, del.body.ok], [200, true]);
     assert.ok(!(await h.db.get('SELECT id FROM emotes WHERE id = ?', [first.id])), 'the row is gone');
-    assert.deepStrictEqual(deleted, [Number(assetId)], 'its Media object removed');
+    assert.deepStrictEqual(deleted.map(String), [String(assetId)], 'its Media object removed (the id is text since migration 0085)');
     assert.deepStrictEqual((await list(null)).body.emojis, []);
 
     // A second delete is a plain 404.
