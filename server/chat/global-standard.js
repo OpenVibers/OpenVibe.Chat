@@ -49,10 +49,30 @@ function lineOk(text, { mirrored = false } = {}) {
     return true;
 }
 
+const metaOf = (m) => { const v = m && m.metadata; if (!v) return null; if (typeof v === 'object') return v; try { return JSON.parse(v); } catch { return null; } };
+const squash = (text) => String(text == null ? '' : text).replace(/\s+/g, ' ').trim();
+/**
+ * A service's line twice (11-20, the owner's phone: "iZoR_One saved a broadcast" twice in Global). Live says a finished
+ * recording in the channel's chat and, when it wants it there, in Global itself (with its own limits: not 18+, once a
+ * channel in 30 minutes, six an hour). The channel's copy is mirrored into Global like every channel line, so Global
+ * showed both. A channel's recording line (metadata kind vod_link) stays in its channel; and a mirrored service line
+ * whose words a Global line of the same page already says is shown once.
+ */
+function twinDrops(list) {
+    const globalSays = new Set(list.filter((r) => r && r.is_global && (r.message_type || 'chat') !== 'chat').map((r) => squash(r.message)));
+    const drop = new Set();
+    for (const r of list) {
+        if (!r || !mirroredRow(r) || (r.message_type || 'chat') === 'chat') continue;
+        const meta = metaOf(r);
+        if ((meta && meta.kind === 'vod_link') || globalSays.has(squash(r.message))) drop.add(r);
+    }
+    return drop;
+}
+
 /** Rows of the global feed without what the global room does not show, in the order given. */
 function filterFeed(rows) {
     const list = Array.isArray(rows) ? rows : [];
-    const drop = new Set();
+    const drop = twinDrops(list);
     const runs = new Map();   // sender → its current run of short lines, oldest first
     const close = (run) => { if (run && run.length > 1 && containsCoreSlur(run.map((r) => r.message).join(' '), [])) run.forEach((r) => drop.add(r)); };
     for (const r of [...list].sort((a, b) => Number(a.id) - Number(b.id))) {
