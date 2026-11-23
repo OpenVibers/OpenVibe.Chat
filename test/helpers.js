@@ -353,7 +353,13 @@ async function boot({ env = {} } = {}) {
                     if (body.op === 'skip') return send(200, { ended: live.mediaState.now_playing, next: live.mediaState.queue[0] || null });
                     return send(400, { error: 'unknown op' });
                 // Live forwards a robot command to the channel's OpenVibe.Bot robot as the viewer: the stub says who it was asked as.
-                case 'hardware': return send(200, { ok: false, reason: 'no_robot', message: `No robot here (asked as ${body.from_subject || 'nobody'}, user ${body.from_user_id || '-'}).` });
+                case 'hardware':
+                    // The robot's line (11-23): Live answers in words, a person signed in or not.
+                    if (body.command === 'button:drive') {
+                        return send(200, body.from_subject ? { ok: true, result: 'join', message: 'You are #2 in line for the robot.' }
+                            : { ok: false, reason: 'login_required', message: 'Sign in to take a turn driving the robot.' });
+                    }
+                    return send(200, { ok: false, reason: 'no_robot', message: `No robot here (asked as ${body.from_subject || 'nobody'}, user ${body.from_user_id || '-'}).` });
                 case 'bench-vote': return send(200, { ok: true, message: 'Your Bench vote is counted.' });
                 case 'ensure-channel': {
                     let ch = [...live.channels.values()].find((c) => c.user_id === body.user_id);
