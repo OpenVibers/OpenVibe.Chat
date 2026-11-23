@@ -91,6 +91,9 @@ const {
 const CHANNEL_NAME_TTL_MS = 60 * 1000;
 const _channelByName = new Map();
 
+// The robot line's chat words (Live's /internal/chat-effects/hardware takes them as button:<word> and answers in words).
+const ROBOT_LINE_WORDS = new Set(['drive', 'join', 'line', 'turn', 'leave']);
+
 class ChatServer {
     constructor() {
         this.wss = null;
@@ -1770,7 +1773,7 @@ class ChatServer {
                     // Forward trailing tokens (e.g. "500p", "0.5") as pitch/speed args.
                     // Not a sound: maybe a button on the channel's robot (!ir_light, !cycle_gear …), pressed quietly.
                     if ((await this.triggerChannelSound(ws, client, stream, cmd.slice(1), parts.slice(1))) === false) {
-                        this._robotButton(stream, cmd.slice(1), client);
+                        this._robotButton(stream, cmd.slice(1), client, ws);
                     }
                     return;
             }
@@ -1834,11 +1837,18 @@ class ChatServer {
      * (Live: `button:<word>`; a robot made of buttons, Maticus 2026-10-26: "!ir_light does nothing"). Signed-in viewers
      * only, a plain word only, and always quiet: most channels have no robot and most words are no button, so a
      * refusal says nothing (the eight movement words and !say keep their own replies).
+     * The robot's line (11-23): !drive, !join, !line, !turn get the viewer in the line of a robot that takes turns and
+     * !leave takes them out (Live answers in words: "You are #3 in line …"). Those answers are said to the viewer, a
+     * signed-out viewer hears to sign in, and a channel with no robot stays quiet.
      */
-    _robotButton(stream, word, client) {
-        if (!client.user || !stream?.user_id || !/^[a-z0-9][a-z0-9_.-]{0,39}$/.test(word)) return;
-        this._subjectOfUser(client.user)
-            .then((subject) => ctx.effects.hardwareCommand(stream.user_id, `button:${word}`, client.user.display_name || client.user.username || '', { subject, userId: client.user.id || null }))
+    _robotButton(stream, word, client, ws = null) {
+        const line = ROBOT_LINE_WORDS.has(word);
+        if (!stream?.user_id || !/^[a-z0-9][a-z0-9_.-]{0,39}$/.test(word)) return;
+        if (!client.user && !line) return;
+        (client.user ? this._subjectOfUser(client.user) : Promise.resolve(null))
+            .then((subject) => ctx.effects.hardwareCommand(stream.user_id, `button:${word}`, client.user ? (client.user.display_name || client.user.username || '') : `anon${client.anonId || ''}`,
+                { subject, userId: client.user ? client.user.id || null : null }))
+            .then((r) => { if (line && ws && r && r.message && r.reason !== 'no_robot') this.sendTo(ws, { type: 'system', message: r.message }); })
             .catch(() => { /* quiet by design */ });
     }
 

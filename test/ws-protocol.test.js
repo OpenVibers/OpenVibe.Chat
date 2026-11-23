@@ -378,6 +378,22 @@ t('Bench votes reach Live once with signed-in viewer and stream ids', async () =
     } finally { viewerWs.close(); }
 });
 
+t('!drive gets in the robot\'s line and Live\'s answer is said to the viewer; a signed-out viewer hears to sign in', async () => {
+    await h.sleep(1100);
+    const before = h.live.effects.length;
+    aliceWs.sendJson({ type: 'chat', message: '!drive' });
+    await aliceWs.next((x) => x.type === 'system' && x.message === 'You are #2 in line for the robot.');
+    const sent = h.live.effects.slice(before).filter((e) => e.name === 'hardware');
+    assert.deepStrictEqual(sent.map((e) => [e.body.command, e.body.from_subject]), [['button:drive', 'usr_01J9AAAAAAAAAAAAAAAAAAAAAA']]);
+    const anon = await h.ws({ ip: '198.51.100.72', stream: streamId });
+    try {
+        anon.sendJson({ type: 'join', streamId });
+        await anon.next((m) => m.type === 'auth');
+        anon.sendJson({ type: 'chat', message: '!drive' });
+        await anon.next((x) => x.type === 'system' && x.message === 'Sign in to take a turn driving the robot.');
+    } finally { anon.close(); }
+});
+
 t('a !word that is not a channel sound is pressed as the robot button of that name, quietly', async () => {
     await h.sleep(1100);
     const before = h.live.effects.length;
