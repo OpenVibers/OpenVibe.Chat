@@ -87,8 +87,9 @@ t('the composer posts without JavaScript, through the API\'s checks; other origi
 });
 
 t('SEO-7: a gated page answers on this origin with noindex, a public page keeps its own canonical', async () => {
+    // /inbox is in the menus: it answers 200 with a line on what it is (signin-pages.test.js); still a gated page.
     const gated = await req('GET', '/inbox');
-    assert.strictEqual(gated.status, 401);
+    assert.strictEqual(gated.status, 200);
     assert.match(gated.text, /<meta name="robots" content="noindex, nofollow">/);
     assert.match(gated.text, /href="\/auth\/login\?next=%2Finbox"/, 'one click from signing in');
     // The rule: a gated page never names another origin as its canonical. It used to be a redirect whose

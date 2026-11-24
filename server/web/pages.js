@@ -223,7 +223,9 @@ function createWebRoutes({ config }) {
         res.status(status).set('Cache-Control', o.cache || cache.htmlHeaders({ private: true })).set('Content-Security-Policy', contentSecurityPolicy(nonce)).type('html')
             .send(renderPage({ config, actor, prefs: await prefsOf(actor), counts: await countsOf(actor), nonce, ringScript: actor.kind === 'user' && !!(config.calls && config.calls.enabled), ...o }));
     };
-    const needUser = async (req, res, { status = 401 } = {}) => {
+    // `about`: one line on what the page does, for a signed-out visitor and a crawler (the owner, 11-21: a sign-in
+    // page answers with a real page, not a 401); a page that has one answers 200.
+    const needUser = async (req, res, { status = 401, about = '' } = {}) => {
         const actor = await viewerOf(req);
         if (actor.kind === 'user') return actor;
         // A gated page answers here, noindex, instead of redirecting to Network sign-in: a crawler that
@@ -237,10 +239,11 @@ function createWebRoutes({ config }) {
         // The visible link goes back to the path only. A query string on a private page holds words that must
         // never come back in an anonymous response — the security suite reads every 401 body for the private
         // room's words, and echoing ?q= here put them there (SEO-7 review, 2026-10-29).
-        await page(req, res, status, {
+        await page(req, res, about ? 200 : status, {
             actor, title: 'Sign in to continue', path: req.path, active: null, footer: 'compact', robots: 'noindex, nofollow',
             body: `<h1>Sign in to continue</h1>
-<p class="oc-muted">This page is for OpenVibe accounts. Sign in and you come straight back here.</p>
+${about ? `<p>${esc(about)}</p>
+` : ''}<p class="oc-muted">This page is for OpenVibe accounts. Sign in and you come straight back here.</p>
 <p><a class="oc-button" href="/auth/login?next=${encodeURIComponent(req.path)}">Sign in with OpenVibe</a></p>`,
         });
         return null;

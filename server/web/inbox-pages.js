@@ -98,7 +98,7 @@ function mountInboxPages(router, { page, viewerOf, needUser, sameSite, formLimit
     const statusChip = (s) => `<span class="ib-st ${STATUS[s] ? STATUS[s][1] : ''}">${esc(STATUS[s] ? STATUS[s][0] : s)}</span>`;
 
     router.get('/inbox', async (req, res) => {
-        const actor = await needUser(req, res); if (!actor) return;
+        const actor = await needUser(req, res, { about: 'A support inbox for your website: one tag puts a chat on your pages, Vibe answers from your pages, and you and your team reply here.' }); if (!actor) return;
         const mine = await inboxes.mine(actor.user);
         const list = mine.length
             ? `<ul class="ib-list">${mine.map((i) => `<li><a href="/inbox/${esc(i.id)}"><span class="ib-dot" style="background:${esc(i.color)}"></span><b>${esc(i.name)}</b>
