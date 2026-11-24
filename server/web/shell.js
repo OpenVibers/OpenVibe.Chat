@@ -175,7 +175,6 @@ function sideServer(o = {}) {
 ${server.description ? `<p class="oc-side-desc">${esc(server.description)}</p>` : ''}
 ${menu.length ? `<details class="oc-more oc-side-more"><summary class="oc-icon-btn" aria-label="Server menu" title="Server menu">${IC.more}</summary><div class="oc-pop">${menu.join('')}</div></details>` : ''}
 </header>
-<a class="oc-side-event" href="/s/${esc(server.slug || '')}/events">${IC.clock}<span>Events</span></a>
 ${can.member ? '' : me ? `<form class="oc-side-join" method="post" action="/s/${esc(server.slug || '')}/join"><button type="submit">Join ${esc(server.name || 'this server')}</button></form>` : `<p class="oc-side-join"><a class="oc-button" href="/auth/login?next=${encodeURIComponent(`/s/${server.slug || ''}`)}">Sign in to join</a></p>`}
 ${categories.map(cat).join('')}
 ${youBar(o.you || {})}`;
