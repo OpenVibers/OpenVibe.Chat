@@ -85,7 +85,7 @@ function mountFeedPages(router, { page, needUser, sameSite, formLimit, notice, c
     }
 
     router.get('/feeds', async (req, res) => {
-        const actor = await needUser(req, res); if (!actor) return;
+        const actor = await needUser(req, res, { about: 'Feeds put what your coding agent is doing in a chat or on your stream: Claude Code\'s hooks or the API publish to a feed, and any site shows it with one tag.' }); if (!actor) return;
         const mine = await feeds.mine(actor.user);
         const where = (f) => [f.room_id ? 'in a room' : '', f.managed_stream_id ? 'on Live' : ''].filter(Boolean).join(' · ');
         const list = mine.length
