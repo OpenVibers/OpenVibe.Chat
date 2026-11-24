@@ -70,9 +70,6 @@
 .oc-side-meta { margin: 2px 0 0; font-size: .82rem; }
 .oc-side-desc { margin: 6px 0 0; font-size: .86rem; color: var(--oc-muted); }
 .oc-side-more { position: absolute; right: 8px; top: 8px; }
-.oc-side-event { display: flex; align-items: center; gap: 8px; min-height: 40px; margin: 0 0 6px; padding: 6px 8px; border-radius: 8px; color: var(--oc-muted); text-decoration: none; font-size: .9rem; }
-.oc-side-event:hover { background: var(--oc-panel-2); color: var(--oc-text); }
-.oc-side-event .oc-i { width: 18px; height: 18px; }
 
 /* Channels: text (#) and voice (a speaker), with the people in each voice channel. */
 .oc-chan { display: flex; align-items: center; gap: 7px; min-height: 36px; padding: 4px 8px; border-radius: 8px; color: var(--oc-muted); text-decoration: none; }

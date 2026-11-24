@@ -21,6 +21,7 @@ const crypto = require('crypto');
 const express = require('express');
 const path = require('path');
 const cache = require('openvibe-shared/cache-policy');
+const seo = require('openvibe-shared/seo');
 const ovServe = require('openvibe-shared/serve');
 const { renderPage, contentSecurityPolicy, esc } = require('./layout');
 const { createSessionRoutes } = require('./session');
@@ -432,6 +433,23 @@ ${holdRows}
     });
 
     // The party host's own 404 for a browser (the same words as Chat's), and the JSON 404 for anything else.
+    // Crawlers (the 11-23 network crawl: openvibe.party had no robots.txt or sitemap of its own, and the full footer's
+    // Updates link answered 404 here). The home is the one public page; a party, the pool and /new are not indexed.
+    const partySite = String(partyConfig.baseUrl || `https://${config.party.host}`).replace(/\/+$/, '');
+    router.get('/robots.txt', (req, res) => {
+        res.type('text/plain').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 })).send(seo.robotsTxt({
+            sitemaps: [`${partySite}/sitemap.xml`],
+            allow: ['/'],
+            disallow: ['/p/', '/new', '/pool', '/auth/', '/api/'],
+        }));
+    });
+    router.get('/sitemap.xml', (req, res) => {
+        res.type('application/xml').set('Cache-Control', cache.htmlHeaders({ maxAge: 3600 }))
+            .send(seo.sitemapXml([{ loc: `${partySite}/`, changefreq: 'weekly', priority: 1 }]));
+    });
+    // What shipped is Chat's (openvibe.party is served by OpenVibe.Chat): the footer's Updates goes there.
+    router.get('/updates', (req, res) => res.redirect(301, 'https://openvibe.chat/updates'));
+
     router.use((req, res, next) => {
         if ((req.method !== 'GET' && req.method !== 'HEAD') || /^\/(api|internal|ws|auth|shared|web)(\/|$)/.test(req.path)) return next();
         return page(req, res, 404, {
