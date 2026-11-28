@@ -33,7 +33,7 @@
 .vb-hit span { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vb-hit small { display: block; margin-top: 2px; color: var(--oc-muted); font-size: .8rem; line-height: 1.35; overflow-wrap: anywhere; }
 .vb-hit mark { background: color-mix(in srgb, var(--oc-accent) 28%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
-.vb-group { margin: 14px 10px 4px; font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
+.vb-group { margin: 14px 10px 4px; font-size: .75rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
 .vb-rail-note { margin: 14px 10px; color: var(--oc-muted); font-size: .9rem; line-height: 1.45; }
 
 .vb-allow { margin: 6px 10px 2px; font-size: .78rem; color: var(--oc-muted); }

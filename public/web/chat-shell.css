@@ -51,7 +51,7 @@
 .oc-side-top .oc-side-find + .oc-side-find { margin-top: 6px; }
 .oc-side-find .oc-i { width: 18px; height: 18px; color: var(--oc-muted); }
 .oc-side-sec { margin-bottom: 12px; }
-.oc-side-group { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 8px 4px; font-size: .72rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--oc-muted); }
+.oc-side-group { display: flex; align-items: center; gap: 6px; margin: 0; padding: 8px 8px 4px; font-size: .75rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--oc-muted); }
 .oc-side-group > summary { cursor: pointer; list-style: none; }
 .oc-side-group > summary::-webkit-details-marker { display: none; }
 .oc-side-cat details > summary::after { content: '▾'; margin-left: auto; font-size: .8rem; }
@@ -87,7 +87,7 @@
 .oc-you-id { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--oc-text); text-decoration: none; }
 .oc-you-names { display: grid; min-width: 0; }
 .oc-you-names strong { font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.oc-you-names .oc-muted { font-size: .74rem; }
+.oc-you-names .oc-muted { font-size: .75rem; }
 .oc-you-tools { display: flex; gap: 2px; margin-left: auto; }
 
 /* ── The members column ── */
@@ -168,7 +168,7 @@
   .oc-chan-head > .oc-chan-title:not(:has(~ .oc-chan-topic)) { grid-row: 1 / 3; align-self: center; }
   .oc-chan-head > .oc-chan-tools { grid-column: 3; grid-row: 1 / 3; display: inline-flex; align-items: center; gap: 0; margin: 0; }
   .oc-chan-head .oc-live { font-size: 0; margin-right: 4px; }
-  .oc-chan-head .oc-live::first-letter { font-size: .7rem; }
+  .oc-chan-head .oc-live::first-letter { font-size: .75rem; }
   .oc-app .oc-tolist { display: inline-grid; }
   .oc-app > .oc-side, .oc-app > .oc-col-main, .oc-app > .oc-col-members { min-width: 0; }
   .oc-app > .oc-side, .oc-app > .oc-col-members { display: none; }
@@ -269,7 +269,7 @@
 .oc-welcome-head .oc-srv-icon--big { margin: 0; flex: none; }
 .oc-welcome-head h1 { margin: 0; font-size: clamp(1.35rem, 4.6vw, 1.75rem); line-height: 1.15; overflow-wrap: anywhere; }
 .oc-welcome-head .oc-muted { margin: 4px 0 0; }
-.oc-welcome-kicker { margin: 0 0 2px; font-size: .74rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
+.oc-welcome-kicker { margin: 0 0 2px; font-size: .75rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
 .oc-welcome-form { display: grid; gap: 12px; }
 .oc-welcome-form .oc-set { margin: 0; }
 .oc-rules { list-style: none; counter-reset: oc-rule; margin: 0; padding: 4px 14px 12px; display: grid; gap: 2px; }
@@ -278,7 +278,7 @@
 .oc-rules li::before { content: counter(oc-rule); display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: color-mix(in srgb, var(--oc-accent) 16%, transparent); color: var(--oc-text); font-size: .8rem; font-weight: 800; }
 .oc-rules-text { margin: 0; padding: 4px 14px 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
 fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
-.oc-role-set > legend { float: left; width: 100%; margin: 0; padding: 12px 14px 4px; font-size: .74rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
+.oc-role-set > legend { float: left; width: 100%; margin: 0; padding: 12px 14px 4px; font-size: .75rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
 .oc-role-set > legend + * { clear: left; }
 .oc-set-note { margin: 0; padding: 0 14px 10px; color: var(--oc-muted); font-size: .88rem; }
 .oc-role-picks { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 14px; }
@@ -357,7 +357,7 @@ fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
 .oc-act > .oc-page-head { margin-bottom: 4px; }
 .oc-act-waiting { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px 4px; border: 1px solid var(--oc-line); border-radius: 18px; background: var(--oc-panel); }
 .oc-act-waiting .oc-act-sec { margin: 0 0 6px; }
-.oc-act-waiting .oc-list-head { margin: 6px 4px; font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted, var(--oc-text)); }
+.oc-act-waiting .oc-list-head { margin: 6px 4px; font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted, var(--oc-text)); }
 .oc-act-answer { display: inline-flex; gap: 6px; flex: none; }
 .oc-act-answer button { min-height: 40px; padding: 0 14px; border-radius: 999px; }
 .oc-act-what > .oc-list-head { margin: 10px 0 8px; }
@@ -398,8 +398,8 @@ fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
 .oc-feed.is-grouped > .oc-msg.is-first[style*="--av-img"]::before { background-image: var(--av-img); background-size: cover; background-position: center; color: transparent; }
 .oc-feed.is-grouped > .oc-msg.is-first::before { content: attr(data-initial); position: absolute; left: 14px; top: 1px; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; font-size: .92rem; font-weight: 800; color: var(--oc-text); background: color-mix(in srgb, var(--nc, var(--oc-accent)) 34%, var(--oc-panel-2)); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--nc, var(--oc-accent)) 50%, transparent); }
 .oc-feed.is-grouped > .oc-msg.is-first > .oc-name { order: 1; font-weight: 750; }
-.oc-feed.is-grouped > .oc-msg.is-first > .oc-where { order: 2; font-size: .74rem; padding: 1px 7px; border-radius: 999px; color: var(--oc-muted); background: color-mix(in srgb, var(--oc-text) 7%, transparent); text-decoration: none; }
-.oc-feed.is-grouped > .oc-msg.is-first > .oc-time { order: 3; font-size: .72rem; color: var(--oc-muted); }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-where { order: 2; font-size: .75rem; padding: 1px 7px; border-radius: 999px; color: var(--oc-muted); background: color-mix(in srgb, var(--oc-text) 7%, transparent); text-decoration: none; }
+.oc-feed.is-grouped > .oc-msg.is-first > .oc-time { order: 3; font-size: .75rem; color: var(--oc-muted); }
 .oc-feed.is-grouped > .oc-msg.is-first > .oc-text { order: 4; flex: 1 0 100%; }
 /* What follows the words (an address card, Shared's .ovlc or Chat's own, an agent run, the hidden-cards note) comes after
    them on its own line: without an order it sat before the name in a run's first message (11-19). */
@@ -407,11 +407,11 @@ fieldset.oc-role-set { min-width: 0; padding: 0 0 14px; }
 /* A follow-up line is only its words: the name, where, the role badge and the name's decoration were all said on the first
    line (11-14, the owner: STAFF repeated on every line of a run). */
 .oc-feed.is-grouped > .oc-msg.is-cont > :is(.oc-name, .oc-where, .oc-badge, .ov-badge) { display: none; }
-.oc-feed.is-grouped > .oc-msg.is-cont > .oc-time { position: absolute; left: 8px; top: 4px; width: 46px; text-align: right; font-size: .66rem; color: var(--oc-muted); opacity: 0; transition: opacity .12s ease; }
+.oc-feed.is-grouped > .oc-msg.is-cont > .oc-time { position: absolute; left: 8px; top: 4px; width: 46px; text-align: right; font-size: .75rem; color: var(--oc-muted); opacity: 0; transition: opacity .12s ease; }
 .oc-feed.is-grouped > .oc-msg.is-cont:is(:hover, :active, :focus-within) > .oc-time { opacity: 1; }
 .oc-feed.is-grouped > .oc-msg:is(:hover, :active) { background: color-mix(in srgb, var(--oc-text) 3.5%, transparent); }
 .oc-feed.is-grouped > .oc-msg .oc-text { overflow-wrap: anywhere; }
-.oc-feed.is-grouped > .oc-day { display: flex; align-items: center; gap: 12px; margin: 18px 14px 4px; font-size: .74rem; font-weight: 700; color: var(--oc-muted); list-style: none; }
+.oc-feed.is-grouped > .oc-day { display: flex; align-items: center; gap: 12px; margin: 18px 14px 4px; font-size: .75rem; font-weight: 700; color: var(--oc-muted); list-style: none; }
 .oc-feed.is-grouped > .oc-day::before, .oc-feed.is-grouped > .oc-day::after { content: ""; flex: 1; height: 1px; background: var(--oc-line); }
 .oc-feed.is-grouped > .oc-msg.is-first > .oc-time { display: inline; margin: 0; }
 .oc-feed.is-grouped > .oc-msg.is-cont > .oc-time { display: block; margin: 0; }

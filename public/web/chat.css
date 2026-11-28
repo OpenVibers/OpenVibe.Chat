@@ -125,7 +125,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-bubble-author { color:var(--oc-muted); font-size:.78rem; font-weight:650; margin:0 0 3px 10px; }
 .oc-bubble { background:var(--oc-panel-raised,var(--oc-panel)); border-radius:17px 17px 17px 5px; padding:9px 12px; overflow-wrap:anywhere; white-space:pre-wrap; }
 .oc-bubble-mine .oc-bubble { background:var(--accent,#5879f6); color:#fff; border-radius:17px 17px 5px 17px; }
-.oc-bubble-time { font-size:.7rem; opacity:.65; margin:3px 4px 0; }
+.oc-bubble-time { font-size:.75rem; opacity:.65; margin:3px 4px 0; }
 .oc-bubbles .oc-empty { align-self:center; }
 .oc-list#oc-convs { border:0; border-radius:0; background:transparent; overflow:visible; }
 .oc-list#oc-convs .oc-row + .oc-row { border-top:1px solid var(--oc-line); }
@@ -203,7 +203,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-srv-meta { margin: 2px 0 0; font-size: .82rem; }
 .oc-srv-desc { margin: 6px 0 0; font-size: .86rem; color: var(--oc-muted); }
 .oc-srv-channels > summary { display: none; }
-.oc-srv-group { margin: 14px 8px 4px; font-size: .7rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--oc-muted); }
+.oc-srv-group { margin: 14px 8px 4px; font-size: .75rem; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; color: var(--oc-muted); }
 .oc-srv-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 1px; }
 .oc-chan { display: flex; align-items: center; gap: 7px; padding: 5px 8px; border-radius: 8px; color: var(--oc-muted); text-decoration: none; }
 .oc-chan:hover, .oc-chan:focus-visible { background: var(--oc-panel-2); color: var(--oc-text); }
@@ -266,7 +266,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
   .oc-chan-head, .oc-srv-main > .oc-compose, .oc-srv-main > .oc-signin, .oc-srv-main > form { padding-left: 12px; padding-right: 12px; }
   .oc-srv-main > .oc-notice, .oc-srv-main > .oc-ai-here, .oc-srv-main > .oc-call { margin-left: 12px; margin-right: 12px; }
   .oc-mobile-bar { position: fixed; z-index: 20; inset: auto 0 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); padding: 6px max(8px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); border-top: 1px solid var(--oc-line); background: var(--oc-panel); }
-  .oc-mobile-bar a { min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--oc-muted); text-decoration: none; font-size: .68rem; }
+  .oc-mobile-bar a { min-height: 44px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; color: var(--oc-muted); text-decoration: none; font-size: .75rem; }
   .oc-mobile-bar a.is-active { color: var(--oc-accent); }
   .oc-mobile-bar .oc-i { width: 20px; height: 20px; }
 }
@@ -416,7 +416,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-task { padding: 8px 10px; border: 1px solid var(--oc-line); border-left: 3px solid var(--oc-line); border-radius: 8px; background: var(--oc-panel-2); }
 .oc-task-title { display: block; color: var(--oc-text); text-decoration: none; font-weight: 600; overflow-wrap: anywhere; }
 .oc-task-title:hover { text-decoration: underline; }
-.oc-task-state { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 999px; font-size: 11.5px; font-weight: 700; background: var(--oc-line); color: var(--oc-text); vertical-align: 1px; }
+.oc-task-state { display: inline-block; margin-right: 4px; padding: 0 6px; border-radius: 999px; font-size: 12px; font-weight: 700; background: var(--oc-line); color: var(--oc-text); vertical-align: 1px; }
 .oc-task-meta { display: block; margin-top: 2px; font-size: 12.5px; color: var(--oc-muted); }
 .oc-task-result, .oc-task-error { margin: 4px 0 0; font-size: 13.5px; overflow-wrap: anywhere; }
 .oc-task-error { color: var(--oc-red); }
@@ -497,7 +497,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-tp-says { margin: 0; }
 .oc-tp-facts { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 6px 0 0; }
 .oc-tp-facts div { padding: 8px 12px; border-radius: 12px; background: var(--oc-panel); border: 1px solid var(--oc-line); min-width: 0; }
-.oc-tp-facts dt { font-size: .74rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--oc-muted); }
+.oc-tp-facts dt { font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--oc-muted); }
 .oc-tp-facts dd { margin: 2px 0 0; font-size: .95rem; overflow-wrap: anywhere; }
 .oc-tp-card { padding: 16px 18px; border-radius: 16px; background: var(--oc-panel); border: 1px solid var(--oc-line); min-width: 0; }
 .oc-tp-card h2 { margin: 0 0 10px; font-size: 1rem; display: flex; gap: 8px; align-items: baseline; }
@@ -682,7 +682,7 @@ h2 { font-size: 1.15rem; margin: 1.4em 0 .5em; }
 .oc-settings { display: grid; gap: 12px; margin: 0; max-width: none; }
 .oc-set { border: 1px solid var(--oc-line); border-radius: 14px; background: var(--oc-panel); overflow: hidden; margin: 0 0 12px; }
 .oc-settings .oc-set { margin: 0; }
-.oc-set > h2 { margin: 0; padding: 12px 14px 6px; font-size: .74rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
+.oc-set > h2 { margin: 0; padding: 12px 14px 6px; font-size: .75rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--oc-muted); }
 .oc-set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 52px; padding: 8px 14px; border-top: 1px solid var(--oc-line); cursor: pointer; }
 .oc-set > h2 + .oc-set-row { border-top: 0; }
 div.oc-set-row { cursor: default; }
@@ -938,7 +938,7 @@ html[data-ov-motion=off] .oc-create:target, html[data-ov-motion=off] .oc-create-
 
 /* Where you stopped reading Global (11-17): the New messages line, and the lines after it lit until they are seen. */
 .oc-new-line { display: flex; align-items: center; gap: 10px; margin: 10px 4px 6px; list-style: none; color: var(--accent-light, var(--accent, #3b82f6));
-  font-size: 11.5px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+  font-size: 12px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
 .oc-new-line::before, .oc-new-line::after { content: ""; flex: 1; height: 2px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--accent, #3b82f6));
   animation: oc-new-line .55s cubic-bezier(.2, .8, .2, 1) both; }
 .oc-new-line::after { background: linear-gradient(90deg, var(--accent, #3b82f6), transparent); }

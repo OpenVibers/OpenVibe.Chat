@@ -20,7 +20,7 @@ a { color: var(--accent); }
 .em-x:focus-visible { outline: 2px solid currentColor; }
 .em-thread { list-style: none; margin: 0; padding: 14px 12px; flex: 1; overflow-y: auto; display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 10px; overscroll-behavior: contain; }
 .em-msg { display: flex; flex-direction: column; max-width: 86%; }
-.em-msg small { font-size: .72rem; color: var(--muted); margin: 0 4px 2px; }
+.em-msg small { font-size: .75rem; color: var(--muted); margin: 0 4px 2px; }
 .em-them { justify-self: start; }
 .em-me { justify-self: end; align-items: flex-end; }
 .em-bubble { padding: 9px 13px; border-radius: 16px 16px 16px 5px; background: var(--panel); overflow-wrap: anywhere; }
@@ -55,7 +55,7 @@ a { color: var(--accent); }
 .em-composer button.em-attach { background: transparent; color: var(--muted); margin-left: -6px; }   /* a picture: quiet, beside the box */
 .em-composer button.em-attach:hover { color: var(--accent); }
 .em-composer button[hidden] { display: none; }
-.em-foot { margin: 0 0 8px; text-align: center; font-size: .72rem; color: var(--muted); }
+.em-foot { margin: 0 0 8px; text-align: center; font-size: .75rem; color: var(--muted); }
 .em-foot a { color: inherit; }
 .em-error { margin: 0 12px; font-size: .82rem; color: var(--danger-text, #ef4444); }
 .em-rate { justify-self: center; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; font-size: .85rem; color: var(--muted); }
@@ -70,7 +70,7 @@ a { color: var(--accent); }
 .re-msg { padding: 3px 2px; line-height: 1.45; overflow-wrap: anywhere; }
 .re-msg b { font-weight: 700; margin-right: 2px; }
 .re-ai b { color: var(--accent); }
-.re-badge { display: inline-block; font-size: .65rem; font-weight: 700; padding: 0 5px; margin-left: 4px; border-radius: 6px; background: var(--panel); color: var(--muted); vertical-align: 1px; }
+.re-badge { display: inline-block; font-size: .75rem; font-weight: 700; padding: 0 5px; margin-left: 4px; border-radius: 6px; background: var(--panel); color: var(--muted); vertical-align: 1px; }
 .re-dock { padding: 6px 12px 4px; }
 .re-dock:empty { display: none; }
 .re-signin { all: unset; box-sizing: border-box; cursor: pointer; display: block; width: 100%; text-align: center; padding: 10px 14px; border-radius: 14px; background: var(--accent); color: var(--on-accent, #fff); font-weight: 600; }
