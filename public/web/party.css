@@ -163,7 +163,7 @@ html[data-ov-motion=reduced] .pt-float { animation: pt-fade 1.6s ease forwards; 
 .pt-face.has-remote .pt-avatar { box-shadow: 0 0 0 2px var(--pt-panel), 0 0 0 4px var(--pt-accent); }
 .pt-face.is-away { opacity: .5; }
 .pt-face-name { font-size: 14px; font-weight: 650; max-width: 14ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pt-face-tag { padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--pt-accent) 18%, transparent); color: var(--pt-accent); font-size: 11.5px; font-weight: 750; }
+.pt-face-tag { padding: 1px 8px; border-radius: 999px; background: color-mix(in srgb, var(--pt-accent) 18%, transparent); color: var(--pt-accent); font-size: 12px; font-weight: 750; }
 .pt-face-tag.is-quiet { background: var(--pt-panel-2); color: var(--pt-muted); }
 
 /* ── The chat ── */

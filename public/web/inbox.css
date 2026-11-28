@@ -5,7 +5,7 @@
    the call. Theme tokens only. */
 
 /* Status: Vibe answers, waiting for a person, open with the team, resolved. */
-.ib-st { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .72rem; font-weight: 700; letter-spacing: .02em; line-height: 1.5;
+.ib-st { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: .75rem; font-weight: 700; letter-spacing: .02em; line-height: 1.5;
     border: 1px solid var(--oc-line); color: var(--oc-muted); white-space: nowrap; }
 .ib-st-bot { color: var(--oc-accent); border-color: color-mix(in srgb, var(--oc-accent) 45%, var(--oc-line)); }
 .ib-st-wait { color: var(--warning-text, #fbbf24); border-color: color-mix(in srgb, var(--warning, #f59e0b) 55%, var(--oc-line)); background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent); }
