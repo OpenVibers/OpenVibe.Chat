@@ -84,4 +84,12 @@ t('the account\'s erasure takes the marker', async () => {
     assert.ok(!(await d.get('SELECT 1 AS x FROM global_reads WHERE user_id = ?', [ann.id])), 'gone');
 });
 
+t('a history page\'s before is a message id: a time is a 400 that says so, not a 500 (11-28, Meme\'s re-verify)', async () => {
+    const bad = await h.http('GET', '/api/chat/global/history?limit=5&before=' + encodeURIComponent('2026-11-03 17:14:27'));
+    assert.strictEqual(bad.status, 400, bad.text);
+    assert.strictEqual(JSON.parse(bad.text).code, 'chat.history.before');
+    const ok = await h.http('GET', '/api/chat/global/history?limit=5&before=999999999');
+    assert.strictEqual(ok.status, 200, ok.text);
+});
+
 t.run(async () => { await h.shutdown(); });

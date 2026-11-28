@@ -581,7 +581,13 @@ router.post('/global/read', requireAuth, globalReadLimit, async (req, res) => {
     }
 });
 
+// A history page's `before` is a message id (exclusive). Anything else was handed to the database as one and answered
+// 500 (11-28: OpenVibe.Meme paged by time, "2026-11-03 17:14:27", and every re-verify failed); it is a 400 now.
+const historyBeforeOk = (b) => b == null || b === '' || /^\d{1,15}$/.test(String(b));
+const refuseBefore = (res) => res.status(400).json({ error: 'before is a message id (a number); use after_id to read forward', code: 'chat.history.before' });
+
 router.get('/global/history', optionalAuth, async (req, res) => {
+    if (!historyBeforeOk(req.query.before)) return refuseBefore(res);
     try {
         const askedLimit = parseInt(req.query.limit, 10);
         const limit = Math.min(Number.isFinite(askedLimit) && askedLimit > 0 ? askedLimit : 50, 100);
@@ -735,6 +741,7 @@ router.get('/:streamId/history', optionalAuth, async (req, res) => {
 // every live slot AND offline periods (channel_user_id), so it works when the
 // streamer has no active session. Used by the channel page (online + offline).
 router.get('/channel/:userId/history', optionalAuth, async (req, res) => {
+    if (!historyBeforeOk(req.query.before)) return refuseBefore(res);
     try {
         const userId = parseInt(req.params.userId);
         if (!userId) return res.status(400).json({ error: 'Bad user id' });
