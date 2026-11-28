@@ -34,7 +34,7 @@ function send(res, err) {
     return res.status(500).json({ error: 'Something went wrong', code: 'persona.error' });
 }
 
-router.get('/', readLimit, async (_req, res) => {
+router.get('/', readLimit, async (req, res) => {
     try { res.set('Cache-Control', 'private, no-store').json(await persona.state(req.user.id)); } catch (err) { send(res, err); }
 });
 
