@@ -691,19 +691,6 @@
       return fetch('/api/chat/global/history?before=' + encodeURIComponent(before) + '&limit=50', { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; });
     }, globalItem, cfg.historyMore);
-    // A workspace room's queue (server/web/workspace-pages.js): its panel reloads when the socket says it changed.
-    var queueBox = document.getElementById('oc-queue'), queueTimer = null;
-    function refreshQueue() {
-      if (!queueBox || queueTimer) return;
-      queueTimer = setTimeout(function () {
-        queueTimer = null;
-        if (queueBox.querySelector('form :focus, details[open] input:not(:placeholder-shown), details[open] textarea:not(:placeholder-shown)')) return;
-        fetch(queueBox.getAttribute('data-queue'), { credentials: 'same-origin', cache: 'no-store' })
-          .then(function (r) { return r.ok ? r.text() : null; })
-          .then(function (html) { if (html) queueBox.innerHTML = html; })
-          .catch(function () {});
-      }, 400);
-    }
     function connect() {
       ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/chat');
       ws.onopen = function () {
@@ -1001,6 +988,21 @@
     var live = document.getElementById('oc-live');
     var ws = null, delay = 1000, opened = false;
     var api = '/api/chat/rooms/' + encodeURIComponent(cfg.room);
+    // A workspace room's queue (server/web/workspace-pages.js): its panel reloads when the socket says it changed.
+    // (11-28: this lived in startGlobal, which never calls it, so a room's room_task message threw "refreshQueue is not
+    // defined" and the queue never reloaded.)
+    var queueBox = document.getElementById('oc-queue'), queueTimer = null;
+    function refreshQueue() {
+      if (!queueBox || queueTimer) return;
+      queueTimer = setTimeout(function () {
+        queueTimer = null;
+        if (queueBox.querySelector('form :focus, details[open] input:not(:placeholder-shown), details[open] textarea:not(:placeholder-shown)')) return;
+        fetch(queueBox.getAttribute('data-queue'), { credentials: 'same-origin', cache: 'no-store' })
+          .then(function (r) { return r.ok ? r.text() : null; })
+          .then(function (html) { if (html) queueBox.innerHTML = html; })
+          .catch(function () {});
+      }, 400);
+    }
     window.OvChatHistory.attach(feed, document.getElementById('oc-history-state'), function (before) {
       return fetch(api + '/messages?before=' + encodeURIComponent(before) + '&limit=50', { credentials: 'same-origin' })
         .then(function (r) { return r.ok ? r.json() : null; });
